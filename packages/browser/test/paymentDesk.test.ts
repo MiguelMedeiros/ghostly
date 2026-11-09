@@ -556,6 +556,45 @@ describe("ecash arriving", () => {
     expect(host.storeMessage.mock.calls.map(([m]) => m.id)).toEqual(["peer_1_refused", "peer_2_refused"]);
   });
 
+  it("a flood of made-up ecash from one chat asks the mint a bounded number of times and stores a bounded number of lines", async () => {
+    const { desk, wallet, sent, host } = setup();
+    wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+    expect(wallet.receiveToken.mock.calls.length, "each one a swap and a state check at the mint, under its lock").toBeLessThanOrEqual(10);
+    expect(host.storeMessage.mock.calls.length, "the chat is not filled with refusals").toBeLessThanOrEqual(5);
+    const results = sent.filter((s) => s.kind === "res").map((s) => s.frame);
+    expect(results, "every frame is answered, none redeemed").toHaveLength(200);
+    expect(results.every((r) => r.ok === false)).toBe(true);
+    expect(results.at(-1)!.error).toMatch(/too many/i);
+  });
+
+  it("another chat's payment still lands at once while one chat is flooding, and the flooding chat's later ones once its minute is over", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { desk, wallet, sent, texts } = setup();
+      wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+      for (let i = 0; i < 50; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+      wallet.receiveToken.mockResolvedValue({ amount: 100, mint: MINT, fee: 0 });
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      // A retransmission of a payment already answered is answered again, not counted.
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      vi.setSystemTime(Date.now() + 61_000);
+      await desk.onPayment("l", cashuPayment("later", { timestamp: 6_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "later", ok: true, credited: "100" });
+      expect(texts().filter((t) => t.startsWith("⚡"))).toEqual(["⚡ 100 sats", "⚡ 100 sats"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a flood of Fedimint payments the app refuses on the spot stores a bounded number of lines", async () => {
+    const { desk, allowed, sent, host } = setup();
+    allowed.fedimint = true;
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", { id: `f${i}`, timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `notes${i}`] });
+    expect(host.storeMessage.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(sent.filter((s) => s.kind === "res")).toHaveLength(200);
+  });
+
   it("settles our request only in full, from a mint it named, and only when it came through this chat", async () => {
     const { desk, wallet, state } = setup([record({ id: "r", direction: "out", mints: [MINT] })]);
     await desk.start();

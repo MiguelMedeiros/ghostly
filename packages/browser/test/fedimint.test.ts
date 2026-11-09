@@ -404,6 +404,18 @@ describe("Fedimint in a chat", () => {
     expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("c")).map((s) => s.frame.error)).toEqual(copies.map(() => "These notes were already received"));
   });
 
+  it("a flood of notes the federation refuses, from one chat, asks it a bounded number of times and stores a bounded number of lines", async () => {
+    const redeems = vi.fn();
+    const payee = { inspectNotes: async () => ({ federation: federation.id, amountMsats: 250_000_000 }),
+      redeemNotes: async () => { redeems(); return { operationId: `op${redeems.mock.calls.length}`, state: "failed" }; }, redeemState: async () => "failed",
+      federation: () => ({ network: "regtest" }), requestFederations: () => [federation.id] } as unknown as FedimintWallet;
+    const { desk, sent, host } = chat(payee);
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", { id: `f${i}`, timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `madeup-${i}`] });
+    expect(redeems.mock.calls.length).toBeLessThanOrEqual(10);
+    expect(host.storeMessage.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(sent.filter((s) => s.kind === "res")).toHaveLength(200);
+  });
+
   it("received notes carry their federation's network: test sats are never a Mainnet payment, and older records learn it", async () => {
     const payee = (network: string | undefined) => ({ inspectNotes: async () => ({ federation: federation.id, amountMsats: 1_200_000 }),
       redeemNotes: async () => ({ operationId: "op", state: "done" }), redeemState: async () => "done",

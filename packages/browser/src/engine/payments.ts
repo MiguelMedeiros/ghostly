@@ -41,6 +41,15 @@ const UNIT = "sat";
 /** A contact's requests in one chat: the new ones taken per minute, and how many may wait to be paid. */
 const REQUESTS_PER_MINUTE = 20;
 const OPEN_REQUESTS = 50;
+/**
+ * A contact's ecash in one chat (Cashu and Fedimint `pay` frames): the new ones taken per minute. Each asks the mint
+ * (under its lock, which this side's own payments there wait on) or the federation. One past it is refused unredeemed,
+ * so the contact takes it back and can send it again a minute later.
+ */
+const PAYMENTS_PER_MINUTE = 10;
+const PAYMENTS_BUSY = "Too many payments at once: send it again in a minute";
+/** Refusal lines one chat gets in an hour; past it the contact is still told, and the chat stays as it is. */
+const REFUSAL_LINES_PER_HOUR = 5;
 
 /**
  * "I paid your invoice" (`sayInvoicePaid`) that has not reached the contact's app yet, kept in `STORES.settings` under
@@ -899,6 +908,31 @@ export class PaymentDesk {
     return true;
   }
 
+  /** New ecash taken from each chat's contact lately, and the refusal lines each chat got (with their latest ids). */
+  private readonly paymentsFrom = new Map<string, RateWindow>();
+  private readonly refusalLines = new Map<string, { recent: RateWindow; ids: string[] }>();
+
+  /** Whether this chat has room for one more new payment of its contact's ecash (`PAYMENTS_PER_MINUTE`). */
+  private roomForPayment(linkId: string): boolean {
+    let recent = this.paymentsFrom.get(linkId);
+    if (!recent) this.paymentsFrom.set(linkId, recent = new RateWindow(PAYMENTS_PER_MINUTE, 60_000));
+    return recent.take();
+  }
+
+  /**
+   * Stores a refusal line in its chat, unless the chat had `REFUSAL_LINES_PER_HOUR` already. One stored again under an
+   * id the chat got lately (spent ecash sent again) adds no line, and is not counted. Never throws: the contact was told.
+   */
+  private async refusalLine(linkId: string, id: string, line: ReturnType<typeof refusedRow>, timestamp: number): Promise<void> {
+    let lines = this.refusalLines.get(linkId);
+    if (!lines) this.refusalLines.set(linkId, lines = { recent: new RateWindow(REFUSAL_LINES_PER_HOUR, 3_600_000), ids: [] });
+    if (!lines.ids.includes(id)) {
+      if (!lines.recent.take()) return;
+      lines.ids = [...lines.ids, id].slice(-REFUSAL_LINES_PER_HOUR);
+    }
+    try { await this.host.storeMessage({ linkId, id, ...line, sender: "peer", timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+  }
+
   /** `held`: picked up from the contact's storage while it was away (WISP 404): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     // Already here from this contact (sent again, or held and live both): once. Another chat's id is not this one.
@@ -1022,6 +1056,8 @@ export class PaymentDesk {
       link?.sendPaymentResult({ id: payment.id, ok: known.state === "settled", credited: String(known.amount), error: known.error });
       return;
     }
+    // Before the token is read or the mint asked: not redeemed, the contact takes it back.
+    if (!this.roomForPayment(linkId)) { link?.sendPaymentResult({ id: payment.id, ok: false, error: PAYMENTS_BUSY }); return; }
 
     if (!link?.allowsPayment("cashu")) {
       // Not redeemed: the token stays the contact's, and they can take it back.
@@ -1082,8 +1118,7 @@ export class PaymentDesk {
       const spent = error instanceof EngineError && error.engineCode === "ecashAlreadySpent";
       // The mint's network says whether these were test sats; ecash that could not be read says nothing of it.
       const network = inspected?.kind === "token" ? mintNetwork(inspected.mint) : undefined;
-      const line = refusedRow({ amount: sats ?? undefined, network, reason });
-      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      await this.refusalLine(linkId, spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, refusedRow({ amount: sats ?? undefined, network, reason }), payment.timestamp);
     }
   }
 
@@ -1141,8 +1176,7 @@ export class PaymentDesk {
     const reason = "The mint did not confirm the ecash";
     link?.sendPaymentResult({ id: record.id, ok: false, error: reason });
     // The chat line a refusal on the spot writes, under the same id: a redeem that ends without the ecash is never silent.
-    const line = refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason });
-    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, ...line, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+    await this.refusalLine(record.linkId, `peer_${record.createdAt}_refused`, refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason }), record.createdAt);
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
@@ -1702,8 +1736,7 @@ export class PaymentDesk {
     // The amount the contact said they sent; the network once the notes' federation is known.
     const refuse = async (reason: string, network?: WalletNetwork) => {
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
-      const line = refusedRow({ amount: parseSats(payment.amount.value, payment.amount.asset) ?? undefined, network, method: "fedimint", reason });
-      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      await this.refusalLine(linkId, `peer_${payment.timestamp}_refused`, refusedRow({ amount: parseSats(payment.amount.value, payment.amount.asset) ?? undefined, network, method: "fedimint", reason }), payment.timestamp);
     };
     if (!link?.allowsPayment("fedimint")) { await refuse("Fedimint is off in this chat"); return; }
     if (!this.fedimint) { await refuse("This app has no Fedimint wallet"); return; }
@@ -1724,6 +1757,8 @@ export class PaymentDesk {
     const spelled = digestHex(notes.trim());
     const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === bytes || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
+    // Before anything is written down or the federation asked (reading the notes asks no one): not redeemed, the contact takes them back.
+    if (!this.roomForPayment(linkId)) { link.sendPaymentResult({ id: payment.id, ok: false, error: PAYMENTS_BUSY }); return; }
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
     await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
     await this.finishRedeem(this.payments.get(payment.id)!);
@@ -1760,8 +1795,7 @@ export class PaymentDesk {
     if (state === "failed") {
       await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
       link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
-      const line = refusedRow({ amount: payment.amount, network: payment.network, method: "fedimint", reason: "These notes were already redeemed" });
-      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, ...line, sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
+      await this.refusalLine(payment.linkId, `peer_${payment.createdAt}_refused`, refusedRow({ amount: payment.amount, network: payment.network, method: "fedimint", reason: "These notes were already redeemed" }), payment.createdAt);
       return;
     }
     // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
