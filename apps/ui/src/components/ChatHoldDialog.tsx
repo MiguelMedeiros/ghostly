@@ -16,7 +16,8 @@ export function ChatHoldLine({ hold, name }: { hold: PeerHoldState; name: string
   if (hold.outstanding <= 0 && !hold.error) return null;
   return (
     <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border" role="status">
-      {hold.outstanding > 0 && <p className="m-0 truncate">{t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+      {/* The whole sentence, on two lines if need be: cut to one on a 320 px phone, it lost the quota at its end. */}
+      {hold.outstanding > 0 && <p className="m-0 break-words">{t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
         count: hold.outstanding, name,
         used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(hold.bytes / 1024 / 1024),
         max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) })}</p>}
