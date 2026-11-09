@@ -95,7 +95,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : t("identities.share.captionTheirs", { contact })}</span>
         {time}
       </p>
-      {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t)}</p>}
+      {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t, "proof")}</p>}
     </div>
   );
 }
