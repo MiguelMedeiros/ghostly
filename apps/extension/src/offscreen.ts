@@ -34,6 +34,9 @@ const CLEAR_GRACE_MS = 15_000;
  * while no tab showed it needs nothing more. A page asks for the rest of a chat it shows whole.
  */
 const ATTACH_NEWEST = 400;
+/** A contact's app refused while Hide my IP from contacts is on: the words of background.ts `RELAY_ONLY_REFUSED`. */
+const RELAY_ONLY_CODE = "relay-only";
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /**
  * The local profile this document runs as, read once: a switch closes the document and starts another
@@ -134,6 +137,14 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
     const peer = engineOf(await server);
     if (!peer) return { ok: false, code: "offline", message: "This profile is not active on this device" };
     await peer.ready;
+    // Hide my IP from contacts, as this peer has it now, decides whether a contact's app is served, not the flag the
+    // page sent with its open (`open-service`'s `relayOnly`): a page whose port dropped keeps its old copy of the setting
+    // while it reconnects, and another tab may have turned it on meanwhile. Nothing is asked of the contact, and the
+    // tab gets only the refusal, so the app never runs there to send it to a server of the contact's.
+    if (hidesIp(peer)) {
+      const shown = await (await import("./viewerWords")).relayOnlyShown();
+      return { ok: false, code: RELAY_ONLY_CODE, message: RELAY_ONLY_REFUSED, status: 403, shown };
+    }
     const response = await peer.node.request(message.peerPubKeyZ32, message.serviceId, {
       method: message.method,
       path: message.path,
@@ -156,6 +167,9 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
     return { ok: false, code, message: error instanceof Error ? error.message : String(error) };
   }
 }
+
+/** Hide my IP from contacts is on in this peer's settings now. */
+const hidesIp = (peer: EngineServer): boolean => peer.node.getState().settings.relayOnly === true;
 
 /**
  * The name the contact gave the service they share, as the chat shows it now. None once they took it back: the tab

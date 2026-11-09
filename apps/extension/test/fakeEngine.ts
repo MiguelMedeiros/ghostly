@@ -41,6 +41,8 @@ export interface FakeEngineControl {
   answer?: (method: string, params: unknown) => Promise<unknown> | undefined;
   /** Runs as a peer stops, before its stop is over: what the peer and its pages still do while it ends. */
   onShutdown?: () => Promise<void>;
+  /** The peer's own settings (`getState().settings`): what it holds now, whatever a page believes. */
+  settings?: { relayOnly?: boolean };
 }
 
 export function engineControl(): FakeEngineControl {
@@ -80,7 +82,7 @@ export class FakeEngineServer {
       this.requests.push({ peer, service, init });
       return engineControl().respond(peer, service, init);
     },
-    getState: () => ({ links: engineControl().links ?? [], services: (engineControl().services ?? []).map((s) => ({ ...s, requests: 0 })) }),
+    getState: () => ({ settings: engineControl().settings ?? {}, links: engineControl().links ?? [], services: (engineControl().services ?? []).map((s) => ({ ...s, requests: 0 })) }),
     setServiceEnabled: ({ serviceId, enabled }: { serviceId: string; enabled: boolean }) => {
       const service = engineControl().services?.find((s) => s.id === serviceId);
       if (service) service.enabled = enabled;

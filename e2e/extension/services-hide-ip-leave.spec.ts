@@ -79,3 +79,87 @@ test("a contact's app does not open while Hide my IP from contacts is on, so it 
     contact.close();
   }
 });
+
+/**
+ * Hide my IP from contacts as the peer has it decides, not the page that asks: a tab whose connection to the peer
+ * dropped keeps its old copy of the setting while it reconnects, and asks with it off after another tab turned it on.
+ * The worker still opens the tab, but the peer serves it only the refusal, so the app never runs to send it away.
+ */
+const STALE_APP_PORT = 46077;
+const STALE_CONTACT_PORT = 46078;
+/** A TURN server nobody answers at: the setting needs one, and nothing here may leave the machine. */
+const CLOSED_TURN = "turn:127.0.0.1:46079";
+
+test("a page that still believes Hide my IP from contacts is off gets a tab that never runs the contact's app", {
+  tag: ["@feature:settings.network.relay-only", "@feature:services.open"],
+}, async ({ extensionPeer }) => {
+  test.setTimeout(8 * 60_000);
+  let connections = 0;
+  const contact = createNetServer((socket) => { connections++; socket.destroy(); });
+  const app = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><title>Atlas</title><h1>Atlas</h1><script>
+      document.body.dataset.ready = "1";
+      setTimeout(() => { location.href = "https://127.0.0.1:${STALE_CONTACT_PORT}/away"; }, 1500);
+    </script>`);
+  });
+  await listen(contact, STALE_CONTACT_PORT);
+  await listen(app, STALE_APP_PORT);
+  try {
+    const [a, b] = await Promise.all([extensionPeer("chrome-stale-a"), extensionPeer("chrome-stale-b")]);
+    await linkLegacy(a, b);
+    await connect(a, b);
+
+    await a.page.getByTestId("account-services").click();
+    await a.page.getByTestId("add-service").click();
+    await a.page.getByTestId("service-name").fill("Atlas");
+    await a.page.getByTestId("service-target").fill(`localhost:${STALE_APP_PORT}`);
+    await a.page.getByTestId("service-save").click();
+    await a.page.getByTestId("service-item").getByTestId("service-people").click();
+    await a.page.getByTestId("service-grant").getByRole("switch").click();
+
+    // This tab asks as one that has not heard of the change yet: the setting off (`extensionHost.openService`).
+    await b.page.evaluate(() => {
+      const { runtime } = (window as unknown as { chrome: { runtime: { sendMessage: (message: unknown) => Promise<unknown> } } }).chrome;
+      const send = runtime.sendMessage.bind(runtime);
+      runtime.sendMessage = (message) =>
+        send((message as { type?: string })?.type === "open-service" ? { ...(message as object), relayOnly: false } : message);
+    });
+    const open = b.page.getByTestId("open-service").filter({ hasText: "Atlas" });
+    await expect(open).toBeVisible({ timeout: 120_000 });
+
+    // Another tab of the same profile turns Hide my IP from contacts on.
+    const settings = await b.context.newPage();
+    await settings.goto(`${new URL(b.page.url()).origin}/app.html#/settings/network`);
+    await settings.getByPlaceholder("turn:turn.example.org:3478").fill(CLOSED_TURN);
+    await settings.getByPlaceholder("Username").fill("ghost");
+    await settings.getByPlaceholder("Credential").fill("s3cret-boo");
+    await settings.getByTestId("network-save").click();
+    await expect(settings.getByText("Saved", { exact: true })).toBeVisible();
+    const relayOnly = settings.getByTestId("network-relay-only");
+    await relayOnly.click();
+    await expect(relayOnly).toHaveAttribute("aria-checked", "true");
+
+    const refusedPromise = b.context.waitForEvent("page");
+    await open.click();
+    const refused = await refusedPromise;
+    await expect(refused.getByText("A contact's app does not open here while Hide my IP is on")).toBeVisible({ timeout: 60_000 });
+    await refused.waitForTimeout(3_000);
+    expect(connections, "the contact's server is never reached").toBe(0);
+    await refused.close();
+
+    // Turned off, the app opens and runs as before.
+    await relayOnly.click();
+    await expect(relayOnly).toHaveAttribute("aria-checked", "false");
+    await settings.close();
+    // Its link to the contact went through the TURN server nobody answers at: direct again first.
+    await expect(b.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })).toBeVisible({ timeout: 150_000 });
+    const viewerPromise = b.context.waitForEvent("page");
+    await open.click();
+    const viewer = await viewerPromise;
+    await viewer.waitForSelector("body[data-ready='1']", { timeout: 150_000 });
+  } finally {
+    app.close();
+    contact.close();
+  }
+});

@@ -381,6 +381,59 @@ describe("viewer tabs", () => {
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
   });
 
+  describe("Hide my IP from contacts as the peer has it now, not as the page that asks believes", () => {
+    // covers: settings.network.relay-only
+    // A page whose port to the peer dropped keeps its copy of the setting while it reconnects (up to 30 s): it asks with
+    // `relayOnly: false` after another tab turned the setting on, and the worker opens the tab.
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    /** The contact's app, which sends whatever holds it to a server of the contact's once it runs. */
+    const app = async () => okResponse("<script>location.href = 'https://contact.example/'</script>", 200, [["content-type", "text/html"]]);
+
+    it("asks the contact for nothing and gives the tab only the refusal, in the profile's language", async () => {
+      world.storage.set("ghostly_app_settings", JSON.stringify({ language: "ar" }));
+      const { default: ar } = await import("../../ui/src/locales/ar/errors.json");
+      // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
+      await import("../../ui/src/locales/ar/index.ts");
+      engineControl().settings = { relayOnly: true };
+      engineControl().respond = app;
+      const tabId = await openViewer(world, PEER, SERVICE, TAG, undefined, false);
+
+      const answer = await pauseRequest(world, tabId, { url });
+      expect(engine().requests).toEqual([]);
+      expect(answer.method).toBe("Fetch.fulfillRequest");
+      expect(answer.params).toMatchObject({ responseCode: 403 });
+      expect(answer.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "relay-only" });
+      const html = bodyText(answer.params);
+      expect(html).toContain(ar.relayOnly.appInExtension);
+      expect(html).toContain('<html lang="ar" dir="rtl">');
+      expect(html).not.toContain("contact.example");
+    });
+
+    it("refuses the peer's http-request itself, whoever asks", async () => {
+      engineControl().settings = { relayOnly: true };
+      engineControl().respond = app;
+      const reply = await send({ target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null });
+      expect(reply).toMatchObject({ ok: false, code: "relay-only", status: 403, message: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+      expect(engine().requests).toEqual([]);
+    });
+
+    it("serves the app as before while the setting is off, and again once it is turned off", async () => {
+      engineControl().settings = { relayOnly: false };
+      engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+      const tabId = await openViewer(world, PEER, SERVICE, TAG, undefined, false);
+      const served = await pauseRequest(world, tabId, { url });
+      expect(served.params).toMatchObject({ responseCode: 200 });
+      expect(bodyText(served.params)).toBe("<h1>atlas</h1>");
+
+      engineControl().settings = { relayOnly: true };
+      expect((await pauseRequest(world, tabId, { url })).params).toMatchObject({ responseCode: 403 });
+      engineControl().settings = {};
+      const again = await pauseRequest(world, tabId, { url });
+      expect(again.params).toMatchObject({ responseCode: 200 });
+      expect(engine().requests).toHaveLength(2);
+    });
+  });
+
   describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
     const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" };
     const close = { target: "background", type: "close-services" };
