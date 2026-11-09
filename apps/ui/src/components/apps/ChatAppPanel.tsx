@@ -106,6 +106,18 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     };
   }, [shown, linkId]);
 
+  // Stopped while shown (the watchdog, a takedown, its frame navigated): the focus was in its frame, gone with it, so it
+  // goes to Open again when offered, else in the panel as on open, and Escape still closes; never pulled from where the
+  // person went meanwhile.
+  const stopped = shown ? app?.stopped : undefined;
+  useEffect(() => {
+    if (!stopped) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const panel = root.current;
+    (panel?.querySelector<HTMLElement>("[data-testid=mini-app-open-again]") ?? (backNow.current ? back.current : panel))?.focus({ preventScroll: true });
+  }, [stopped]);
+
   // A stopped app (a takedown) has nothing left to stop: Close takes its message away.
   const close = () => { if (app?.stopped) setChatApp(linkId, null); else app?.running.stop(); };
   const openAgain = () => {
