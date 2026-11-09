@@ -198,6 +198,7 @@
     "resumeSharing": "تشارك ملفًا",
     "sharingWith": "تشارك ملفًا مع {{name}}",
     "stoppedFailed": "توقف {{title}} عن العمل وأُغلق. إن تكرر ذلك، أخبر ناشره.",
+    "stoppedFocus": "تم إيقاف {{title}}: ظل يستحوذ على لوحة المفاتيح",
     "stoppedOffline": "تعذّر بدء {{title}} لأنك غير متصل. افتحه من جديد بعد الاتصال.",
     "stoppedRemoved": "تم إيقاف {{title}}: أزال {{store}} هذا الإصدار",
     "stoppedRevoked": "تم إيقاف {{title}}: ألغى ناشره هذا الإصدار",

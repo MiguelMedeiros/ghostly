@@ -195,6 +195,7 @@
     "resumeSharing": "compartilhando um arquivo",
     "sharingWith": "compartilhando um arquivo com {{name}}",
     "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o publicador.",
+    "stoppedFocus": "{{title}} foi parado: insistia em tomar o teclado",
     "stoppedOffline": "{{title}} não pôde iniciar: você está offline. Abra de novo quando estiver conectado.",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o publicador revogou esta versão",
