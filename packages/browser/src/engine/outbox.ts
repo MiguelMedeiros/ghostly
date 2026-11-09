@@ -83,6 +83,22 @@ const KEPT_CANCELLED = 1_000;
 const DEADLINE_SKEW_MS = 60_000;
 /** The longest delay a timer keeps: past it (about 24.8 days) `setTimeout` fires at once, in Node and in browsers. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/**
+ * A clock in ms that keeps counting while the machine is suspended, where the platform has one apart from the wall
+ * clock: Linux's boot time (`os.uptime()` reads `CLOCK_BOOTTIME`) for Node on Linux. Node's monotonic clock there
+ * (`CLOCK_MONOTONIC`, what `performance.now()` reads) stands still in a suspend, so a session that slept and a wall
+ * clock set forward looked the same to `Outbox.clock`. On macOS Node's monotonic clock counts sleep already, and a
+ * browser or Android's WebView has no such clock: none there (`Outbox.clock` counts the time it ran).
+ */
+export function bootClock(): (() => number) | undefined {
+  const host = (globalThis as { process?: { platform?: string; getBuiltinModule?: (id: string) => unknown } }).process;
+  if (host?.platform !== "linux" || typeof host.getBuiltinModule !== "function") return undefined;
+  const os = host.getBuiltinModule("node:os") as { uptime?: () => number } | undefined;
+  const uptime = os?.uptime;
+  if (typeof uptime !== "function") return undefined;
+  return () => uptime() * 1000;
+}
+
 /** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
 const KNOWN_ROWS = 16;
 
@@ -118,9 +134,9 @@ export class Outbox {
    * Queued: when it is looked at again, how far along the backoff, since when. `at` and `since` are on the monotonic
    * clock (`monotonic`): they live only in this session, and a step of the device clock must not move them. Read by the
    * wall clock, a clock set back an hour after a text was queued handed it to store-and-forward an hour late, not at
-   * its first check past a minute (`holdAfterMs`).
+   * its first check past a minute (`holdAfterMs`). `wallSince`: the same moment by the wall clock (`waitedOut`).
    */
-  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number }>();
+  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number; wallSince: number }>();
   /**
    * Stored deadlines (`resendUntil`) found further ahead than a whole window after the device clock went back, each
    * with the deadline it is held to in this session: a window from when it was found so (`pastDeadline`).
@@ -183,27 +199,49 @@ export class Outbox {
   private readonly policy: ResendPolicy;
   private readonly now: () => number;
   private readonly monotonic: () => number;
-  /** The wall clock and the monotonic clock when this outbox began: `clock` counts on from there. */
-  private readonly origin: { wall: number; monotonic: number };
+  /** A clock that counts a suspend (`bootClock`), where the platform has one. */
+  private readonly boot?: () => number;
+  /** The wall, monotonic and boot clocks when this outbox began: `clock` counts on from there. */
+  private readonly origin: { wall: number; monotonic: number; boot?: number };
   constructor(private store: OutboxStore,
     private send: (message: StoredMessage) => Promise<string | null | NotSent>,
     private timeoutMs: number | ((message: StoredMessage) => number) = 20_000,
     private pendingUntil?: (message: StoredMessage) => number | undefined,
-    options: { resender?: Resender; policy?: Partial<ResendPolicy>; now?: () => number; monotonic?: () => number } = {}) {
+    options: {
+      resender?: Resender; policy?: Partial<ResendPolicy>; now?: () => number; monotonic?: () => number;
+      /** Default `bootClock()`; null: none. */
+      boot?: (() => number) | null;
+    } = {}) {
     this.resender = options.resender ?? { ready: () => true };
     this.policy = { ...RESEND_POLICY, ...options.policy };
     this.now = options.now ?? Date.now;
     this.monotonic = options.monotonic ?? (() => performance.now());
-    this.origin = { wall: this.now(), monotonic: this.monotonic() };
+    this.boot = options.boot === undefined ? bootClock() : options.boot ?? undefined;
+    this.origin = { wall: this.now(), monotonic: this.monotonic(), boot: this.boot?.() };
   }
 
   /**
    * The time a stored deadline (`resendUntil`, set by the wall clock) is judged by: the wall clock, never ahead of the
-   * time this session has run since it began. A clock set forward 8 days failed every queued text at its next check,
-   * as not confirmed within 7 days, a few seconds after it was written.
+   * time that passed since this session began. A clock set forward 8 days failed every queued text at its next check,
+   * as not confirmed within 7 days, a few seconds after it was written. The time that passed counts a suspend where a
+   * clock says so (`bootClock`): a laptop asleep 9 days fails a text queued before at its first check after the wake,
+   * where it went on a week of the machine awake. Elsewhere it is the time the session ran.
    */
   private clock(): number {
-    return Math.min(this.now(), this.origin.wall + this.monotonic() - this.origin.monotonic);
+    let passed = this.monotonic() - this.origin.monotonic;
+    if (this.boot && this.origin.boot !== undefined) passed = Math.max(passed, this.boot() - this.origin.boot);
+    return Math.min(this.now(), this.origin.wall + passed);
+  }
+
+  /**
+   * Queued a minute (`holdAfterMs`), so it may be handed to store-and-forward: by the monotonic clock or by the wall
+   * clock, whichever counts more. A clock set back must not delay it (the monotonic clock counts), and a suspend must
+   * not either: on Linux and Android the monotonic clock stands still in one, and a text queued before a night asleep
+   * waited out its minute again after the wake. A clock set forward hands it over at its next check: harmless, a text to
+   * an away contact goes there anyway.
+   */
+  private waitedOut(wait: { since: number; wallSince: number }): boolean {
+    return Math.max(this.monotonic() - wait.since, this.now() - wait.wallSince) >= this.policy.holdAfterMs;
   }
 
   /**
@@ -671,7 +709,7 @@ export class Outbox {
     const wait = this.waiting.get(message.id);
     return !!wait && (message.delivery === "queued" || message.delivery === "waiting") && message.via !== "hold"
       && !this.pastDeadline(message) && !this.resender.ready(message)
-      && !(this.resender.divert && this.monotonic() - wait.since >= this.policy.holdAfterMs);
+      && !(this.resender.divert && this.waitedOut(wait));
   }
 
   /**
@@ -756,7 +794,7 @@ export class Outbox {
     // The look in progress left the ones behind it unread (`parkedBehind`): it waits for its check even if the chat changed meanwhile.
     if (this.parked.has(id)) { if (!wait?.timer) this.schedule(id); return false; }
     if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
-    if (this.resender.divert && wait && this.monotonic() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return true; }
+    if (this.resender.divert && wait && this.waitedOut(wait) && await this.resender.divert(message)) { this.forget(id); return true; }
     // A flush between two checks leaves the backoff where it was.
     if (!wait?.timer) this.schedule(id);
     return false;
@@ -831,7 +869,7 @@ export class Outbox {
 
   private schedule(id: string): void {
     if (this.cancelled.has(id)) return;
-    const wait = this.waiting.get(id) ?? { step: 0, since: this.monotonic(), at: 0 };
+    const wait = this.waiting.get(id) ?? { step: 0, since: this.monotonic(), wallSince: this.now(), at: 0 };
     if (wait.timer) clearTimeout(wait.timer);
     const delay = this.policy.backoffMs[Math.min(wait.step, this.policy.backoffMs.length - 1)];
     wait.at = this.monotonic() + delay;
@@ -844,7 +882,7 @@ export class Outbox {
     if (this.cancelled.has(id)) return;
     const wait = this.waiting.get(id);
     if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
-    if (!wait) this.waiting.set(id, { step: 0, since: this.monotonic(), at: 0 });
+    if (!wait) this.waiting.set(id, { step: 0, since: this.monotonic(), wallSince: this.now(), at: 0 });
   }
 
   private forget(id: string): void {
