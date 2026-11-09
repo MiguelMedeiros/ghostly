@@ -46,6 +46,35 @@ describe("Remove, on the active device", () => {
     expect(removed).toHaveTextContent("Removed");
   });
 
+  it("a device that still holds files a move left for later says so, and Get them now fetches them before the remove", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    let devices = activeSet().devices.map((device) => (device.key === TABLET ? { ...device, later: { count: 1, bytes: 70 * 1024 * 1024 } } : device));
+    engine.on("deviceSet", () => activeSet({ devices }));
+    engine.on("deviceFetchLeftFiles", () => activeSet({ devices }));
+    await user.click((await screen.findAllByTestId("device-menu"))[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    const later = screen.getByTestId("device-remove-later");
+    expect(later).toHaveTextContent("70 MB of large files are still only on Tablet.");
+    expect(later).toHaveTextContent("If you remove it first, they're lost.");
+    await user.click(within(later).getByTestId("device-remove-fetch"));
+    await waitFor(() => expect(engine.callsTo("deviceFetchLeftFiles")).toEqual([{ key: TABLET }]));
+    expect(await screen.findByTestId("device-remove-fetching")).toHaveTextContent("Keep Ghostly open on both devices.");
+    // Fetched: the next read of the set no longer lists them, and the warning goes. Remove was there all along.
+    devices = activeSet().devices;
+    await waitFor(() => expect(screen.queryByTestId("device-remove-later")).toBeNull(), { timeout: 5_000 });
+    expect(engine.callsTo("deviceRemove")).toEqual([]);
+    expect(screen.getByTestId("device-remove-go")).toBeEnabled();
+  });
+
+  it("a device with nothing left for later shows no such warning", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    await user.click((await screen.findAllByTestId("device-menu"))[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    expect(screen.getByTestId("device-remove")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-remove-later")).toBeNull();
+  });
+
   it("once the device is removed, the keyboard focus is on its Removed row, not on the page", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     let devices = activeSet().devices;

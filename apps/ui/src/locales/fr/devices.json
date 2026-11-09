@@ -255,7 +255,11 @@
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
       "failed": "Un problème est survenu. Rien n’a été modifié."
     },
+    "fetch": "Les récupérer maintenant",
+    "fetching": "Récupération des fichiers. Gardez Ghostly ouvert sur les deux appareils.",
     "go": "Retirer",
+    "later": "{{size}} de fichiers volumineux sont encore uniquement sur {{device}}.",
+    "laterNext": "Ils arrivent quand les deux appareils sont allumés. Si vous le retirez avant, ils sont perdus.",
     "lost": "Perdu ou volé",
     "removing": "Retrait…",
     "text": "Il ne pourra plus prendre ce profil.",

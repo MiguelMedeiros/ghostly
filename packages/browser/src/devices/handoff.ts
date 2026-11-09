@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import { MAX_EARLIER_SETS, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, MAX_FETCH_FILES, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type FetchFile, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -344,13 +344,13 @@ const isLater = (file: { size: number }, later: number | undefined): boolean => 
 
 // -- sending and receiving parts ------------------------------------------------------------------------------------
 
-interface OutPart { name: string; size: number; read(offset: number, length: number): Promise<Uint8Array> }
+export interface OutPart { name: string; size: number; read(offset: number, length: number): Promise<Uint8Array> }
 
 /**
  * Sends parts in sealed pieces, at most `HANDOFF_WINDOW` unconfirmed. `stop()` ends a run (the link dropped, a new
  * plan came): it returns `stopped`, and a new run starts from what the taker said it holds.
  */
-class PartSender {
+export class PartSender {
   private run = 0;
   private outstanding: { part: string; end: number }[] = [];
   private wake: (() => void)[] = [];
@@ -1657,9 +1657,12 @@ export class HandoffTaker {
     const earlierSets = devices ? withEarlierSets(record!.earlierSets, devices.bytes) : undefined;
     if (earlierSets === null) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     this.h = h;
+    // The files left for later go with the install too: the profile this device runs fetches them from the giver
+    // (`handoffFiles.ts`), and Remove of that device says they are still there.
+    const fetchFiles: FetchFile[] = [...this.behind.values()].flatMap(([, size, digest]) => (this.ids[digest]?.length ? [{ sha256: digest, size, ids: this.ids[digest]!.slice(0, 64), on: this.peer! }] : [])).slice(0, MAX_FETCH_FILES);
     // The earlier sets go into this device's record with the same write, so the install carries them under the staged
     // name; kept should the handoff stop, as a staying device keeps its own (it delivers their frames all the same).
-    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}) });
+    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}), fetchFiles: fetchFiles.length ? fetchFiles : undefined });
     this.phase = "verified";
     this.out(await handoffVerifiedFrame(this.ports.turnAddress, this.turn + 1, h, { publicKey: this.ports.ownKey, sign: (bytes) => this.ports.sign(bytes) }));
     this.arm(HANDOFF_TIMINGS.releaseMs, () => this.askAgain());
@@ -1836,7 +1839,7 @@ export class HandoffTaker {
     this.pake = null; this.bundle = null; this.devices = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
-    if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
+    if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined }, fetchFiles: undefined }).catch(() => {});
   }
 
   private arm(ms: number, then: () => void | Promise<void>): void {

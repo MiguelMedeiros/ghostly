@@ -255,7 +255,11 @@
       "busy": "Something else is changing your devices. Try again in a moment.",
       "failed": "Something went wrong. Nothing was changed."
     },
+    "fetch": "Get them now",
+    "fetching": "Getting them. Keep Ghostly open on both devices.",
     "go": "Remove",
+    "later": "{{size}} of large files are still only on {{device}}.",
+    "laterNext": "They come over when both devices are on. If you remove it first, they're lost.",
     "lost": "Lost or stolen",
     "removing": "Removing…",
     "text": "It can no longer take this profile.",

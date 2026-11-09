@@ -255,7 +255,11 @@
       "busy": "Outra coisa está mudando seus dispositivos. Tente de novo daqui a pouco.",
       "failed": "Algo deu errado. Nada foi mudado."
     },
+    "fetch": "Trazer agora",
+    "fetching": "Trazendo os arquivos. Mantenha o Ghostly aberto nos dois dispositivos.",
     "go": "Remover",
+    "later": "{{size}} de arquivos grandes ainda estão só em {{device}}.",
+    "laterNext": "Eles vêm quando os dois dispositivos estão ligados. Se você remover antes, eles se perdem.",
     "lost": "Perdido ou roubado",
     "removing": "Removendo…",
     "text": "Ele não poderá mais assumir este perfil.",

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   HANDOFF_ATTEMPTS, HANDOFF_LIST_PER_FRAME, HANDOFF_PIECE_BYTES, NO_ATTEMPTS, filePartDigest, filePartName, handoffAckFrame, handoffAttemptAllowed,
   handoffAttemptFailed, handoffAttemptSucceeded, handoffBusyFrame, handoffCancelFrame, handoffContext, handoffContextProof, handoffDataFrame,
-  handoffDigest, handoffDoneFrame, handoffEphemeral, handoffFileMissingFrame, handoffFileRequestFrame, handoffHaveFrames, handoffHelloFrame,
+  handoffDigest, handoffDoneFrame, handoffEphemeral, handoffFileKey, handoffFileMissingFrame, handoffFileRequestFrame, handoffHaveFrames, handoffHelloFrame,
   handoffManifestFrames, handoffOfferFrame, handoffPakeFrame, handoffReleaseFrame, handoffRequestFrame, handoffRetryAfter, handoffStreamKey,
   handoffVerifiedFrame, handoffVerifiedMessage, handoffVersions, isHandoffPartName, openHandoffPiece, readHandoffAck, readHandoffBusy,
   readHandoffCancel, readHandoffData, readHandoffDone, readHandoffFileFrame, readHandoffHave, readHandoffHello, readHandoffManifest, readHandoffPake,
@@ -169,9 +169,28 @@ describe("handoff frames", () => {
     expect(readHandoffCancel(handoffCancelFrame("damaged"))).toBe("damaged");
     expect(readHandoffCancel({ t: "handoff-cancel", why: "something new" })).toBe("failed");
     expect(readHandoffDone(handoffDoneFrame(42))).toBe(42);
-    expect(readHandoffFileFrame(handoffFileRequestFrame(digestOf("a")))).toEqual({ missing: false, sha256: digestOf("a") });
-    expect(readHandoffFileFrame(handoffFileMissingFrame(digestOf("a")))).toEqual({ missing: true, sha256: digestOf("a") });
+    expect(readHandoffFileFrame(handoffFileRequestFrame(digestOf("a")))).toEqual({ missing: false, sha256: digestOf("a"), offset: 0 });
+    expect(readHandoffFileFrame(handoffFileMissingFrame(digestOf("a")))).toEqual({ missing: true, sha256: digestOf("a"), offset: 0 });
     expect(readHandoffFileFrame({ t: "handoff-file-request", sha256: "../x" })).toBeNull();
+    // A request goes on from the bytes the active device wrote; a negative or broken offset is no request.
+    expect(handoffFileRequestFrame(digestOf("a"))).toEqual({ t: "handoff-file-request", sha256: digestOf("a") });
+    expect(readHandoffFileFrame(handoffFileRequestFrame(digestOf("a"), 32_768))).toEqual({ missing: false, sha256: digestOf("a"), offset: 32_768 });
+    for (const o of [-1, 1.5, "8", null]) expect(readHandoffFileFrame({ t: "handoff-file-request", sha256: digestOf("a"), o })).toBeNull();
+    expect(readHandoffFileFrame({ t: "handoff-file-missing", sha256: digestOf("a"), o: 5 })).toBeNull();
+  });
+
+  it("a file left for later is sealed with a key of the device-set secret and the session: another session's key does not open it", () => {
+    const d = new Uint8Array(32).fill(0xd0), one = "11".repeat(32), two = "22".repeat(32);
+    const key = handoffFileKey(d, one);
+    expect(key).toHaveLength(32);
+    expect(handoffFileKey(d, one)).toEqual(key);
+    const part = filePartName(digestOf("big"));
+    const sealed = sealHandoffPiece(key, part, 0, utf8Encode("bytes"));
+    expect(openHandoffPiece(key, part, 0, sealed)).toEqual(utf8Encode("bytes"));
+    expect(openHandoffPiece(handoffFileKey(d, two), part, 0, sealed)).toBeNull();
+    expect(openHandoffPiece(handoffFileKey(new Uint8Array(32).fill(1), one), part, 0, sealed)).toBeNull();
+    expect(() => handoffFileKey(new Uint8Array(16), one)).toThrow();
+    expect(() => handoffFileKey(d, "not hex")).toThrow();
   });
 
   it("the three messages of the password proof read back; the third carries the context proof, or says the password was wrong", () => {

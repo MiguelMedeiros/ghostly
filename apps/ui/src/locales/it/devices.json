@@ -255,7 +255,11 @@
       "busy": "Qualcos’altro sta cambiando i tuoi dispositivi. Riprova tra un momento.",
       "failed": "Qualcosa è andato storto. Non è stato cambiato nulla."
     },
+    "fetch": "Recuperali ora",
+    "fetching": "Recupero dei file in corso. Tieni Ghostly aperto su entrambi i dispositivi.",
     "go": "Rimuovi",
+    "later": "{{size}} di file grandi sono ancora solo su {{device}}.",
+    "laterNext": "Arrivano quando entrambi i dispositivi sono accesi. Se lo rimuovi prima, vanno persi.",
     "lost": "Perso o rubato",
     "removing": "Rimozione…",
     "text": "Non potrà più prendere questo profilo.",
