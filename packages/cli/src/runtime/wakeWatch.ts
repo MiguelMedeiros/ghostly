@@ -18,7 +18,7 @@ export const WAKE_LATE_MS = 30_000;
  * The machine's own virtual bridges, for containers and VMs on it: Docker's (`docker0`, a compose network's `br-<id>`,
  * `veth*`), libvirt's, CNI's, LXD's, VirtualBox's and VMware's host networks, macOS's `bridge100` (sharing, a VM), and
  * Windows's WSL and Default Switch. A container network made or removed changes them with nothing changed for the
- * internet, and a network wake clears the relays' back-off. A Hyper-V switch bound to the network card (`vEthernet
+ * internet, and a network wake makes every chat read and publish at once. A Hyper-V switch bound to the network card (`vEthernet
  * (External)`) holds the machine's real address and stays.
  */
 const LOCAL_BRIDGE = /^(docker\d*|br-[0-9a-f]+|veth.*|virbr\d+|cni\d+|flannel.*|cali.*|lxcbr\d+|lxdbr\d+|incusbr\d+|podman\d+|vboxnet\d+|vmnet\d+|bridge\d+|vEthernet \((WSL.*|Default Switch)\))$/;
