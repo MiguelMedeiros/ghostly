@@ -16,7 +16,8 @@ export const HOLD_MAX_MINUTES = 7 * 24 * 60;
 interface Hold { until: number; since: number }
 type Holds = Record<string, Hold>;
 
-const timers = new WeakMap<ApiContext, Map<string, ReturnType<typeof setTimeout>>>();
+/** Per chat held: what stops its wait (the timer, or the wait for the chat to open: `expire`). */
+const timers = new WeakMap<ApiContext, Map<string, () => void>>();
 
 function holdsFile(ctx: ApiContext): string {
   return join(ctx.runtime.paths.dir, "holds.json");
@@ -32,27 +33,53 @@ function writeHolds(ctx: ApiContext, holds: Holds): void {
   renameSync(file + ".tmp", file);
 }
 
-function timersOf(ctx: ApiContext): Map<string, ReturnType<typeof setTimeout>> {
+function timersOf(ctx: ApiContext): Map<string, () => void> {
   let map = timers.get(ctx);
   if (!map) timers.set(ctx, (map = new Map()));
   return map;
 }
 
+function stopWait(ctx: ApiContext, linkId: string): void {
+  timersOf(ctx).get(linkId)?.();
+  timersOf(ctx).delete(linkId);
+}
+
 function schedule(ctx: ApiContext, linkId: string, until: number): void {
-  const map = timersOf(ctx);
-  clearTimeout(map.get(linkId));
+  stopWait(ctx, linkId);
   const timer = setTimeout(() => {
-    map.delete(linkId);
-    void releaseHold(ctx, linkId, "expired").catch((error: unknown) => process.stderr.write(`ghostly: the hold on ${linkId} could not end: ${error instanceof Error ? error.message : String(error)}\n`));
+    timersOf(ctx).delete(linkId);
+    expire(ctx, linkId);
   }, Math.max(0, until - Date.now()));
   // A one-shot leaves when its command is done; the next start takes the hold back.
   timer.unref?.();
-  map.set(linkId, timer);
+  timersOf(ctx).set(linkId, () => clearTimeout(timer));
 }
 
-/** When the chat's hold ends, or null. */
+/**
+ * Whether the chat leaves DHT only in this run: the engine switches only a chat it opened (`runnableTransports` is
+ * there once it did). A one-shot that only reads opens none, and one about another chat not this one.
+ */
+const switchable = (link: LinkView | undefined): boolean => !link || link.deliveryMode !== "dht" || !!link.runnableTransports;
+
+/**
+ * A hold whose time is up ends. On a chat this run has not opened it ends once the chat opens, or at the next start
+ * that opens it; it is no longer reported meanwhile (`holdOf`). Each read said on stderr that it "could not end:
+ * Delivery method unavailable." and kept its past `heldUntil`.
+ */
+function expire(ctx: ApiContext, linkId: string): void {
+  const opened = (links: readonly LinkView[]) => switchable(links.find((l) => l.id === linkId));
+  if (!opened(state(ctx).links)) {
+    const off = ctx.hub.onState((s) => { if (opened(s.links)) { stopWait(ctx, linkId); expire(ctx, linkId); } });
+    timersOf(ctx).set(linkId, off);
+    return;
+  }
+  void releaseHold(ctx, linkId, "expired").catch((error: unknown) => process.stderr.write(`ghostly: the hold on ${linkId} could not end: ${error instanceof Error ? error.message : String(error)}\n`));
+}
+
+/** When the chat's hold ends, or null (its time is up, also while it waits for the chat to open: `expire`). */
 export function holdOf(ctx: ApiContext, linkId: string): number | null {
-  return readHolds(ctx)[linkId]?.until ?? null;
+  const until = readHolds(ctx)[linkId]?.until;
+  return until !== undefined && until > Date.now() ? until : null;
 }
 
 /** Keeps the chat off its direct link for `minutes` (again: from now). */
@@ -81,8 +108,7 @@ export async function holdChat(ctx: ApiContext, link: LinkView, minutes: number)
 export async function releaseHold(ctx: ApiContext, linkId: string, reason: "expired" | "connect" | "lifted", chosen = false): Promise<boolean> {
   const holds = readHolds(ctx);
   if (!holds[linkId]) return false;
-  clearTimeout(timersOf(ctx).get(linkId));
-  timersOf(ctx).delete(linkId);
+  stopWait(ctx, linkId);
   const link = state(ctx).links.find((l) => l.id === linkId);
   if (!chosen && link?.deliveryMode === "dht") await node(ctx).setDeliveryMode({ linkId, mode: "stream" });
   delete holds[linkId];
