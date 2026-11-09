@@ -303,7 +303,7 @@ describe("the Share to… picker", () => {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
   const picker = () => renderApp(<Routes><Route path="/shared" element={<SharePicker />} /><Route path="*" element={<Where />} /></Routes>, { route: "/shared" });
-  /** The next share shown is said before a press acts on it: the clock moved past that. */
+  /** A share shown is said before a press acts on it: the clock moved past that. */
   const settled = () => vi.setSystemTime(Date.now() + SEARCH_STATUS_SETTLE_MS);
   afterEach(() => vi.useRealTimers());
 
@@ -315,6 +315,7 @@ describe("the Share to… picker", () => {
   it("lists the chats and the groups for text; picking one hands it over and opens the chat", async () => {
     receiveShare(share({ text: "hello" }));
     const { user } = picker();
+    settled();
     expect(screen.getByTestId("share-text")).toHaveTextContent("hello");
     expect(screen.getAllByTestId("share-chat")).toHaveLength(1);
     expect(screen.getByTestId("share-group")).toHaveTextContent("Friends");
@@ -332,6 +333,38 @@ describe("the Share to… picker", () => {
     expect(screen.queryByTestId("where")).toBeNull();
     expect(incomingShare()?.text).toBe("from a website");
     expect(takeShareFor("chat1")).toBeNull();
+    settled();
+    await user.click(screen.getByTestId("share-chat"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
+  });
+
+  it("a share the picker opens on by itself is not acted on before it is seen: a tap meant for the screen it replaced picks nothing", async () => {
+    vi.setSystemTime(Date.now());
+    receiveShare(share({ text: "website text", files: [file("invoice.pdf")] }), { queue: true });
+    const { user } = picker();
+    await user.click(screen.getByTestId("share-chat"));
+    await user.click(screen.getByTestId("share-cancel"));
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("website text");
+    expect(takeShareFor("chat1")).toBeNull();
+    // Said to a screen reader as the next share is.
+    await waitFor(() => expect(screen.getByTestId("share-next")).toHaveTextContent("From another app or website. Nothing is sent until you send it. invoice.pdf website text"));
+    settled();
+    await user.click(screen.getByTestId("share-chat"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
+    expect(takeShareFor("chat1")?.files.map((f) => f.name)).toEqual(["invoice.pdf"]);
+  });
+
+  it("a share that reaches the picker while it waits for one gets the same pause from when it shows", async () => {
+    vi.setSystemTime(Date.now());
+    const { user } = picker();
+    expect(screen.getByTestId("share-none")).toBeInTheDocument();
+    settled();
+    act(() => receiveShare(share({ text: "website text" }), { queue: true }));
+    await user.click(screen.getByTestId("share-chat"));
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("website text");
+    settled();
     await user.click(screen.getByTestId("share-chat"));
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
   });
@@ -339,6 +372,7 @@ describe("the Share to… picker", () => {
   it("files go to groups too (WISP 503): picking one hands them to its composer", async () => {
     receiveShare(share({ files: [file("a.png"), file("b.png")] }));
     const { user } = picker();
+    settled();
     expect(screen.getByTestId("share-files")).toHaveTextContent("2 files");
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
     await user.click(screen.getByTestId("share-group"));
@@ -365,6 +399,7 @@ describe("the Share to… picker", () => {
   it("Cancel drops the share and goes home", async () => {
     receiveShare(share({ text: "never mind" }));
     const { user } = picker();
+    settled();
     await user.click(screen.getByTestId("share-cancel"));
     expect(incomingShare()).toBeNull();
     expect(screen.getByTestId("where")).toHaveTextContent("/");
@@ -374,6 +409,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ text: "one" }), { queue: true });
     receiveShare(share({ text: "two", files: [file("photo.jpg")] }), { queue: true });
     const { user } = picker();
+    settled();
     expect(screen.getByTestId("share-text")).toHaveTextContent("one");
     await user.click(screen.getByTestId("share-chat"));
     // Still the picker, now on the share that waited behind: none is left where nothing shows it.
@@ -392,6 +428,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ text: "first text" }), { queue: true });
     receiveShare(share({ text: "second unseen", files: [file("photo.jpg")] }), { queue: true });
     const { user } = picker();
+    settled();
     const ana = screen.getByTestId("share-chat");
     ana.focus();
     await user.keyboard("{Enter}");
@@ -419,6 +456,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ text: "never mind" }), { queue: true });
     receiveShare(share({ text: "second unseen" }), { queue: true });
     const { user } = picker();
+    settled();
     await user.click(screen.getByTestId("share-cancel"));
     expect(screen.getByTestId("share-text")).toHaveTextContent("second unseen");
     expect(document.activeElement).toBe(within(screen.getByTestId("share-picker")).getByRole("heading", { level: 1 }));
@@ -439,6 +477,7 @@ describe("the Share to… picker", () => {
     receiveShare(share({ text: "one", files: [file("a.txt")] }), { queue: true });
     receiveShare(share({ text: "two", url: "https://b.example", files: [file("b.txt")] }), { queue: true });
     const { user } = picker();
+    settled();
     await user.click(screen.getByTestId("share-chat"));
     settled();
     await user.click(screen.getByTestId("share-chat"));
@@ -529,6 +568,7 @@ describe("the Share to… picker", () => {
   it("a share past the three that can wait is never dropped without a word: the share shown says how many were not kept", async () => {
     for (const text of ["one", "two", "three", "four", "five"]) receiveShare(share({ text }), { queue: true });
     const { user } = picker();
+    settled();
     expect(screen.getByTestId("share-text")).toHaveTextContent("one");
     expect(screen.getByTestId("share-dropped-title")).toHaveTextContent("2 more shares couldn't be kept: 3 were already waiting.");
     expect(screen.getByTestId("share-dropped-next")).toHaveTextContent("Send or cancel the ones waiting, then share the rest again.");
