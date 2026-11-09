@@ -109,10 +109,11 @@ export function LocationCard({ place }: { place: Place }) {
       <div className="flex items-start gap-2">
         <span className="text-accent mt-0.5 shrink-0"><PinIcon /></span>
         {/* The place's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
-            keeps its start, and a short one stays at the line's start. */}
+            keeps its start, and a short one stays at the line's start. The coordinates read left to right in every
+            language: in Arabic each minus was drawn after its number ("46.63330- ,23.55050-"). */}
         <span className="min-w-0 flex flex-col items-start">
           <span dir="auto" className="max-w-full text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? t("chat.location.title")}</span>
-          <span className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
+          <span dir="ltr" className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
         </span>
       </div>
       {showMap ? <MapTiles place={place} /> : (
