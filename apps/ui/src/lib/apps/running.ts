@@ -125,14 +125,15 @@ export function useAppSessions(): readonly string[] {
 /**
  * Opened from the Apps page in a chat the person picked (a `chat` app runs in a chat only): the chat takes it as it
  * shows, once its panel is there (Chat.tsx), and opens it as its own + → Apps would. One not taken within a minute (the
- * person went elsewhere) is dropped.
+ * person went elsewhere) is dropped. Its age is read on the monotonic clock (the map lives only as long as the page): a
+ * device clock set back never keeps a stale one, to open by itself the next time that chat shows.
  */
 export interface OpenRequest { app: InstalledAppView; options?: OpenAppOptions }
 const OPEN_REQUEST_MS = 60_000;
 const requests = new Map<string, OpenRequest & { at: number }>();
 
 export function requestOpenInChat(linkId: string, request: OpenRequest): void {
-  requests.set(linkId, { ...request, at: Date.now() });
+  requests.set(linkId, { ...request, at: performance.now() });
   changed();
 }
 
@@ -148,7 +149,7 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
   if (!request) return undefined;
   requests.delete(linkId);
   changed();
-  return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
+  return performance.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
 /**
