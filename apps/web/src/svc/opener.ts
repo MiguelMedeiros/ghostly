@@ -81,6 +81,24 @@ export class CookieJar {
 }
 
 /**
+ * What one opened app (its jar) may have waiting in this page at once, requests and their bodies' bytes: past either, a
+ * request is refused at once, so the app cannot make the page that runs the peer hold unbounded memory.
+ */
+export const MAX_PENDING_REQUESTS = 32;
+export const MAX_PENDING_BODY_BYTES = 32 * 1024 * 1024;
+const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number }>();
+
+/** Takes room for one request of the app's: how to give it back, or null with none left. */
+function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
+  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0 };
+  if (pending.count >= MAX_PENDING_REQUESTS || pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
+  pending.count++;
+  pending.bytes += bytes;
+  pendingOf.set(jar, pending);
+  return () => { pending.count--; pending.bytes -= bytes; };
+}
+
+/**
  * Sends one request from the app over the link and streams the answer back on its port. `view`: aborted once the page
  * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
  * too, rather than running on their machine and holding one of the link's places.
@@ -101,6 +119,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
+  const release = holdRoom(jar, request.body?.byteLength ?? 0);
+  if (!release) {
+    post({ type: "error", status: 503, text: words.failed });
+    port.close();
+    return;
+  }
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
   const pageGone = () => stop.abort();
@@ -143,6 +167,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
+    release();
     clearTimeout(late);
     view?.removeEventListener("abort", pageGone);
     port.close();

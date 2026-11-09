@@ -3,8 +3,8 @@ import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from ".
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { GhostlyHttpError, HttpClient, LIMITS, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -174,6 +174,46 @@ describe("one request from the app, over the contact's link", () => {
       return { status: 200, headers: [], bytes: async () => new Uint8Array(), body: (async function* () { cancel(); yield new Uint8Array(1); yield new Uint8Array(1); })() };
     }, new CookieJar(), words);
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("holds a bounded number of the app's requests and their bodies in this page, however many it sends: past it, refused at once", async () => {
+    vi.useFakeTimers();
+    try {
+      // The real link client, on a link where the contact never answers: what goes out is counted.
+      let sentOnLink = 0;
+      const channel = {
+        bufferedAmount: LIMITS.sendHighWaterMark + 1, drained: () => new Promise<void>(() => {}), close() {}, onMessage: null, onClose: null,
+        send(data: string | Uint8Array) { if (typeof data === "string" && decodeControl(data)?.t === "req") sentOnLink++; },
+      };
+      const client = new HttpClient(channel);
+      const send = (request: ClientRequest) => client.request("demo", request);
+      const jar = new CookieJar();
+      // One 8 MiB buffer for every POST, as the app can: what counts is what the page holds for each.
+      const body = new ArrayBuffer(MAX_REQUEST_BYTES);
+      const requests = Array.from({ length: 40 }, () => {
+        const r = recorder();
+        let ended = false;
+        void serve(r.port, { type: "request", method: "POST", path: "/up", headers: [], body }, send, jar, words).finally(() => { ended = true; });
+        return { ...r, ended: () => ended };
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const held = requests.filter((r) => !r.ended());
+      const refused = requests.filter((r) => r.ended());
+      expect(held.length * MAX_REQUEST_BYTES, "the bodies this page still holds").toBeLessThanOrEqual(32 * 1024 * 1024);
+      expect(refused.length).toBe(40 - held.length);
+      for (const r of refused) expect(r.replies).toEqual([{ type: "error", status: 503, text: "Failed" }]);
+      // Once those end (here: unanswered in time), the app has its room again.
+      await vi.advanceTimersByTimeAsync(ANSWER_BY_MS);
+      expect(requests.every((r) => r.ended())).toBe(true);
+      const again = recorder();
+      void serve(again.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, send, jar, words);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(again.replies).toEqual([]);
+      expect(sentOnLink).toBe(held.length + 1);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("drops what is not a request, sending nothing", async () => {

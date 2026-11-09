@@ -44,11 +44,11 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 /** One request through the worker's fetch handler: whether it answered, and with what. */
-function fetchThrough(request: { method?: string; path?: string; mode: string; destination: string; referrer: string }, clientId = ""): Promise<Response> | null {
+function fetchThrough(request: { method?: string; path?: string; mode: string; destination: string; referrer: string; signal?: AbortSignal }, clientId = ""): Promise<Response> | null {
   let answer: Promise<Response> | null = null;
   const method = request.method ?? "GET";
   onFetch({
-    request: { url: `${ORIGIN}${request.path ?? "/"}`, method, mode: request.mode, destination: request.destination, referrer: request.referrer,
+    request: { url: `${ORIGIN}${request.path ?? "/"}`, method, mode: request.mode, destination: request.destination, referrer: request.referrer, signal: request.signal ?? new AbortController().signal,
       headers: new Headers({ "content-type": "application/x-www-form-urlencoded" }), body: method === "GET" ? null : new Response("a=1").body },
     clientId,
     respondWith: (response) => { answer = Promise.resolve(response); },
@@ -113,5 +113,19 @@ describe("a request the app's page could not get an answer to", () => {
     });
     const html = await (await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!).text();
     expect(html).toContain("<html><head>");
+  });
+
+  it("passes a fetch the app gives up on before any answer on as cancelled: the page lets go of it, and its body", async () => {
+    let port: MessagePort | undefined;
+    const said: unknown[] = [];
+    bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+      port = transfer[0] as MessagePort;
+      port.onmessage = (event) => said.push(event.data);
+    });
+    const controller = new AbortController();
+    void fetchThrough({ method: "POST", path: "/up", mode: "cors", destination: "", referrer: `${ORIGIN}/`, signal: controller.signal }, "app");
+    await vi.waitFor(() => expect(port).toBeDefined());
+    controller.abort();
+    await vi.waitFor(() => expect(said).toEqual([{ type: "cancel" }]));
   });
 });
