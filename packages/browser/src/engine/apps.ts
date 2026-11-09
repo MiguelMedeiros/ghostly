@@ -863,15 +863,20 @@ export class Apps {
     if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
   }
+  /** Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them). */
   private async putApp(app: InstalledApp): Promise<void> {
-    try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
+    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    const read = tx.objectStore(STORES.apps).get(app.ref);
+    read.onsuccess = () => { tx.objectStore(STORES.apps).put(withRevocations(app, (read.result as InstalledApp | undefined)?.revocations ?? [])); };
+    try { await done(tx); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
    * transaction: an app uninstalled (or installed again) while the update check was reading is not put back, nor is the
    * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
    * A store removed since the caller read the stores pins nothing: it is judged at the write, as `removeStore` unpins
-   * only the records written before it.
+   * only the records written before it. A revocation the record gained since `was` (`keepStoreRevocations`) is kept:
+   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -879,7 +884,10 @@ export class Apps {
     let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
     read.onsuccess = () => {
-      if (!sameRecord(read.result as InstalledApp | undefined, was)) return;
+      const now = read.result as InstalledApp | undefined;
+      if (!sameRecord(now, was)) return;
+      const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
+      app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -924,9 +932,13 @@ export class Apps {
   private async keepStoreRevocations(record: AddedAppStore): Promise<void> {
     const revoked = record.index?.revoked ?? [];
     if (!revoked.length) return;
-    for (const app of await this.installed()) {
-      const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
-      if ((next.revocations?.length ?? 0) > (app.revocations?.length ?? 0)) await this.putAppIfUnchanged(next, app);
+    const reread = async (ref: string) => wrap<InstalledApp | undefined>((await store(STORES.apps, "readonly")).get(ref));
+    for (const first of await this.installed()) {
+      // A record changed meanwhile (the update check wrote it) is read again: the revocation is not dropped.
+      for (let app: InstalledApp | undefined = first; app; app = await reread(first.ref)) {
+        const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
+        if ((next.revocations?.length ?? 0) <= (app.revocations?.length ?? 0) || await this.putAppIfUnchanged(next, app)) break;
+      }
     }
   }
   /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
