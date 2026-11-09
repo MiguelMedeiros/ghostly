@@ -176,6 +176,11 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^No Bitcoin source is set up$/, "unavailable"],
   [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
   [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
+  // What a payment's state refuses: a payment the contact took (or a request) has nothing to take back, a request or an
+  // invoice already paid is not paid again.
+  [/^Nothing to (reclaim|take back)$/, "refused"],
+  [/^This request is no longer open$/, "refused"],
+  [/^This invoice is already paid$/, "refused"],
 ];
 
 /**
@@ -194,6 +199,9 @@ const NO_MINT = /^(No mint could create an invoice: No mint configured|You have 
 
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
+  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name): nothing is known to
+  // have failed, try again later, as a mint that cannot be reached at all is `unavailable`.
+  if (error.name === "SwapUnsettledError") return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
 }
@@ -421,7 +429,10 @@ const WALLETS: Record<string, Method> = {
 
   async "payment.check"(ctx, params) {
     const link = chatOf(ctx, params);
-    if (state(ctx).payments[str(params, "payment", true)]?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    const p = state(ctx).payments[str(params, "payment", true)];
+    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
+    if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
     return { chat: link.id, paymentId: str(params, "payment", true) };
   },
