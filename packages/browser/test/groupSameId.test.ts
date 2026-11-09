@@ -225,3 +225,43 @@ describe("another group under an id this device holds", () => {
     expect(view(other, g)?.invited).toEqual([]);
   });
 });
+
+describe("a contact's invitation under an id held here is answered as one under an id not held", () => {
+  type Held = "member" | "none" | "removed" | "left" | "invited";
+  /**
+   * Bob holds `held` under Alice's group's id; Eve, his contact, invites him to it with `fillers` of her own waiting
+   * first, then sends `after` more of her own. The declines she hears from the invitation on.
+   */
+  async function answerToEve(held: Held, fillers: number, after = 0): Promise<number> {
+    const { world, alice, bob, g } = await setup();
+    const eve = world.add("eve").groups;
+    world.chats.set("chat-be", ["bob", "eve"]);
+    await eve.load();
+    if (held !== "none") { await alice.invite(g, "chat-ab"); await world.settle(); }
+    if (held === "member" || held === "removed" || held === "left") { await bob.accept(g); await world.settle(); await world.meet(); }
+    if (held === "removed") { await alice.remove(g, view(bob, g)!.myKey!); await world.settle(); await world.meet(); }
+    if (held === "left") { await bob.leave(g); await world.settle(); await world.meet(); }
+    const anyKey = () => identityFromSeedB64(toBase64Url(randomBytes(32))).pubKeyZ32;
+    for (let i = 0; i < fillers; i++) await bob.handleContactFrame("chat-be", { t: "group-invite", g: toBase64Url(randomBytes(16)), admin: anyKey(), name: "Filler" });
+    world.sent.length = 0;
+    await bob.handleContactFrame("chat-be", { t: "group-invite", g, admin: anyKey(), name: "Family" });
+    for (let i = 0; i < after; i++) await bob.handleContactFrame("chat-be", { t: "group-invite", g: toBase64Url(randomBytes(16)), admin: anyKey(), name: "Filler" });
+    return world.sent.filter(s => s.from === "bob" && s.linkId === "chat-be" && s.t === "group-decline").length;
+  }
+
+  it("within her chat's room and past it, Eve hears the same whatever Bob holds under the id", async () => {
+    const held: Held[] = ["member", "none", "removed", "left", "invited"];
+    for (const fillers of [0, 4]) {
+      const answers: Record<string, number> = {};
+      for (const h of held) answers[h] = await answerToEve(h, fillers);
+      expect(answers).toEqual(Object.fromEntries(held.map(h => [h, fillers ? 1 : 0])));
+    }
+  });
+
+  it("one kept beside a held group takes the room of her chat as a new one would: the next past it is told no either way", async () => {
+    const held: Held[] = ["member", "none", "removed", "left", "invited"];
+    const answers: Record<string, number> = {};
+    for (const h of held) answers[h] = await answerToEve(h, 3, 1);
+    expect(answers).toEqual(Object.fromEntries(held.map(h => [h, 1])));
+  });
+});

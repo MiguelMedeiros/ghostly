@@ -5,11 +5,14 @@ export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
   /** The peer stopped for good ("Clear all data"): its document closes and a new one starts. */
   | { target: "background"; type: "restart-engine" }
-  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; page?: ViewerPage }
+  /** `profile`: the page's profile (`EngineStatus.profile`); the tab opens only while the peer runs that one. */
+  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; profile: string; page?: ViewerPage }
   /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
   | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
   | { target: "background"; type: "open-payment-link"; uri: string }
+  /** The offscreen peer asks whether profile `profile` may reach `origin` for a contact (localAllowList.ts): a boolean. */
+  | { target: "background"; type: "local-access-allowed"; profile: string; origin: string }
   /**
    * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
    * worker shows the app itself (apps/ui/src/lib/notifications.ts).

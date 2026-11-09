@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { REMOVED_TEXT } from "@ghostly/core";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { CommunityWorld, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.protocol.edits
 
 /**
@@ -8,13 +8,21 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * `GroupSession`; Pkarr and links in memory, simulated clock). Hubs change: the ones a group had when a message was
  * written leave or close, and newcomers whose apps stay online carry it from then on. They were not in the message's
  * epoch, so they cannot read its edits; they carry them all the same.
+ *
+ * Each run is the same (`sameRun`). With random keys and waits, the other members were sometimes still moving to the
+ * newcomers when the author spoke, and took the edits from a newcomer's catch-up ~105 s later: past a 30 s wait, a
+ * run in five failed. The wait covers that catch-up (seeds 1 to 30 all pass).
  */
 
 const edits = new Map<Peer, { id: string; e: number; m: string; rm?: true }[]>();
 
 describe("edits in a private group on hubs", () => {
+  let restore = () => {};
+  afterEach(() => { restore(); restore = () => {}; });
+
   it("an edit and a removal of a message older than the current hubs reach every member through them", async () => {
-    const world = new CommunityWorld();
+    const world = new CommunityWorld(undefined, null, seededRandom(1));
+    restore = sameRun(world, 1);
     const hooks = (p: Peer) => ({ groupEdit: (_g: string, e: { id: string; e: number; m: string; rm?: true }) => { edits.set(p, [...edits.get(p) ?? [], e]); } });
     const add = (name: string, staysOnline = false) => world.add(name, hooks, { staysOnline });
     const admin = add("admin");
@@ -39,7 +47,9 @@ describe("edits in a private group on hubs", () => {
     const hubA = add("hubA", true), hubB = add("hubB", true);
     await join(hubA); await join(hubB);
     const newKeys = [hubA, hubB].map(p => view(p).myKey!);
-    const edgesOf = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id).map(e => e.peer);
+    // Edges with apps that are open: the one a member keeps with its neighbor in the roster (WISP 902 § Transports) waits
+    // for the closed hub to come back, and carries nothing until it does.
+    const edgesOf = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id && !peers.some(q => !q.online && view(q).myKey === e.peer)).map(e => e.peer);
     await world.until(() => edgesOf(author).length > 0 && edgesOf(author).every(k => newKeys.includes(k)), 10 * 60_000, 1000,
       () => `author's edges: ${edgesOf(author).map(k => peers.find(p => view(p)?.myKey === k)?.name).join(",")}`);
 
@@ -49,7 +59,8 @@ describe("edits in a private group on hubs", () => {
     const readers = peers.filter(p => p !== author && !old.includes(p) && p !== hubA && p !== hubB);
     // (Twice each, once per hub: the app shows an edit no newer than its text once.)
     const took = (p: Peer) => [kept, gone].every(m => (edits.get(p) ?? []).some(e => e.id === m));
-    await world.until(() => readers.every(took), 30_000, 1000, () => `took both: ${readers.filter(took).length}/${readers.length}`);
+    // A member still on its way to the newcomers gets them from a newcomer's catch-up once there.
+    await world.until(() => readers.every(took), 5 * 60_000, 1000, () => `took both: ${readers.filter(took).length}/${readers.length}`);
     for (const p of readers) expect(edits.get(p)!.find(e => e.id === kept)).toMatchObject({ e: 1, m: "A edited" });
     for (const p of readers) expect(edits.get(p)!.find(e => e.id === gone)).toMatchObject({ rm: true });
     // The newcomers carried them, unread.

@@ -96,6 +96,12 @@ export interface IrohWebOptions {
   onlineMs?: number;
   connectMs?: number;
   load?: () => Promise<IrohWasm>;
+  /**
+   * Whether a contact's relay is at a public address, or at a name whose every address is public now: asked before each
+   * dial through a relay that is not one of `relays`, where the host has a resolver (the CLI's `nodePublicRelay`). A page
+   * has none; a contact's relay is held there to what its URL says (`dialableIrohRelay`).
+   */
+  publicRelay?: (relay: string) => Promise<boolean>;
 }
 
 const SEND_BUDGET = 120 * 1024;
@@ -237,7 +243,12 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
       if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
-      const conn = await node.connect(irohDescriptor(descriptor, BROWSER_SPELLING), options.connectMs ?? 20_000);
+      const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
+      const relay = (dialled as { relay?: unknown } | null)?.relay;
+      if (options.publicRelay && typeof relay === "string" && !listed(relays, relay) && !await options.publicRelay(relay))
+        throw new Error("The contact's Iroh relay is not one this device dials");
+      if (stopped) throw new Error("Iroh endpoint is stopped");
+      const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
     },

@@ -3,6 +3,7 @@ import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from 
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
+import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -256,10 +257,15 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, message.profile, viewerPageOf(message.page)).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
+    return true;
+  }
+  if (message.type === "local-access-allowed") {
+    if (typeof message.profile !== "string" || typeof message.origin !== "string") { sendResponse(false); return false; }
+    void localOriginAllowed(message.profile, message.origin).then((allowed) => sendResponse(allowed === true), () => sendResponse(false));
     return true;
   }
   if (message.type === "close-services") {
@@ -423,11 +429,21 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
+/** `profile`: the page's (`EngineStatus.profile`). The tab is only made, and only shows the app, while the peer runs that profile. */
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, profile: unknown, page: ViewerPage): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
-  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag || typeof profile !== "string") throw new Error("Invalid service");
   await ensureEngine();
+  // The open ends as the tab would have, had it been made a moment sooner (a new peer closes every viewer), when the
+  // peer it waited on is another profile's: a switch in another tab while it started, or one the document read as it
+  // loaded. The tab is the page's profile's origin, and no other peer serves it.
+  const running = async () => {
+    const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage).catch(() => undefined)) as EngineStatus | undefined;
+    return status && !status.stopped ? status.profile : undefined;
+  };
+  const closed = async () => (await running()) !== profile;
+  if (await closed()) return;
 
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
@@ -441,7 +457,16 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
     await devtools(tab.id, "Page.enable");
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
+    // A switch's `closeViewers` took the tab while DevTools attached to it.
+    if (await closed()) return;
     throw error;
+  }
+  // From here on the binding is written: a switch that comes later finds the tab (`closeViewers`).
+  if (await closed()) {
+    await forget(tab.id);
+    await chrome.debugger.detach({ tabId: tab.id }).catch(() => {});
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    return;
   }
   await chrome.tabs.update(tab.id, { url });
 }

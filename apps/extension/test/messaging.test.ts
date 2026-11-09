@@ -31,7 +31,7 @@ describe("the service worker keeps one peer", () => {
     ]);
     // Iroh runs in the page here too (WISP 102, relay only), loaded on first use.
     // A new profile's Mainnet wallets are made by the peer, never under test (see defaultWalletsAllowed).
-    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function) });
+    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function), localFetch: expect.any(Function) });
 
     // Later asks find the document and only check that the peer answers.
     expect(await send({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });
@@ -283,7 +283,7 @@ describe("viewer tabs", () => {
     ["a chat tag with a dot", PEER, SERVICE, `${TAG}.evil`],
     ["a chat tag outside z-base-32", PEER, SERVICE, "l".repeat(16)],
   ])("refuses %s before opening a tab", async (_, peer, service, tag) => {
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Invalid service" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
@@ -291,7 +291,7 @@ describe("viewer tabs", () => {
 
   it("closes the tab and forgets it when DevTools cannot attach", async () => {
     world.failDebuggerAttach = "Another debugger is already attached to the tab.";
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Another debugger is already attached to the tab." });
     const [[tabId]] = world.callsTo("tabs.remove") as [[number]];
     expect(world.tabs.has(tabId)).toBe(false);
@@ -570,7 +570,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
 
   it("attaches only to the tab it just created, whatever tab a page names", async () => {
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, tabId: bank.id });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "", tabId: bank.id });
     expect(reply).toEqual({ ok: true });
     const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
     expect(viewer.id).not.toBe(bank.id);

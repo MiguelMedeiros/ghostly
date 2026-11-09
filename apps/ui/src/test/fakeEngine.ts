@@ -194,7 +194,9 @@ export class FakeEngine implements BrowserHost {
     });
   }
 
-  requestLocalAccess = async () => false;
+  requestLocalAccess = async (_pattern: string, _origin: string) => false;
+  /** The extension's: whether an address was allowed in this browser. Left out as on the web app and Desktop. */
+  localAccessAllowed?: (origin: string) => Promise<boolean>;
   openService = async () => {};
 
   /** Answers `method` from now on. */

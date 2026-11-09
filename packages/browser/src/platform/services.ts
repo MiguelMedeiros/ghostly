@@ -296,6 +296,16 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
     await engine.call("addService", { name, target });
   },
+  async localAccessNeeded(target) {
+    const host = getBrowserHost();
+    if (!host.localAccessAllowed) return false;
+    try { return !(await host.localAccessAllowed(parseLocalTarget(target).origin)); } catch { return false; }
+  },
+  async allowLocalAccess(target) {
+    const { origin } = parseLocalTarget(target);
+    // From the click, as when it was shared.
+    if (!(await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin))) throw new Error("Ghostly needs your permission to reach that local address");
+  },
   async removeService(serviceId) {
     // Read before the call: the state after it may not have caught up yet.
     const services = engine.state?.services ?? [];
