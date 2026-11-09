@@ -79,4 +79,33 @@ describe("the update check with many apps", () => {
     const rows = await appRows() as { ref: string; revocations?: unknown[] }[];
     expect(rows.filter((a) => a.revocations?.length).map((a) => a.ref)).toEqual([refs[3]]);
   });
+
+  it("reads a revocations file several apps share once per check, and each app keeps only its own", async () => {
+    // A publisher with several apps in one repository: their bundles sit in one folder, beside one ghostly-revoke.json.
+    const folder = "https://raw.githubusercontent.com/ana/apps/HEAD";
+    const shared = `${folder}/ghostly-revoke.json`;
+    let now = NOW_MS;
+    const store = apps(net, { now: () => now });
+    const refs: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const app = await bundle({ name: `app${i}` });
+      net.put(`${folder}/app${i}.ghostlyapp`, app.bytes);
+      await store.preview({ url: `${folder}/app${i}.ghostlyapp` });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+      refs.push(app.ref);
+    }
+    const reads = () => net.requests.filter((url) => url === shared).length;
+
+    net.requests.length = 0;
+    await store.checkUpdates();
+    expect(reads(), "one read of the shared file in a check").toBe(1);
+
+    now += 60_000;
+    net.put(shared, canonicalJsonBytes([await revocation(refs[2]!, [(await bundle({ name: "app2", sequence: 2 })).digest])]));
+    net.requests.length = 0;
+    await store.checkUpdates();
+    expect(reads(), "and one in the next check").toBe(1);
+    const rows = await appRows() as { ref: string; revocations?: unknown[] }[];
+    expect(rows.filter((a) => a.revocations?.length).map((a) => a.ref)).toEqual([refs[2]]);
+  });
 });
