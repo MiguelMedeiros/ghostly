@@ -13,6 +13,16 @@ import { networkInterfaces } from "node:os";
 export const WAKE_TICK_MS = 10_000;
 /** A tick this much later than due: the process was not running (sleep, a stopped process), not merely busy. */
 export const WAKE_LATE_MS = 30_000;
+/**
+ * A wake republishes every chat with nothing published in the last seconds (on the CLI the DHT copy goes whatever the
+ * relays' budgets say: 200 chats are 200 DHT puts and a ~76 ms turn). A network that flaps (Wi-Fi at the edge of range,
+ * a VPN in a reconnect loop) changed the addresses every tick and woke the engine every 10 s for nothing new. A network
+ * wake within this long of the previous wake is held and runs once when the gap is over, the latest change included; each
+ * held one run doubles the gap, up to `WAKE_GAP_MAX_MS`, and a whole gap with no change brings it back. A network change
+ * after a quiet spell, and a sleep, still wake at once.
+ */
+export const WAKE_GAP_MS = 60_000;
+export const WAKE_GAP_MAX_MS = 10 * 60_000;
 
 /** The machine's own non-internal addresses, sorted: a change means another network (Wi-Fi to cable, a new DHCP lease). */
 export function addressesKey(nets: ReturnType<typeof networkInterfaces> = networkInterfaces()): string {
@@ -42,6 +52,15 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
   const addresses = options.addresses ?? (() => addressesKey());
   let last = now();
   let key = safe(addresses);
+  let wokeAt = -Infinity;
+  let gap = WAKE_GAP_MS;
+  /** A network change seen within the gap, not woken for yet. */
+  let held = false;
+  const wake = (why: "sleep" | "network", at: number) => {
+    wokeAt = at;
+    held = false;
+    try { onWake(why); } catch { /* the engine's own wake logs its trouble */ }
+  };
   const timer = setInterval(() => {
     const at = now();
     const slept = at - last > tickMs + lateMs;
@@ -51,9 +70,17 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
     // network coming back included (relays left alone while it was gone are asked again).
     const moved = next !== "" && next !== key;
     key = next;
-    if (slept || moved) {
-      try { onWake(slept ? "sleep" : "network"); } catch { /* the engine's own wake logs its trouble */ }
+    if (slept) return wake("sleep", at);
+    const due = at - wokeAt >= gap;
+    if (!due) { held ||= moved; return; }
+    if (held) {
+      // The network kept changing through the whole gap: wake for the latest, and wait longer before the next one.
+      gap = Math.min(gap * 2, WAKE_GAP_MAX_MS);
+      return wake("network", at);
     }
+    // A whole gap since the last wake with no change: the network settled.
+    gap = WAKE_GAP_MS;
+    if (moved) wake("network", at);
   }, tickMs);
   timer.unref?.();
   return () => clearInterval(timer);
