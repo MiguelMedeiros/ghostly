@@ -319,6 +319,7 @@
     "off": "Desactivado en este chat: activa una forma en Aceptar",
     "offOrOld": "Tu contacto tiene los pagos desactivados en este chat o necesita actualizar Ghostly"
   },
+  "pictureHiddenIp": "No se muestra con Ocultar mi IP activado",
   "pinned": {
     "bar": "Mensaje fijado",
     "info": "Un mensaje fijado por chat, visible para todos en él. Uno nuevo reemplaza al anterior. En una comunidad, solo el admin fija.",

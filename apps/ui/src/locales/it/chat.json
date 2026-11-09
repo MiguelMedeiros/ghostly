@@ -320,6 +320,7 @@
     "off": "Disattivato in questa chat: attiva un metodo in Accetta",
     "offOrOld": "Il tuo contatto ha disattivato i pagamenti in questa chat, o deve aggiornare Ghostly"
   },
+  "pictureHiddenIp": "Non mostrata con Nascondi il mio IP attivo",
   "pinned": {
     "bar": "Messaggio fissato",
     "info": "Un messaggio fissato per chat, visibile a tutti. Uno nuovo sostituisce il precedente. In una community, solo l’admin fissa.",

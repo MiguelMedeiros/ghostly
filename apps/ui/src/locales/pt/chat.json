@@ -319,6 +319,7 @@
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
   },
+  "pictureHiddenIp": "Não mostrada com Ocultar meu IP ligado",
   "pinned": {
     "bar": "Mensagem fixada",
     "info": "Uma mensagem fixada por conversa, vista por todos nela. Uma nova fixação substitui a anterior. Numa comunidade, só o admin fixa.",
