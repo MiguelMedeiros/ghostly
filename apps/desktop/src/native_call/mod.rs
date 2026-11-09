@@ -22,6 +22,8 @@ pub mod engine;
 #[cfg(any(target_os = "linux", test))]
 pub mod gather;
 pub mod ice;
+#[cfg(all(test, target_os = "linux"))]
+mod turn_lab;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

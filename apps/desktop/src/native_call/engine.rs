@@ -1415,6 +1415,11 @@ pub struct Call {
     relay_only: bool,
 }
 
+/// Why a call under Hide my IP from contacts was not made. The page knows them by their first words
+/// (`relayFailure` in apps/ui/src/desktop/nativeCalls.ts) and says the relay did not answer.
+const NO_TURN: &str = "Hide my IP: no TURN server this app can use";
+const NO_RELAY: &str = "Hide my IP: the TURN server gave no relay candidate";
+
 /// The connection's ICE servers and policy. Hide my IP from contacts (`relay_only`, WISP 601 Relay only): the
 /// profile's TURN servers alone under the relay policy, so no STUN server is asked and the only candidates
 /// gathered are the relay's. Otherwise the built-in STUN server (`stun`, by address), then the profile's own.
@@ -1479,7 +1484,7 @@ impl Call {
     ) -> Result<Call, String> {
         // Never a direct path instead: the call does not start.
         if relay_only && ice::relays(servers).is_empty() {
-            return Err("Hide my IP from contacts is on and no TURN server is set".into());
+            return Err(NO_TURN.into());
         }
         let uses_turn = ice::uses_turn(servers);
         let mut media = MediaEngine::default();
@@ -1691,11 +1696,19 @@ impl Call {
         } else {
             gather::REFLEXIVE
         };
-        let gathered = self
-            .shared
-            .gathering
-            .wait_for(gather::BOUNDS, awaited)
-            .await?;
+        // Hide my IP from contacts: the relay candidate is the only one there will be, so the wait for it is the
+        // whole wait, and without one there is no description: a TURN server that did not answer.
+        let bounds = match self.relay_only {
+            true => gather::Bounds {
+                first: gather::BOUNDS.reflexive,
+                ..gather::BOUNDS
+            },
+            false => gather::BOUNDS,
+        };
+        let gathered = match self.shared.gathering.wait_for(bounds, awaited).await {
+            Err(_) if self.relay_only => return Err(NO_RELAY.into()),
+            gathered => gathered?,
+        };
         let local = self
             .pc
             .local_description()
@@ -1704,6 +1717,9 @@ impl Call {
         let mut described = describe(&local.sdp, &gathered, self.ssrcs);
         if self.relay_only {
             described = relay_candidates_only(&described);
+            if !described.contains("a=candidate:") {
+                return Err(NO_RELAY.into());
+            }
         }
         // Which kinds of candidates went out (not their addresses): why a call never connected, afterwards.
         let kinds: Vec<&str> = described
@@ -1922,7 +1938,8 @@ impl Call {
 
 #[cfg(test)]
 mod tests {
-    // covers: calls.linux-native, calls.reconnect, calls.speaking
+    // covers: calls.linux-native, calls.reconnect, calls.speaking, settings.network.relay-only
+    use super::super::turn_lab::TurnLab;
     use super::*;
 
     #[test]
@@ -2025,14 +2042,14 @@ mod tests {
             Arc::new(|_| {}),
         )
         .await;
-        assert!(made.is_err());
+        assert_eq!(made.err(), Some(NO_TURN.to_string()));
     }
 
-    /// Relay only, against a local TURN server that never answers: the connection asks it for an allocation and
-    /// gathers no host or server reflexive candidate (this machine's addresses) meanwhile. Off, host candidates
-    /// come within milliseconds.
+    /// Relay only, against a local TURN server that never answers: the connection asks it for an allocation,
+    /// gathers no host or server reflexive candidate (this machine's addresses), and there is no offer. Off, host
+    /// candidates come within milliseconds.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_relay_only_call_gathers_nothing_but_the_relay() {
+    async fn a_relay_only_call_whose_turn_server_is_silent_makes_no_offer() {
         if let Some(missing) = missing() {
             eprintln!("skipped: {missing}");
             return;
@@ -2053,32 +2070,37 @@ mod tests {
         )
         .await
         .unwrap();
-        let offer = a.pc.create_offer(None).await.unwrap();
-        a.pc.set_local_description(offer).await.unwrap();
-        // An Allocate request (STUN method 0x003) reaches the TURN server.
+        let started = Instant::now();
+        assert_eq!(a.offer(false).await.err(), Some(NO_RELAY.to_string()));
+        assert!(started.elapsed() < gather::BOUNDS.first, "the relay wait");
+        // An Allocate request (STUN method 0x003) reached the TURN server.
         let mut packet = [0u8; 1500];
         let (n, _) = silent.recv_from(&mut packet).expect("no Allocate request");
         assert!(n >= 20 && packet[..2] == [0x00, 0x03], "{:?}", &packet[..n]);
-        tokio::time::sleep(Duration::from_millis(1500)).await;
         let gathered = a.shared.gathering.gathered();
         assert!(gathered.is_empty(), "{gathered:?}");
         a.close().await;
     }
 
-    /// Two relay-only calls through a real TURN server (local lab only: coturn or node-turn on this machine,
-    /// `GHOSTLY_TURN_LAB=host:port`, user `ghost`, password `test-credential`): every candidate either side sends is
-    /// `typ relay`, and they hear each other. Skipped without it.
+    /// Two relay-only calls through a TURN server on this machine ([`TurnLab`], or a real one such as coturn with
+    /// `GHOSTLY_TURN_LAB=host:port`, user `ghost`, password `test-credential`): every candidate either side
+    /// gathers and sends is `typ relay`, the pair ICE chooses is the relay's on both sides, and they hear each
+    /// other through the server's channels.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn two_relay_only_calls_connect_through_the_turn_server() {
-        let Ok(lab) = std::env::var("GHOSTLY_TURN_LAB") else {
-            eprintln!("skipped: no GHOSTLY_TURN_LAB");
-            return;
-        };
         if let Some(missing) = missing() {
             eprintln!("skipped: {missing}");
             return;
         }
-        let servers = [turn_server(&format!("turn:{lab}?transport=udp"))];
+        let lab = match std::env::var("GHOSTLY_TURN_LAB") {
+            Ok(_) => None,
+            Err(_) => Some(TurnLab::start("ghost").await),
+        };
+        let address = match &lab {
+            Some(lab) => lab.addr.to_string(),
+            None => std::env::var("GHOSTLY_TURN_LAB").unwrap(),
+        };
+        let servers = [turn_server(&format!("turn:{address}?transport=udp"))];
         let call = || {
             Call::new(
                 OPUS_PT,
@@ -2120,8 +2142,21 @@ mod tests {
             stats,
         )
         .await;
-        let pair = a.selected_pair().await;
-        eprintln!("selected pair: {pair:?}");
+        for side in [&a, &b] {
+            let gathered = side.shared.gathering.gathered();
+            assert!(
+                gathered.iter().all(|c| c.contains(" typ relay")),
+                "{gathered:?}"
+            );
+            let (local, remote) = side.selected_pair().await.expect("no selected pair");
+            assert!(local.starts_with("relay "), "{local} to {remote}");
+        }
+        if let Some(lab) = &lab {
+            let seen = |count: &std::sync::atomic::AtomicUsize| count.load(Ordering::Relaxed);
+            assert_eq!(seen(&lab.seen.allocations), 2);
+            assert!(seen(&lab.seen.channel_data_out) > 20, "ChannelData sent on");
+            assert!(seen(&lab.seen.relayed_in) > 20, "relayed back");
+        }
         a.close().await;
         b.close().await;
     }

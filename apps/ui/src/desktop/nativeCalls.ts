@@ -1,5 +1,6 @@
 import { Channel, invoke, transformCallback } from "@tauri-apps/api/core";
 import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
+import { CallRelayError } from "@ghostly/react";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
 import { setCallLevels, type LevelSource } from "../lib/voiceLevels";
 
@@ -236,6 +237,15 @@ const callOf = new WeakMap<MediaStreamTrack, NativePeerConnection>();
 const wantedOf = new WeakMap<MediaStreamTrack, string | null>();
 /** The device a track captures from, by name (null: the default), as Rust said. */
 const usedOf = new WeakMap<MediaStreamTrack, string | null>();
+
+/**
+ * Hide my IP from contacts: Rust made no call or no description, for want of a TURN server it can use or of a relay
+ * candidate from it (`NO_TURN`, `NO_RELAY` in native_call/engine.rs). To the call hook that is the relay not
+ * answering, as a browser's connection without a relay candidate: never a direct path instead.
+ */
+function relayFailure(error: unknown): never {
+  throw /^Hide my IP/.test(error instanceof Error ? error.message : String(error)) ? new CallRelayError("relay") : error;
+}
 
 function named(error: unknown, name: string): Error {
   return Object.assign(new Error(error instanceof Error ? error.message : String(error)), { name });
@@ -534,7 +544,7 @@ export class NativePeerConnection extends EventTarget {
    * mute stay as they are (WISP 601, "Reconnecting").
    */
   async createOffer(options: RTCOfferOptions = {}): Promise<RTCSessionDescriptionInit> {
-    await this.opened;
+    await this.opened.catch(relayFailure);
     if (this.started) {
       if (!options.iceRestart) throw named("The call has started already", "InvalidStateError");
       const { sdp } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices(), restart: true }));
@@ -543,7 +553,7 @@ export class NativePeerConnection extends EventTarget {
     this.started = true;
     const sent = this.devices();
     const track = this.audio.sender.track;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent })).catch(relayFailure);
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);
@@ -552,7 +562,7 @@ export class NativePeerConnection extends EventTarget {
 
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     if (!this.offer) throw named("There is no offer to answer", "InvalidStateError");
-    await this.opened;
+    await this.opened.catch(relayFailure);
     const offer = this.offer;
     // A second offer on a call that has started is the peer's ICE restart: answered on the same connection.
     if (this.started) {
@@ -562,7 +572,7 @@ export class NativePeerConnection extends EventTarget {
     this.started = true;
     const sent = this.devices();
     const track = this.audio.sender.track;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent })).catch(relayFailure);
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);

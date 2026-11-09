@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking, settings.network.relay-only
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -43,6 +43,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { CallRelayError } = await import("@ghostly/react");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
@@ -326,6 +327,26 @@ describe("the RTCPeerConnection stand-in", () => {
     // What the call hook checks before the microphone (`assertKeepsToRelays`), and when the switch goes on mid-call.
     expect(nativeCallMedia().keepsToRelays).toBe(true);
     expect(keepsToRelays(pc as unknown as RTCPeerConnection)).toBe(true);
+  });
+
+  it("with Hide my IP from contacts on, a call Rust could not keep to the relay is the relay not answering, and other failures stay as they are", async () => {
+    const relayOnly = callRtcConfig([{ urls: "turns:turn.example.org:5349", username: "ghost", credential: "test-credential" }], { relayOnly: true });
+    // No TURN server Rust can use: the call was not opened.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_open") throw "Hide my IP: no TURN server this app can use"; });
+    const unopened = new NativePeerConnection(relayOnly);
+    await expect(unopened.createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    await unopened.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(unopened.createAnswer()).rejects.toMatchObject({ problem: "relay" });
+    expect(commands()).not.toContain("native_call_offer");
+    expect(commands()).not.toContain("native_call_answer");
+    // A TURN server that gave no relay candidate: no description.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer" || command === "native_call_answer") throw "Hide my IP: the TURN server gave no relay candidate"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    const answering = new NativePeerConnection(relayOnly);
+    await answering.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(answering.createAnswer()).rejects.toBeInstanceOf(CallRelayError);
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer") throw "No microphone"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBe("No microphone");
   });
 
   it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {
