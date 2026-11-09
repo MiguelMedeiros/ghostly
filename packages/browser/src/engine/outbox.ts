@@ -76,6 +76,8 @@ export class NotSent {
 const TURN_MS = 30_000;
 /** The newest messages deleted here an outbox keeps from going (`Outbox.cancel`); their rows are long gone by the oldest. */
 const KEPT_CANCELLED = 1_000;
+/** The longest delay a timer keeps: past it (about 24.8 days) `setTimeout` fires at once, in Node and in browsers. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 /** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
 const KNOWN_ROWS = 16;
 
@@ -188,7 +190,10 @@ export class Outbox {
       const until = this.pendingUntil?.(message);
       if (until && until > this.now()) {
         await this.store.update(message.id, "sent");
-        this.track(message.id, until - this.now());
+        // The deadline was stamped by the clock as it was then. One further ahead than a receipt is ever awaited was set
+        // before the clock went back (an NTP step, a wrong date set right): it counts one window from now, as the DHT
+        // path counts its own copy (`DhtDelivery.clock()`), not for as long as the clock went back.
+        this.track(message.id, Math.min(until - this.now(), this.receiptWindow(message)));
       } else if (until !== undefined) await this.expired(message);
       else await this.queue(message, "Not confirmed before the app closed. It is sent again, under the same ID, once your contact is reachable.");
     }
@@ -808,6 +813,11 @@ export class Outbox {
     this.sentUnder.delete(id);
   }
 
+  /** How long a receipt is awaited for this message when it goes now. */
+  private receiptWindow(message: StoredMessage): number {
+    return typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message);
+  }
+
   private track(id: string, duration: number): void {
     this.clear(id);
     const timer = setTimeout(() => {
@@ -820,7 +830,7 @@ export class Outbox {
         if (message?.via === "pkarr") await this.expired(message);
         else await this.requeue(id, "No receipt received yet.");
       }).catch(() => {});
-    }, duration);
+    }, Math.min(Math.max(duration, 0), MAX_TIMER_MS));
     this.receipts.set(id, timer);
   }
   private clear(id: string): void { const timer = this.receipts.get(id); if (timer) clearTimeout(timer); this.receipts.delete(id); }
