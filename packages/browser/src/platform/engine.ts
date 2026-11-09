@@ -71,7 +71,7 @@ class EngineClient {
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; text?: SentText }>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
@@ -224,8 +224,9 @@ class EngineClient {
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
+    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0]) : undefined;
     return new Promise<Result<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(text && { text }) });
       connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
     });
   }
@@ -243,7 +244,13 @@ class EngineClient {
           for (const id of [...this.held, ...this.asked]) if (id.startsWith("group:")) this.reread.add(id);
           this.asked.clear();
           this.held.clear();
-          for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
+          for (const { resolve, reject, text } of this.pending.values()) {
+            const lost = new Error("Lost the Ghostly peer");
+            if (!text) { reject(lost); continue; }
+            // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
+            // not handed back to be sent twice. Only a text not in the chat failed.
+            void this.keptRow(text).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
+          }
           this.pending.clear();
           this.reconnect(500);
         },
@@ -268,6 +275,12 @@ class EngineClient {
       this.setReconnecting(true);
       this.reconnect(500);
     });
+  }
+
+  /** The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept. */
+  private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
+    const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
+    return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
   }
 
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
@@ -382,6 +395,19 @@ class EngineClient {
       for (const listener of this.messageListeners) listener(linkId, messages, changes);
     }
   }
+}
+
+/** A text sent at the page's own time (`sendMessage`'s `timestamp`): what finds its row in the chat. */
+interface SentText {
+  linkId: string;
+  text: string;
+  timestamp: number;
+}
+
+function sentText(params: Parameters<EngineApi["sendMessage"]>[0]): SentText | undefined {
+  const { linkId, text, timestamp } = params ?? {};
+  return typeof linkId === "string" && typeof text === "string" && text.trim() && Number.isSafeInteger(timestamp)
+    ? { linkId, text: text.trim(), timestamp: timestamp! } : undefined;
 }
 
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
