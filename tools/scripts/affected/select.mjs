@@ -47,6 +47,9 @@ export const EVERYTHING = ["package.json", "package-lock.json", "tools/patches/*
  * `tests`: the project's test files (its vitest `include`). A test there may import a file outside `sources` by
  * relative path (packages/browser/test/chatConnection.test.ts imports apps/ui/src/components/ChatConnection.tsx), so a
  * change outside `sources` still runs the tests whose relative imports reach it (testsReaching).
+ * A test that reads a file from disk by its name (a config, a doc, a crate's Rust) is in no import graph: a change to
+ * that file runs it (testsReading). `reads` (scripts only, whose tests name repository paths as data): the files its
+ * tests read, listed instead.
  */
 export const UNIT_PROJECTS = [
   {
@@ -348,6 +351,89 @@ export function testsReaching(changed, files, tests, packages) {
   return [...out].sort();
 }
 
+// ---------- tests that read a file from disk ----------
+
+/**
+ * The repository paths a test file names as string literals, as it would read them from disk: `"apps/web/nginx.conf"`
+ * (from the repository root or any folder above the test), `"index.css"` joined to a folder above it,
+ * `"../../sdk/src/app.ts"` (from the test, or from its folder), `join(import.meta.dirname, "..", "public", "_locales")`
+ * (adjacent literals joined) and the fixed head of a template (`` `apps/web/public${icon}` ``). Names that are
+ * no file of the repository come out too; they never match a changed file. `dir`: a folder (two or more named parts,
+ * no extension), so a change anywhere under it counts.
+ *
+ * @param {string} file  the test file
+ * @param {string} text  its text
+ * @returns {{path: string, dir: boolean}[]}
+ */
+export function namedPaths(file, text) {
+  // Every quote may open a literal (a regex literal's quotes would throw a left-to-right reading off by one).
+  const literals = new Map();
+  for (const m of text.matchAll(/(?=(["'`])((?:(?!\1)[^\\\n]|\\.)*)\1)/g)) literals.set(m.index, { value: m[2], end: m.index + m[2].length + 2, template: m[1] === "`" });
+  const names = [];
+  for (const [start, literal] of literals) {
+    // A module it imports is vitest's to follow, not a read.
+    if (/(?:\bfrom|\bimport\s*\(?|\b(?:mock|doMock|importActual|importOriginal|require)\s*\()\s*$/.test(text.slice(Math.max(0, start - 24), start))) continue;
+    if (literal.template && literal.value.includes("${")) {
+      names.push(literal.value.slice(0, literal.value.indexOf("${")));
+      continue;
+    }
+    names.push(literal.value);
+    // `join(root, "..", "web", "src", "main.tsx")`: the literals in a row, one path.
+    let joined = literal.value;
+    for (let cur = literal; ;) {
+      const comma = /^\s*,\s*/.exec(text.slice(cur.end, cur.end + 40));
+      const next = comma && literals.get(cur.end + comma[0].length);
+      if (!next || (next.template && next.value.includes("${"))) break;
+      joined += `/${next.value}`;
+      names.push(joined);
+      cur = next;
+    }
+  }
+  const dir = file.split("/").slice(0, -1);
+  const out = new Map();
+  for (const name of names) {
+    if (!name || name.length > 200 || !/[./]/.test(name) || /[\s*?{}[\]()|^$\\:@<>,;=!#%&+~]/.test(name)) continue;
+    const segs = name.split("/").filter((s) => s && s !== ".");
+    const named = segs.filter((s) => s !== "..");
+    if (!named.length) continue;
+    const folder = named.length >= 2 && !named[named.length - 1].includes(".");
+    // A relative name is joined to the test (`fileURLToPath(import.meta.url)`) or its folder; a bare one to a folder above.
+    const bases = segs[0] === ".." || name.startsWith("./") ? [[...dir, file.split("/").pop()], dir] : dir.map((_, k) => dir.slice(0, dir.length - k)).concat([[]]);
+    for (const base of bases) {
+      const parts = [...base];
+      let outside = false;
+      for (const s of segs) {
+        if (s !== "..") parts.push(s);
+        else if (parts.length) parts.pop();
+        else { outside = true; break; }
+      }
+      if (!outside && parts.length) out.set(parts.join("/"), out.get(parts.join("/")) || folder);
+    }
+  }
+  return [...out].map(([path, isDir]) => ({ path, dir: isDir }));
+}
+
+/**
+ * The test files (`*.test.*` in `files`) that name one of `changed` by path (namedPaths): they read it from disk, and
+ * no import graph shows that, so `vitest related` finds none of them.
+ *
+ * @param {string[]} changed  changed files (deleted ones too: the test that reads one fails)
+ * @param {Record<string, string>} files  path → text of the files to look in
+ * @returns {string[]} those test files, sorted
+ */
+export function testsReading(changed, files) {
+  if (!changed.length) return [];
+  const exact = new Set(changed);
+  // A test is read only when it holds the name of a changed file or of a folder one is in.
+  const words = [...new Set(changed.flatMap((p) => p.split("/")))];
+  const out = [];
+  for (const [path, text] of Object.entries(files)) {
+    if (!isTest(path) || !words.some((w) => text.includes(w))) continue;
+    if (namedPaths(path, text).some((n) => exact.has(n.path) || (n.dir && changed.some((c) => c.startsWith(`${n.path}/`))))) out.push(path);
+  }
+  return out.sort();
+}
+
 // ---------- what a bundle is built from ----------
 
 /**
@@ -480,6 +566,8 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
   // unit
   const coreChanged = changed.filter((c) => c.exists && c.path.startsWith(CORE_SRC) && /\.[cm]?tsx?$/.test(c.path)).map((c) => c.path);
   const coreDependents = coreChanged.length && codeFiles ? throughCoreBarrel(coreChanged, codeFiles) : [];
+  // The tests that read a changed file from disk by its name (docs included): no import graph shows those.
+  const readers = codeFiles ? testsReading(changed.map((c) => c.path), codeFiles) : [];
   const unit = UNIT_PROJECTS.map((p) => {
     const whole = matching(p.whole);
     if (everythingWhy || whole.length) return { ...p, mode: "whole", reason: everythingWhy ?? `${why(whole)} changed` };
@@ -495,7 +583,8 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles, packages })
     const read = Object.entries(p.reads ?? {})
       .filter(([glob]) => changed.some((c) => match([glob], c.path)))
       .flatMap(([, names]) => names.map((n) => `tools/scripts/test/${n}.test.ts`))
-      .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaPath.includes(f));
+      .concat(p.reads ? [] : readers.filter((f) => match(p.tests, f)))
+      .filter((f, i, all) => all.indexOf(f) === i && !direct.includes(f) && !viaCore.includes(f) && !viaPath.includes(f));
     const files = [...direct, ...viaCore, ...viaPath, ...read];
     const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles, packages) : null;
     const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
