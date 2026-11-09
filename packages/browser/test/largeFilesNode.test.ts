@@ -62,6 +62,8 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   /** What reached the contact, in the order it came: each text, and each file's first offer. */
   const arrivals: string[] = [];
   const peer: { link?: GhostLink } = {};
+  /** Told of each change to one of the contact's transfers, as it is made (`watch`). */
+  const watchers: ((record: FileTransferRecord) => void)[] = [];
   const files = new ChatFiles({
     send: (frame) => peer.link?.sendFilesFrame(frame) ?? false,
     decide: async (file) => decide(file.size),
@@ -75,7 +77,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
       const { size, digest } = sources.get(record.id)!;
       return { read: async (offset, length) => pattern(offset, Math.min(length, size - offset)), digest: async () => digest ?? digestOf(size) };
     },
-    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
+    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); for (const watch of watchers) watch(record); },
     room: async () => 50 * 1024 ** 3,
     writable: () => peer.link?.filesWritable(),
   });
@@ -119,6 +121,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
   return {
     net, id, files, records, received, contact, offer, incoming, arrivals,
     node: () => node,
+    watch: (fn: (record: FileTransferRecord) => void) => { watchers.push(fn); },
     set decide(fn: (size: number) => OfferDecision) { decide = fn; },
     /** The app quits and starts again, the contact dialling it once it is back. */
     async restartApp() { await node.shutdown(); node = makeNode(); await open(); },
