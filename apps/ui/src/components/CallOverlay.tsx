@@ -334,13 +334,14 @@ export function CallOverlay({
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
           style={phone && !mini ? { top: `calc(${64 + Math.round(120 / selfAspect) + 16}px + env(safe-area-inset-top))` } : undefined}
-          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 w-max max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-2xl px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />
             <path d="M8 21h8M12 17v4" />
           </svg>
-          <span className="truncate">{sharingNotice}</span>
+          {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
+          <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
         </p>
       )}
 
@@ -603,7 +604,8 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       onFocus={() => set("focus", true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) set("focus", false); }}
       onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
-      <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
+      {/* On two lines if need be: cut to one on a phone, "… desconectado. Usand…" never said what the call uses now. */}
+      <span className="call-notice-words min-w-0 break-words">{t(NOTICE_TEXT[notice.type], { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
           className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">

@@ -673,6 +673,13 @@ html[data-standalone="true"] {
   font-size: 11px;
 }
 
+/* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
+.call-mini .call-notice-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .call-mini .call-preview {
   top: 8px;
   right: 8px;
