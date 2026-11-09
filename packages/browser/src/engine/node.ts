@@ -7668,6 +7668,11 @@ export class GhostlyNode implements EngineImplementation {
    */
   async deviceEnrollInvite({ name }: { name: string }): Promise<EnrollView> {
     this.enrollAllowed();
+    // Not while the profile moves (this device may freeze between the grant and its done, and the note that would move
+    // the set to a new secret stays here, on a standby) or while the set moves (the code would carry the old secret).
+    const handoff = this.handoffGiver?.view();
+    if (handoff && handoff.step !== "failed") throw new Error("enroll-busy: The profile is moving. Try again after it.");
+    if (this.settingMove) throw new Error("enroll-busy: The device set is already changing.");
     await this.enrollment?.cancel().catch(() => {});
     const inviter = new EnrollInviter({
       profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(), name,
