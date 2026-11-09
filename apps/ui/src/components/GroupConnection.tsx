@@ -13,6 +13,7 @@ import { Notice } from "./ui/Notice";
 import { useOnline } from "../hooks/useOnline";
 import { useEngineValue } from "../lib/engineState";
 import { useMinuteClock } from "../hooks/useMinuteClock";
+import { useNoLinksHint } from "../hooks/useNoLinksHint";
 
 /** Some members reachable, not all: the connected icon with a warning dot. */
 type GroupKind = ConnectionKind | "partial";
@@ -27,6 +28,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const { ghostlyOnline, groupLinks } = useEngineValue(state => ({ ghostlyOnline: state?.settings.online ?? true, groupLinks: state?.transport.groupLinks }));
   // Offline either way: Ghostly's own switch, or a device with no network.
   const deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
+  const noLinksHint = useNoLinksHint();
   const [menuOpen, setMenuOpen] = useState(false);
   const [tip, setTip] = useState(false);
   const [busy, setBusy] = useState("");
@@ -96,7 +98,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         </div>
         {carried && <p className="mt-0.5 text-[11px]" data-testid="group-connection-transports">{carried.line}</p>}
         {!online && <p className="mt-1 text-[11px]">{t("group.connection.offlineHint")}</p>}
-        {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{t("group.connection.noWebrtcHint")}</p>}
+        {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{noLinksHint}</p>}
         <ul className="mt-3 space-y-1" data-testid="group-connection-members">
           {linked.map(m => {
             // A member reached through a hub is not down: reconnecting my own edge to them would not help.
