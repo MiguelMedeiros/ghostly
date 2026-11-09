@@ -190,6 +190,7 @@
     "resumeSharing": "正在共享文件",
     "sharingWith": "正在与 {{name}} 共享文件",
     "stoppedFailed": "{{title}} 已停止运行并被关闭。如果反复出现，请告知其发布者。",
+    "stoppedFocus": "{{title}} 已停止：它不断抢占键盘",
     "stoppedOffline": "你处于离线状态，{{title}} 无法启动。连接网络后请重新打开。",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
     "stoppedRevoked": "{{title}} 已停止：其发布者撤销了此版本",

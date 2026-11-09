@@ -190,6 +190,7 @@
     "resumeSharing": "condivide un file",
     "sharingWith": "condivide un file con {{name}}",
     "stoppedFailed": "{{title}} ha smesso di funzionare ed è stata chiusa. Se succede ancora, avvisa il suo editore.",
+    "stoppedFocus": "{{title}} è stata fermata: continuava a prendere la tastiera",
     "stoppedOffline": "{{title}} non è partita: sei offline. Riaprila quando sei connesso.",
     "stoppedRemoved": "{{title}} è stata fermata: {{store}} ha rimosso questa versione",
     "stoppedRevoked": "{{title}} è stata fermata: il suo editore ha revocato questa versione",
