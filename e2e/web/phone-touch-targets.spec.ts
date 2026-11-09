@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -318,6 +319,32 @@ test.describe("a voice message on a phone", () => {
 
     expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
   });
+});
+
+/**
+ * An audio file (not a voice note) in the chat, which none of the screens above shows: its Play took taps on 36 × 36 px
+ * and its Save on 32 × 32, beside a voice note's Play on 44. Bob's file is played and paused, so the speed pill shows too.
+ */
+test("on a phone a received audio file's Play, speed pill and Save are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:files.audio.play"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("audio-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("audio-phone-bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+
+  await bob.page.getByTestId("file-input").setInputFiles(fileURLToPath(new URL("../support/audio-fixtures/ghost-tune.mp3", import.meta.url)));
+  const received = chat(alice).getByTestId("audio-bubble").last();
+  await expect(received.getByTestId("audio-play")).toBeEnabled({ timeout: 30_000 });
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "paused");
+  await expect(received.getByTestId("voice-speed")).toBeVisible();
+  await expect(received.getByTestId("audio-save")).toBeVisible();
+  await received.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("audio-file-paused.png") });
+
+  const small = (await smallTargets(page)).filter((target) => /audio-|voice-speed/.test(target.name)).map((target) => `${target.name} ${target.width}×${target.height} (${target.stops})`);
+  expect(small, "an audio file's controls under 44 × 44 px on a phone").toEqual([]);
 });
 
 /**
