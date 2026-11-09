@@ -1250,6 +1250,23 @@ describe("with the apps flag on", () => {
     wraps(within(store).getByText(`${long}6`));
   });
 
+  it("names a store not read yet by its whole link, over two lines on a phone, so the part after the host that names it shows", async () => {
+    // Cut on one line, a 375 px phone showed "https://raw.githubusercontent.com/MiguelMedei…": two GitHub stores looked the same.
+    const unread = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-store/main/index.json";
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []).on("appStoreList", () => [
+      { key: "u", fingerprint: "abcd efgh ijkl mnop", url: unread, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      { key: "s", fingerprint: "qrst uvwx yz12 3456", url: "https://example.com/hunt.json", preloaded: false, name: "Hunt", kind: "curated", sequence: 1,
+        expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] },
+    ]);
+    renderApp(<Apps />, { route: "/apps" });
+    const [first, named] = await screen.findAllByTestId("app-store");
+    const link = within(first!).getByText(unread);
+    expect(link).not.toHaveClass("truncate");
+    expect(link.className).toContain("[overflow-wrap:anywhere]");
+    // A store's own name stays on one line, cut at its end.
+    expect(within(named!).getByText("Hunt")).toHaveClass("truncate");
+  });
+
   it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {
     const listings = (n: number, name: string) => Array.from({ length: n }, (_, i) => ({ ref: `${KEY}/${name}${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `${name} ${i}`, tagline: "A game" }));
     const store = (key: string, name: string, n: number) => ({ key, fingerprint: "abcd efgh ijkl mnop", url: `https://raw.githubusercontent.com/g/${key}/HEAD/ghostly-store.json`, preloaded: false,

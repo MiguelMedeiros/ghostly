@@ -221,7 +221,9 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span className="flex items-center gap-1.5">
-            <span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{storeName}</span>
+            {/* Its link wraps whole: cut, a phone showed only its host, and the owner, repository and file that tell two
+                stores apart were the part cut. */}
+            <span dir="auto" className={`min-w-0 text-sm text-text-primary ${store.name ? "truncate" : "[overflow-wrap:anywhere]"}`}>{storeName}</span>
             {read && (
               <svg aria-hidden="true" data-testid="app-store-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                 className={`shrink-0 text-text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
