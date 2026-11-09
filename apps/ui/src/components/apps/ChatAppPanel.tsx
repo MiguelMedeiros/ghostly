@@ -112,7 +112,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     if (!app || !appOpener || (again?.of === app.running && again.busy)) return;
     const of = app.running;
     setAgain({ of, busy: true });
-    appOpener(app.ref, linkId).then(() => {
+    // Opened with Run anyway (a version a store removed): again the same way, as the person chose.
+    appOpener(app.ref, linkId, { runAnyway: app.runAnyway === true }).then(() => {
       setAgain(null);
       // Its button went with the stopped message: the focus goes back into the panel, as on first open, unless the
       // person went elsewhere meanwhile.
