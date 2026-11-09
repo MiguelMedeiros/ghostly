@@ -707,13 +707,20 @@ export class GroupFileDesk {
    * only queue again. So a file that ends asks the few wants it frees an edge for, not every want waiting (a member back
    * from away with hundreds of files to fetch asked each of them once per file, more so with a member in the group that
    * holds none of them, or serves none).
+   * `freed`, the edge a file ended or was refused on: a want waiting with nobody to ask is asked again only when that is
+   * its author's edge, whose turn it may wait for (`waitForKnown`). A free edge does nothing else for it: one up and
+   * live to a member it could ask would have queued it, not left it waiting. What may (an edge up, a session open, a
+   * member saying it holds the file, a new round) asks it then.
    */
-  private retry(groupId: string): void {
+  private retry(groupId: string, freed?: string): void {
     let free: [string, string][] | undefined;
+    const peer = freed === undefined ? undefined : this.edgesById.get(freed)?.peer;
     for (const [id, want] of this.wants) {
       const kept = this.kept.get(id);
       if (kept?.groupId !== groupId || want.holder) continue;
-      if (this.deps.transfers.get(id)?.stage === "queued" && !this.freeFor(kept, want, free ??= this.freeEdges(groupId))) continue;
+      const stage = this.deps.transfers.get(id)?.stage;
+      if (freed !== undefined && stage === "waiting" && kept.author !== peer) continue;
+      if (stage === "queued" && !this.freeFor(kept, want, free ??= this.freeEdges(groupId))) continue;
       this.ask(kept);
       // That ask may have taken a free edge.
       free = undefined;
@@ -732,6 +739,7 @@ export class GroupFileDesk {
 
   /** One of these free edges (member key, link id) is one `ask` would ask this want on: asked now, it would not only queue again. */
   private freeFor(kept: Kept, want: Want, free: [string, string][]): boolean {
+    if (!free.length) return false;
     const membership = this.deps.membership(kept.groupId);
     if (!membership) return false;
     const known = this.knownHolders(kept, membership);
@@ -903,7 +911,7 @@ export class GroupFileDesk {
     want.holder = want.linkId = undefined;
     this.ask(kept);
     // The edge is free for a file waiting its turn there.
-    this.retry(groupId);
+    this.retry(groupId, linkId);
   }
 
   /** A member says it holds these files: remembered as a holder of each (newest first), and asked when a want waits. */
@@ -1163,7 +1171,7 @@ export class GroupFileDesk {
     edge.taking.delete(file.id);
     if (this.wants.get(kept.id) === want && want.wire === file.id) {
       this.stopFailed(kept, NO_ROOM);
-      this.retry(kept.groupId);
+      this.retry(kept.groupId, edge.linkId);
     }
     return { refuse: "no-room", room };
   }
@@ -1281,7 +1289,7 @@ export class GroupFileDesk {
         this.finished(kept, "in");
         this.queueHave(kept);
         // The holder is free for the next file this device waits for.
-        this.retry(kept.groupId);
+        this.retry(kept.groupId, edge.linkId);
         return;
       }
       case "failed": case "declined": case "cancelled":
@@ -1292,7 +1300,7 @@ export class GroupFileDesk {
         kept.unclear = false;
         Object.assign(want, { wire: undefined, holder: undefined, linkId: undefined, moved: 0 });
         this.ask(kept);
-        this.retry(kept.groupId);
+        this.retry(kept.groupId, edge.linkId);
         return;
       case "verifying":
         this.show(kept, { state: "transferring", stage: "verifying", transferred, size, direction: "in" });
