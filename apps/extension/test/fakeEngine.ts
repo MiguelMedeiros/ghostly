@@ -37,6 +37,8 @@ export interface FakeEngineControl {
   services?: StoredService[];
   /** Per chat or group, the whole history `history` sends the client that asks for it; none sends nothing. */
   history?: Record<string, StoredMessage[]>;
+  /** What the peer answers a page's call, as `EngineServer.handle` posts it; undefined: no answer. */
+  answer?: (method: string, params: unknown) => Promise<unknown> | undefined;
 }
 
 export function engineControl(): FakeEngineControl {
@@ -123,6 +125,8 @@ export class FakeEngineServer {
     this.handled.push({ client, request });
     // Answered once the call is over, as `EngineServer.handle` does; only the call the extension cares about runs.
     if (request?.kind === "request" && request.method === "clearProfileData") await this.node.clearProfileData();
+    const answer = request?.kind === "request" ? engineControl().answer?.(request.method, request.params) : undefined;
+    if (answer) client.post({ kind: "response", id: request.id, result: await answer });
   }
 }
 
