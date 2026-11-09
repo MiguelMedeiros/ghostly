@@ -135,6 +135,39 @@ describe("a group open in a tab whose peer started again", () => {
     expect(client.history("group:g")?.map((m) => m.text)).toEqual(["two (edited)", "three"]);
     expect(engineControl().servers[1].histories.map((h) => h.linkId)).toEqual(["group:g"]);
   }, 15_000);
+
+  /**
+   * A tab holds the whole history of every group opened in it (GroupChat reads it once). The new peer read and sent each
+   * of them whole at once, to every tab, with only one group on the screen: the others are read when opened again.
+   */
+  it("is the only group read again, not every group opened before it", async () => {
+    const row = (linkId: string, text: string) => ({ id: `${linkId}-${text}`, linkId, sender: "peer", text, timestamp: 1 }) as unknown as StoredMessage;
+    const groups = ["group:a", "group:b", "group:c"];
+    engineControl().history = Object.fromEntries(groups.map((id) => [id, [row(id, "one")]]));
+    world = await bootExtension();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(1));
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const { engine: client } = await world.load("page", async () => {
+      (await import("@ghostly/browser/host")).setBrowserHost(extensionHost);
+      return import("@ghostly/browser/platform/engine");
+    });
+    await client.connect();
+    // Opened one after another: group:c is the one on the screen.
+    for (const id of groups) {
+      client.history(id);
+      await vi.waitFor(() => expect(client.history(id)).toHaveLength(1));
+    }
+
+    world.endOffscreen();
+    await vi.waitFor(() => expect(engineControl().servers).toHaveLength(2), { timeout: 5_000 });
+    await vi.waitFor(() => expect(engineControl().servers[1].attached).toHaveLength(1), { timeout: 5_000 });
+    await vi.waitFor(() => expect(engineControl().servers[1].histories.map((h) => h.linkId)).toEqual(["group:c"]), { timeout: 5_000 });
+    await settle();
+    expect(engineControl().servers[1].histories.map((h) => h.linkId)).toEqual(["group:c"]);
+    // One opened again reads its history then.
+    expect(client.history("group:a")).toBeUndefined();
+    await vi.waitFor(() => expect(engineControl().servers[1].histories.map((h) => h.linkId)).toEqual(["group:c", "group:a"]));
+  }, 15_000);
 });
 
 describe("a peer that stopped for good is not taken for a running one", () => {
