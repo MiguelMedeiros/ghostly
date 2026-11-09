@@ -50,7 +50,9 @@ class EngineClient {
   private readonly held = new Set<string>();
   /** Per chat, how many readers hold its whole history here (`keepWhole`). */
   private readonly kept = new Map<string, number>();
-  /** The groups held or asked for when the peer went away: the next connection asks their whole history again. */
+  /** The group asked for last (`history`): the one the page shows, or showed last. */
+  private lastGroup: string | null = null;
+  /** That group, held or asked for when the peer went away: the next connection asks its whole history again. */
   private readonly reread = new Set<string>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
@@ -121,6 +123,7 @@ class EngineClient {
    * group that opens reads it here, not from the store on each open.
    */
   history(linkId: string): StoredMessage[] | undefined {
+    if (linkId.startsWith("group:")) this.lastGroup = linkId;
     if (this.held.has(linkId)) return this.messages.get(linkId);
     if (!this.connection) {
       void this.connect().then(() => void this.history(linkId)).catch(() => {});
@@ -139,6 +142,7 @@ class EngineClient {
     this.asked.clear();
     this.held.clear();
     this.reread.clear();
+    this.lastGroup = null;
     this.changed.clear();
   }
 
@@ -240,8 +244,10 @@ class EngineClient {
         () => {
           this.connection = null;
           // The next connection is sent each chat again: what it asked for, it asks again. A group's list here is no
-          // longer kept current: read again once connected (a group open now asks nothing again), and when asked for.
-          for (const id of [...this.held, ...this.asked]) if (id.startsWith("group:")) this.reread.add(id);
+          // longer kept current: read again once connected for the group open now (it asks nothing again), and for any
+          // other when it is opened. Not every group opened since the page loaded: each was read whole, in every tab.
+          const open = this.lastGroup;
+          if (open && (this.held.has(open) || this.asked.has(open))) this.reread.add(open);
           this.asked.clear();
           this.held.clear();
           for (const { resolve, reject, text } of this.pending.values()) {
