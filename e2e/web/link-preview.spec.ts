@@ -131,4 +131,21 @@ test("a place in a message shows a location card, and its map loads from OpenStr
   await expect.poll(() => tiles.length).toBe(4);
   for (const tile of tiles) expect(tile).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
   await expect(card.getByTestId("location-open")).toHaveAttribute("href", /^https:\/\/(maps\.apple\.com|www\.openstreetmap\.org)\//);
+
+  // In Arabic the coordinates still read left to right: the minus is drawn before its number, not after it.
+  await bob.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await bob.page.reload();
+  await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+  const coordinates = bubble(bob, "meet me at").getByTestId("location-coordinates");
+  await expect(coordinates).toHaveText("38.69160, -9.21600");
+  const drawn = await coordinates.evaluate((el) => {
+    const text = el.firstChild as Text;
+    const left = (i: number) => { const range = document.createRange(); range.setStart(text, i); range.setEnd(text, i + 1); return range.getBoundingClientRect().left; };
+    const minus = text.data.indexOf("-");
+    return { minusBeforeDigit: left(minus) < left(minus + 1), latitudeFirst: left(0) < left(minus) };
+  });
+  expect(drawn).toEqual({ minusBeforeDigit: true, latitudeFirst: true });
 });
