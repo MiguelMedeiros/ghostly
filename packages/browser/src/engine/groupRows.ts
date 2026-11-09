@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { GroupState } from "@ghostly/core";
 import type { GroupLight, GroupLive, StoredGroup } from "../shared/types";
 import type { GroupStore } from "./groups";
@@ -46,6 +48,12 @@ function restKey(group: StoredGroup): string {
 
 const lightOf = (group: StoredGroup): GroupLight => ({ ...(group.pin && { pin: group.pin }), removedIds: group.removedIds ?? [], removals: group.removals ?? [] });
 
+/**
+ * What a record holds of `LIGHT` (`lightOf`, in one string), as their row's `of`: an app from before that took a pin, an
+ * unpin or a deletion for everyone wrote the record and not their row, and changed nothing the small row's check sees.
+ */
+const markOf = (light: string): string => bytesToHex(sha256(utf8ToBytes(light))).slice(0, 32);
+
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
   return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
@@ -56,9 +64,14 @@ function liveOf(group: StoredGroup): GroupLive {
 
 const later = (a: number | undefined, b: number | undefined) => a === undefined ? b : b === undefined ? a : Math.max(a, b);
 
+/**
+ * A group's record as written: its state now (`seq` reserved), its `recordKey`, the rest of it (`restKey`), and what it
+ * holds of `LIGHT` (`markOf`).
+ */
+interface Written { key: string; state: GroupState; rest: string; of: string }
+
 export class GroupRows {
-  /** Per group, the state as its record holds it now (`seq` reserved), its `recordKey`, and the rest of it (`restKey`). */
-  private readonly written = new Map<string, { key: string; state: GroupState; rest: string }>();
+  private readonly written = new Map<string, Written>();
   /** What the engine writes a private group through: its record holds the state as it was last written whole. */
   readonly store: GroupStore;
 
@@ -73,7 +86,8 @@ export class GroupRows {
 
   /**
    * At load: the state of each record that no app from before wrote since takes what its small row says, and its pin
-   * and deletions for everyone what their row says.
+   * and deletions for everyone what their row says while the record still holds of them what it did when the row was
+   * written (`of`).
    */
   async load(groups: StoredGroup[]): Promise<void> {
     if (!this.raw.getGroupLive) return;
@@ -84,13 +98,14 @@ export class GroupRows {
       if (!live || !state || group.community) continue;
       if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
       if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || live.state.seqEpoch !== state.seqEpoch || !(live.state.seq <= state.seq)) continue;
-      const light = lights.get(group.id);
-      if (light) {
+      const light = lights.get(group.id), of = markOf(JSON.stringify(lightOf(group)));
+      // Else an app from before took a pin or a deletion since, from the record: the record counts.
+      if (light && (light.of === undefined || light.of === of)) {
         if (light.pin) group.pin = light.pin; else delete group.pin;
         if (light.removedIds.length) group.removedIds = light.removedIds; else delete group.removedIds;
         if (light.removals.length) group.removals = light.removals; else delete group.removals;
       }
-      this.written.set(group.id, { key: recordKey(state), state: structuredClone(state), rest: restKey(group) });
+      this.written.set(group.id, { key: recordKey(state), state: structuredClone(state), rest: restKey(group), of });
       const merged = { ...state };
       for (const field of LIVE) delete (merged as Partial<GroupState>)[field];
       group.state = Object.assign(merged, live.state);
@@ -113,16 +128,17 @@ export class GroupRows {
     if (was && holds(was.state, was.key, state)) {
       const rest = restKey(group);
       // Only a pin or a deletion for everyone changed: their row alone, the record stays as it is.
-      if (rest === was.rest && this.raw.putGroupLight) return this.raw.putGroupLight(group.id, lightOf(group));
-      await this.whole(group, { ...group, state: was.state, seqReserved: { e: was.state.seqEpoch, n: was.state.seq } });
+      if (rest === was.rest && this.raw.putGroupLight) return this.raw.putGroupLight(group.id, { ...lightOf(group), of: was.of });
+      await this.whole(group, { ...group, state: was.state, seqReserved: { e: was.state.seqEpoch, n: was.state.seq } }, was);
       was.rest = rest;
       return;
     }
     // A copy: the session goes on changing the state it holds (a commit pushed on its chain) before it saves it.
-    const written = { key: recordKey(state), state: { ...structuredClone(state), seq: state.seq + SEQ_BLOCK }, rest: restKey(group) };
+    // `of`: `whole` sets it.
+    const written: Written = { key: recordKey(state), state: { ...structuredClone(state), seq: state.seq + SEQ_BLOCK }, rest: restKey(group), of: "" };
     this.written.set(group.id, written);
     try {
-      await this.whole(group, { ...group, state: written.state, seqReserved: { e: state.seqEpoch, n: written.state.seq } });
+      await this.whole(group, { ...group, state: written.state, seqReserved: { e: state.seqEpoch, n: written.state.seq } }, written);
     } catch (error) {
       // Not kept: the record still reserves what it did before, and the next save writes it whole again.
       if (this.written.get(group.id) === written) this.written.delete(group.id);
@@ -132,12 +148,13 @@ export class GroupRows {
 
   /**
    * The record written whole as `record`, with the small row, and its `GroupLight` row deleted: the record holds the pin
-   * and the deletions again. One that changed while it was being written goes to its row again after it.
+   * and the deletions again (`written.of`). One that changed while it was being written goes to its row again after it.
    */
-  private async whole(group: StoredGroup, record: StoredGroup): Promise<void> {
-    const light = JSON.stringify(lightOf(record));
+  private async whole(group: StoredGroup, record: StoredGroup, written: Written): Promise<void> {
+    const light = JSON.stringify(lightOf(record)), of = markOf(light);
+    written.of = of;
     await this.raw.putGroup(record, liveOf(group));
-    if (this.raw.putGroupLight && JSON.stringify(lightOf(group)) !== light) await this.raw.putGroupLight(group.id, lightOf(group));
+    if (this.raw.putGroupLight && JSON.stringify(lightOf(group)) !== light) await this.raw.putGroupLight(group.id, { ...lightOf(group), of });
   }
 }
 
