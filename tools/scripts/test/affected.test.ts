@@ -554,6 +554,7 @@ describe("the rest", () => {
       ["CHANGELOG.md", "bumpVersion.test.ts"],
       ["apps/desktop/src/translate.rs", "translationRuntimes.test.ts"],
       ["e2e/playwright.config.ts", "e2eWorkflow.test.ts"],
+      ["rust-toolchain.toml", "rustToolchain.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
     ];
@@ -695,6 +696,7 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });
     expect(r("native/transports/src/lib.rs")).toEqual({ desktop: "run" });
     expect(r("Cargo.lock")).toEqual({ desktop: "run" });
+    expect(r("rust-toolchain.toml")).toEqual({ desktop: "run" });
     expect(r("docs/README.md")).toEqual({ desktop: "skip" });
   });
 
