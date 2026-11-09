@@ -34,6 +34,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setTyping: vi.fn(),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     getMessages: vi.fn(async () => []),
+    fileMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
     fileAction: vi.fn(async () => undefined),
     disconnect: vi.fn(),
@@ -144,7 +145,7 @@ describe("file list", () => {
   it("says whose decision a file waits for: mine for one received, the contact's for one sent", async () => {
     const { ctx, node, transfer } = fake();
     const message = (id: string, file: string) => ({ id, sender: id.startsWith("me_") ? "me" : "peer", timestamp: 1, file: { id: file, name: "big.bin", size: 40_000_000, mime: "application/octet-stream" } });
-    node.getMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
+    node.fileMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
     transfer("chat-one-in-i", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
     transfer("chat-one-out-j", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
     transfer("chat-one-in-k", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "queued" });
