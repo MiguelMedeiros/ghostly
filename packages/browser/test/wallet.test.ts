@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, MintOperationError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
+import { Amount, HttpResponseError, MintOperationError, NetworkError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
 import { LIMITS } from "@ghostly/core";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
@@ -331,6 +331,22 @@ describe("Lightning out: melts", () => {
     const { wallet } = setup();
     await pay(wallet);
     await expect(wallet.payQuote("m1", MINT)).rejects.toThrow(/already being paid/);
+  });
+
+  it("a mint that fails the quote (a 500, a closed socket) is named, with nothing paid and the next step; its own words kept last", async () => {
+    const socket = "fetch failed (other side closed, UND_ERR_SOCKET) at https://mint.example";
+    for (const [failure, said] of [[new HttpResponseError("internal error", 500), "internal error"], [new NetworkError(socket), socket]] as const) {
+      mint.createMeltQuoteBolt11.mockRejectedValueOnce(failure);
+      const { wallet } = setup();
+      await expect(wallet.quoteInvoice(INVOICE)).rejects.toMatchObject({
+        engineCode: "mintFailedQuote",
+        message: `mint.example could not take this payment right now, and no sats left your wallet: try again later. The mint said: ${said}`,
+      });
+    }
+    // A refusal is the mint's word on this invoice: said as it said it.
+    mint.createMeltQuoteBolt11.mockRejectedValueOnce(new MintOperationError(20000, "Amount too large"));
+    await expect(setup().wallet.quoteInvoice(INVOICE)).rejects.toThrow(/^Amount too large$/);
+    expect(balance()).toBe(108);
   });
 
   describe("pays only the invoice and amount shown", () => {
