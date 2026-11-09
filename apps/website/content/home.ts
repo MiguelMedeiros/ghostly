@@ -21,6 +21,8 @@ export const home = {
     lead: "Ghostly connects you straight to the people you invite. Chat one to one or as a group, send files and sats, call, and share what runs on your computer.",
     open: "Open in your browser",
     download: "Download the app",
+    /** On an Android phone the APK leads the hero and the web app comes second. */
+    android: "Download for Android",
     micro: "Nothing to install · Free and open source",
     follow: "Follow Boo",
     booSays: "Is anyone out there?",
@@ -412,14 +414,14 @@ export const home = {
     eyebrow: "08 · Your turn",
     title1: "One little step.",
     title2: "You're a ghost.",
-    lead: "Open Ghostly in your browser and invite someone you know. Or take it with you on your desktop.",
+    lead: "Open Ghostly in your browser and invite someone you know. Or take it with you on your computer or your Android phone.",
     browser: {
       title: "In your browser",
       body: "Nothing to install. Open a tab and create an invitation.",
       cta: "Open app.ghostly.tools",
     },
     desktop: {
-      title: "For your computer",
+      title: "Download the app",
       platforms: {
         mac: "macOS",
         windows: "Windows",
@@ -436,8 +438,11 @@ export const home = {
     },
     android: {
       title: "Android",
-      body: "The native app, for arm64 phones on Android 8 or newer. It comes as an APK: when Android asks, allow your browser to install unknown apps.",
-      cta: "Download",
+      body: "The native app, for arm64 phones on Android 8.0 or newer. It comes as an APK: when Android asks, allow your browser to install unknown apps. The app tells you when a new version is out.",
+      cta: "Download APK",
+      how: "How to install it",
+      scan: "Scan with your phone",
+      qr: "QR code for ghostly.tools/android",
     },
     extension: {
       title: "Browser extension",
