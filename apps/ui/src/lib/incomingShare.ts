@@ -233,7 +233,11 @@ export function onShareChange(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-/** Tests only. */
+/**
+ * Every share this page holds is dropped: those in the picker and those sent to a chat whose composer has not taken
+ * them. The profile's data goes (Clear all data, Remove this profile here), and a share picked for a chat is a draft of
+ * it: none is carried to the page that loads next.
+ */
 export function resetIncomingShare(): void {
   pending = null;
   behind = [];
