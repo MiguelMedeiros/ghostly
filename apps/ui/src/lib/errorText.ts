@@ -275,7 +275,6 @@ const RULES: readonly Rule[] = [
   // A contact's Iroh relay this device does not dial (irohWeb.ts, apps/desktop paired_transport.rs): not a public https
   // one nor one of the person's own, or, with Hide my IP from contacts on, not one of theirs.
   exact("The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"),
-  exact("The contact is not on one of this profile's Iroh relays", "errors.transport.irohNotOwnRelay", "errors.transport.irohNotOwnRelayNext"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },

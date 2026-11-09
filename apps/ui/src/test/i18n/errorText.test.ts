@@ -118,7 +118,6 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // A contact's Iroh relay this device does not dial: not a public https one, or not one of the person's own with Hide my IP on.
   ["The contact's Iroh relay is not one this device dials", `${BROWSER}/platform/irohWeb.ts`],
   ["The contact's Iroh relay is not one this device dials", "apps/desktop/src/paired_transport.rs"],
-  ["The contact is not on one of this profile's Iroh relays", `${BROWSER}/platform/irohWeb.ts`],
   ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
   ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
   ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
@@ -696,7 +695,6 @@ describe("errors in the app's language", () => {
     const t = translators[language];
     const cases: [string, TranslationKey, TranslationKey][] = [
       ["The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"],
-      ["The contact is not on one of this profile's Iroh relays", "errors.transport.irohNotOwnRelay", "errors.transport.irohNotOwnRelayNext"],
     ];
     for (const [raw, key, next] of cases) {
       expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key), next: t(next) });
