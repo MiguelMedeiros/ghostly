@@ -243,6 +243,26 @@ describe("IdentityShareLine", () => {
     line(entry({ kind: "stopped", state: undefined, reason: "revoked" }));
     expect(text()).toBe("Alice’s Domain · example.org was revoked");
   });
+
+  it("keeps the contact's name and the identity whole in a right-to-left sentence: each its own <bdi>, the handle left to right", () => {
+    const arabic = (e: IdentityTimelineEntry) => renderApp(<IdentityShareLine entry={e} link={undefined} contact="Ana (work)" onOpen={() => {}} />, { language: "ar" });
+    const bdis = () => [...screen.getByTestId("identity-share-text").querySelectorAll("bdi")].map(b => `${b.getAttribute("dir") ?? ""}:${b.textContent}`);
+    const shared = arabic(entry());
+    expect(text()).toBe("شارك Ana (work) هذه الهوية");
+    expect(bdis()).toEqual([":Ana (work)"]);
+    shared.unmount();
+    const stopped = arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", provider: "ssh-github", subject: "octocat-old" }));
+    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (SSH key) · octocat-old");
+    expect(bdis()).toEqual([":Ana (work)", ":GitHub (SSH key) · octocat-old", "ltr:octocat-old"]);
+    stopped.unmount();
+    // Stopped before it was presented: the kind alone, its ")" kept on its own side of the Arabic after it.
+    const revoked = arabic(entry({ kind: "stopped", state: undefined, reason: "revoked", provider: "ssh-github", subject: undefined }));
+    expect(text()).toBe("أُلغي GitHub (SSH key) الخاص بـ Ana (work)");
+    expect(bdis()).toEqual([":GitHub (SSH key)", ":Ana (work)"]);
+    revoked.unmount();
+    arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", side: "mine", proof: "gone", subject: "example.com" }));
+    expect(bdis()).toEqual([":Domain · example.com", "ltr:example.com"]);
+  });
 });
 
 describe("the chat's timeline", () => {
