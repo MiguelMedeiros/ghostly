@@ -351,9 +351,12 @@ export const FILE_METHODS: Record<string, Method> = {
     const target = chatOrGroupOf(ctx, params);
     const views = state(ctx).transfers;
     // A file that finished before this run has no transfer in the engine's state: its record says it is done. Nor has a
-    // group's file waiting for a Download: its record says it is not here.
+    // group's file waiting for a Download: its record says it is not here. Nor has a chat's file sent to a contact who is
+    // away, until they are back: its record says how far it went, and it waits for them.
     const keptOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => [])).flatMap((f) => {
-      const kept = f.transfer?.state === "done" ? { ...f.transfer, direction: f.direction } : waitingGroupFile(f);
+      const kept = f.transfer?.state === "done" ? { ...f.transfer, direction: f.direction }
+        : !("group" in target) && f.transfer?.state === "transferring" && f.direction === "out" ? { ...f.transfer, direction: f.direction, stage: "waiting" as const, waitingFor: "contact" as const }
+        : waitingGroupFile(f);
       return kept ? [[f.id, kept] as const] : [];
     }));
     if ("group" in target) {
