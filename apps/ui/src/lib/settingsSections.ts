@@ -95,6 +95,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "media", label: "settings.media.speaker", words: "settings.searchWords.speaker", needs: "media" },
   { section: "privacy", label: "settings.linkPreviews", words: "settings.searchWords.linkPreviews" },
   { section: "privacy", label: "settings.sendTyping" },
+  { section: "privacy", label: "settings.sharePresence" },
   { section: "privacy", label: "settings.publicProfiles", words: "settings.searchWords.publicProfiles" },
   { section: "privacy", label: "settings.lockScreen", words: "settings.searchWords.lock" },
   { section: "privacy", label: "settings.password", opens: "passwordForm" },

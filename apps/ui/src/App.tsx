@@ -37,6 +37,9 @@ import { groupRouteId } from "./lib/groups";
 import { sessionPeerKey } from "./lib/storage";
 import { useEngineValue } from "./lib/engineState";
 import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
+import { usePresence } from "./hooks/useOwnStatus";
+import { useIsLocked } from "./contexts/LockScreenContext";
+import { StatusPickerHost } from "./components/StatusPicker";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -222,6 +225,8 @@ export function App() {
   useComputerAwake();
   // Hide my IP from contacts turned on: the contacts' apps opened with it off close.
   useServiceWindowsHideIp();
+  // Whether the person is here, for the contacts who see it (WISP 401 § Presence and status).
+  usePresence(useIsLocked());
   const chats = useLoadedChats();
   const onScreen = useOnScreenLink();
   // The chat on screen that is not live keeps dialling by itself: nobody has to press Reconnect for it.
@@ -266,6 +271,7 @@ export function App() {
         </main>
         <InstallSteps />
         <TranslateDownloadFailure />
+        <StatusPickerHost />
       </div>
     );
   }
@@ -295,6 +301,7 @@ export function App() {
       {tabs && <MobileTabBar />}
       <InstallSteps />
       <TranslateDownloadFailure />
+      <StatusPickerHost />
     </div>
   );
 }
