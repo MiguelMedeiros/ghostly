@@ -6,6 +6,7 @@ import {
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "../src/identityProofs";
+import { lastSharedWithMe } from "../src/identityTimeline";
 // covers: proofs.binding, proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry
 
 const binding: IdentityBinding = {
@@ -364,7 +365,7 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ side: "theirs", state: "failed", error: "The file on the homeserver is not this proof", subject: externalKey })]);
   });
 
-  it("a refused share tried again is a new attempt, never a stop; stopping a refused one writes no stop line", async () => {
+  it("a refused share tried again is a new attempt (the contact's line taken over), never a stop; stopping a refused one writes no stop line", async () => {
     const w = world(), { alice, bob } = w.ids;
     let refuse = true;
     const ab = w.peer(alice, bob, "a".repeat(64));
@@ -378,7 +379,8 @@ describe("identity timeline, from the exchange", () => {
     await vi.waitFor(() => expect(tl(w, alice, bob)[1]?.state).toBe("verified"));
     const kinds = (me: string, them: string) => tl(w, me, them).map(e => `${e.kind}:${e.state ?? e.reason}`);
     expect(kinds(alice, bob)).toEqual(["shared:failed", "shared:verified"]);
-    expect(kinds(bob, alice)).toEqual(["shared:failed", "shared:verified"]);
+    // On the contact's side its retry takes the failed line over: one line per kind not verified (see the flood below).
+    expect(kinds(bob, alice)).toEqual(["shared:verified"]);
     // A refused share taken back: the contact never held it, so neither side shows a stop.
     const other = w.addProof();
     refuse = true;
@@ -387,7 +389,7 @@ describe("identity timeline, from the exchange", () => {
     await ab.withdraw(other, true);
     await vi.waitFor(() => expect(w.ledger(alice, bob).shared.find(s => s.id === other)?.status).toBe("withdrawn"));
     expect(kinds(alice, bob).slice(2)).toEqual(["shared:failed"]);
-    expect(kinds(bob, alice).slice(2)).toEqual(["shared:failed"]);
+    expect(kinds(bob, alice).slice(1)).toEqual(["shared:failed"]);
   });
 
   it("a kind the contact's app cannot verify is refused at once, with no write on the verifier's side", async () => {
@@ -418,6 +420,40 @@ describe("identity timeline, from the exchange", () => {
     }
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: id, side: "theirs", state: "verified" })]);
     expect(w.ledger(bob, alice).challenges).toHaveLength(0);
+  });
+
+  it("a flood of requests for a kind this app verifies, failed or never presented, keeps one line of the contact's and every other", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    // Alice's real share, verified on Bob's side; Bob's own share, accepted by Alice.
+    await ab.share(w.addProof(), true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    await ba.share(w.addProof(), true);
+    await vi.waitFor(() => expect(w.ledger(bob, alice).shared[0]?.status).toBe("accepted"));
+    const before = tl(w, bob, alice);
+    expect(before.map(e => `${e.side}:${e.state}`)).toEqual(["theirs:verified", "mine:verified"]);
+    const firstAt = (w.now() + 3) * 1000;
+    const throwaway = (subject: string) => newIdentityBinding({ provider: "test", subject, validitySeconds: 86_400, now: w.now() }).binding;
+    let n = 0;
+    const fresh = () => (n++).toString(16).padStart(64, "0");
+    // A request for a fresh id, then a presentation of a throwaway binding with garbage evidence: the check fails.
+    for (let i = 0; i < 120; i++) {
+      const id = fresh();
+      w.advance(3);
+      await ba.receive({ t: "idp-request", id, provider: "test" });
+      const c = w.ledger(bob, alice).challenges.find(x => x.id === id)!;
+      await ba.receive({ t: "idp-present", nonce: c.nonce, issuedAt: c.issuedAt, binding: throwaway("rnichael"), evidence: { sig: [1] }, sig: "x" });
+    }
+    // Requests only, never presented: as many as the live challenges allow, window after window.
+    for (let win = 0; win < 14; win++) {
+      for (let i = 0; i < 8; i++) await ba.receive({ t: "idp-request", id: fresh(), provider: "test" });
+      w.advance(IDENTITY_CHALLENGE_WINDOW + 1);
+    }
+    const after = tl(w, bob, alice);
+    expect(after.slice(0, 2)).toEqual(before);
+    // The contact's line keeps its first id and time: no new sound for it, and the chat moved up once only.
+    expect(after.slice(2)).toEqual([expect.objectContaining({ id: `theirs:${"0".repeat(64)}:0`, side: "theirs", kind: "shared", state: "verifying", at: firstAt })]);
+    expect(lastSharedWithMe(after)).toBe(firstAt);
   });
 
   it("is not repeated when the request goes again at a reconnect, nor by a refresh", async () => {
