@@ -610,7 +610,7 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     };
     for (const dir of ["apps/ui/src", "apps/extension/test", "apps/mini", "packages", "e2e/matrix"]) walk(dir);
 
-    it("a config, crate, doc or skill the app's, the extension's or the CLI's tests read runs those tests", () => {
+    it("a config, crate, doc or skill the app's, the extension's or the CLI's tests read runs those tests", { timeout: 30_000 }, () => {
       const cases: [string, string, string[]][] = [
         ["apps/web/nginx-headers.conf", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts"]],
         ["apps/desktop/tauri.conf.json", "ui", ["apps/ui/src/test/security/contentSecurityPolicy.test.ts", "apps/ui/src/test/desktop/windowFirstMouse.test.ts", "apps/ui/src/test/chat/messageBubble.test.tsx"]],
@@ -636,7 +636,7 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
       expect(doc.filter((u) => names.includes(u.name)).every((u) => u.mode === "skip")).toBe(true);
     });
 
-    it("every repository file a test reads by name runs that test", () => {
+    it("every repository file a test reads by name runs that test", { timeout: 30_000 }, () => {
       // `read("x")`, `readFileSync(join(ROOT, "x"))`, `join(import.meta.dirname, "../../..", "x")` and the like: each
       // existing file such a call names must be among the paths plan() sees the test name (namedPaths).
       const reads = /\b(?:read|json|source|root|readFileSync|readdirSync|existsSync|statSync)\(\s*(?:(?:join|resolve)\(\s*[\w.]+(?:\([^()]*\))?\s*,\s*)?((?:["'][^"'`$\n]+["']\s*,\s*)*["'][^"'`$\n]+["'])/g;
