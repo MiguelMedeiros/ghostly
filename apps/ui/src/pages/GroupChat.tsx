@@ -586,7 +586,7 @@ export function GroupChat() {
   const [pickMyJoin] = useState(() => rowPicker<StoredMessage, number>(m => m.event === "joined" && !m.member ? m.timestamp : undefined));
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
+  const search = useChatSearch({ messages: shown, chat: groupChat(groupId), active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown), and under the lock screen too
   // (the app stays mounted there): read once unlocked, as a chat's is.
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
