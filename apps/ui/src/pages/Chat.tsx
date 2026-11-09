@@ -736,10 +736,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shownName = shown.name;
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
   const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
-  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts).
+  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts): no
+  // name in it while the app lock is on.
   useCallService(
     callHoldsService(callState, webrtc.localStream) ? { name: shownName, video: !webrtc.isVideoOff && !webrtc.isScreenSharing } : null,
     webrtc.hangUp,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash,
   );
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
