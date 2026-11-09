@@ -37,9 +37,10 @@ console.log(keyPair.publicKey.toString("hex"));
  * it comes), a far peer on its testnet, and a relay client whose `count` dials to it have opened, the far peer frozen
  * since. `run` gets them and is cleaned up after.
  */
-async function frozen(count: number, run: (on: { relay: Awaited<ReturnType<typeof startRelay>>; socket: WebSocket; streams: Stream[]; lines: string[]; closed: () => boolean }) => Promise<void>) {
+async function frozen(count: number, run: (on: { relay: Awaited<ReturnType<typeof startRelay>>; socket: WebSocket; streams: Stream[]; lines: string[]; closed: () => boolean }) => Promise<void>, { setup, freeze = true }: { setup?: (relay: Awaited<ReturnType<typeof startRelay>>) => void; freeze?: boolean } = {}) {
   const lines: string[] = [];
   const relay = await startRelay({ testnet: 3, limits: { bytesPerSecond: 1024 * MiB, burstBytes: 1024 * MiB, queuedBytes: MiB }, log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+  setup?.(relay);
   const far = spawn(process.execPath, ["--input-type=module", "-e", FAR, JSON.stringify(relay.bootstrap)], { cwd: import.meta.dirname, stdio: ["ignore", "pipe", "inherit"] });
   const farLines = createInterface({ input: far.stdout! })[Symbol.asyncIterator]();
   let socket: WebSocket | undefined;
@@ -57,7 +58,7 @@ async function frozen(count: number, run: (on: { relay: Awaited<ReturnType<typeo
       expect((await farLines.next()).value).toBe("connected");
       streams.push(stream);
     }
-    far.kill("SIGSTOP");
+    if (freeze) far.kill("SIGSTOP");
     await run({ relay, socket: ws, streams, lines, closed: () => closed });
   } finally {
     far.kill("SIGKILL");
@@ -99,6 +100,58 @@ it("closes a stream whose far peer has stopped taking what the client sends, pas
     // The client itself stays: only that conversation was stuck.
     expect(closed()).toBe(false);
   });
+}, 60_000);
+
+type Raw = { _writev(buffers: Buffer[], cb: unknown): void; _wreqs: { buffers: Buffer[] | null }[] };
+
+it("weighs what a stream holds toward a frozen far peer without going over every write it holds, at each write", async () => {
+  // Each batch of writes the relay's UDX streams hand down, its buffers counted as they are read from where it waits for
+  // its ack (where the relay used to go over all of them, again, after every write the client sent).
+  let visits = 0;
+  const count = (relay: Awaited<ReturnType<typeof startRelay>>) => {
+    const dht = relay.dht as unknown as { createRawStream(...args: unknown[]): Raw };
+    const create = dht.createRawStream.bind(dht);
+    dht.createRawStream = (...args) => {
+      const raw = create(...args);
+      const writev = raw._writev;
+      raw._writev = function (buffers, cb) {
+        writev.call(this, buffers, cb);
+        const req = this._wreqs.find(write => write.buffers === buffers);
+        if (req) req.buffers = new Proxy(buffers, { get: (target, key, receiver) => { if (typeof key === "string" && /^\d+$/.test(key)) visits++; return Reflect.get(target, key, receiver); } });
+      };
+      return raw;
+    };
+  };
+  await frozen(1, async ({ socket, streams: [stream], lines, closed }) => {
+    let streamClosed = false;
+    stream.once("close", () => { streamClosed = true; });
+    // 10,000 writes of 16 bytes at once (about 360 KiB with their framing, under half of `queuedBytes`): the far peer acks
+    // none of them, so the relay's UDX stream holds them all, batched into a few writes.
+    const WRITES = 10_000;
+    const small = Buffer.alloc(16, 0x62);
+    visits = 0;
+    for (let i = 0; i < WRITES; i++) stream.write(small);
+    while (socket.bufferedAmount > 0) await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Before, about 4,000 buffers looked at per write (40 million in all, growing with the square of the writes); now
+    // none until the far peer acks, each buffer once then.
+    expect(visits / WRITES).toBeLessThan(2);
+    // The bound still holds, and this burst stays under it.
+    expect(streamClosed).toBe(false);
+    expect(closed()).toBe(false);
+    expect(lines).not.toContain("closed far queue");
+  }, { setup: count });
+}, 60_000);
+
+it("keeps a stream open whose far peer takes what is sent, however much passes through it", async () => {
+  await frozen(1, async ({ socket, streams: [stream], lines, closed }) => {
+    // 8 MiB, sixteen times the bound: what the far peer acks is no longer counted as held.
+    const { sent, streamClosed } = await send(stream, socket, 8 * MiB, closed);
+    expect(sent).toBe(8 * MiB);
+    expect(streamClosed).toBe(false);
+    expect(closed()).toBe(false);
+    expect(lines).not.toContain("closed far queue");
+  }, { freeze: false });
 }, 60_000);
 
 it("drops a client whose streams together hold more than queuedBytes toward far peers that have stopped taking it", async () => {
