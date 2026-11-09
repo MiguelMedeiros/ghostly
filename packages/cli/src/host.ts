@@ -2,6 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
+import { fileStore } from "@ghostly/browser/shared/idb";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
@@ -84,6 +85,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       else histories.set(id, await whole(id));
     }
     hub.baseline(now, histories, { newest, whole });
+    // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
+    await hub.ended((id) => fileStore.get(id));
     announceJoins(hub, node);
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
