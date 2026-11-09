@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { openPeer, type Peer } from "../../support/fixtures";
 import { LocalRelay } from "../../support/relay";
+import { minWebView, webViewTooOld } from "./webview";
 
 export { expect };
 
@@ -312,6 +313,9 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     }
     const installed = installedBuild(adb);
     if (!installed.debug) throw new Error(`${PKG} ${installed.version} on ${serial} is a release build, which ignores the e2e start (no name step, the test's network): set E2E_ANDROID_APK to the debug APK`);
+    // A WebView the app refuses: every spec would wait 120 s for a page behind the update screen (support/webview.ts).
+    const tooOld = webViewTooOld(adb.tryRun("shell", "dumpsys", "webviewupdate").out, minWebView());
+    if (tooOld) throw new Error(`${serial}: ${tooOld}`);
     const device = (await _android.devices()).find((d) => d.serial() === serial);
     if (!device) throw new Error(`Playwright sees no device ${serial}`);
     await use({ adb, device });
