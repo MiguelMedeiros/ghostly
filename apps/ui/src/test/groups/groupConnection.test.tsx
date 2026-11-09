@@ -270,6 +270,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
   });
 
+  it("with Hide my IP on, says that is why, and where to change it, not to open the group elsewhere", async () => {
+    // The Linux Desktop with no HyperDHT relay: its own Iroh and HyperDHT are left out for contacts, so no group link.
+    await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { relayOnly: true } });
+    const hint = screen.getByTestId("group-connection-no-webrtc");
+    expect(hint).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(hint).not.toHaveTextContent("web app");
+  });
+
   it("offers no Reconnect while this device is offline", async () => {
     await open(active([me, alice({ state: "waiting" })]), { settings: { online: false } });
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();

@@ -329,6 +329,14 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
   });
 
+  it("with Hide my IP on and no transport for group links, the joining card says Hide my IP is why", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...fakeEngine.state.settings, relayOnly: true } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(card).not.toHaveTextContent("web app");
+  });
+
   it("Cancel joining is a thumb's height on a phone", () => {
     // It was 24 px tall, the only way off the joining card.
     openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }), profile: "community" });
