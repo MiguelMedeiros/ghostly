@@ -121,7 +121,8 @@ describe("IdentityShareLine", () => {
     const failed = line(entry({ state: "failed", error: "No such record" }));
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("No such record");
+    // A reason the app does not know: a line of its own, never the check's English (that stays in the hover).
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("This proof couldn't be verified");
     failed.unmount();
     line(entry({ state: "verifying", subject: undefined, at: Date.now() - 10 * 60_000 }));
     expect(card()).toHaveAttribute("data-state", "unanswered");
@@ -235,7 +236,7 @@ describe("IdentityShareLine", () => {
     verified.unmount();
     line(entry({ state: "failed", error: "No such record" }));
     expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain/);
-    expect(button()).toHaveAccessibleDescription("Alice shared this identity No such record");
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity This proof couldn't be verified");
   });
 
   it("keeps the card left to right in a right-to-left language, with the caption in the page's direction", () => {
