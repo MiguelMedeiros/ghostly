@@ -215,6 +215,13 @@ describe("a location card", () => {
     expect(source.querySelector("bdi[dir=ltr]")).toHaveTextContent("google.com");
   });
 
+  it("draws its coordinates left to right, so a right-to-left language keeps each minus before its number", () => {
+    renderApp(<MessageBubble message={{ id: "m10", text: "https://maps.google.com/?q=-23.5505,-46.6333", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const coordinates = screen.getByTestId("location-coordinates");
+    expect(coordinates).toHaveTextContent("-23.55050, -46.63330");
+    expect(coordinates).toHaveAttribute("dir", "ltr");
+  });
+
   it("comes from a map link too", () => {
     renderApp(<MessageBubble message={{ id: "m5", text: "https://www.openstreetmap.org/?mlat=38.6916&mlon=-9.2160#map=16/38.6916/-9.2160", sender: "me", timestamp: 1_700_000_000_000 }} />);
     expect(screen.getByTestId("location-coordinates")).toHaveTextContent("38.69160, -9.21600");
