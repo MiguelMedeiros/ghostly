@@ -183,7 +183,7 @@ describe("wallets", () => {
       [() => node.walletCreate.mockRejectedValueOnce(refused("You already have a Testnet Cashu wallet")), "wallet.create", { type: "cashu" }, "refused"],
       [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "wallet.receive", { amount: 10 }, "unavailable"],
       [() => node.requestPayment.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "chat.request", { chat: "Alice", amount: 10 }, "unavailable"],
-      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "unavailable"],
+      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "refused"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("The faucet did not pay: This wallet has no test mint to ask for test coins")), "wallet.faucet", { type: "cashu" }, "unavailable"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("Ghostly cannot ask this wallet's faucet by itself: open it instead")), "wallet.faucet", { type: "bitcoin" }, "unavailable"],
     ];
@@ -259,6 +259,36 @@ describe("wallets", () => {
     // A contact with no wallet is still said first: that is the engine's answer before any of these.
     node.sendPayment.mockRejectedValueOnce(Object.assign(new Error("Your contact has no wallet yet: they need one to pay or be paid"), { engineCode: "contactNoWallet" }));
     expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toMatchObject({ code: "refused", details: { reason: "contact_no_wallet" } });
+  });
+
+  it("faucet, receive or an address from a profile with no wallet of the type: refused, naming the wallet to make", async () => {
+    // Found in a bug hunt: each was `unavailable` (try again later) "This wallet has no test mint", "No mint configured"
+    // or "No Bitcoin source is set up", on a profile that had no wallet at all.
+    const { ctx, node } = fake();
+    const answer = async (method: string, params: Record<string, unknown>) => asCliError(await callApi(ctx, method, params).catch((e: unknown) => e)).toJSON();
+    const noMint = () => new Error("The faucet did not pay: This wallet has no test mint to ask for test coins");
+    // With the wallet, the engine's words stay `unavailable`: its mint or source did not answer.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toMatchObject({ code: "unavailable" });
+    const engine = node.getState;
+    node.getState = () => { const s = engine(); s.wallet.wallets!.push(...[{ id: "arkade:testnet", type: "arkade", network: "testnet", config: {} }, { id: "bitcoin:testnet", type: "bitcoin", network: "testnet", config: {} }] as never[]); return s; };
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual({ code: "unavailable", message: "No arkade wallet with an address on testnet" });
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual({ code: "unavailable", message: "No Bitcoin source is set up" });
+    node.getState = () => { const s = engine(); s.wallet.wallets = []; return s; };
+    const none = (type: string, name: string) => ({ code: "refused", message: `You have no Testnet ${name} wallet: ghostly wallet create ${type}`, details: { reason: "no_wallet" } });
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toEqual(none("cashu", "Cashu"));
+    // The faucet of a Lightning card with no source of its own is the test mint's.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "lightning" })).toEqual(none("cashu", "Cashu"));
+    node.walletReceiveLightning.mockRejectedValueOnce(new Error("No mint could create an invoice: No mint configured"));
+    expect(await answer("wallet.receive", { amount: 100 })).toEqual(none("cashu", "Cashu"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual(none("bitcoin", "Bitcoin"));
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual(none("arkade", "Arkade"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin", network: "mainnet" })).toEqual({ ...none("bitcoin", "Bitcoin"), message: "You have no Mainnet Bitcoin wallet: ghostly wallet create bitcoin --network mainnet" });
   });
 
   it("a wallet source that is not offered is the person's value, refused before the engine is asked", async () => {

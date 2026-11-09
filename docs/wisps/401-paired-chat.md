@@ -126,6 +126,32 @@ Each local profile ([04](04-profiles.md)) decides whether contacts are told (on 
 
 Groups ([900](900-group-sessions.md)) do not carry it yet. A mesh group would send one frame per member edge for every refresh, and a community's typing would tell every member, most of them strangers, when each person is present; both need their own decision on cost and privacy.
 
+### Presence and status
+
+A contact can see whether the other side is online, and a status that person set, like "Busy", "🌴 On holiday" or "Do not disturb" (revision 2026-11-08; specified, not yet in the apps). Both sides list `status/1` in `paired-capabilities`; then each side sends its whole state in one frame on this session:
+
+```
+{"t":"paired-status","p":"active"}
+{"t":"paired-status","p":"idle","s":{"a":"busy","e":"🍕","m":"At lunch","u":1762603600000}}
+{"t":"paired-status","s":{"a":"dnd"}}
+{"t":"paired-status"}
+```
+
+- `p`, presence: `active` while the person uses the app, `idle` after 10 minutes with no input in it (a key, a click, a touch), `active` again at the next one. Absent when the person does not share it (below).
+- `s`, a status the person set: `a` is the availability (`available`, `busy`, `away`, `dnd` for Do not disturb), `e` one emoji (the rule a reaction's emoji follows, [§ Reactions](#reactions)), `m` a short text, `u` when it ends (Unix time in milliseconds). Every field is optional; `s` absent means no status.
+
+Each frame says the whole state and replaces the one before it: a side sends it once `status/1` is agreed on each new session, and again when its presence or status changes, at most once every 5 seconds (a change in that time goes when it ends, the latest state only). Like typing, it is presence, not a message: no message ID (older apps drop it), never stored by the sender's outbox, never held ([404](404-store-and-forward.md)), never sent on the DHT ([403](403-dht-text.md)) or in the capability record ([03](03-capabilities.md)), and never in a group's frames. A side that does not offer `status/1`, or whose contact does not, sends none, and shows nothing for that contact.
+
+A reader MUST ignore a frame while `status/1` is not agreed, and keep what it had for a malformed one (not an object, `p` or `a` not a string). Past 15 frames a minute it drops the rest unread. An availability or presence it does not know reads as `available` or `active`. `m` is plain text, cleaned as a typing status is ([§ Typing](#typing)): one line, no invisible or direction-changing characters, no link or markup, at most 60 characters. An `e` that is not one emoji is left out, and so is a `u` that is not a positive safe integer. A status whose `u` is past, by the reader's clock, is no status.
+
+**Showing it.** The contact is online while this session is live and its last frame says `p`: a dot on its picture, by availability (green when available, amber when idle or away, red when busy or Do not disturb). With no `p`, there is no dot. When the session ends, presence ends with it; a reader MAY show when it last saw the contact online ("Last seen 5 min ago"), from its own clock, only for a contact that shared `p` on that session. The status (emoji, text, availability) is shown beside the name while it lasts. A reader MAY keep the last status it heard and show it while the contact is away, until its `u`: a status set while the contact was away reaches it on their next session.
+
+**Sharing.** Each local profile ([04](04-profiles.md)) decides whether contacts see when it is online (Settings, "Share when I'm online", on by default). Off, its frames carry no `p`, said at once on every live session, so its contacts show no dot and no last seen. It cannot hide the session itself: the contact's app knows a session is live (the chat's connection control says so), and the switch only takes away the word that the person is there. A status the person sets goes to every paired contact; clearing it sends a frame with no `s`. The choice is about what this side says, not what it hears.
+
+**Do not disturb.** While a profile's own status is `dnd` (until its `u`), its app shows no notices and plays no sounds for messages; calls still ring, as in a muted chat ([400](400-chat.md)). The contact's app delivers as usual and MAY say near the composer that the person will not be notified.
+
+**Not in this revision.** A person's own devices ([06](06-devices.md)) do not share one status yet: each device says its own. Groups ([900](900-group-sessions.md)) do not carry presence or status: a mesh group would send it on every edge, and a community would tell strangers when each person is there.
+
 ### Reactions
 
 Reactions ([400](400-chat.md#reactions), revision 0.8) go on this session once both sides list `react/1` in `paired-capabilities`, and the contact confirms each one it took:
