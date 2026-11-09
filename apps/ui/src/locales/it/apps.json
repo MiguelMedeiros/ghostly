@@ -68,6 +68,7 @@
     "githubLink": "Questa pagina di GitHub non è un'app. Incolla il link del repository o quello del file dell'app.",
     "host": "Le app arrivano solo da GitHub (raw.githubusercontent.com) o da jsDelivr a un commit.",
     "hostProblem": "Il server ha avuto un problema (errore {{status}}). Riprova più tardi.",
+    "locked": "Il profilo si è bloccato prima che l'app si aprisse. Aprila di nuovo.",
     "needsFiles": "I suoi file non sono ancora su questo dispositivo.",
     "network": "Impossibile raggiungere il server.",
     "notListed": "Questo store non elenca più quell'app.",
@@ -157,6 +158,7 @@
     "title": "Apri {{title}} in una chat"
   },
   "store": {
+    "clockLate": "L'elenco di questo store ha una data successiva all'orologio di questo dispositivo. Controlla la data e l'ora di questo dispositivo.",
     "count": "{{count}} app",
     "count_one": "{{count}} app",
     "count_other": "{{count}} app",

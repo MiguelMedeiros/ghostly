@@ -218,6 +218,23 @@ export function themeOf(id: string): ColorTheme {
 }
 
 /**
+ * Calls `changed` when a save of this profile's settings gives it another colour, the one thing of its settings that
+ * its badge and the profile lists show (`themeOf`, read from the saved copy). Any other setting (a name typed key by
+ * key, a switch) is no reason to draw them again, nor to read the other profiles. Returns the way to stop.
+ */
+export function onOwnThemeSaved(changed: () => void): () => void {
+  let theme = themeOf(activeProfileId());
+  const saved = () => {
+    const now = themeOf(activeProfileId());
+    if (now === theme) return;
+    theme = now;
+    changed();
+  };
+  window.addEventListener("settings-updated", saved);
+  return () => window.removeEventListener("settings-updated", saved);
+}
+
+/**
  * A new, empty profile with its own name and a theme no other profile uses yet, so switching is visible at
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
@@ -275,6 +292,21 @@ export function unregisterProfile(id: string): void {
   const registry = read();
   if (registry.active === id) throw new Error("Switch to another profile first");
   write({ ...registry, profiles: registry.profiles.filter((p) => p.id !== id) });
+}
+
+/**
+ * The profile this page runs as was removed from this device ("Remove this profile here", WISP 06): its data must
+ * already be gone. Another profile goes off the list, and the next page starts as the first one, if it was the choice.
+ * The first profile keeps its place, pointed at its own namespace again, and starts empty.
+ */
+export function forgetProfileHere(id: string): void {
+  const registry = read();
+  if (id) { write({ ...registry, active: registry.active === id ? "" : registry.active, profiles: registry.profiles.filter((p) => p.id !== id) }); return; }
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id) return p;
+    const { space: _was, ...rest } = p;
+    return rest;
+  }) });
 }
 
 /**

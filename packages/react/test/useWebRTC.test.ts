@@ -220,6 +220,35 @@ describe("placing a call", () => {
     expect(call.publishedKinds()).toEqual(["o", "h", null]);
   });
 
+  it("the end line keeps the time the call lasted when the device's clock is set forward or back meanwhile", async () => {
+    const hour = 60 * 60_000;
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(3000); });
+    vi.setSystemTime(Date.now() + hour);
+    act(() => { vi.advanceTimersByTime(4000); });
+
+    act(() => call.result.current.hangUp());
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 7000);
+
+    // The contact going away ends the next one, the clock set back meanwhile: still its own length, never a negative one.
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => FakePeerConnection.instances[1].setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(2000); });
+    vi.setSystemTime(Date.now() - 2 * hour);
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    act(() => FakePeerConnection.instances[1].setIceState("failed"));
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 5000);
+  });
+
   it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {
     const call = renderCall();
     const { stream, pc } = await offered(call);
@@ -706,6 +735,53 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
+  it("a call that comes once a person could have redialled rings though the device's clock was set back after the missed one", () => {
+    const call = renderCall();
+    let theirs = Date.now();
+    call.receive(remote.offer(theirs));
+    call.receive(remote.hangUp(theirs + 1));
+    // This side's clock goes back 90 s (the contact's does not), and the contact calls again 30 s later.
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(30_000); });
+    theirs += 30_000;
+    call.receive(remote.offer(theirs));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("a call that rang a while holds nothing back though the device's clock was set back while it rang", () => {
+    const call = renderCall();
+    let theirs = Date.now();
+    call.receive(remote.offer(theirs));
+    act(() => { vi.advanceTimersByTime(3000); });
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(2000); });
+    theirs += 5000;
+    call.receive(remote.hangUp(theirs));
+    act(() => { vi.advanceTimersByTime(1200); });
+    theirs += 1200;
+    call.receive(remote.offer(theirs));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("calling back once the held-back call rang out there places a call of its own though the clock was set back", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    call.receive(remote.offer(Date.now()));
+    // Its hang-up never comes here; the clock goes back 90 s, and the person calls back past the held call's ring.
+    vi.setSystemTime(Date.now() - 90_000);
+    act(() => { vi.advanceTimersByTime(RING_MS + 1000); });
+
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.removeCallEventMessage).not.toHaveBeenCalled();
+  });
+
   it("a chat let go between a burst's calls (off screen, loaded only for its call) still holds the next one back", () => {
     const first = renderCall(undefined, undefined, {}, "chat-burst");
     first.receive(remote.offer(Date.now()));
@@ -1117,6 +1193,27 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblem).toBe("denied");
     expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
     act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS); });
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
+  it("a call refused again while the reason still shows shows it anew, for its whole time", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[0].deny(denied());
+    await settle();
+    const first = call.result.current.mediaProblemId;
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS - 2000); });
+
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].deny(denied());
+    await settle();
+
+    // A new notice (a screen reader hears it again), whose time starts over.
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.result.current.mediaProblemId).not.toBe(first);
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS - 1000); });
+    expect(call.result.current.mediaProblem).toBe("denied");
+    act(() => { vi.advanceTimersByTime(1000); });
     expect(call.result.current.mediaProblem).toBeNull();
   });
 

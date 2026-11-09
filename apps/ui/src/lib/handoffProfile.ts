@@ -326,9 +326,12 @@ class Staging implements HandoffStaging {
     const kept = new Map(files.map((file) => [file.id, notes.get(file.id) ?? null]));
     try {
       for (let at = 0; at < files.length;) {
-        // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits.
+        // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits. All of
+        // a transaction's at once: each read is a round trip to the file storage's worker, which serves other files
+        // meanwhile. One after the other, 8,000 files took 7.2 s of the stretch both devices are frozen (bug hunt, 2026-11-07).
         const small = new Map<string, Uint8Array | Blob>();
         const blobs = new Map<string, { file: HandoffFile; id: string }[]>();
+        const reads: Promise<void>[] = [];
         let end = at;
         for (let held = 0; end < files.length && end - at < RESTORE_FILES && held < RESTORE_BYTES; end++) {
           const file = files[end];
@@ -336,16 +339,19 @@ class Staging implements HandoffStaging {
           const from = kept.get(file.id);
           // The frozen copy's own Blob, not its bytes: nothing read or written here but its record.
           if (from) { blobs.set(from.database, blobs.get(from.database) ?? []).get(from.database)!.push({ file, id: from.id }); continue; }
-          const bytes = new Uint8Array(file.size);
-          for (let done = 0; done < file.size;) {
-            const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
-            if (!part.length) throw new Error("The file is shorter than it says");
-            bytes.set(part, done);
-            done += part.length;
-          }
-          small.set(file.id, bytes);
+          reads.push((async () => {
+            const bytes = new Uint8Array(file.size);
+            for (let done = 0; done < file.size;) {
+              const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
+              if (!part.length) throw new Error("The file is shorter than it says");
+              bytes.set(part, done);
+              done += part.length;
+            }
+            small.set(file.id, bytes);
+          })());
           held += file.size;
         }
+        await Promise.all(reads);
         for (const [database, list] of blobs) {
           if (!frozen.has(database)) frozen.set(database, await openAsStored(database));
           const rows = frozen.get(database)!.transaction("files", "readonly").objectStore("files");
@@ -376,7 +382,11 @@ class Staging implements HandoffStaging {
       db.close();
       for (const opened of frozen.values()) opened.close();
     }
-    for (const file of files) if (file.size <= SMALL_FILE_BYTES && !kept.get(file.id)) await store.remove(file.id).catch(() => {});
+    // Their bytes are on their records now; the staged copies go a transaction's worth at a time, as they were read.
+    const copies = files.filter((file) => file.size <= SMALL_FILE_BYTES && !kept.get(file.id));
+    for (let at = 0; at < copies.length; at += RESTORE_FILES) {
+      await Promise.all(copies.slice(at, at + RESTORE_FILES).map((file) => store.remove(file.id).catch(() => {})));
+    }
   }
 
   async dropRest(): Promise<void> {
@@ -406,9 +416,11 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
-    await dropFileSpace(database).catch(() => {});
+    const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);
+    // Files that stayed are said: whoever names this namespace keeps naming it, and drops it again later.
+    if (files) throw files;
   },
 };
 

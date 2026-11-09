@@ -21,7 +21,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
-import { LimitedStartGate } from "./components/devices/LimitedStart";
+import { LimitedStartGate, useLimited } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
@@ -32,6 +32,7 @@ import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
+import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
@@ -64,17 +65,21 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
  * An invite link, or a chat address from before chats were routed by session
  * id, carries the chat's keys. They leave the address at once, so they stay
  * out of the history: the address must not wait for the password. The chat
- * itself is made once the lock is passed, as a group's link is joined, and
+ * itself is made once the lock is passed and a limited start's question answered, as a group's link is joined, and
  * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
  */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
+  // "Can't check which device is active" asks first: the answer may make this copy a standby, which must stay as it
+  // is, so the invite waits as it does under the lock (in memory: Try again starts the app again without it).
   const { isLocked } = useLockScreen();
-  const locked = useRef(isLocked);
-  locked.current = isLocked;
-  /** The invite a link brought while locked: the last one, kept in memory only. */
+  const asking = useLimited() === "ask";
+  const waits = isLocked || asking;
+  const locked = useRef(waits);
+  locked.current = waits;
+  /** The invite a link brought while locked or asking: the last one, kept in memory only. */
   const [held, setHeld] = useState<SessionKeys | null>(null);
   const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
@@ -130,10 +135,10 @@ function ChatLinkIntake() {
   }, [pathname, hash, navigate, open]);
 
   useEffect(() => {
-    if (!held || isLocked) return;
+    if (!held || waits) return;
     setHeld(null);
     open(held);
-  }, [held, isLocked, open]);
+  }, [held, waits, open]);
 
   useEffect(() => {
     if (!invalid) return;
@@ -170,7 +175,7 @@ function JoinNotice() {
 /**
  * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
  * they open). It sits over the sidebar's header, so it closes as the app's other top notices do. An Escape something
- * else answered (a menu, a popover) is not its own. The focus goes back where it was when it came (the New that could
+ * else answered (a menu, a popover, a dialog over it) is not its own. The focus goes back where it was when it came (the New that could
  * not make a chat) when it was on the notice or nowhere, not to the page; one in a field or a menu stays there.
  */
 function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
@@ -186,10 +191,11 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
   };
   useEffect(() => {
     // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
-    // though their listeners came after this one (the window's run in the order they were added).
+    // though their listeners came after this one (the window's run in the order they were added). Nor is one pressed in
+    // a modal dialog: a <dialog> closes on the key's default action without cancelling it, and is gone by the timeout.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || modalOpen()) return;
       clearTimeout(timer);
       timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
     };
@@ -219,8 +225,9 @@ function ChatNotStoredNotice() {
 
 /**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
- * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
+ * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
+ * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
+ * the ⓘ), there until closed.
  * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
  * counted once the engine has loaded its groups.
  */
@@ -228,7 +235,7 @@ function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
-  const { hasUnlocked } = useLockScreen();
+  const { isLocked, hasUnlocked } = useLockScreen();
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -245,7 +252,7 @@ function GroupLinkIntake() {
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {
-    if (!code || !hasUnlocked || !groupsLoaded) return;
+    if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
     const groups = engine.state?.groups ?? [];
     const id = linkGroupId(code);
@@ -260,7 +267,7 @@ function GroupLinkIntake() {
       .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
       .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, hasUnlocked, groupsLoaded]);
+  }, [code, isLocked, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 

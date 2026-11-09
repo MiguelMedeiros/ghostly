@@ -141,7 +141,7 @@ describe("the push relay (infra/services/push-relay)", () => {
     // One kind among the refusals: the first line names the origin, the rest of the minute is a count (the preflights
     // were answered, so three POSTs and one without an Origin are the four refusals).
     expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"']);
-    expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ forwarded: 0, refused: 4 });
+    expect(relay.stats()).toMatchObject({ forwarded: 0, refused: 4 });
     await relay.close();
     close = undefined;
     expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"', "refused origin 3 more"]);

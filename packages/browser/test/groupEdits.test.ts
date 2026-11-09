@@ -304,6 +304,33 @@ describe("GroupEdits on its own", () => {
     edits.stop();
   });
 
+  it("past GROUP_EDITS_HELD the member holding the most loses its oldest, a removal last: another's flood never pushes out one's waiting edits", async () => {
+    vi.useFakeTimers();
+    const removed: string[] = [];
+    const carols = (n: number) => `${carol}:1:${n}`;
+    const { edits, messages, tick } = setup(Array.from({ length: 6 }, (_, n) => bobs(n)), [me, bob, carol], removed);
+    const fill = async (sender: string, id: string) => { for (let e = 1; e <= EDIT_RECEIVE_LIMIT; e++) await edits.receive("g1", sender, { id, e, ts: e, m: `v${e}` }); };
+    // Bob's burst: four edits and a removal wait for his next window.
+    await fill(bob, bobs(0).id);
+    for (let n = 1; n <= 4; n++) expect(await edits.receive("g1", bob, { id: bobs(n).id, e: 1, ts: 1, m: `bob's ${n}` })).toBe("waiting");
+    expect(await edits.receive("g1", bob, { id: bobs(5).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("waiting");
+    // Carol then floods edits of messages that are not there, more than the group holds.
+    await fill(carol, carols(0));
+    for (let n = 1; n <= GROUP_EDITS_HELD + 30; n++) await edits.receive("g1", carol, { id: carols(n), e: 1, ts: 1, m: "flood" });
+    tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+    expect(messages.map(m => m.text)).toEqual([`v${EDIT_RECEIVE_LIMIT}`, "bob's 1", "bob's 2", "bob's 3", "bob's 4"]);
+    expect(removed).toEqual([bobs(5).id]);
+    edits.stop();
+    // Bob holding the most himself: a removal of his that waits goes after his other edits.
+    const own = setup([bobs(0), bobs(1)], [me, bob, carol], []);
+    for (let e = 1; e <= EDIT_RECEIVE_LIMIT; e++) await own.edits.receive("g1", bob, { id: bobs(0).id, e, ts: e, m: `v${e}` });
+    expect(await own.edits.receive("g1", bob, { id: bobs(1).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("waiting");
+    for (let n = 2; n <= GROUP_EDITS_HELD + 1; n++) await own.edits.receive("g1", bob, { id: bobs(n).id, e: 1, ts: 1, m: "more" });
+    for (let window = 0; window < GROUP_EDITS_HELD / EDIT_RECEIVE_LIMIT + 2; window++) { own.tick(10_000); await vi.advanceTimersByTimeAsync(10_000); }
+    expect(own.messages.map(m => m.id)).toEqual([bobs(0).id]);
+    own.edits.stop();
+  });
+
   it("an edit that names me marks the message, but is never a new mention", async () => {
     const { edits, messages } = setup([bobs(0, "hi")]);
     await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: "hi @me", k: [{ k: me, o: 3, l: 3 }] });

@@ -65,6 +65,8 @@ export class TransportSwitch {
   /** This side chose while no session was open: the next one begins with it as a choice. */
   private apart = false;
   private readonly policiesRead = new RateWindow(POLICY_RECEIVE_LIMIT, POLICY_RECEIVE_WINDOW_MS);
+  /** The session on which the contact's policy, the one read already, was said again and read for free (`handle`). */
+  private repeatRead = "";
   private policyHeld: { frame: Record<string, unknown>; timer: ReturnType<typeof setTimeout> } | null = null;
   constructor(private readonly options: {
     key: string; peerKey: string;
@@ -312,7 +314,11 @@ export class TransportSwitch {
       const policy = parsePolicy(frame.policy);
       if (!policy || (this.remote && (policy.revision < this.remote.revision ||
         (policy.revision === this.remote.revision && JSON.stringify(policy) !== JSON.stringify(this.remote))))) return true;
-      if (!this.policiesRead.take()) {
+      // The policy read already, said again as a moved session begins (`begin`): once per session, it spends none of
+      // the window. A move spent two of it, and the sixth in a minute waited 37-51 s for its room.
+      const repeat = !!this.remote && policy.revision === this.remote.revision && this.repeatRead !== this.context;
+      if (repeat) this.repeatRead = this.context;
+      else if (!this.policiesRead.take()) {
         if (this.policyHeld) this.policyHeld.frame = frame;
         else this.policyHeld = { frame, timer: setTimeout(() => {
           const held = this.policyHeld; this.policyHeld = null;

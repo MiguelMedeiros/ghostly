@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -31,7 +31,7 @@ describe("the service worker keeps one peer", () => {
     ]);
     // Iroh runs in the page here too (WISP 102, relay only), loaded on first use.
     // A new profile's Mainnet wallets are made by the peer, never under test (see defaultWalletsAllowed).
-    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function) });
+    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function), localFetch: expect.any(Function) });
 
     // Later asks find the document and only check that the peer answers.
     expect(await send({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });
@@ -251,7 +251,7 @@ describe("viewer tabs", () => {
   it("opens one tab bound to one contact's service, intercepting only the virtual origin", async () => {
     const tabId = await openViewer(world);
     expect(world.callsTo("tabs.create")).toEqual([["about:blank"]]);
-    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }), relayOnly: false });
+    expect(world.session.get(`viewer:${tabId}`)).toEqual({ peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, page: expect.objectContaining({ lang: "en", dir: "ltr" }) });
     expect(world.callsTo("debugger.attach")).toEqual([[{ tabId }, "1.3"]]);
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
@@ -287,7 +287,7 @@ describe("viewer tabs", () => {
     ["a chat tag with a dot", PEER, SERVICE, `${TAG}.evil`],
     ["a chat tag outside z-base-32", PEER, SERVICE, "l".repeat(16)],
   ])("refuses %s before opening a tab", async (_, peer, service, tag) => {
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Invalid service" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
@@ -295,7 +295,7 @@ describe("viewer tabs", () => {
 
   it("closes the tab and forgets it when DevTools cannot attach", async () => {
     world.failDebuggerAttach = "Another debugger is already attached to the tab.";
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Another debugger is already attached to the tab." });
     const [[tabId]] = world.callsTo("tabs.remove") as [[number]];
     expect(world.tabs.has(tabId)).toBe(false);
@@ -325,7 +325,7 @@ describe("viewer tabs", () => {
   });
 
   it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
-    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
     const policies = (params: Record<string, unknown>) =>
       (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
     const tabId = await openViewer(world);
@@ -344,27 +344,93 @@ describe("viewer tabs", () => {
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
-  it("keeps a tab opened while Hide my IP from contacts is on to its own origin, the error page's policy too", async () => {
-    // covers: settings.network.relay-only
-    const strict = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
-    const loose = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
-    const policies = (params: Record<string, unknown>) =>
-      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
-    const hidden = await openViewer(world, PEER, SERVICE, TAG, undefined, true);
-    // Another profile's chat, opened with it off; and a page that says anything but true counts as off.
-    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
-    expect(world.session.get(`viewer:${hidden}`)).toMatchObject({ relayOnly: true });
-    expect(world.session.get(`viewer:${shown}`)).toMatchObject({ relayOnly: false });
+  it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
+    // A popup is no viewer: no DevTools on it, no binding, so no close (lock, profile switch, Hide my IP) reaches it.
+    const sandboxes = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[])
+        .filter(({ name }) => name.toLowerCase() === "content-security-policy")
+        .flatMap(({ value }) => value.split(/[,;]/).map((directive) => directive.trim().split(/\s+/)))
+        .filter(([name]) => name === "sandbox")
+        .map(([, ...flags]) => flags);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
 
-    engineControl().respond = async () => okResponse("<img src=\"https://contact.example/p.png\">", 200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]]);
-    expect(policies((await pauseRequest(world, hidden, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` })).params)).toEqual([`img-src *, ${strict}`]);
-    expect(policies((await pauseRequest(world, shown, { url: `https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/` })).params)).toEqual([`img-src *, ${loose}`]);
-
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["content-security-policy", "sandbox allow-scripts allow-popups"]]);
+    const served = sandboxes((await pauseRequest(world, tabId, { url })).params);
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
     };
-    expect(policies((await pauseRequest(world, hidden, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` })).params)).toEqual([strict]);
+    const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
+
+    // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
+    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+  });
+
+  it("opens no tab while Hide my IP from contacts is on, and says why", async () => {
+    // covers: settings.network.relay-only
+    // The app could send the tab, or a frame of its own, to a server of the contact's: Chrome connects there before
+    // any policy or DevTools refuses the page, and that server learns this device's address.
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, relayOnly: true });
+    expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.callsTo("debugger.attach")).toEqual([]);
+    expect(world.session.size).toBe(0);
+    // A page that says anything but true counts as off.
+    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
+    expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
+  describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
+    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" };
+    const close = { target: "background", type: "close-services" };
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle();
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when both come in the same tick", async () => {
+      const opened = send(open);
+      const closed = send(close);
+      expect(await closed).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the close comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = send(open);
+      await settle();
+      expect(await send(close)).toEqual({ ok: true });
+      ready();
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("closes the tab it was making when the close comes right after the tab is created", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      let closed: Promise<unknown> | undefined;
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        const tab = await create(props);
+        closed = send(close);
+        return tab;
+      }) as typeof world.chrome.tabs.create;
+      expect(await send(open)).toEqual({ ok: true });
+      expect(await closed).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("a close before the open does not keep a later open from opening", async () => {
+      expect(await send(close)).toEqual({ ok: true });
+      const tabId = await openViewer(world);
+      expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+    });
   });
 
   it("keeps a tab opened while Hide my IP from contacts is on off WebRTC: the guard runs in each of its frames first", async () => {
@@ -589,7 +655,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
 
   it("attaches only to the tab it just created, whatever tab a page names", async () => {
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, tabId: bank.id });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "", tabId: bank.id });
     expect(reply).toEqual({ ok: true });
     const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
     expect(viewer.id).not.toBe(bank.id);

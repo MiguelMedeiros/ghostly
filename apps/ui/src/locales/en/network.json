@@ -38,6 +38,7 @@
   "turnCredential": "TURN credential",
   "turnCredentialAgain": "Enter the credential again: backups leave it out.",
   "turnHint": "Optional. Used only when a direct connection fails.",
+  "turnHintRelayOnly": "Required while Hide my IP is on: calls and chats go through it.",
   "turnInfo": "It forwards encrypted WebRTC packets. It is connectivity infrastructure, not a Ghostly server.",
   "turnUrl": "TURN server URL",
   "turnUsername": "TURN username",

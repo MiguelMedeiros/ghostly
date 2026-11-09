@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLink, encodeInviteCode } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -176,9 +177,23 @@ describe("Profile, Devices", () => {
     const { engine } = renderApp(<DevicesSection />);
     // The handoff view keeps the name the device had when the move failed; the set has its new one.
     engine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, name: "Pixel" } : device)) }));
-    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" }) satisfies HandoffView);
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password", refused: true }) satisfies HandoffView);
     const row = await screen.findByTestId("handoff-wrong-password");
     await waitFor(() => expect(row).toHaveTextContent("Pixel tried to move this profile with a wrong password." + "Let Pixel try again"));
+  });
+
+  it("a wrong password before the device is refused: the row says so, with no Let <device> try again (WISP 06: only at 15)", async () => {
+    // At 1 and at 5 (locked out for an hour) the giver's view carries no `refused`: pressing it then would start the count again.
+    const { engine } = renderApp(<DevicesSection />);
+    let view: HandoffView = { role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "password" };
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => view);
+    const row = await screen.findByTestId("handoff-wrong-password");
+    expect(row).toHaveTextContent("iPhone tried to move this profile with a wrong password.");
+    expect(screen.queryByTestId("handoff-allow")).toBeNull();
+    // The fifteenth: refused until the person lets it try again.
+    view = { ...view, refused: true };
+    expect(await screen.findByTestId("handoff-allow", {}, { timeout: 3_000 })).toHaveTextContent("Let iPhone try again");
   });
 
   it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
@@ -620,6 +635,24 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
       act(() => fakeEngine.setState({}));
       await waitFor(() => expect(screen.queryByTestId("limited-banner")).toBeNull());
     } finally { delete (fakeEngine as BrowserHost).restartEngine; }
+  });
+
+  it("an invite link opened while it asks makes no chat until Start anyway: the copy may turn out to be a standby", async () => {
+    fakeEngine.setState({ limited: true });
+    window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
+    const chats = () => Object.values(localStorage).filter((value) => value.includes("\"mySeedB64\""));
+    try {
+      render(<Root />);
+      expect(await screen.findByTestId("limited-start")).toBeInTheDocument();
+      // The keys leave the address at once, as under the lock, but no chat is written while the question shows.
+      await waitFor(() => expect(window.location.hash).not.toContain("/chat/pair"));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      expect(chats()).toEqual([]);
+      // Start anyway: the profile offline, where an invite makes its chat as it does offline.
+      act(() => screen.getByTestId("limited-start-go-on").click());
+      await waitFor(() => expect(chats()).toHaveLength(1));
+      expect(chats()[0]).toContain("\"viaLink\":true");
+    } finally { window.location.hash = ""; }
   });
 
   it("a check while going online is not a limited start: no question, and the line only once it lasts", async () => {

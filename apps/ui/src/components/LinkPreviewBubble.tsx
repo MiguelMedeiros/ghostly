@@ -1,11 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { previewImageSize, type LinkPreview } from "@ghostly/core";
+import { labelMisleads } from "../lib/parse";
 import { videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
 import { useT } from "../contexts/I18nContext";
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
+
+/**
+ * A host on one line, cut at its START when it does not fit ("…secure-login.attacker.example"): its end says whose it
+ * is, and the start is whatever its owner chose. It reads left to right on its own, and the whole of it is the
+ * `title`, the link's long-press menu, and what a screen reader reads.
+ */
+function HostLine({ host, className, testId }: { host: string; className: string; testId: string }) {
+  return (
+    <span data-testid={testId} title={host} className={`${className} overflow-hidden text-ellipsis whitespace-nowrap [direction:rtl] text-left rtl:text-right`}>
+      <bdi dir="ltr">{host}</bdi>
+    </span>
+  );
+}
 
 function PlayIcon() {
   return (
@@ -24,7 +38,8 @@ function PlayIcon() {
  */
 export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
   const video = videoSite(preview.u);
-  const site = preview.s ?? hostOf(preview.u);
+  // The sender's site name, unless it reads as another address than the link's (or hides characters): the host then.
+  const site = preview.s && !labelMisleads(preview.s, preview.u) ? preview.s : undefined;
   // Its box from the JPEG's header, so the card is its full height before the picture decodes (the chat does not move).
   const size = useMemo(() => previewImageSize(preview.i), [preview.i]);
   return (
@@ -38,10 +53,11 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
         </span>
       )}
       <span className="block px-2.5 py-2">
-        <span className="block text-[12px] text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+        {site ? <span className="block text-[12px] text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+          : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block text-[12px] text-text-secondary" />}
         {preview.t && <span className="block text-[13.5px] font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
         {preview.d && <span className="block text-[12.5px] text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
-        <span className="block text-[11px] text-link truncate mt-1" data-testid="link-preview-url">{hostOf(preview.u)}</span>
+        <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>
   );
@@ -56,26 +72,34 @@ function PinIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-/** The map, from OpenStreetMap's tile server: 2×2 tiles, moved so the place sits in the middle of the frame. */
-function MapTiles({ place }: { place: Place }) {
+/**
+ * The map, from OpenStreetMap's tile server: 2×2 tiles, moved so the place sits in the middle of the frame. Its
+ * frame (map or failure line) takes the focus when asked: Show map, used from the keyboard, is gone once it shows.
+ */
+function MapTiles({ place, label, focus }: { place: Place; label: string; focus: boolean }) {
   const [failed, setFailed] = useState(false);
   const t = useT();
+  const frame = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (focus) frame.current?.focus(); }, [focus]);
   const { tiles, point } = useMemo(() => mapTiles(place), [place]);
   const width = 280, height = 150;
-  if (failed) return <p className="text-[12px] text-text-secondary mt-1.5" role="status">{t("chat.location.mapFailed")}</p>;
   return (
-    <div className="relative mt-1.5 rounded-md overflow-hidden bg-text-primary/5" style={{ width: `min(${width}px, 66vw)`, height }} data-testid="location-map">
-      <div className="absolute" style={{ left: `calc(50% - ${point.x}px)`, top: height / 2 - point.y, width: 512, height: 512 }}>
-        {tiles.map(tile => (
-          // Tiles need a Referer by OpenStreetMap's usage policy: the app's origin, never the chat.
-          <img key={tile.src} src={tile.src} alt="" width={256} height={256} referrerPolicy="origin" draggable={false}
-            onError={() => setFailed(true)} className="absolute block max-w-none" style={{ left: tile.dx * 256, top: tile.dy * 256 }} />
-        ))}
-      </div>
-      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full text-danger drop-shadow"><PinIcon size={28} /></span>
-      <a {...externalLinkProps("https://www.openstreetmap.org/copyright")} className="absolute end-0 bottom-0 px-1 text-[9px] bg-[rgba(255,255,255,0.8)] text-[#333] no-underline">
-        © OpenStreetMap
-      </a>
+    <div ref={frame} tabIndex={-1} role="group" aria-label={label} className="w-fit max-w-full rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      {failed ? <p className="text-[12px] text-text-secondary mt-1.5" role="status">{t("chat.location.mapFailed")}</p> : (
+        <div className="relative mt-1.5 rounded-md overflow-hidden bg-text-primary/5" style={{ width: `min(${width}px, 66vw)`, height }} data-testid="location-map">
+          <div className="absolute" style={{ left: `calc(50% - ${point.x}px)`, top: height / 2 - point.y, width: 512, height: 512 }}>
+            {tiles.map(tile => (
+              // Tiles need a Referer by OpenStreetMap's usage policy: the app's origin, never the chat.
+              <img key={tile.src} src={tile.src} alt="" width={256} height={256} referrerPolicy="origin" draggable={false}
+                onError={() => setFailed(true)} className="absolute block max-w-none" style={{ left: tile.dx * 256, top: tile.dy * 256 }} />
+            ))}
+          </div>
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full text-danger drop-shadow"><PinIcon size={28} /></span>
+          <a {...externalLinkProps("https://www.openstreetmap.org/copyright")} className="absolute end-0 bottom-0 px-1 text-[9px] bg-[rgba(255,255,255,0.8)] text-[#333] no-underline">
+            © OpenStreetMap
+          </a>
+        </div>
+      )}
     </div>
   );
 }
@@ -86,22 +110,27 @@ function MapTiles({ place }: { place: Place }) {
  */
 export function LocationCard({ place }: { place: Place }) {
   const [showMap, setShowMap] = useState(false);
+  // Show map had the focus when used (Enter, Space, or a click that focused it): the map takes it over.
+  const [mapFocus, setMapFocus] = useState(false);
   const t = useT();
+  const name = place.name ?? t("chat.location.title");
   const open = mapsUrl(place, mapsPlatform());
   return (
     <div data-testid="location-card" className="mt-1.5 mb-1 w-[min(300px,68vw)] rounded-md bg-text-primary/6 border-s-4 border-accent px-2.5 py-2">
       <div className="flex items-start gap-2">
         <span className="text-accent mt-0.5 shrink-0"><PinIcon /></span>
         {/* The place's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
-            keeps its start, and a short one stays at the line's start. */}
+            keeps its start, and a short one stays at the line's start. The coordinates read left to right in every
+            language: in Arabic each minus was drawn after its number ("46.63330- ,23.55050-"). */}
         <span className="min-w-0 flex flex-col items-start">
-          <span dir="auto" className="max-w-full text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? t("chat.location.title")}</span>
-          <span className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
+          <span dir="auto" className="max-w-full text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{name}</span>
+          <span dir="ltr" className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
         </span>
       </div>
-      {showMap ? <MapTiles place={place} /> : (
+      {showMap ? <MapTiles place={place} label={name} focus={mapFocus} /> : (
         <>
-          <button type="button" data-testid="location-show-map" onClick={() => setShowMap(true)}
+          <button type="button" data-testid="location-show-map"
+            onClick={(e) => { setMapFocus(document.activeElement === e.currentTarget); setShowMap(true); }}
             className="mt-1.5 text-[12.5px] text-link underline decoration-dotted cursor-pointer">
             {t("chat.location.showMap")}
           </button>
@@ -111,7 +140,9 @@ export function LocationCard({ place }: { place: Place }) {
       <div className="mt-1.5 flex gap-3 text-[12.5px]">
         <a {...externalLinkProps(open)} data-testid="location-open" className="text-link underline">{t("chat.location.open")}</a>
         {open !== openStreetMapUrl(place) && /^https?:/.test(place.source) && hostOf(place.source) !== hostOf(open) && (
-          <a {...externalLinkProps(place.source)} className="text-link underline truncate">{hostOf(place.source)}</a>
+          <a {...externalLinkProps(place.source)} className="min-w-0 text-link underline">
+            <HostLine host={hostOf(place.source)} testId="location-source" className="block" />
+          </a>
         )}
       </div>
     </div>

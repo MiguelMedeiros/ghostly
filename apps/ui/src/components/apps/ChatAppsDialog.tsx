@@ -6,12 +6,12 @@ import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { refreshInstalledApps, sendAppCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, sendAppCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
-const opens = (app: InstalledAppView) => app.run.status === "ok" || app.run.status === "needs-files";
+const opens = (app: InstalledAppView) => !appStopped(app);
 
 /*
  * The composer's + → Apps in a 1:1 chat (WISP 1200 § In a chat): the installed apps, one to open with this contact.

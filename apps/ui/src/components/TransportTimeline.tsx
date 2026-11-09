@@ -19,7 +19,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
     // Not part of the conversation: a run of voice messages goes on past it (lib/voicePlayback.ts).
     <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="transport-line" data-kind={entry.kind} data-voice-passes>
       <button type="button" aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(!open)}
-        className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
+        className={`tap-target inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
         <TransportLineIcon entry={entry} />
         <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact, t)}</span>
         {earlier.length > 0 && <span className="shrink-0 text-[10px] text-text-muted" data-testid="transport-line-earlier-count"

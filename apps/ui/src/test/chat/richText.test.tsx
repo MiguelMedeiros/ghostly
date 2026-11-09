@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
@@ -71,6 +71,33 @@ describe("spoilers", () => {
     expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
   });
 
+  it.each([["Enter", "{Enter}"], ["Space", " "]])("keep the focus on the text they uncover (%s)", async (_, keys) => {
+    const { user } = bubble("the ending: ||the ghost was the narrator||");
+    await user.tab();
+    const spoiler = screen.getByTestId("rich-spoiler");
+    expect(spoiler).toHaveFocus();
+    await user.keyboard(keys);
+    expect(spoiler).toHaveAttribute("data-shown");
+    // The same node holds the focus (not the page's body), still focusable but out of the Tab order.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(spoiler);
+    expect(screen.getByTestId("rich-spoiler")).toBe(spoiler);
+    expect(spoiler).toHaveAttribute("tabindex", "-1");
+    expect(spoiler).not.toHaveAttribute("role");
+    expect(spoiler).toHaveTextContent("the ghost was the narrator");
+  });
+
+  it("take no focus when tapped while it is elsewhere", async () => {
+    bubble("||secret||");
+    const outside = document.body.appendChild(document.createElement("button"));
+    try {
+      outside.focus();
+      fireEvent.click(screen.getByTestId("rich-spoiler"));
+      expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
   it("keep a link inside unreachable until shown", async () => {
     const { user } = bubble("||https://x.example/secret||");
     expect(screen.getByTestId("rich-spoiler").querySelector("[inert]")).not.toBeNull();
@@ -131,6 +158,15 @@ describe("code blocks", () => {
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     await user.click(screen.getByTestId("rich-codeblock-copy"));
     expect(writeText).toHaveBeenCalledWith(TRICKY);
+  });
+
+  // In Arabic a bare <U+…> in the sentence had its < and > mirrored around the U: drawn as <…+U>.
+  it.each(["en", "pt", "es", "fr", "it", "ja", "zh", "ar"] as const)("name the marker left to right in the warning (%s)", (language) => {
+    renderApp(<MessageBubble message={message("```\nls ‮txt.exe\n```")} peerPubKey="peer" />, { language });
+    const note = screen.getByTestId("rich-codeblock-hidden");
+    const marker = note.querySelector("[dir=ltr]");
+    expect(marker).toHaveTextContent(/^<U\+…>$/);
+    expect(note.textContent!.split("<U+…>")).toHaveLength(2);
   });
 
   it("draw the markers in a block that is not highlighted too", () => {

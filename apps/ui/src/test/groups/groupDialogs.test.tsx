@@ -764,6 +764,15 @@ describe("NewGroupDialog", () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
+  it("with Hide my IP on and no transport for group links, says Hide my IP is why", () => {
+    const { engine } = open();
+    act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...engine.state.settings, relayOnly: true } }));
+    const note = screen.getByTestId("new-group-no-webrtc");
+    expect(note).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(note).not.toHaveTextContent("web app");
+    expect(screen.getByTestId("new-group-create")).toBeDisabled();
+  });
+
   it("cancels", async () => {
     const { user, engine, onClose } = open();
     await user.click(screen.getByRole("button", { name: "Cancel" }));

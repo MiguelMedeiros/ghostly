@@ -19,6 +19,7 @@ import { existsSync, readdirSync, readFileSync, statSync, mkdirSync } from "node
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
+import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
 import { plan as makePlan } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
@@ -103,10 +104,12 @@ function sources(...dirs) {
 }
 const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8"));
 const e2eFiles = sources("e2e");
-// Tests import across workspaces by relative path (packages/browser/test → apps/ui/src/, e2e/matrix → packages/browser/),
-// so the plan reads every workspace's imports.
-const codeFiles = { ...sources("packages", "apps/ui/src", "apps/extension", "apps/web/src", "apps/mini", "tools/scripts", "apps/website"), ...e2eFiles };
-const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
+// Tests import across workspaces by relative path (packages/browser/test → apps/ui/src/, → native/transports/) and by
+// package name (@ghostly/iroh-web), so the plan reads every file git knows and the workspaces' exports
+// (tools/scripts/affected/files.mjs).
+const known = knownFiles(ROOT);
+const codeFiles = { ...repoCode(ROOT, known), ...e2eFiles };
+const p = makePlan({ changed, inventory, e2eFiles, codeFiles, packages: workspacePackages(ROOT, known) });
 
 // ---------- the plan, printed ----------
 const short = (xs, n = 8) => (xs.length <= n ? xs.join(", ") : `${xs.slice(0, n).join(", ")} … (+${xs.length - n})`);

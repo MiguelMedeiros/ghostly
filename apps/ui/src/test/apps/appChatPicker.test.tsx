@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -57,6 +57,23 @@ describe("Open an app in a chat: which chat, found by name", () => {
     expect(screen.getByTestId("app-chat-picker-no-match")).toHaveTextContent("No chat by that name");
     await user.clear(search);
     expect(names()).toHaveLength(31);
+  });
+
+  it("says what the search found once the typing settles, as Forward does: how many chats, or none", async () => {
+    const { user } = open();
+    const status = screen.getByTestId("app-chat-picker-found");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status.textContent).toBe("");
+    await user.keyboard("Contact 1");
+    expect(status.textContent).toBe("");
+    await waitFor(() => expect(status).toHaveTextContent(/^10 chats$/));
+    await user.clear(screen.getByTestId("app-chat-picker-search"));
+    await user.keyboard("zoe");
+    await waitFor(() => expect(status).toHaveTextContent(/^1 chat$/));
+    await user.keyboard("x");
+    await waitFor(() => expect(status).toHaveTextContent(/^No chat by that name$/));
+    await user.clear(screen.getByTestId("app-chat-picker-search"));
+    await waitFor(() => expect(status.textContent).toBe(""));
   });
 
   it("the down arrow (or Tab) goes from the search to the chats found, and Enter opens the app there", async () => {

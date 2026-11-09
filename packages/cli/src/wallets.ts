@@ -4,6 +4,7 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, findOwnNamedChat, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
+import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
@@ -102,7 +103,9 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
     case "cashu": balance = view?.balance ?? null; break;
     case "lightning": {
       const card = view?.lightnings?.find((c) => c.card === instance.card);
-      balance = card?.balance ?? null; status = card?.status ?? null; error = card?.error ?? null;
+      // Through the mints, the card pays from and into the Cashu balance, which the app's card shows (walletCardData):
+      // its own copy is read again only every 15 s, so after a payment it answered the balance from before it.
+      balance = (card?.providerId === CASHU_MINT_SOURCE ? view?.balance : card?.balance) ?? null; status = card?.status ?? null; error = card?.error ?? null;
       break;
     }
     case "arkade": balance = view?.ark?.balance ?? null; address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
@@ -176,6 +179,11 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^No Bitcoin source is set up$/, "unavailable"],
   [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
   [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
+  // What a payment's state refuses: a payment the contact took (or a request) has nothing to take back, a request or an
+  // invoice already paid is not paid again.
+  [/^Nothing to (reclaim|take back)$/, "refused"],
+  [/^This request is no longer open$/, "refused"],
+  [/^This invoice is already paid$/, "refused"],
 ];
 
 /**
@@ -194,6 +202,9 @@ const NO_MINT = /^(No mint could create an invoice: No mint configured|You have 
 
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
+  // A mint asked for a swap that has not answered (the engine's `SwapUnsettledError`, by its name): nothing is known to
+  // have failed, try again later, as a mint that cannot be reached at all is `unavailable`.
+  if (error.name === "SwapUnsettledError") return new CliError("unavailable", error.message);
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
   return code ? new CliError(code, error.message) : error;
 }
@@ -421,7 +432,10 @@ const WALLETS: Record<string, Method> = {
 
   async "payment.check"(ctx, params) {
     const link = chatOf(ctx, params);
-    if (state(ctx).payments[str(params, "payment", true)]?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    const p = state(ctx).payments[str(params, "payment", true)];
+    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
+    if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
     return { chat: link.id, paymentId: str(params, "payment", true) };
   },

@@ -31,11 +31,38 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
   fitTextEdit(before, after, caret, fitsGroupName);
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing nor the key's end a name already shows
- * ("Alice (…3r69cg)"), so "alice " and "Alice (…k1p0aa)" are both "Alice".
+ * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
+ * something else: the joiners, the fillers, the variation selectors and the other default-ignorable code points, and
+ * the blank Braille pattern.
+ */
+const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
+ * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
+ * and "Alice (…k1p0aa)" are all "Alice".
  */
 const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+
+/**
+ * The app's own word for me in each language it speaks, which its lines about me start with ("You removed Bob",
+ * "Você reagiu…"). Every language's is here (test/i18n checks it): a name in one language's word reads as mine in it.
+ */
+const MY_WORDS = ["You", "Você", "Tú", "Vous", "Tu", "あなた", "你", "أنت"];
+/** `sameNameForm` without accents or marks: "Voce", "Tu" and "انت" are the word too. */
+const wordForm = (name: string) => sameNameForm(name).normalize("NFD").replace(/\p{M}/gu, "");
+const MY_WORD_FORMS = new Set(MY_WORDS.map(wordForm));
+
+/**
+ * A name someone chose (a contact's, a member's) as a line about them says it: in quotes where it is the app's word for
+ * me (`MY_WORDS`, whatever its case, spacing or accents), so a member named "You" reads "“You” removed Bob", never my
+ * own "You removed Bob". Not for my own name: those lines are mine.
+ */
+export function othersName(name: string, t: Translate = english): string {
+  const form = wordForm(name);
+  return MY_WORD_FORMS.has(form) || form === wordForm(t("group.member.you")) || form === wordForm(t("chat.reply.you")) ? t("common.quotedName", { name }) : name;
+}
 
 /** `sameNamed` of a roster already read: a page names many of its rows, each by the same roster. */
 const sameNamedOf = new WeakMap<readonly object[], ReadonlySet<string>>();
@@ -58,8 +85,11 @@ export function sameNamed(members: readonly Pick<GroupMemberView, "key" | "me" |
   return keys;
 }
 
-/** A name told apart by the end of its key, as "@" offers a member. */
-const withKeyEnd = (nick: string, key: string) => `${nick} (…${key.slice(-6)})`;
+/**
+ * A name told apart by the end of its key, as "@" offers a member. The end is isolated left to right (LRI … PDI): in
+ * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start.
+ */
+const withKeyEnd = (nick: string, key: string) => `${nick} \u2066(…${key.slice(-6)})\u2069`;
 
 /** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>
@@ -77,9 +107,9 @@ type FormerNamesOf = { profile?: GroupView["profile"]; members: readonly Pick<Gr
  */
 export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
-  if (member) return memberName(member, t, sameNamed(group.members));
+  if (member) return member.me ? memberName(member, t) : othersName(memberName(member, t, sameNamed(group.members)), t);
   const former = group.formerNames?.[key];
-  return former ? formerName(group, key, former) : t("group.member.unnamed", { key: key.slice(0, 8) });
+  return former ? othersName(formerName(group, key, former), t) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
 
 /**

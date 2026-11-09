@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { createIdentity } from "../src/identity";
 import {
-  emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
+  emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityRefusal, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  IDENTITY_REUSE_CHECK_S,
 } from "../src/identityProofs";
+import { lastSharedWithMe } from "../src/identityTimeline";
 // covers: proofs.binding, proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry
 
 const binding: IdentityBinding = {
@@ -364,7 +366,7 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ side: "theirs", state: "failed", error: "The file on the homeserver is not this proof", subject: externalKey })]);
   });
 
-  it("a refused share tried again is a new attempt, never a stop; stopping a refused one writes no stop line", async () => {
+  it("a refused share tried again is a new attempt (the contact's line taken over), never a stop; stopping a refused one writes no stop line", async () => {
     const w = world(), { alice, bob } = w.ids;
     let refuse = true;
     const ab = w.peer(alice, bob, "a".repeat(64));
@@ -378,7 +380,8 @@ describe("identity timeline, from the exchange", () => {
     await vi.waitFor(() => expect(tl(w, alice, bob)[1]?.state).toBe("verified"));
     const kinds = (me: string, them: string) => tl(w, me, them).map(e => `${e.kind}:${e.state ?? e.reason}`);
     expect(kinds(alice, bob)).toEqual(["shared:failed", "shared:verified"]);
-    expect(kinds(bob, alice)).toEqual(["shared:failed", "shared:verified"]);
+    // On the contact's side its retry takes the failed line over: one line per kind not verified (see the flood below).
+    expect(kinds(bob, alice)).toEqual(["shared:verified"]);
     // A refused share taken back: the contact never held it, so neither side shows a stop.
     const other = w.addProof();
     refuse = true;
@@ -387,7 +390,7 @@ describe("identity timeline, from the exchange", () => {
     await ab.withdraw(other, true);
     await vi.waitFor(() => expect(w.ledger(alice, bob).shared.find(s => s.id === other)?.status).toBe("withdrawn"));
     expect(kinds(alice, bob).slice(2)).toEqual(["shared:failed"]);
-    expect(kinds(bob, alice).slice(2)).toEqual(["shared:failed"]);
+    expect(kinds(bob, alice).slice(1)).toEqual(["shared:failed"]);
   });
 
   it("a kind the contact's app cannot verify is refused at once, with no write on the verifier's side", async () => {
@@ -418,6 +421,40 @@ describe("identity timeline, from the exchange", () => {
     }
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: id, side: "theirs", state: "verified" })]);
     expect(w.ledger(bob, alice).challenges).toHaveLength(0);
+  });
+
+  it("a flood of requests for a kind this app verifies, failed or never presented, keeps one line of the contact's and every other", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    // Alice's real share, verified on Bob's side; Bob's own share, accepted by Alice.
+    await ab.share(w.addProof(), true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    await ba.share(w.addProof(), true);
+    await vi.waitFor(() => expect(w.ledger(bob, alice).shared[0]?.status).toBe("accepted"));
+    const before = tl(w, bob, alice);
+    expect(before.map(e => `${e.side}:${e.state}`)).toEqual(["theirs:verified", "mine:verified"]);
+    const firstAt = (w.now() + 3) * 1000;
+    const throwaway = (subject: string) => newIdentityBinding({ provider: "test", subject, validitySeconds: 86_400, now: w.now() }).binding;
+    let n = 0;
+    const fresh = () => (n++).toString(16).padStart(64, "0");
+    // A request for a fresh id, then a presentation of a throwaway binding with garbage evidence: the check fails.
+    for (let i = 0; i < 120; i++) {
+      const id = fresh();
+      w.advance(3);
+      await ba.receive({ t: "idp-request", id, provider: "test" });
+      const c = w.ledger(bob, alice).challenges.find(x => x.id === id)!;
+      await ba.receive({ t: "idp-present", nonce: c.nonce, issuedAt: c.issuedAt, binding: throwaway("rnichael"), evidence: { sig: [1] }, sig: "x" });
+    }
+    // Requests only, never presented: as many as the live challenges allow, window after window.
+    for (let win = 0; win < 14; win++) {
+      for (let i = 0; i < 8; i++) await ba.receive({ t: "idp-request", id: fresh(), provider: "test" });
+      w.advance(IDENTITY_CHALLENGE_WINDOW + 1);
+    }
+    const after = tl(w, bob, alice);
+    expect(after.slice(0, 2)).toEqual(before);
+    // The contact's line keeps its first id and time: no new sound for it, and the chat moved up once only.
+    expect(after.slice(2)).toEqual([expect.objectContaining({ id: `theirs:${"0".repeat(64)}:0`, side: "theirs", kind: "shared", state: "verifying", at: firstAt })]);
+    expect(lastSharedWithMe(after)).toBe(firstAt);
   });
 
   it("is not repeated when the request goes again at a reconnect, nor by a refresh", async () => {
@@ -484,6 +521,35 @@ describe("identity timeline, from the exchange", () => {
     expect(steps(alice, bob)).toHaveLength(3);
   });
 
+  for (const slower of ["older", "newer"] as const) for (const run of [1, 2, 3])
+  it(`two proofs of one identity checked at once: the newer is kept on both sides when the ${slower} check ends last (run ${run})`, async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const older = w.addProof();
+    w.advance(60);
+    const newer = w.addProof();
+    // The slower proof's check ends only once the other one is stored.
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    const slowId = slower === "older" ? older : newer;
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => { if (s.id === slowId) await gate; return fakeVerify(s, e); } });
+    await ab.share(older, false);
+    await ab.share(newer, false);
+    ab.ready();
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received.map(r => r.id)).toEqual([slower === "older" ? newer : older]));
+    release();
+    const status = (id: string) => w.ledger(alice, bob).shared.find(s => s.id === id)?.status;
+    await vi.waitFor(() => expect(status(older)).not.toBe("pending"));
+    await vi.waitFor(() => expect(status(newer)).toBe("accepted"));
+    expect(w.ledger(bob, alice).received.map(r => `${r.id === older ? "older" : "newer"}:${r.status}`)).toEqual(["newer:verified"]);
+    expect(status(older)).toBe(slower === "older" ? "rejected" : "withdrawn");
+    if (slower === "older") expect(identityRefusal(w.ledger(alice, bob).shared.find(s => s.id === older)?.error)).toMatch(/newer proof/);
+    expect(w.ledger(alice, bob).shared.filter(s => s.status === "accepted").map(s => s.id)).toEqual([newer]);
+    // Nothing on the contact's timeline stops the newer share.
+    expect(tl(w, bob, alice).some(e => e.proof === newer && e.kind === "stopped")).toBe(false);
+    expect(tl(w, alice, bob).some(e => e.proof === newer && e.kind === "stopped")).toBe(false);
+  });
+
   it("a share taken back before it left leaves nothing; a revocation found is a stop", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
@@ -498,5 +564,61 @@ describe("identity timeline, from the exchange", () => {
     await ba.recheck(id, { revocationOnly: true });
     await ba.recheck(id);
     expect(tl(w, bob, alice).map(e => e.reason ?? e.kind)).toEqual(["shared", "revoked"]);
+  });
+});
+
+describe("a share asked again after its result was lost", () => {
+  /** Alice shares; Bob verifies and keeps it, but his result never reaches her (the link closed during his check). */
+  async function lostResult(second: () => Promise<VerifiedIdentity>) {
+    const w = world(), { alice, bob } = w.ids;
+    let check = 0;
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => {
+      if (++check === 1) { await held; return fakeVerify(s, e); }
+      return second();
+    } });
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(check).toBe(1));
+    w.online.delete(`${alice}>${bob}`);
+    release();
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received[0]?.status).toBe("verified"));
+    await new Promise(r => setTimeout(r, 0));
+    expect(w.ledger(alice, bob).shared[0].status).toBe("pending");
+    // Reconnect past the hour a verified check is reused for (`IDENTITY_REUSE_CHECK_S`): the share still pending is asked
+    // again, and Bob checks it a second time.
+    w.online.add(`${alice}>${bob}`);
+    w.advance(IDENTITY_REUSE_CHECK_S + 10);
+    ab.ready();
+    await vi.waitFor(() => expect(check).toBe(2));
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).not.toBe("pending"));
+    const card = (me: string, them: string) => (w.ledger(me, them).timeline ?? []).map(e => `${e.kind}:${e.state}`);
+    return { w, alice, bob, card };
+  }
+
+  it("a second check that could not run leaves the held copy standing, and both sides say it is held", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => { throw new IdentityCheckUnavailable("probe resolver could not be reached"); });
+    expect(w.ledger(bob, alice).received[0].status).toBe("verified");
+    expect(w.ledger(alice, bob).shared[0].status).toBe("accepted");
+    expect(card(alice, bob)).toEqual(["shared:verified"]);
+    expect(card(bob, alice)).toEqual(["shared:verified"]);
+  });
+
+  it("a second check that fails for a real reason turns the held copy unconfirmed, and the sharer is told", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => { throw new Error("The record is gone"); });
+    expect(w.ledger(bob, alice).received[0]).toMatchObject({ status: "unconfirmed", error: "The record is gone", checkedAt: w.now() });
+    expect(w.ledger(alice, bob).shared[0]).toMatchObject({ status: "rejected", error: "Your contact could not verify it" });
+    expect(card(alice, bob)).toEqual(["shared:failed"]);
+    expect(card(bob, alice)).toEqual(["shared:failed"]);
+  });
+
+  it("a second check that passes refreshes the held copy and settles the share", async () => {
+    const { w, alice, bob, card } = await lostResult(async () => ({ subject: externalKey, source: "Test signature" }));
+    expect(w.ledger(bob, alice).received).toEqual([expect.objectContaining({ status: "verified", checkedAt: w.now() })]);
+    expect(w.ledger(alice, bob).shared[0].status).toBe("accepted");
+    expect(card(alice, bob)).toEqual(["shared:verified"]);
+    expect(card(bob, alice)).toEqual(["shared:verified"]);
   });
 });

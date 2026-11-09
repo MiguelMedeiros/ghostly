@@ -68,7 +68,7 @@ describe("an edit bar on a message of mine that is deleted", () => {
     const { engine, user } = await openChat();
     engine.on("deleteMessage", ({ messageId }: { messageId: string }) => {
       setTimeout(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: [messageId] }));
-      return undefined;
+      return { everyone: false };
     });
     await user.click(within(row(mine.id)).getByTestId("message-options"));
     await user.click(screen.getByTestId("message-edit"));

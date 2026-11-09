@@ -68,6 +68,7 @@
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "hostProblem": "主机出了问题（错误 {{status}}）。请稍后再试。",
+    "locked": "应用打开前个人资料已锁定。请再次打开。",
     "needsFiles": "它的文件还不在此设备上。",
     "network": "无法连接到主机。",
     "notListed": "这个商店不再列出该应用。",
@@ -157,6 +158,7 @@
     "title": "在聊天中打开 {{title}}"
   },
   "store": {
+    "clockLate": "该商店列表的日期晚于此设备的时钟。请检查此设备的日期和时间。",
     "count": "{{count}} 个应用",
     "count_one": "{{count}} 个应用",
     "count_other": "{{count}} 个应用",

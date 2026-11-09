@@ -208,21 +208,47 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 }
 
 /**
+ * The contact's headers a viewer does not pass on: each makes the browser send something to a place it names, outside
+ * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
+ * early connections). With Hide my IP from contacts on, that place would learn this device's address. The same list
+ * as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's `DROPPED_HEADERS`.
+ */
+export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+
+/** The directives of a contact's policy that send reports to a URL it names, dropped from it (`OPENED_SERVICE_DROPPED_DIRECTIVES`). */
+export const VIEWER_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
+
+/** A contact's `Content-Security-Policy` value (one policy or several joined by commas) without its report directives. */
+function withoutReports(value: string): string {
+  return value.split(",")
+    .map((policy) => policy.split(";").filter((directive) => !VIEWER_DROPPED_DIRECTIVES.includes(directive.trim().split(/\s+/)[0].toLowerCase())).join(";").trim())
+    .filter((policy) => policy.replace(/;/g, "").trim())
+    .join(", ");
+}
+
+/**
  * A contact's response headers as a viewer serves them to the page (the extension's viewer tab, Desktop's viewer
- * window). The contact's app decides them, and the wire checks only that they are strings, so a header whose name
+ * window, the web app's view).
+ * The contact's app decides them, and the wire checks only that they are strings, so a header whose name
  * is not a token or whose value carries CR, LF or NUL is dropped: it could otherwise add headers of its own. Each
  * `Set-Cookie` stays on the exact origin it came from (no `Domain=`), and one holding several cookies on separate
- * lines becomes one header per cookie.
+ * lines becomes one header per cookie. No header or policy directive that sends a report or an early request elsewhere
+ * (`VIEWER_DROPPED_HEADERS`, `VIEWER_DROPPED_DIRECTIVES`); a policy left empty goes.
  */
 export function viewerResponseHeaders(headers: HeaderList): HeaderList {
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     if (typeof name !== "string" || typeof value !== "string" || !HEADER_NAME.test(name)) continue;
-    if (name.toLowerCase() === "set-cookie") {
+    const lower = name.toLowerCase();
+    if (VIEWER_DROPPED_HEADERS.includes(lower)) continue;
+    if (lower === "set-cookie") {
       for (const cookie of value.split(/\r?\n/)) {
         const scoped = cookie.replace(/;\s*domain\s*=[^;]*/gi, "");
         if (scoped.trim() && isCleanHeaderValue(scoped)) out.push([name, scoped]);
       }
+    } else if (lower === "content-security-policy") {
+      const policy = withoutReports(value);
+      if (policy && isCleanHeaderValue(policy)) out.push([name, policy]);
     } else if (isCleanHeaderValue(value)) {
       out.push([name, value]);
     }
@@ -654,6 +680,7 @@ export class HttpClient {
   private nextId = 1;
   private readonly streams = new Map<number, ClientStream>();
   private readonly waiting: (() => void)[] = [];
+  private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
 
@@ -662,7 +689,28 @@ export class HttpClient {
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     if (this.inFlight >= LIMITS.maxClientInFlight) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
+      const bytes = request.body?.length ?? 0;
+      if (this.waiting.length >= LIMITS.maxClientWaiting || this.waitingBytes + bytes > LIMITS.maxClientWaitingBodyBytes) {
+        throw new GhostlyHttpError("busy", "Too many requests waiting");
+      }
+      this.waitingBytes += bytes;
+      // Aborted while it waits: it leaves the queue at once, and lets go of its body.
+      let leave = () => {};
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const wake = () => { request.signal?.removeEventListener("abort", leave); resolve(); };
+          leave = () => {
+            const at = this.waiting.indexOf(wake);
+            if (at >= 0) this.waiting.splice(at, 1);
+            reject(new GhostlyHttpError("aborted", "Request aborted"));
+          };
+          if (request.signal?.aborted) return leave();
+          this.waiting.push(wake);
+          request.signal?.addEventListener("abort", leave, { once: true });
+        });
+      } finally {
+        this.waitingBytes -= bytes;
+      }
       if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     }
     this.inFlight++;

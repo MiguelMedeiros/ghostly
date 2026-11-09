@@ -26,6 +26,13 @@ export const MAX_QUEUE_MS = 5 * 60_000;
 export const PARTIAL_WAIT_MS = 60;
 
 /**
+ * The call's own clock, in ms: monotonic, so the device's clock set back or ahead mid-call (a phone or a VM fixing its
+ * time) moves the time of day, not the audio. On `Date.now()`, a clock set back held the next frame for as long as the
+ * jump, and one set ahead read as that long without a packet from the contact.
+ */
+export const monotonic = (): number => performance.now();
+
+/**
  * What the program wrote, waiting to be sent: taken one 20 ms frame per tick, silence when there is nothing, and
  * dropped whole by a flush (barge-in). The program may write any amount at any time, faster than real time too.
  */
@@ -40,7 +47,7 @@ export class PlaybackQueue {
   /** Bytes dropped because the queue was full, since the start. */
   dropped = 0;
 
-  constructor(readonly rate: CallRate, private readonly now: () => number = Date.now, maxMs = MAX_QUEUE_MS) {
+  constructor(readonly rate: CallRate, private readonly now: () => number = monotonic, maxMs = MAX_QUEUE_MS) {
     this.frame = frameBytes(rate);
     // Whole samples only: an odd byte waits for its other half.
     this.max = Math.floor((rate * maxMs) / 1000) * 2;

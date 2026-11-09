@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Remis (accusé reçu)",
-    "failed": "Échec",
+    "failed": "Non envoyé",
     "held": "Gardé pour le contact",
     "queued": "Pas encore confirmé, repart tout seul",
     "sending": "Envoi en cours",

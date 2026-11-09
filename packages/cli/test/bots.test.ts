@@ -106,7 +106,7 @@ describe("file wait", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(settled).toBe(false);
     transfer("chat-two-in-d", { state: "done", transferred: 5, size: 5, direction: "in" });
-    await expect(saving).rejects.toMatchObject({ code: "not_found", message: "No file chat-two-in-d" });
+    await expect(saving).rejects.toMatchObject({ code: "not_found", message: 'No file "chat-two-in-d" (ghostly file list <chat|group>)' });
   });
 
   it("a received file that waits for file accept says so at once, whether it waited so from the start or came to", async () => {

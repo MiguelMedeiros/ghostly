@@ -1,7 +1,9 @@
 {
   "attach": "Joindre",
   "camera": "Appareil photo",
+  "cameraBlocked": "Appareil photo bloqué. Autorisez l'appareil photo pour Ghostly dans les réglages d'Android.",
   "cameraFailed": "Impossible de démarrer l'appareil photo.",
+  "cameraRefused": "Pas d'accès à l'appareil photo. Touchez Appareil photo à nouveau et autorisez-le.",
   "caption": "Ajouter une légende",
   "captionTooLong": "Cette légende fait {{bytes}} octets UTF-8. La DHT en accepte au plus {{max}}.",
   "category": {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
@@ -20,7 +20,7 @@ import { format } from "node:util";
 import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
-  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownNameOption, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
   startingDaemon,
   type ProfilePaths,
 } from "./profiles";
@@ -476,7 +476,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
     translate,
   }],
-  ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
+  ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
@@ -693,7 +693,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       noMoreThan(1, parsed.positionals, "profile create <name> [--use] [--name <shown name>] [--force]");
       // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
       // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
-      const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
+      const shownName = parsed.options.name === undefined ? undefined : checkShownNameOption(parsed.options.name as string);
       const force = parsed.options.force === true;
       if (shownName) (await import("./secretGuard")).guardText(shownName, force, "name", "set it");
       const paths = createProfile(g.home, name);
@@ -731,7 +731,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "set": {
       noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       const params: Record<string, unknown> = {};
-      if (parsed.options.name !== undefined) params.name = parsed.options.name;
+      // Checked before the profile opens, so a bad --name is a usage error naming it; the engine takes it as given.
+      if (parsed.options.name !== undefined) {
+        checkShownNameOption(parsed.options.name as string);
+        params.name = parsed.options.name;
+      }
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
       if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       if (parsed.options.force === true) params.force = true;
@@ -1570,6 +1574,8 @@ export async function main(input: string[]): Promise<number> {
   if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
   if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
   if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
+  // Lifting stopped at it: a word with a dash there is a mistyped global option, not a command (`-` and `--` are none).
+  if (first.startsWith("-") && first !== "-" && first !== "--") throw unknownGlobalOption(first);
   throw unknownCommand(first, two ? second : undefined, three ? third : undefined);
 }
 

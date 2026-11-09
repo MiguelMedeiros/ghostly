@@ -166,6 +166,32 @@ describe("ChatConnection: what the header says", () => {
     });
   });
 
+  // The Linux Desktop with Hide my IP on and no HyperDHT relay: no WebRTC in WebKitGTK, its own Iroh and HyperDHT left
+  // out for contacts. Nothing can go live, yet the header said "retrying live", breathing, with Reconnect, for as long
+  // as the switch stayed on: the engine's dials each ended at once ("No transport both apps allow").
+  describe("with Hide my IP on and no transport this app can run", () => {
+    const onDht: Partial<LinkView> = { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved", pairing: { status: "ready", peerKey: "peer" } as Pairing,
+      availableTransports: [], runnableTransports: [], peerTransports: ["iroh/1", "hyperdht/1"] };
+    const reconnect = () => screen.queryByRole("button", { name: "Reconnect" });
+
+    it("says it is on the DHT, with no retry and no Reconnect, and why", () => {
+      banner(onDht, { settings: { relayOnly: true } });
+      expect(header()).toMatchObject({ kind: "dht", name: "On DHT", popover: "On DHT", dot: null, pulse: false });
+      expect(reconnect()).not.toBeInTheDocument();
+      expect(screen.getByTestId("connection-live-off")).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    });
+
+    it.each<[string, Partial<LinkView>, StatePatch]>([
+      ["a HyperDHT relay is set", { runnableTransports: ["hyperdht/1"] }, { settings: { relayOnly: true } }],
+      ["Hide my IP is off", {}, {}],
+    ])("retries live as before when %s", (_, more, state) => {
+      banner({ ...onDht, ...more }, state);
+      expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", pulse: true });
+      expect(reconnect()).toBeInTheDocument();
+      expect(screen.queryByTestId("connection-live-off")).not.toBeInTheDocument();
+    });
+  });
+
   it("is back to what the connection says once the device is online again", () => {
     const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     banner({ pairing: ready() });
@@ -591,6 +617,32 @@ describe("ChatConnection: what the panel does", () => {
     expect(header()).toMatchObject({ kind: "failure", name: "Connection issue" });
     act(() => engine.update({ links: [linkView({ availableTransports: all, ...away, dataLink: "open", peerOnline: true, pairing: ready({ peerKey: "peer" }) })] }));
     expect(header()).toMatchObject({ kind: "connected", name: "Connected · WebRTC" });
+    expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
+  });
+
+  // The engine's dial waits up to 90 s for an away contact: Reconnect held the whole panel off for that long (DHT only,
+  // Fallback, Reconnect), said nothing, and dropped the focus to the page. Measured on a web build: 90 s.
+  it("leaves the panel usable while Reconnect waits for the contact, and a choice meanwhile takes over", async () => {
+    const away = { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" } as Partial<LinkView>;
+    const { user, engine } = banner(away);
+    let refuse: (e: Error) => void = () => {};
+    engine.on("connect", () => new Promise<void>((_, reject) => { refuse = reject; }));
+    engine.on("setChatTransport", () => undefined);
+    await user.click(screen.getByTestId("connection-options"));
+    const button = screen.getByRole("button", { name: "Reconnect" });
+    await user.click(button);
+    const dhtOnly = screen.getByRole("radio", { name: "DHT only" });
+    expect(dhtOnly).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Fallback" })).toBeEnabled();
+    expect(button).toHaveFocus();
+    expect(button).toHaveTextContent("Reconnecting…");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await user.click(button);
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await user.click(dhtOnly);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
+    // DHT only closed the dial: its refusal is not the chat's connection issue.
+    await act(async () => refuse(new Error("Connection attempt cancelled")));
     expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
   });
 

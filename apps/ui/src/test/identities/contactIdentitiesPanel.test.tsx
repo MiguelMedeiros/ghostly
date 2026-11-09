@@ -8,6 +8,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 import { DAY, identitiesView, now, receivedView } from "./views";
 
 // covers: proofs.badges, proofs.recheck, proofs.expiry, proofs.unverifiable, proofs.public-activity
@@ -105,7 +106,8 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
+      // A reason the app does not know reads as its own line, never as the check's English.
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
@@ -361,6 +363,7 @@ describe("ContactIdentitiesPanel", () => {
     const panel = screen.getByRole("complementary", { name: "Identities with Alice" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(panel).not.toHaveAttribute("aria-modal");
+    expect(await axeViolations(panel)).toEqual([]);
     expect(panel).toHaveFocus();
     const composer = screen.getByTestId("composer");
     for (let i = 0; i < 14 && document.activeElement !== composer; i++) await user.tab();
@@ -383,6 +386,8 @@ describe("ContactIdentitiesPanel", () => {
     const { user } = besideChat(false);
     const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
     expect(panel).toHaveAttribute("aria-modal", "true");
+    // A role ARIA in HTML allows on its element: `dialog` on an <aside> is flagged by every checker.
+    expect(await axeViolations(panel)).toEqual([]);
     for (let i = 0; i < 14; i++) { await user.tab(); expect(panel).toContainElement(document.activeElement as HTMLElement); }
   });
 });

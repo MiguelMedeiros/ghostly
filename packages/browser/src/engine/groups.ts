@@ -2217,6 +2217,21 @@ export class Groups {
         const existing = this.stored.get(g);
         // Another group under an id held here, from a contact: kept beside it and shown, for the person to say which is real.
         const other = (): Promise<void> => this.noteOther(existing!, { at: Date.now(), linkId, name: groupName(frame.name) ?? "Group", admin: frame.admin as string, ...invitationClaims(frame) });
+        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need, and
+        // all chats together 32 (one over a chat this app accepts by itself makes room, `roomForAutoJoin`). Past either
+        // the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own waiting,
+        // sent again, takes no new room: one taken back, or another chat's under the same id, counts as new. Checked
+        // before whatever is held under the id, and one kept beside a group held takes room as one waiting does: the
+        // answer, now or to the next, must not tell a contact whether I am in the group.
+        const ownWaiting = (existing?.invitation && !existing.invitation.takenBack && existing.invitation.linkId === linkId)
+          || existing?.others?.some(o => "linkId" in o && o.linkId === linkId);
+        const waiting = [...this.stored.values()].flatMap(x => [...x.invitation && !x.invitation.takenBack ? [x.invitation.linkId] : [],
+          ...(x.others ?? []).flatMap(o => "linkId" in o ? [o.linkId] : [])]);
+        if (!ownWaiting && (waiting.filter(chat => chat === linkId).length >= MAX_INVITATIONS_PER_CHAT
+          || (waiting.length >= MAX_WAITING_INVITATIONS && !await this.roomForAutoJoin(linkId, existing)))) {
+          try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
+          return;
+        }
         // Through the group's link: the entry session is pinned to the key the link named, so this is its admin. Accepted at once.
         if (existing?.invitation?.entry && !existing.state) {
           if (existing.invitation.linkId !== linkId) return other();
@@ -2251,17 +2266,6 @@ export class Groups {
         // the place taken by anyone's. Another contact's would take the admin's place: it is kept beside it, for the person
         // to pick. One taken back waits for nothing: any invitation takes its place.
         if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !(existing.invitation.genesis && linkId === keptAdminChat(existing.previous)) && !existing.invitation.takenBack) return other();
-        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need, and
-        // all chats together 32 (one over a chat this app accepts by itself makes room, `roomForAutoJoin`). Past either
-        // the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own waiting,
-        // sent again, takes no new room: one taken back, or another chat's under the same id, counts as new.
-        const ownWaiting = existing?.invitation && !existing.invitation.takenBack && existing.invitation.linkId === linkId;
-        const waiting = [...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack);
-        if (!ownWaiting && (waiting.filter(x => x.invitation!.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT
-          || (waiting.length >= MAX_WAITING_INVITATIONS && !await this.roomForAutoJoin(linkId, existing)))) {
-          try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
-          return;
-        }
         // Removed and invited again: the history stays, and the names it was written under with it.
         const known = { ...existing?.formerNames, ...existing?.state?.nicks };
         // Declined, the removed group comes back as it was (an invitation that replaced another keeps the one it kept).

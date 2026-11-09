@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { sanitizeNick } from "@ghostly/core";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { authorName, formerName, memberName, sameNamed } from "../../lib/groups";
 import { GroupChat } from "../../pages/GroupChat";
@@ -27,23 +28,59 @@ function openChat(group: Partial<GroupView>, messages: StoredMessage[]) {
   renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
 }
 const rowOf = async (text: string) => (await screen.findByText(text)).closest<HTMLElement>("[data-message-row]")!;
+/** A name told apart by its key's end, as shown: the end isolated left to right (LRI … PDI). */
+const apart = (name: string, end: string) => `${name} \u2066(…${end})\u2069`;
+/** A message's name, as its whole text: "~" before a name that is no contact's. */
+const nickOf = (row: HTMLElement) => within(row).getByTestId("message-nick").textContent;
 
 describe("a group's members with one name", () => {
   it("are each told apart by the end of their key, whatever case, width or spacing tells them apart", () => {
     const roster = [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, " ａｌｉｃｅ  ")];
     const same = sameNamed(roster);
-    expect(memberName(roster[1]!, undefined, same)).toBe("Alice (…adm1n0)");
-    expect(memberName(roster[2]!, undefined, same)).toBe(" ａｌｉｃｅ   (…0th3r9)");
-    expect(authorName({ members: roster }, ADMIN)).toBe("Alice (…adm1n0)");
-    // A name that already shows a key's end is the same name.
+    expect(memberName(roster[1]!, undefined, same)).toBe(apart("Alice", "adm1n0"));
+    expect(memberName(roster[2]!, undefined, same)).toBe(apart(" ａｌｉｃｅ  ", "0th3r9"));
+    expect(authorName({ members: roster }, ADMIN)).toBe(apart("Alice", "adm1n0"));
+    // A name that already shows a key's end is the same name, isolated as shown or not.
     expect(sameNamed([member(ADMIN, "Alice", "admin"), member(OTHER, "Alice (…adm1n0)")]).has(OTHER)).toBe(true);
+    expect(sameNamed([member(ADMIN, "Alice", "admin"), member(OTHER, apart("Alice", "adm1n0"))]).has(OTHER)).toBe(true);
     // Mine counts: a member who takes my name is told apart from me.
     expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, "Bob")], "bob")]).toEqual([ME, OTHER]);
     expect(sameNamed([member(ADMIN, "Alice", "admin"), member(OTHER, "Alicia")]).size).toBe(0);
     // In a community, a member gone since, by the name the group knew them by: told apart from a member who has it now.
     const community = { profile: "community" as const, members: roster };
-    expect(authorName({ ...community, formerNames: { [GONE]: "alice" } }, GONE)).toBe("alice (…g0n3ab)");
+    expect(authorName({ ...community, formerNames: { [GONE]: "alice" } }, GONE)).toBe(apart("alice", "g0n3ab"));
     expect(formerName(community, GONE, "Carol")).toBe("Carol");
+  });
+
+  it("an Arabic name's key end still reads \"…k1p0aa\": the end is isolated left to right, so the name's direction cannot turn it", () => {
+    // Plain "محمد (…adm1n0)" is laid out right to left as a whole: the "…" lands after the key, which then reads as its start.
+    const roster = [member(ME, undefined, "member", true), member(ADMIN, "محمد", "admin"), member(OTHER, "محمد")];
+    const same = sameNamed(roster);
+    expect(memberName(roster[1]!, undefined, same)).toBe("محمد \u2066(…adm1n0)\u2069");
+    expect(memberName(roster[2]!, undefined, same)).toBe("محمد \u2066(…0th3r9)\u2069");
+    expect(formerName({ profile: "community", members: roster }, GONE, "محمد")).toBe("محمد \u2066(…g0n3ab)\u2069");
+  });
+
+  it("are told apart whatever a name adds that draws nothing: a filler, a selector, a joiner, a blank", () => {
+    const unseen = [
+      "Anaㅤ", "Anaﾠ", "Anaᅟ", "Anaᅠ", "Ana͏", "Ana︀", "Ana\u{e0100}", "Ana᠋", "Ana឵",
+      "A‍na", "An‌a", "Ana⠀", "Ana️", "ㅤAna (…adm1n0)",
+    ];
+    for (const nick of unseen) {
+      // A name a receiver keeps as it came, and one the name step lets a person type.
+      expect(sanitizeNick(nick)).toBe(nick);
+      const roster = [member(ADMIN, "Ana", "admin"), member(OTHER, nick)];
+      expect([...sameNamed(roster)], nick).toEqual([ADMIN, OTHER]);
+      expect(authorName({ members: roster }, OTHER)).toBe(`${nick} \u2066(…0th3r9)\u2069`);
+      expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, nick)], "Ana")], nick).toEqual([ME, OTHER]);
+    }
+    // Names that read apart stay apart, and a name that needs its joiners shows them as it came.
+    expect(sameNamed([member(ADMIN, "Ana", "admin"), member(OTHER, "Anna")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "क्षमा", "admin"), member(OTHER, "क्षमता")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "می‌خواهم", "admin"), member(OTHER, "مریم")]).size).toBe(0);
+    const persian = [member(ADMIN, "می‌خواهم", "admin"), member(OTHER, "میخواهم")];
+    expect(memberName(persian[0]!, undefined, sameNamed(persian))).toBe("می‌خواهم \u2066(…adm1n0)\u2069");
+    expect(memberName(member(OTHER, "👩‍💻 Ana"), undefined, sameNamed([member(ADMIN, "Bob", "admin"), member(OTHER, "👩‍💻 Ana")]))).toBe("👩‍💻 Ana");
   });
 
   it("in a private group, a member removed and invited again is named as before, her old key's messages as her new key's", () => {
@@ -57,12 +94,12 @@ describe("a group's members with one name", () => {
     expect(formerName(mesh, CAROL_THEN, "Carol")).toBe("Carol");
     // Two members in the roster now with one name are still told apart there, the admin's too.
     const clash = { profile: "mesh" as const, members: [...roster, member(OTHER, "alice")] };
-    expect(authorName(clash, ADMIN)).toBe("Alice (…adm1n0)");
-    expect(authorName(clash, OTHER)).toBe("alice (…0th3r9)");
+    expect(authorName(clash, ADMIN)).toBe(apart("Alice", "adm1n0"));
+    expect(authorName(clash, OTHER)).toBe(apart("alice", "0th3r9"));
     // In a community, a name a former member went by is told apart from a member who shows it now.
     const community = { ...mesh, profile: "community" as const };
-    expect(authorName(community, CAROL_THEN)).toBe("Carol (…c4r0l1)");
-    expect(formerName(community, CAROL_THEN, "Carol")).toBe("Carol (…c4r0l1)");
+    expect(authorName(community, CAROL_THEN)).toBe(apart("Carol", "c4r0l1"));
+    expect(formerName(community, CAROL_THEN, "Carol")).toBe(apart("Carol", "c4r0l1"));
   });
 
   it("in a community, the admin's messages and those of a member who took the admin's name read apart, the admin's marked", async () => {
@@ -70,9 +107,9 @@ describe("a group's members with one name", () => {
       [said("g1", ADMIN, "from the admin", 0), said("g2", OTHER, "send the deposit here", 1)]);
     const admin = await rowOf("from the admin"), other = await rowOf("send the deposit here");
     // The mark is beside the name, never in it: the name is only what the member says it is.
-    expect(within(admin).getByTestId("message-nick")).toHaveTextContent(/^~Alice \(…adm1n0\)$/);
+    expect(nickOf(admin)).toBe(`~${apart("Alice", "adm1n0")}`);
     expect(within(admin).getByTestId("message-nick-admin")).toHaveTextContent("admin");
-    expect(within(other).getByTestId("message-nick")).toHaveTextContent(/^~Alice \(…0th3r9\)$/);
+    expect(nickOf(other)).toBe(`~${apart("Alice", "0th3r9")}`);
     expect(within(other).queryByTestId("message-nick-admin")).toBeNull();
   });
 
@@ -104,7 +141,7 @@ describe("a group's members with one name", () => {
     ]);
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual([
-      "Alice (…0th3r9) joined", "Alice (…adm1n0) is now the admin", "Alice (…adm1n0) admin renamed the group to “Book club”",
+      `${apart("Alice", "0th3r9")} joined`, `${apart("Alice", "adm1n0")} is now the admin`, `${apart("Alice", "adm1n0")} admin renamed the group to “Book club”`,
     ]);
     expect(lines.map(l => !!within(l).queryByTestId("group-event-admin"))).toEqual([false, false, true]);
   });
@@ -113,8 +150,8 @@ describe("a group's members with one name", () => {
     openChat({ profile: "community", formerNames: { [GONE]: "Carol" }, members: [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, "Carol")] }, [
       said("g1", GONE, "carol before", 0), line("e1", GONE, "left", "Carol left", 1), said("g2", OTHER, "carol now", 2),
     ]);
-    expect(within(await rowOf("carol before")).getByTestId("message-nick")).toHaveTextContent(/^~Carol \(…g0n3ab\)$/);
+    expect(nickOf(await rowOf("carol before"))).toBe(`~${apart("Carol", "g0n3ab")}`);
     expect(within(await rowOf("carol now")).getByTestId("message-nick")).toHaveTextContent(/^~Carol$/);
-    expect((await screen.findAllByTestId("group-event")).map(l => l.textContent)).toEqual(["Carol (…g0n3ab) left"]);
+    expect((await screen.findAllByTestId("group-event")).map(l => l.textContent)).toEqual([`${apart("Carol", "g0n3ab")} left`]);
   });
 });

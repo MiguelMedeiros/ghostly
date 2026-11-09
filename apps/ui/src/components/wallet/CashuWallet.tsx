@@ -24,6 +24,7 @@ import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { copySecret } from "../../lib/shareLink";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -315,6 +316,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "send" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+            {/* The result, paid or pending, as Receive's: Done takes the keys, so only a line that was there, empty,
+                before its text says which. Refusals are the error's own alert. */}
+            <p role="status" className="sr-only">{sent ?? ""}</p>
             {sent ? (
               <div className="text-center py-3 space-y-3" data-testid="wallet-send-result">
                 {sent === t("wallet.cashu.paid") && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -453,7 +457,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </Section>
           <Section title={t("wallet.cashu.settings")} testId="wallet-backup">
             <Row label={t("wallet.cashu.copyEcash")} hint={t("wallet.cashu.copyEcashHint")}>
-              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
+              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await copySecret(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
               <p role="status" className="sr-only">{copied ? t("wallet.cashu.backupCopied") : ""}</p>
             </Row>
             {(copied || (error && backupFailed)) && <Block>{copied ? <Notice tone="success" testId="wallet-notice">{t("wallet.cashu.backupCopied")}</Notice> : error && <Notice problem={error} testId="wallet-error" />}</Block>}

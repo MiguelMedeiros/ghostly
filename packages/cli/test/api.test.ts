@@ -222,6 +222,34 @@ describe("chats", () => {
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
   });
 
+  it("a ref shaped as a chat's id is that chat or none: never a contact's own name, a group's name or a group's prefix", () => {
+    // The id of a chat removed since, which its contact (and whoever saw its invite) knows.
+    const ID = "mkodukaftkmj9cf3";
+    const carol = link("jmc8f4ousct61qo8", { label: "c", peerNick: ID });
+    const refused = (links: LinkView[], groups: GroupView[], ref: string) => { try { findChatOrGroup(links, groups, ref); } catch (error) { return (error as { toJSON(): unknown }).toJSON(); } };
+    for (const ref of [ID, ID.toUpperCase(), ` ${ID}${String.fromCharCode(0x200b)}`]) {
+      expect(() => findChat([carol], ref), JSON.stringify(ref)).toThrow(expect.objectContaining({ code: "not_found", message: `No chat ${JSON.stringify(ref)} (ghostly chat list)` }));
+      expect(refused([carol], [], ref)).toMatchObject({ code: "not_found", message: `No chat ${JSON.stringify(ref)} (ghostly chat list)` });
+      expect(() => findOwnNamedChat([carol], ref)).toThrow(expect.objectContaining({ code: "not_found" }));
+    }
+    // Nor a group whose admin named it so, or whose id its creator made start so: `group:<ref>` names those.
+    const named = { ...group, id: "g".repeat(22), name: ID, status: "active" } as unknown as GroupView;
+    const prefixed = { ...group, id: `${ID}gggggg`, name: "Room", status: "active" } as unknown as GroupView;
+    expect(refused([], [named], ID)).toMatchObject({ code: "not_found", message: `No chat "${ID}" (ghostly chat list)` });
+    expect(refused([], [prefixed], ID)).toMatchObject({ code: "not_found" });
+    expect(findChatOrGroup([], [named], `group:${ID}`)).toEqual({ group: named });
+    // The chat with that id is that chat; a label given here still names one (only this side chose it).
+    const kept = link(ID, { label: "bob" });
+    expect(findChat([carol, kept], ID).id).toBe(ID);
+    expect(findChatOrGroup([carol, kept], [named], ID)).toEqual({ link: kept });
+    const labelled = link("jmc8f4ousct61qo8", { label: ID, peerNick: "Carol" });
+    expect(findChat([labelled], ID).id).toBe(labelled.id);
+    expect(findChatOrGroup([labelled], [named], ID)).toEqual({ link: labelled });
+    // A name of another length, or with a letter no id has (l, v, 0, 2), is a name as before.
+    expect(findChat([link("chatNick", { peerNick: "processingqueue" })], "processingqueue").id).toBe("chatNick");
+    expect(findChat([link("chatNick", { peerNick: "mkodukaftkmj9cf2" })], "mkodukaftkmj9cf2").id).toBe("chatNick");
+  });
+
   it("an id prefix (the contact may choose it) never takes a label this side gave, nor a group's name", async () => {
     // Mallory's invite code was ground so that the chat this side made from it has an id that starts with Bob's label.
     const bob = link("chatBobxxxxxxxxx", { label: "bob" }), mallory = link("bobpitcapjj8o1wf", { label: "mallory" });
@@ -640,8 +668,8 @@ describe("chats", () => {
     expect(await page("c", 2)).toEqual({ messages: [], more: false });
     expect(await page(2, "b")).toEqual({ messages: [], more: false });
     // A message that is not there is still said, on either side.
-    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
-    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
+    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: 'No message "zz" in this chat (ghostly chat history chat-one)' });
+    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: 'No message "zz" in this chat (ghostly chat history chat-one)' });
   });
 
   it("a history limit that is not a whole number is bad_request, not the engine failing", async () => {

@@ -426,6 +426,36 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(late).toEqual([0.1]);
   });
 
+  it("asks Rust for the levels only while a ring listens: a video call, which draws none, is told none", async () => {
+    // Rust says a level at nearly every reading while someone speaks, an eval each: 20 a second for no ring.
+    const levelCommands = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_call_levels").map(([, args]) => args);
+    const pc = new NativePeerConnection({});
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    // A ring that listens before Rust has the call waits for it.
+    const stopEarly = levels.peer(() => {});
+    expect(levelCommands()).toEqual([]);
+    await pc.createOffer();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }]);
+    stopEarly();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+    // Both rings back (the camera off again): asked once, and let go once the last stops.
+    const stopPeer = levels.peer(() => {});
+    const stopOwn = levels.own(() => {});
+    stopPeer();
+    expect(levelCommands()).toHaveLength(3);
+    stopOwn();
+    expect(levelCommands().slice(2)).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+
+    // A video call: no ring ever listens, and Rust starts with none to say.
+    tauri.invoke.mockClear();
+    const video = new NativePeerConnection({});
+    video.addTrack((await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks()[0]);
+    await video.createOffer();
+    expect(levelCommands()).toEqual([]);
+  });
+
   it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {
     const idle = await nativeCallMedia().getUserMedia({ audio: true });
     const heard = vi.fn();

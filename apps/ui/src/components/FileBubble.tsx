@@ -5,7 +5,7 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
-import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
+import { knownPictureSize, MAX_EDGE, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
@@ -18,7 +18,7 @@ import { problemLine, saveProblemLine } from "../lib/problemText";
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
 
-const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
@@ -195,7 +195,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"} {...(gone && { "data-gone": "" })}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
-          style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
+          style={{ width: box.width, maxWidth: "100%", maxHeight: MAX_EDGE, aspectRatio: box.ratio }}>
           {blobUrl && (
             // A tap opens it large. Not a <button>: a long press on a control is not the message's long press (the
             // reactions' bar), and on a picture it must stay one; the tap that ends a long press opens nothing.
@@ -249,7 +249,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             type="button"
             onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`tap-target w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -263,7 +263,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       </div>
       {offered && group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer"
+          <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none cursor-pointer"
             data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}</button>
         </div>
       )}
@@ -279,9 +279,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             </p>
           )}
           <div className="flex gap-2">
-            <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50"
+            <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50"
               data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
-            <button type="button" className="text-xs px-3 py-1 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
+            <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
         </div>
       )}

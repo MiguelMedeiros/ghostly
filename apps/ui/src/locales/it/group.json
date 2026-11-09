@@ -256,6 +256,9 @@
     "keep": "Tieni questo",
     "link": "Un link di gruppo che hai aperto",
     "switch": "Passa a questo",
+    "switchBody": "{{other}}. Esci da questo gruppo, che viene eliminato da questo dispositivo con la sua cronologia, e l'altro prende il suo posto.",
+    "switchConfirm": "Passa",
+    "switchTitle": "Passare all'altro gruppo?",
     "title": "Un altro gruppo ha l'id di questo gruppo"
   },
   "readNote": "Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte. Chi viene rimosso conserva ciò che ha già ricevuto e non può leggere ciò che segue; chi entra dopo non può leggere ciò che c'era prima. I messaggi vanno a ogni membro; chi era assente riceve ciò che ha perso da qualsiasi membro che lo abbia (gli ultimi {{count}} messaggi del gruppo) quando si ritrovano.",

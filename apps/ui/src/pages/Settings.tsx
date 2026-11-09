@@ -60,6 +60,8 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { stopPlayingFrom } from "../lib/nowPlaying";
+import { chatPath } from "../lib/url";
 import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
@@ -494,6 +496,8 @@ export function Settings() {
   };
   const deleteChats = () => {
     if (anyChatOnCall()) return;
+    // What plays on from one of them (the now-playing bar) stops with it, as with a chat deleted from the chat list.
+    for (const session of listSessions()) stopPlayingFrom(chatPath(session.id), false);
     deleteAllSessions();
     // Confirm goes and Delete comes back off (no chat left): the focus goes on to the next row's button.
     focusDataButton.current = confirmClearData ? "clearCancel" : "clear";
@@ -590,7 +594,7 @@ export function Settings() {
             <input id="settings-nickname" type="text" {...nickname}
               placeholder={t("settings.nicknamePlaceholder")} className={field} />
             <button onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")}
-              className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
+              className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
@@ -609,7 +613,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
-                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
+                className={`tap-target flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {option.value === "light" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" strokeWidth="2" />
@@ -635,7 +639,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
-                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
+                className={`tap-target px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
@@ -667,9 +671,10 @@ export function Settings() {
           const name = t(`settings.cues.${category}` as const), off = !settings.notifications.soundEnabled;
           return (
             <Row key={category} label={name} hint={t(`settings.cues.${category}Hint` as const)} testId={`settings-cues-${category}-row`}>
+              {/* On a phone a tap lands on 44 px around it: up to the switch's own area at its end, so further on its start side. */}
               <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category], { kind: "preview" })}
                 aria-label={t("settings.cues.preview", { name })} title={t("settings.cues.preview", { name })}
-                className="grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                className="relative before:absolute before:content-[''] max-md:before:-inset-y-1.5 max-md:before:-start-3.5 max-md:before:end-0 grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>
               </button>
               <Switch testId={`settings-cues-${category}`} label={name} disabled={off} checked={categoryOn(category, { ...settings.notifications, soundEnabled: true })}
@@ -683,14 +688,14 @@ export function Settings() {
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}
-          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
+          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} busy={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
             hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
-            {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
+            {wakeOn && <Button data-testid="settings-wake-rotate" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
+            {wakeNoPush && <Button data-testid="settings-wake-retry" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} busy={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
         {canWake && wakeOnline.shared && (
@@ -828,7 +833,7 @@ export function Settings() {
       <Section title={t("settings.about")}>
         <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} testId="settings-about-version" />
         <Row label={t("settings.website")} value={
-          <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
+          <a {...externalLinkProps(APP_WEBSITE)} className="tap-target inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
             GitHub
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -865,11 +870,11 @@ export function Settings() {
                 {t("updates.download")}
               </a>
             ) : update.update ? (
-              <Button variant="primary" onClick={() => void update.install()} disabled={update.stage === "installing"}>
+              <Button variant="primary" onClick={() => void update.install()} loading={update.stage === "installing"}>
                 {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
               </Button>
             ) : (
-              <Button onClick={() => void update.check()} disabled={update.stage === "checking"}>
+              <Button onClick={() => void update.check()} loading={update.stage === "checking"}>
                 {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
               </Button>
             )}

@@ -356,6 +356,8 @@ export class LinkSession {
   private signalReadsLeft = 0;
   /** Fast reads still signaling while the contact's offer is due (`SIGNAL_DUE_READS`). */
   private dueSignalReadsLeft = 0;
+  /** This side just left DHT only and its presence is not out yet: the contact dials on it (`presenceDue`). */
+  private presenceDueOut = false;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   /**
@@ -496,6 +498,7 @@ export class LinkSession {
     countUnusedInvite(this.transport, this, false);
     this.rtcSignal = null;
     this.callSignal = null;
+    this.presenceDueOut = false;
     this.events.onStatus?.("offline");
     if (announce) {
       try {
@@ -566,6 +569,15 @@ export class LinkSession {
    * the windows that look fast for the contact (`expectPeer`, `watchPeer`) end, and the link reads at its pace from the
    * next read on. An offer of this side's out keeps its window.
    */
+  /**
+   * This side just left DHT only: the contact that dials waits on its next packet that advertises, so that one is
+   * signaling (`PkarrRequestOptions.signal`). As a plain write, an app that had spent its relay minute held it 55 s,
+   * and the contact dialled only then.
+   */
+  presenceDue(): void {
+    this.presenceDueOut = true;
+  }
+
   calm(): void {
     if (this.rtcSignal !== null) return;
     this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = this.lingerUntil = this.dueSignalReadsLeft = 0;
@@ -816,7 +828,7 @@ export class LinkSession {
       // held back every read of the chats still waiting for an answer until the minute freed.
       const awaited = this.connected || this.presence.online || this.sentBuffer.length > 0 || this.callSignal !== null || this.awaitingPeer();
       const takesBack = !rtcSignal && this.rtcSignalOut !== null;
-      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
+      const options = (rtcSignal && rtcSignal !== this.rtcSignalOut) || (advertise && this.presenceDueOut) ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       this.wroteInBackground = options?.background === true;
       // No relay takes it now: refused before it is built, as before it is signed (`RelayTransport.publishDated`). With
@@ -846,6 +858,7 @@ export class LinkSession {
     }
     const ms = Date.now() - started;
     this.lastPublishedAt = Date.now();
+    if (advertise) this.presenceDueOut = false;
     // Signaling's fast window counts from when its signal went out: one the relays' budget held back for most of the
     // window (an offer held 50 s) would otherwise have its answer read at the background pace (2026-09-27).
     const signalOut = !!rtcSignal && rtcSignal !== this.rtcSignalOut;
@@ -904,6 +917,8 @@ export class LinkSession {
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
+      // An invite this side made, its joiner due: the knock is read here (`PkarrRequestOptions.awaited`).
+      const awaited = !signal && this.ownInvite() && this.awaitingPeer();
       // A daemon's idle-pace reads of a contact long gone (`watchPeer`'s `idleMs`) can wait as much.
       const background = pace === "background" || pace === "connected" || (pace === "idle" && !this.active);
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
@@ -912,7 +927,7 @@ export class LinkSession {
       // the answer, the link never said it could not read its contact, and the engine let a gone contact's HyperDHT
       // listener go for the whole outage (`contactUnread`), where only that listener could bring the contact back.
       let unread: RelaysFailedError | undefined;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) }, false)
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(awaited && { awaited }), ...(resume && { resume }) }, false)
         .catch((error: unknown) => { if (!(error instanceof RelaysFailedError)) throw error; unread = error; return error.kept; });
       if (!this.running) return;
       this.discoveryResult("read", unread);

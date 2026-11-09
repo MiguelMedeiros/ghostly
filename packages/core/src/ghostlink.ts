@@ -220,6 +220,14 @@ export const LIVENESS_PING_MS = 15_000;
  */
 export const SWITCH_RETIRE_MS = 3_000;
 /**
+ * A move's native dial that found no announce of the contact (HyperDHT's PEER_NOT_FOUND) is made again this long after,
+ * for as long as the move lasts: the contact is live (its policy came over the open session), and its endpoint is not
+ * announced while a channel is live: a move back to HyperDHT within ~5 s of leaving it, before the session left behind
+ * had retired (`SWITCH_RETIRE_MS`) and the endpoint was announced again, found nobody. The move gave up at once and the
+ * chat waited the 20 s retry (20.0-20.1 s in 3 of 3 cycles on two CLI daemons, a 2 s gap between moves).
+ */
+const SWITCH_FIND_RETRY_MS = 1_000;
+/**
  * A receiver takes at most this many `paired-rtc` frames from a contact per `RTC_SIGNAL_RATE_WINDOW_MS`, counted before
  * their signature is checked; the rest are dropped. Each offer taken builds a new peer connection (and gathers for it).
  * A person's busiest minute is under half of it, 30 frames: five moves to WebRTC (one every 12 s, back and forth), each
@@ -722,6 +730,8 @@ export interface GhostLinkOptions {
   deviceCapabilities?: readonly DeviceCapability[];
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
+    /** How often a contact that chose DHT only is read with the chat in the background (a CLI daemon's, `DhtDelivery`). */
+    peerDhtPollMs?: number;
     /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
     firstControlAfterMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -1152,6 +1162,7 @@ export class GhostLink {
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
+      ...(options.dht.peerDhtPollMs && { peerDhtPollMs: options.dht.peerDhtPollMs }),
       ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       ...(options.dht.ratchet && { ratchet: options.dht.ratchet }),
@@ -1617,8 +1628,9 @@ export class GhostLink {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
     if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    // Held to a growing wait while the contact's mailbox still says DHT only after the reads one started (`peerLinkPacket`).
+    const read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence), ...(!read && { held: true }) });
   }
 
   /**
@@ -1627,14 +1639,19 @@ export class GhostLink {
    * room for the presence `peerMayHaveLeftDht` looks at, so the mailbox is read now and at the DHT pace for a while
    * here too. The offer is kept and answered, and the dial taken, once that read unblocks the stream. False when
    * something else blocks it (this side is DHT-only, the contact is not pinned, or the offer is not the contact's).
+   * A connection on a native endpoint (no `signal`) proves nothing yet: anyone who can dial the endpoint can open one,
+   * with any identities, and only the session it carries, which waits for this read, authenticates it. The reads it
+   * starts are held as a fresh link packet's are (`peerLinkPacket`); the connection is kept for them all the same.
    */
   private peerDialsFromDht(signal?: string): boolean {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht") return false;
     const credentials = this.options.pairing?.credentials;
     if (!credentials?.peerKey) return false;
     if (signal !== undefined && !verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, credentials.peerKey, true)) return false;
-    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    let read = true;
+    if (signal !== undefined) this.dht.expect(EXPECT_PEER_MS, true);
+    else read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined, ...(!read && { held: true }) });
     return true;
   }
 
@@ -1761,8 +1778,12 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
-    // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
-    else if (!this.quietForTaken) this.session.start();
+    // The link session runs before the contact can learn the new method (from the envelope setMode publishes). Where the
+    // contact dials (the lower key offers), this side's first presence is what it dials on: signaling (`LinkSession.presenceDue`).
+    else if (!this.quietForTaken) {
+      if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) this.session.presenceDue();
+      this.session.start();
+    }
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
@@ -3046,6 +3067,8 @@ export class GhostLink {
   }
   /** What awaits its receipt on the DHT floor now, if anything does. */
   get dhtPendingId(): string | undefined { return this.dht?.pendingId; }
+  /** The last DHT send of this text went nowhere: no relay holds it, and it is off the floor (`DhtDelivery.wentNowhereFor`). */
+  dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
 
@@ -4057,8 +4080,8 @@ export class GhostLink {
       }
       try {
         await new Promise<void>((resolve, reject) => {
-          let active = true;
-          const timer = setTimeout(() => { active = false; reject(new Error(`${transport} did not connect in time`)); }, 8_000);
+          let active = true, notFound: Error | undefined;
+          const timer = setTimeout(() => { active = false; reject(notFound ?? new Error(`${transport} did not connect in time`)); }, 8_000);
           const done = { resolve: () => { active = false; clearTimeout(timer); resolve(); }, reject: (error: Error) => { active = false; clearTimeout(timer); reject(error); } };
           if (transport === "webrtc/1") {
             this.rtcCandidateWaiter = done;
@@ -4076,13 +4099,22 @@ export class GhostLink {
             // One switch dial in flight per transport: a cancelled one runs to its own timeout (it cannot be aborted),
             // and the next waits for it rather than stacking another beside it.
             const turn = (this.switchDials.get(transport) ?? Promise.resolve()).then(async () => {
-              if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
-              this.switcher.dialing(plan);
-              try {
-                const { channel, binding } = await endpoint.connect(descriptor);
-                if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
-                void this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
-              } catch (error) { done.reject(error instanceof Error ? error : new Error(String(error))); }
+              for (;;) {
+                if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
+                this.switcher.dialing(plan);
+                try {
+                  const { channel, binding } = await endpoint.connect(descriptor);
+                  if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
+                  void this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
+                  return;
+                } catch (error) {
+                  const failure = error instanceof Error ? error : new Error(String(error));
+                  if (!/^PEER_NOT_FOUND\b/.test(failure.message)) { done.reject(failure); return; }
+                  // Not announced again yet (`SWITCH_FIND_RETRY_MS`): dialled again until the move's 8 s are up.
+                  notFound = failure;
+                  await new Promise(resolve => setTimeout(resolve, SWITCH_FIND_RETRY_MS));
+                }
+              }
             });
             this.switchDials.set(transport, turn);
             void turn.then(() => { if (this.switchDials.get(transport) === turn) this.switchDials.delete(transport); });

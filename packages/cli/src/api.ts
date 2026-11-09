@@ -1,12 +1,14 @@
 import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
+import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
+import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
-  type ApiContext, type Method, type Params,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, node, num, oneOf, state, str, transportOffered, waitForState,
+  type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
@@ -69,11 +71,35 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 }
 
 /** Settings a command may change; the rest are the app's to manage. */
-export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
+const SETTABLE_KINDS = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
   autoDownloads: "boolean", serveFiles: "boolean",
+} as const satisfies Partial<Record<keyof Settings, "strings" | "string" | "boolean" | "ice">>;
+export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = SETTABLE_KINDS;
+
+type Settable = keyof typeof SETTABLE_KINDS;
+/**
+ * What a setting of the table reads as while the engine keeps none (types.ts `Settings`): a switch that is on and the
+ * default relays are kept as absent (node.ts `updateSettings` deletes `sendTyping: true`, an empty `irohRelays`...).
+ * Every key of the table the engine may leave out needs one here, or tsc fails.
+ */
+const SETTING_DEFAULTS: { [K in Settable as undefined extends Settings[K] ? K : never]-?: () => NonNullable<Settings[K]> } = {
+  irohRelays: () => [...DEFAULT_IROH_RELAYS], hyperdhtRelay: () => DEFAULT_HYPERDHT_RELAY,
+  publicProfiles: () => true, shareProfile: () => true, sendTyping: () => true, autoDownloads: () => true, serveFiles: () => true,
 };
+
+/**
+ * The settings as `settings get` and `settings set` answer them: each key `settings set` takes, with its value in
+ * effect. Before, a switch that is on (absent as kept) was never shown, and a fresh profile showed 4 of the 11 keys.
+ */
+export function settingsInEffect(settings: Settings): Settings {
+  const filled: Record<string, unknown> = { ...settings };
+  for (const key of Object.keys(SETTABLE_KINDS) as Settable[]) {
+    if (filled[key] === undefined && Object.hasOwn(SETTING_DEFAULTS, key)) filled[key] = SETTING_DEFAULTS[key as keyof typeof SETTING_DEFAULTS]();
+  }
+  return filled as unknown as Settings;
+}
 
 /**
  * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
@@ -95,7 +121,8 @@ const CHAT_NAME_LENGTH = 48;
  * A chat's name on this side (`chat rename`, an invite's `--label`), as the engine stores it (`cleanName`): a tab or a
  * line break is a space, invisible characters go, and what is left is counted. Longer than the engine keeps whole is
  * refused, not cut. An empty name (or spaces) is the documented one of `chat rename` (the contact's own name) and no
- * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name.
+ * label for an invite; a name with nothing that shows is refused: given as is, the engine cleared the chat's name. A
+ * name starting with `group:` is refused: `group:<ref>` names a group in every command (`groupPrefixed`).
  */
 function chatName(params: Params, name: string): string | undefined {
   const value = str(params, name);
@@ -103,6 +130,7 @@ function chatName(params: Params, name: string): string | undefined {
   const clean = cleanName(value, CHAT_NAME_LENGTH);
   if (clean === undefined) throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_LENGTH} characters on one line`);
   if (!clean) throw new CliError("bad_request", `A chat's name needs a character that shows (an empty name gives back the contact's own)`);
+  if (groupPrefixed(clean) !== null) throw new CliError("bad_request", `A chat's name can't start with "group:": that names a group`);
   return clean;
 }
 
@@ -236,7 +264,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "settings.get"(ctx, params) {
-    return redactSettings(state(ctx).settings, bool(params, "showSecret"));
+    return redactSettings(settingsInEffect(state(ctx).settings), bool(params, "showSecret"));
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
@@ -273,7 +301,7 @@ const METHODS: Record<string, Method> = {
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
-    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
+    return { ...redactSettings(settingsInEffect(state(ctx).settings)), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
@@ -351,7 +379,10 @@ const METHODS: Record<string, Method> = {
     endTyping(ctx, { linkId: link.id }, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
-    if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) {
+      throw (replyTo && notHere(result.error, replyTo, { group: false, ref: str(params, "chat", true) }))
+        || (/not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error));
+    }
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
@@ -372,7 +403,7 @@ const METHODS: Record<string, Method> = {
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
+    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
@@ -412,7 +443,7 @@ const METHODS: Record<string, Method> = {
     const { wait, ms } = confirmWait(ctx, params);
     // A new reaction of mine is numbered past every one still waiting: it is confirmed once none past those is left.
     const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
-    const result = await react(ctx, link.id, params);
+    const result = await react(ctx, link.id, params, { group: false, ref: str(params, "chat", true) });
     const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
     if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
     return { chat: link.id, ...result, confirmed: !pending(node(ctx).chatUnconfirmed({ linkId: link.id })) };
@@ -433,6 +464,8 @@ const METHODS: Record<string, Method> = {
       ? { wait: oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none"), ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 }
       : confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
+    const gone = result.error && messageId ? notHere(result.error, messageId, { group: target.group, ref: str(params, "chat", true) }) : undefined;
+    if (gone) throw gone;
     if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
     if (target.group) {
       // A one-shot leaves once its command is done, and its groups with it: what no edge took yet went nowhere.
@@ -486,7 +519,7 @@ const METHODS: Record<string, Method> = {
     const chosen: StoredMessage[] = [];
     for (const id of messageIds) {
       const message = await node(ctx).getMessage(from.linkId, id);
-      if (!message) throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`);
+      if (!message) throw noMessage(id, { group: from.group, ref: str(params, "chat", true) });
       chosen.push(message);
     }
     if (!bool(params, "force")) for (const message of chosen) {
@@ -527,9 +560,10 @@ const METHODS: Record<string, Method> = {
     const link = notAGroup(ctx, params, () => chatOf(ctx, params), () => "a group's message is not sent again by hand, it goes by itself when a member's edge opens");
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
-    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    const place = { group: false, ref: str(params, "chat", true) };
+    if (!message) throw noMessage(messageId, place);
     // Before, both answered done and nothing was sent: the engine sends again whatever id it is given.
-    if (message.sender !== "me") throw new CliError("not_found", `No message ${messageId} of yours in this chat: only your own messages are sent again`);
+    if (message.sender !== "me") throw noMessage(messageId, place, { whose: "of yours", tail: ": only your own messages are sent again" });
     if (message.delivery === "delivered") throw new CliError("refused", "Nothing to send again: it was delivered");
     await node(ctx).retryMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId };
@@ -546,7 +580,7 @@ const METHODS: Record<string, Method> = {
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
       const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
-      if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
+      if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "of yours", tail: ": only your own messages are deleted for everyone" });
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
@@ -564,15 +598,18 @@ const METHODS: Record<string, Method> = {
     const ref = str(params, "message") ?? "<message>";
     const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
-    await node(ctx).deleteMessage({ linkId: link.id, messageId });
-    return { chat: link.id, messageId, deleted: messageId, everyone: false };
+    if (!(await node(ctx).getMessage(link.id, messageId))) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });
+    // A waiting text of mine is cancelled; one the outbox already handed to the link may be out, so the engine deletes it
+    // for everyone instead, and `everyone` says so.
+    const { everyone } = node(ctx).deleteMessage({ linkId: link.id, messageId });
+    return { chat: link.id, messageId, deleted: messageId, everyone };
   },
   /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */
   async "chat.details"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
-    const details = await node(ctx).messageDetails({ linkId: target.linkId, messageId: str(params, "message", true) });
-    if (!details) throw new CliError("not_found", `No message ${String(params.message)} in this ${target.group ? "group" : "chat"}`);
+    const messageId = str(params, "message", true);
+    const details = await node(ctx).messageDetails({ linkId: target.linkId, messageId });
+    if (!details) throw noMessage(messageId, { group: target.group, ref: str(params, "chat", true) });
     return details;
   },
   async "chat.rename"(ctx, params) {
@@ -709,7 +746,9 @@ const METHODS: Record<string, Method> = {
     endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     // Not a member (removed, say): refused, and nothing was sent. Anything else by what a bot can do about it.
-    if (result.error) throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
+    // A `--reply` the group lacks says "group": the engine's line says "chat".
+    if (result.error) throw (replyTo && notHere(result.error, replyTo, { group: true, ref: str(params, "group", true) }))
+      || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
@@ -735,7 +774,7 @@ const METHODS: Record<string, Method> = {
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, "group", result.error, result.refused);
+    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, { group: true, ref: str(params, "group", true) }, result.error, result.refused);
     const message = await node(ctx).getMessage(linkId, messageId);
     const edits = message?.edit?.seq ?? 0;
     // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
@@ -755,7 +794,7 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
-    const { n, ...said } = await react(ctx, `group:${group.id}`, params);
+    const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref: str(params, "group", true) });
     const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
     return { group: group.id, ...said, sent: edges > 0, edges };
@@ -937,12 +976,14 @@ function confirmWait(ctx: ApiContext, params: Params): { wait: "none" | "confirm
  * Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). In a
  * group, `n` is the reaction's number, for `groupTaken`.
  */
-async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean; n?: number }> {
+async function react(ctx: ApiContext, linkId: string, params: Params, place: RefPlace): Promise<{ messageId: string; emoji: string | null; removed: boolean; n?: number }> {
   const messageId = str(params, "message", true);
   const removed = bool(params, "remove");
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
+  const gone = result.error ? notHere(result.error, messageId, place) : undefined;
+  if (gone) throw gone;
   if (result.error) throw new CliError(result.refused ? "refused" : /not in this (?:chat|group)|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed, ...(result.n ? { n: result.n } : {}) };
 }
@@ -999,14 +1040,23 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
 }
 
 /**
- * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
- * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
- * can be edited" (`refused`, exit 1), as if the message were someone else's.
+ * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), said as every
+ * message id is (`noMessage`); before, a mistyped or lost id read "Only your own text messages can be edited"
+ * (`refused`, exit 1), as if the message were someone else's.
  */
-function editRefused(message: StoredMessage | undefined, ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
-  if (refused && !message)
-    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
+function editRefused(message: StoredMessage | undefined, ref: string, place: RefPlace, error: string, refused: boolean | undefined): CliError {
+  if (refused && !message) return noMessage(ref, place);
   return new CliError(refused ? "refused" : "unavailable", error);
+}
+
+/**
+ * The engine's "That message is not in this chat" (", or takes no reaction", ", or cannot be pinned", ", or cannot be
+ * replied to") for the message `id`, said as `noMessage` says it, with that reason kept; undefined for any other error.
+ * The engine says "chat" in a group for a reply and a save: `place` says which it is.
+ */
+function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
+  const said = /^That message is not in this (?:chat|group)(?:, or (.+))?$/.exec(error);
+  return said ? noMessage(id, place, said[1] ? { tail: `, or it ${said[1]}` } : {}) : undefined;
 }
 
 /** The chat link's own wait for a contact (`GhostLink.connect`): `chat connect --timeout` waits at most that long. */
@@ -1039,7 +1089,8 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   // (the engine's line says "chat"); an unsave's with where the saved ids are.
   const where = target.group ? "group" : "chat";
   if (result.error && /not in this chat/.test(result.error)) {
-    throw new CliError("not_found", remove ? `No saved message ${JSON.stringify(messageId)} in this ${where} (ghostly saved list shows the saved ones)` : `No message ${JSON.stringify(messageId)} in this ${where}`);
+    throw remove ? new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this ${where} (ghostly saved list shows the saved ones)`)
+      : noMessage(messageId, { group: target.group, ref: str(params, "chat", true) });
   }
   if (result.error) throw new CliError("bad_request", result.error);
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
@@ -1058,7 +1109,10 @@ async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (m
   };
   const before = bound("before"), after = bound("after");
   const page = await node(ctx).messagePage({ linkId: chat, limit, before, ...(after !== undefined && { after }) }).catch((error: unknown) => {
-    throw error instanceof Error && [before, after].some((id) => error.message === `No message ${id}`) ? new CliError("not_found", error.message) : error;
+    const missing = [before, after].find((id) => error instanceof Error && error.message === `No message ${id}`);
+    if (missing === undefined) throw error;
+    const group = chat.startsWith("group:");
+    throw noMessage(String(missing), { group, ref: str(params, group ? "group" : "chat", true) });
   });
   const originals = await originalsNow(ctx, chat, page.messages);
   return { messages: page.messages.map((m) => quoteChecked(json(m), m, originals)), more: page.more };

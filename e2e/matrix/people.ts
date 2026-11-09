@@ -186,8 +186,11 @@ export async function desktopPerson(name: string, options: {
     copyInvite: async () => {
       await run(`Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (v) => { window.qaInvite = v; } } });`);
       await person.press("Copy invite", '[data-testid="invite-card"]');
+      // An invite is a secret: the app copies it natively (`copy_secret`, marked so clipboard histories keep no copy),
+      // past the page's clipboard, and the test build's clipboard is a stand-in. The card shows the same link in full.
       let invite: string | null = null;
-      await expect.poll(async () => (invite = await run<string | null>(`return window.qaInvite ?? null;`))).not.toBeNull();
+      await expect.poll(async () => (invite = await run<string | null>(
+        `return window.qaInvite ?? document.querySelector('[data-testid="invite-card"] [data-testid="invite-link"]')?.getAttribute("title") ?? null;`))).not.toBeNull();
       return invite!;
     },
     join: async (invite) => {

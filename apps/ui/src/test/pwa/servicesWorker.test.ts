@@ -44,11 +44,11 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 /** One request through the worker's fetch handler: whether it answered, and with what. */
-function fetchThrough(request: { method?: string; path?: string; mode: string; destination: string; referrer: string }, clientId = ""): Promise<Response> | null {
+function fetchThrough(request: { method?: string; path?: string; mode: string; destination: string; referrer: string; signal?: AbortSignal }, clientId = ""): Promise<Response> | null {
   let answer: Promise<Response> | null = null;
   const method = request.method ?? "GET";
   onFetch({
-    request: { url: `${ORIGIN}${request.path ?? "/"}`, method, mode: request.mode, destination: request.destination, referrer: request.referrer,
+    request: { url: `${ORIGIN}${request.path ?? "/"}`, method, mode: request.mode, destination: request.destination, referrer: request.referrer, signal: request.signal ?? new AbortController().signal,
       headers: new Headers({ "content-type": "application/x-www-form-urlencoded" }), body: method === "GET" ? null : new Response("a=1").body },
     clientId,
     respondWith: (response) => { answer = Promise.resolve(response); },
@@ -92,6 +92,26 @@ describe("a navigation the services worker hands to the contact", () => {
   });
 });
 
+describe("an answer of the contact's app the worker passes on", () => {
+  it("carries Ghostly's viewer policy after the app's own, Hide my IP on or off, whatever policy the app sends", async () => {
+    const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
+    const { VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
+    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", label: "", owner: "", hostError: () => null };
+    for (const own of [null, "connect-src *"]) {
+      for (const relayOnly of [false, true]) {
+        // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
+        bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
+          const headers: [string, string][] = [["content-type", "text/html"], ...(own ? [["content-security-policy", own] as [string, string]] : [])];
+          void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
+        });
+        const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        const policy = relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP;
+        expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
+      }
+    }
+  });
+});
+
 describe("a request the app's page could not get an answer to", () => {
   it("is said in the profile's language and direction, as a page with nothing to run: never the worker's plain English", async () => {
     bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
@@ -113,5 +133,19 @@ describe("a request the app's page could not get an answer to", () => {
     });
     const html = await (await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!).text();
     expect(html).toContain("<html><head>");
+  });
+
+  it("passes a fetch the app gives up on before any answer on as cancelled: the page lets go of it, and its body", async () => {
+    let port: MessagePort | undefined;
+    const said: unknown[] = [];
+    bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+      port = transfer[0] as MessagePort;
+      port.onmessage = (event) => said.push(event.data);
+    });
+    const controller = new AbortController();
+    void fetchThrough({ method: "POST", path: "/up", mode: "cors", destination: "", referrer: `${ORIGIN}/`, signal: controller.signal }, "app");
+    await vi.waitFor(() => expect(port).toBeDefined());
+    controller.abort();
+    await vi.waitFor(() => expect(said).toEqual([{ type: "cancel" }]));
   });
 });

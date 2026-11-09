@@ -1,7 +1,7 @@
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { databaseName } from "@ghostly/browser/shared/idb";
-import type { StoredService } from "@ghostly/browser/shared/types";
+import type { StoredMessage, StoredService } from "@ghostly/browser/shared/types";
 import { mayReach } from "@ghostly/browser/engine/serviceAccess";
 
 /**
@@ -35,6 +35,10 @@ export interface FakeEngineControl {
   links?: { peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
   /** The apps this peer shares (`getState().services`), which `setServiceEnabled` turns on and off as the engine's does. */
   services?: StoredService[];
+  /** Per chat or group, the whole history `history` sends the client that asks for it; none sends nothing. */
+  history?: Record<string, StoredMessage[]>;
+  /** What the peer answers a page's call, as `EngineServer.handle` posts it; undefined: no answer. */
+  answer?: (method: string, params: unknown) => Promise<unknown> | undefined;
 }
 
 export function engineControl(): FakeEngineControl {
@@ -109,6 +113,8 @@ export class FakeEngineServer {
 
   async history(client: EngineClientSink, linkId: unknown): Promise<void> {
     this.histories.push({ client, linkId });
+    const messages = typeof linkId === "string" ? engineControl().history?.[linkId] : undefined;
+    if (messages) client.post({ kind: "messages", linkId: linkId as string, messages });
   }
 
   detach(client: EngineClientSink): void {
@@ -119,6 +125,8 @@ export class FakeEngineServer {
     this.handled.push({ client, request });
     // Answered once the call is over, as `EngineServer.handle` does; only the call the extension cares about runs.
     if (request?.kind === "request" && request.method === "clearProfileData") await this.node.clearProfileData();
+    const answer = request?.kind === "request" ? engineControl().answer?.(request.method, request.params) : undefined;
+    if (answer) client.post({ kind: "response", id: request.id, result: await answer });
   }
 }
 

@@ -25,19 +25,37 @@ type Window = Json & {
 /** The window's `Document`: its `execCommand` edits, as a browser's does (the runner keeps it for every other command). */
 class Document {
   execCommand(): boolean { return true; }
+  open(): void {}
+  write(): void {}
+  writeln(): void {}
 }
 
 /** The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. */
 function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }, sent: unknown[] = []) {
   const written: string[] = [];
+  /** The window's events, a class per window: `stopImmediatePropagation` marks the event, so a test sees it was called. */
+  class Event {
+    stopped = false;
+    stopImmediatePropagation(): void { this.stopped = true; }
+  }
   /** The window's listeners, by event: the runner's own are the only ones here. */
   const listeners: Record<string, (event: { isTrusted: boolean }) => void> = {};
+  /** Whether each was added for the capture phase. */
+  const capture: Record<string, unknown> = {};
+  const addEventListener = (type: string, listener: (event: { isTrusted: boolean }) => void, options?: unknown) => {
+    listeners[type] = listener;
+    capture[type] = options;
+  };
   const window = {
     origin: "null",
     atob,
+    // A window's navigator, its async Clipboard API already gone (the runner checks that none is left).
+    navigator: {},
     setTimeout,
     Date: { now: () => clock.t },
-    addEventListener: (type: string, listener: (event: { isTrusted: boolean }) => void) => { listeners[type] = listener; },
+    addEventListener,
+    EventTarget: { prototype: { addEventListener } },
+    Event,
     TextEncoder,
     // A document of its own class, as WebKit's is: the runner wraps `Document.prototype.execCommand` before any app code.
     Document,
@@ -57,7 +75,7 @@ function open(answer: (request: { type: string; id?: number }) => string, clock 
   window.window = window;
   window.self = window;
   runInNewContext(runner, window);
-  return { window, written, listeners };
+  return { window, written, listeners, capture, Event };
 }
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
@@ -103,6 +121,57 @@ it("says `activity` for the person's taps and keys, at most every 5 seconds, and
   expect(said()).toBe(1);
   listeners.keydown!({ isTrusted: true });
   expect(said()).toBe(2);
+});
+
+// A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+// listeners, and the app runs on: the runner's taps-and-keys listener goes back on as it opens, through what the runner
+// took before the app's code ran, so the lock screen still counts the person's input in the app.
+it("listens for the person's taps and keys again whenever the app opens its document again", async () => {
+  const clock = { t: 1_000 };
+  const asked: string[] = [];
+  const { window, listeners, capture } = open((request) => {
+    asked.push(request.type);
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true}`;
+  }, clock);
+  await settle();
+  const said = () => asked.filter((type) => type === "activity").length;
+  runInNewContext("addEventListener = function () {}; Reflect.apply = function () {};", window);
+  for (const name of ["open", "write", "writeln"]) {
+    delete listeners.pointerdown;
+    delete listeners.keydown;
+    runInNewContext(`Document.prototype.${name}.call(document)`, window);
+    expect([name, capture.pointerdown, capture.keydown, typeof listeners.pointerdown, typeof listeners.keydown]).toEqual([name, true, true, "function", "function"]);
+    const before = said();
+    clock.t += 5_000;
+    listeners.pointerdown!({ isTrusted: true });
+    expect(said(), name).toBe(before + 1);
+  }
+});
+
+// The person's copy or cut in the app window puts on the clipboard what they selected: the app's own listeners, which
+// could set other text in its place, never hear it. The runner's capture listener on the window runs before any of the
+// app's and stops the event there, through what it took before the app's code ran.
+it("stops the person's copy and cut before any of the app's listeners, whatever the app changed", async () => {
+  const { window, listeners, capture, Event } = open((request) => (request.type === "start" ? `"<p>bc1qREALADDRESS</p>"` : `{"id":${request.id},"ok":true}`));
+  await settle();
+  runInNewContext("Event.prototype.stopImmediatePropagation = function () {}; Reflect.apply = function () {};", window);
+  for (const type of ["copy", "cut"]) {
+    expect(capture[type], type).toBe(true);
+    const person = Object.assign(new Event(), { isTrusted: true });
+    listeners[type]!(person);
+    expect(person.stopped, type).toBe(true);
+    // One the app made puts nothing on the clipboard: it goes on to the app's listeners.
+    const made = Object.assign(new Event(), { isTrusted: false });
+    listeners[type]!(made);
+    expect(made.stopped, type).toBe(false);
+  }
+  // A document opened again erases the window's listeners: the runner's go back on as it opens.
+  for (const name of ["open", "write", "writeln"]) {
+    delete listeners.copy;
+    delete listeners.cut;
+    runInNewContext(`Document.prototype.${name}.call(document)`, window);
+    expect([name, capture.copy, capture.cut, typeof listeners.copy, typeof listeners.cut]).toEqual([name, true, true, "function", "function"]);
+  }
 });
 
 it("gives the app an answer with a __proto__ member as a key", async () => {

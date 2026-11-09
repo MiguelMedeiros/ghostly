@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -50,6 +51,19 @@ describe("app init", () => {
   it("names the app after the folder", async () => {
     const dir = join(tmp(), "My Game_2");
     expect(ok(await ghostly(["app", "init", dir]))).toMatchObject({ name: "my-game-2", title: "My game 2" });
+  });
+
+  it("says the next command with the folder quoted for a shell when it needs it", async () => {
+    const root = tmp();
+    for (const folder of ["Bad Name", "it's mine", "a$b", "plain-folder"]) {
+      const dirArg = join(root, folder);
+      const { next } = ok(await ghostly(["app", "init", dirArg])) as { next: string };
+      // The words a POSIX shell reads in the command, up to the key the person fills in.
+      const command = next.slice(0, next.indexOf(" --key "));
+      const words = execFileSync("sh", ["-c", `printf '%s\\0' ${command}`], { encoding: "utf8" }).split("\0").slice(0, -1);
+      expect(words).toEqual(["ghostly", "app", "publish", dirArg]);
+    }
+    expect(ok(await ghostly(["app", "init", join(root, "plain")])).next).toBe(`ghostly app publish ${join(root, "plain")} --key <a key file outside ${join(root, "plain")}>`);
   });
 
   it("writes nothing over a file that is there, unless --force", async () => {

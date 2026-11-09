@@ -7,19 +7,22 @@ import { openProblem } from "../lib/openFailure";
 import type { Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 
-// Published release verified through GitHub's releases API. Unknown future
-// versions link to the index until their corresponding release is verified.
-const publishedReleases: Record<string, string> = {
-  "0.4.0": "https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.4.0",
-  "1.0.0": "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1.0.0",
-};
+/**
+ * The release page of the version that runs, for a build made by .github/workflows/release.yml from its tag: it sets
+ * VITE_RELEASE_TAG (read when the build is made) for the Desktop and Android builds. A local or dev build, or one whose
+ * tag is not the version it runs, has none and links the releases index.
+ */
+function releasePage(version: string): string | undefined {
+  const tag = import.meta.env?.VITE_RELEASE_TAG;
+  return tag && tag === `v${version}` ? `${APP_WEBSITE}/releases/tag/${tag}` : undefined;
+}
 
 export function HomeProjectLinks() {
   const { t } = useI18n();
   const [version, setVersion] = useState<string>();
   const [failed, setFailed] = useState<Problem | null>(null);
   useEffect(() => { let active = true; getVersion().then(v => { if (active) setVersion(v); }).catch(() => {}); return () => { active = false; }; }, []);
-  const release = version ? publishedReleases[version] : undefined;
+  const release = version ? releasePage(version) : undefined;
   /** Desktop opens only Ghostly's own pages from here (`open_project_link`), and says when it could not. */
   const link = (href: string) => {
     const props = externalLinkProps(href, { command: "open_project_link", onError: (error) => setFailed(openProblem(error, t)) });
