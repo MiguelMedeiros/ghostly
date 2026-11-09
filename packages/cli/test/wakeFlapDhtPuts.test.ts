@@ -66,7 +66,7 @@ describe("a daemon on a network that flaps every tick of the wake watch", { time
     await vi.advanceTimersByTimeAsync(10 * MIN);
     let flip = 0, wakes = 0;
     const flapping = () => (flip++ % 2 ? "en0/10.0.0.2" : "en0/10.0.0.3");
-    stopWake = watchWake(() => { wakes++; engine.wake({ network: true }); }, { addresses: flapping });
+    stopWake = watchWake(() => { wakes++; engine.wake({ network: true }); }, { addresses: flapping, monotonic: Date.now });
     const from = puts;
     await vi.advanceTimersByTimeAsync(10 * MIN);
     // Before: 60 wakes and 12,406 puts (1,006 with no wake at all), the same every run. Now 4 wakes and 1,806 puts.

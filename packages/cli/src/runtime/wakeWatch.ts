@@ -51,6 +51,8 @@ export interface WakeWatchOptions {
   tickMs?: number;
   lateMs?: number;
   now?: () => number;
+  /** Measures the gap between wakes: a device clock set back or ahead does not move it. */
+  monotonic?: () => number;
   addresses?: () => string;
 }
 
@@ -58,7 +60,9 @@ export interface WakeWatchOptions {
 export function watchWake(onWake: (why: "sleep" | "network") => void, options: WakeWatchOptions = {}): () => void {
   const tickMs = options.tickMs ?? WAKE_TICK_MS;
   const lateMs = options.lateMs ?? WAKE_LATE_MS;
+  // The sleep check reads the wall clock (a monotonic one pauses in sleep on macOS); the gap reads the monotonic one.
   const now = options.now ?? Date.now;
+  const monotonic = options.monotonic ?? (() => performance.now());
   const addresses = options.addresses ?? (() => addressesKey());
   let last = now();
   let key = safe(addresses);
@@ -80,17 +84,18 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
     // network coming back included (relays left alone while it was gone are asked again).
     const moved = next !== "" && next !== key;
     key = next;
-    if (slept) return wake("sleep", at);
-    const due = at - wokeAt >= gap;
+    const mono = monotonic();
+    if (slept) return wake("sleep", mono);
+    const due = mono - wokeAt >= gap;
     if (!due) { held ||= moved; return; }
     if (held) {
       // The network kept changing through the whole gap: wake for the latest, and wait longer before the next one.
       gap = Math.min(gap * 2, WAKE_GAP_MAX_MS);
-      return wake("network", at);
+      return wake("network", mono);
     }
     // A whole gap since the last wake with no change: the network settled.
     gap = WAKE_GAP_MS;
-    if (moved) wake("network", at);
+    if (moved) wake("network", mono);
   }, tickMs);
   timer.unref?.();
   return () => clearInterval(timer);
