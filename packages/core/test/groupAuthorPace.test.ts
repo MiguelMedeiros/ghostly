@@ -138,7 +138,7 @@ describe("one member's messages and edits at a pace", { timeout: 60_000 }, () =>
     // A minute on, what Bob says is his own, live, not an answer to a sync long over.
     mesh.clock = start + 62_000;
     await bob.sendText("live", mesh.clock);
-    const said = mesh.sentFrames.findLast(f => f.from === bob.myKey && f.frame.t === "group-msg")!.frame;
+    const said = [...mesh.sentFrames].reverse().find(f => f.from === bob.myKey && f.frame.t === "group-msg")!.frame;
     await carol.handle(bob.myKey, clone(said));
     expect(mesh.inbox.get(carol.myKey)!.find(m => m.text === "live")?.live).toBe(true);
   });
