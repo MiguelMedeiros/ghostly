@@ -216,7 +216,7 @@ class EngineClient {
 
   /** A chat by its peer's key, or the edge of a group toward a member (payments with that member use it). */
   linkByPeer(peerPubKeyZ32: string): LinkView | undefined {
-    return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32) ?? this.state?.edges?.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
+    return linkOfPeer(this.state?.links, peerPubKeyZ32) ?? linkOfPeer(this.state?.edges, peerPubKeyZ32);
   }
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {
@@ -459,6 +459,24 @@ function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineSt
     ...(kept.identityProofs && { identityProofs: picturesBack(state.identityProofs, kept.identityProofs, before?.identityProofs, identityPicture) }),
     ...(kept.nostrOwn && { nostr: { ...state.nostr, own: picturesBack(state.nostr.own, kept.nostrOwn, before?.nostr.own, nostrPicture) } }),
   };
+}
+
+/** Per list of a state (its chats, its group edges), each view by its contact's key: made once per state, not per lookup. */
+const byPeer = new WeakMap<readonly LinkView[], Map<string, LinkView>>();
+
+/**
+ * The view in `list` with this contact's key (the first, as `find` would): each row of the chat list looks its contact
+ * up on every engine state, and a pass over the whole list for each made N rows cost N x N.
+ */
+export function linkOfPeer(list: readonly LinkView[] | undefined, peerPubKeyZ32: string | undefined): LinkView | undefined {
+  if (!list || peerPubKeyZ32 === undefined) return undefined;
+  let index = byPeer.get(list);
+  if (!index) {
+    index = new Map();
+    for (const view of list) if (!index.has(view.peerPubKeyZ32)) index.set(view.peerPubKeyZ32, view);
+    byPeer.set(list, index);
+  }
+  return index.get(peerPubKeyZ32);
 }
 
 export const engine = new EngineClient();
