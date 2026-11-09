@@ -414,6 +414,43 @@ HandshakeProxy.prototype.recv = function (payload) {
 }
 
 /**
+ * A custodial client (it hands the relay its secret key) runs no handshake of its own: HyperDHT runs it on the relay and
+ * asks the client's firewall whether to take each connection, and dht-relay 0.4.3 waits for that answer with no end.
+ * HyperDHT holds the handshake, its Noise state and the far peer's request until it comes, so a client that never
+ * answers would have the relay hold every handshake anyone sent its key. Its answer now counts as the handshakes above
+ * do: denied after `handshakeMs`, and one asked for only within the client's share of `handshakes` (a server's quarter,
+ * all servers' together leaving a quarter to its dials), else denied without asking.
+ */
+const { FirewallProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'firewall-proxy.js'))
+function firewallCrowded(firewall, limits) {
+  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  if (firewall._requests.size >= quarter) return 'listen share'
+  let waiting = 0
+  for (const server of firewall._node._servers.values()) waiting += server._firewall?._requests.size ?? 0
+  return waiting >= limits.handshakes - quarter ? 'incoming' : null
+}
+Object.defineProperty(FirewallProxy.prototype, '_deny', {
+  // dht-relay sets its own `_deny` in the constructor; this keeps a bounded one in its place.
+  set(deny) {
+    Object.defineProperty(this, '_deny', {
+      value: (...args) => {
+        const limits = this._node._limits ?? DEFAULT_LIMITS
+        const why = firewallCrowded(this, limits)
+        if (why) {
+          this._node._refused?.('refused handshake', why)
+          return Promise.resolve(true)
+        }
+        const answer = deny(...args)
+        // deny() has just put its request last in the map: answered as a deny once the wait is over.
+        const id = [...this._requests.keys()].at(-1)
+        const timer = setTimeout(() => this._requests.get(id)?.(true), limits.handshakeMs)
+        return answer.finally(() => clearTimeout(timer))
+      },
+    })
+  },
+})
+
+/**
  * The address a client counts against. Behind Cloudflare (`cloudflare`), `CF-Connecting-IP`, which its edge writes
  * over the client's. Behind `proxies` reverse proxies (a tunnel, nginx), the entry that many from the end of
  * `X-Forwarded-For` (the ones before it are the client's to write). Otherwise, or without the header, the socket's.
