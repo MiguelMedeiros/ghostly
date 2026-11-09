@@ -6,6 +6,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink, WakeSubscription } from "../src/shared/types";
+import { hostOf } from "./helpers/urlHost";
 
 // covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group, push.wake.online
 
@@ -211,7 +212,7 @@ describe("waking a contact whose app is closed", () => {
     const calls: { url: string; body: unknown }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, body: init.body });
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       return new Response(JSON.stringify({ status: 201 }), { status: 200 });
     }));
     const node = engine();
@@ -235,7 +236,7 @@ describe("waking a contact whose app is closed", () => {
     let relay = () => new Response("<html>Not Found</html>", { status: 404 });
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -269,7 +270,7 @@ describe("waking a contact whose app is closed", () => {
       const posts: string[] = [];
       let relay = failure;
       vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-        if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+        if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
         try { const answer = relay(); posts.push(answer.ok && (await answer.clone().json() as { status: number }).status === 201 ? "ok" : "fail"); return answer; }
         catch (error) { posts.push("fail"); throw error; }
       }));
@@ -325,7 +326,7 @@ describe("waking a contact whose app is closed", () => {
     let relay: () => Response | Promise<Response> = () => new Response("<!doctype html><title>My site</title>", { status: 200, headers: { "Content-Type": "text/html" } });
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -372,7 +373,7 @@ describe("waking a contact whose app is closed", () => {
     let relay: () => Response | Promise<Response> = () => { throw new TypeError("Failed to fetch"); };
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
