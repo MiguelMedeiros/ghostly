@@ -9,7 +9,7 @@ import { servicesPlatform } from "../lib/platform";
 import { knownChatKeys, ownsKey } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, registryKey, renameProfile, settingsKeyFor, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, onOwnThemeSaved, registryKey, renameProfile, settingsKeyFor, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
@@ -43,11 +43,14 @@ function useProfiles() {
   useEffect(() => {
     const changed = () => bump((n) => n + 1);
     const stored = (event: StorageEvent) => { if (showsKey(event.key)) changed(); };
-    for (const name of ["profiles-updated", "settings-updated"]) window.addEventListener(name, changed);
+    window.addEventListener("profiles-updated", changed);
     window.addEventListener("storage", stored);
+    // This profile's settings: the page draws with them already; only its colour is read from the saved copy.
+    const stopTheme = onOwnThemeSaved(changed);
     return () => {
-      for (const name of ["profiles-updated", "settings-updated"]) window.removeEventListener(name, changed);
+      window.removeEventListener("profiles-updated", changed);
       window.removeEventListener("storage", stored);
+      stopTheme();
     };
   }, []);
   return { current: currentProfile(), all: listProfiles() };
