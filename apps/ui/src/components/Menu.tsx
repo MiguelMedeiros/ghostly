@@ -147,8 +147,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   // had it as the menu opened, its button. A row that moved the focus elsewhere keeps it there, and a field is left
   // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
   // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
+  const openedFrom = useRef<Element | null>(null);
   useLayoutEffect(() => {
     const opener = document.activeElement, menu = ref.current;
+    openedFrom.current = opener;
     return () => {
       if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
       if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
@@ -159,6 +161,18 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
     const rows = usable(ref.current);
+    // Hung on the page's body, a portal's popover comes last in the Tab order: Tab past its last row went to the top of
+    // the page, behind whatever layer it opened from (a whole-window call), the menu still open. It takes the place a
+    // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes.
+    if (portal && !phone && (e.key === "Tab" || e.code === "Tab") && rows.length) {
+      const opener = openedFrom.current;
+      const leaving = e.shiftKey ? document.activeElement === rows[0] : document.activeElement === rows[rows.length - 1];
+      if (!leaving || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected) return;
+      opener.focus({ preventScroll: true });
+      if (e.shiftKey) e.preventDefault();
+      onClose();
+      return;
+    }
     if (!rows.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const at = rows.indexOf(document.activeElement as HTMLElement);
