@@ -13,6 +13,7 @@ import { ProviderMark } from "./ProviderMark";
 import { useI18n } from "../../contexts/I18nContext";
 import "./identity-share.css";
 import { problemLine } from "../../lib/problemText";
+import { fillNames, fillNodes } from "../../lib/fillNodes";
 
 /**
  * Where a share stands now. A share that stopped later (the next entry of that identity on that side is a stop) is
@@ -60,11 +61,13 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
     received: mine ? undefined : link?.identities?.received.find(r => r.id === entry.proof),
     contact, t, language,
   });
-  const what = card.subject ? `${card.label} · ${card.short}` : card.label;
+  // The contact's name and the identity, each its own <bdi> in the sentence as fillNames puts them, the handle left to
+  // right as on the card's face: "Ana (work)" and "GitHub (SSH key)" keep their brackets on their side in Arabic.
+  const names = { contact: <bdi>{contact}</bdi>, what: <bdi>{card.label}{card.subject && <> · <bdi dir="ltr">{card.short}</bdi></>}</bdi> };
   if (entry.kind === "stopped") {
-    const text = entry.reason === "revoked"
-      ? (mine ? t("identities.share.revokedMine", { what }) : t("identities.share.revokedTheirs", { contact, what }))
-      : (mine ? t("identities.share.stoppedMine", { what }) : t("identities.share.stoppedTheirs", { contact, what }));
+    const text = fillNodes(t(entry.reason === "revoked"
+      ? (mine ? "identities.share.revokedMine" : "identities.share.revokedTheirs")
+      : (mine ? "identities.share.stoppedMine" : "identities.share.stoppedTheirs")), names);
     return (
       <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="identity-share" data-side={entry.side} data-kind="stopped">
         <button type="button" onClick={() => onOpen(entry)}
@@ -92,7 +95,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <IdCardFace card={card} />
       </button>
       <p className="m-0 inline-flex max-w-full items-baseline gap-1.5 rounded-lg bg-surface-alt/80 px-2.5 py-1 text-xs text-text-secondary">
-        <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : t("identities.share.captionTheirs", { contact })}</span>
+        <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : fillNames(t("identities.share.captionTheirs"), { contact })}</span>
         {time}
       </p>
       {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t)}</p>}
