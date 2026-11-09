@@ -1,7 +1,7 @@
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { databaseName } from "@ghostly/browser/shared/idb";
-import type { StoredService } from "@ghostly/browser/shared/types";
+import type { StoredMessage, StoredService } from "@ghostly/browser/shared/types";
 import { mayReach } from "@ghostly/browser/engine/serviceAccess";
 
 /**
@@ -35,6 +35,8 @@ export interface FakeEngineControl {
   links?: { peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
   /** The apps this peer shares (`getState().services`), which `setServiceEnabled` turns on and off as the engine's does. */
   services?: StoredService[];
+  /** Per chat or group, the whole history `history` sends the client that asks for it; none sends nothing. */
+  history?: Record<string, StoredMessage[]>;
 }
 
 export function engineControl(): FakeEngineControl {
@@ -109,6 +111,8 @@ export class FakeEngineServer {
 
   async history(client: EngineClientSink, linkId: unknown): Promise<void> {
     this.histories.push({ client, linkId });
+    const messages = typeof linkId === "string" ? engineControl().history?.[linkId] : undefined;
+    if (messages) client.post({ kind: "messages", linkId: linkId as string, messages });
   }
 
   detach(client: EngineClientSink): void {

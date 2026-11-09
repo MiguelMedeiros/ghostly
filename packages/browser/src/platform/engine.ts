@@ -50,6 +50,8 @@ class EngineClient {
   private readonly held = new Set<string>();
   /** Per chat, how many readers hold its whole history here (`keepWhole`). */
   private readonly kept = new Map<string, number>();
+  /** The groups held or asked for when the peer went away: the next connection asks their whole history again. */
+  private readonly reread = new Set<string>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -136,6 +138,7 @@ class EngineClient {
     this.partial.clear();
     this.asked.clear();
     this.held.clear();
+    this.reread.clear();
     this.changed.clear();
   }
 
@@ -236,7 +239,8 @@ class EngineClient {
         () => {
           this.connection = null;
           // The next connection is sent each chat again: what it asked for, it asks again. A group's list here is no
-          // longer kept current: read again when it is asked for.
+          // longer kept current: read again once connected (a group open now asks nothing again), and when asked for.
+          for (const id of [...this.held, ...this.asked]) if (id.startsWith("group:")) this.reread.add(id);
           this.asked.clear();
           this.held.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
@@ -247,6 +251,9 @@ class EngineClient {
       .then((connection) => {
         this.connection = connection;
         this.setReconnecting(false);
+        const reread = [...this.reread];
+        this.reread.clear();
+        for (const id of reread) this.history(id);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
