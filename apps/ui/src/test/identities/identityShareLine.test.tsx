@@ -128,6 +128,20 @@ describe("IdentityShareLine", () => {
     expect(status()).toBe("Not checked");
   });
 
+  it("turns the contact's card Not checked when its challenge window ends, with no other change to draw it again", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() }));
+      act(() => { vi.advanceTimersByTime(299_000); });
+      expect(status()).toBe("Checking");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(card()).toHaveAttribute("data-state", "unanswered");
+      expect(status()).toBe("Not checked");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows on the same card that the share stopped later: no longer shared, or revoked, on both sides, and never a card that still looks valid", () => {
     const publicProfile: PublicProfileView = { found: true, name: "Pat", avatar: AVATAR, hosts: ["relay.damus.io"], fetchedAt: now() - 60 };
     const stop = (of: IdentityTimelineEntry, reason: "withdrawn" | "revoked"): IdentityTimelineEntry => ({ id: `${of.side}:${of.proof}:1`, proof: of.proof, side: of.side, kind: "stopped", provider: of.provider, subject: of.subject, reason, at: of.at + 500 });
