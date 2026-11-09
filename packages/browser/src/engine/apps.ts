@@ -668,7 +668,10 @@ export class Apps {
   /** Drops `previewed` past `STAGED.ms`: an index is up to 4 MiB, and a closed Add screen sends no call. */
   private previewedSweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
-  /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
+  /**
+   * Runs the person started with Run anyway (`<ref> <digest>`): a removal does not cut them off. Only that run's: dropped
+   * when the version starts without it, when a call finds it no longer removed, and at Uninstall.
+   */
   private readonly anyway = new Set<string>();
   /** The apps started here (`entry`), for this engine's life: one of them uninstalled since may still have a frame open. */
   private readonly ran = new Set<string>();
@@ -855,6 +858,8 @@ export class Apps {
     const version = this.versionRunning(app, digest);
     const run = this.runStatus(version, await this.heldViews(), app.revocations);
     if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
+    // Its removal went: a later one is one the person never chose to run past.
+    if (run.status === "ok") this.anyway.delete(`${version.ref} ${version.digest}`);
     if (run.status === "removed" && !this.anyway.has(`${version.ref} ${version.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     return app;
   }
@@ -2066,7 +2071,9 @@ export class Apps {
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
+    // Run anyway is this run's alone: one started without it takes the pass from that version.
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
+    else this.anyway.delete(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app, true);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
     this.ran.add(app.ref);
@@ -2166,6 +2173,7 @@ export class Apps {
     try { await done(tx); } finally { this.held.delete(ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${ref}\0`)) this.usage.delete(key);
     this.started.delete(ref);
+    for (const key of [...this.anyway]) if (key.startsWith(`${ref} `)) this.anyway.delete(key);
     if (!app) return;
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
