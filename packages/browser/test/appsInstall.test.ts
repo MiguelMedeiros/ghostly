@@ -1370,6 +1370,47 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.chatRunnable({ ref: v1.ref });
   });
 
+  it("Run anyway is for its run: a later normal run of that version is cut off when a store removes it again", async () => {
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    await store.entry({ ref: v1.ref, runAnyway: true });
+    // The store lists it again, and the person opens it normally.
+    await net.putStore(await storeFiles({ sequence: 2 }));
+    await store.refreshStores();
+    expect((await store.runCheck({ ref: v1.ref })).status).toBe("ok");
+    await store.entry({ ref: v1.ref });
+    await net.putStore(await storeFiles({ sequence: 3, removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware again", at: NOW_MS / 1000 }] }));
+    await store.refreshStores();
+    await cutOff(store, v1.ref);
+  });
+
+  it("Run anyway is for its run: the removal going ends it, and so does Uninstall", async () => {
+    const removedBy = async (sequence: number, reason: string) => {
+      await net.putStore(await storeFiles({ sequence, removed: [{ ref: v1.ref, digest: v1.digest, reason, at: NOW_MS / 1000 }] }));
+      await store.refreshStores();
+    };
+    const { v1, store } = await running();
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    await store.entry({ ref: v1.ref, runAnyway: true });
+    // Its removal goes, and a call of the run sees the version ok: a new removal is one the person never chose to run past.
+    await net.putStore(await storeFiles({ sequence: 2 }));
+    await store.refreshStores();
+    await store.storageGet({ ref: v1.ref, scope: "chat-1", key: "game" });
+    await removedBy(3, "Malware again");
+    await cutOff(store, v1.ref);
+    // Run anyway again, then Uninstall, and installed again once the store lists it: a frame of the new install gets no pass.
+    await store.entry({ ref: v1.ref, runAnyway: true });
+    await store.uninstall({ ref: v1.ref });
+    await net.putStore(await storeFiles({ sequence: 4 }));
+    await store.refreshStores();
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await removedBy(5, "Malware once more");
+    await cutOff(store, v1.ref);
+  });
+
   it("a publisher's revocation cuts it off, Run anyway or not", async () => {
     const { v1, store } = await running();
     await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
