@@ -57,12 +57,13 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   // The identity as this app holds it now (mine: my proof, theirs: what the contact presented), else as the entry kept it.
   const state: ShareState = entry.kind === "stopped" ? (entry.reason === "revoked" ? "revoked" : "withdrawn") : shareState(entry, link);
   // The contact's share still being checked turns Not checked when its window ends: nothing else draws the line again
-  // then. Once more after each wake while it still checks (a clock set back wakes it early).
+  // then. Once more after each wake while it still checks (a clock set back wakes it early). Never past the longest a
+  // timer holds (about 24.8 days): one set further fires at once, and each wake set the next, a draw every millisecond.
   const [wakes, wake] = useReducer((n: number) => n + 1, 0);
   const expires = state === "verifying" && !mine ? entry.at + IDENTITY_CHALLENGE_WINDOW * 1000 : undefined;
   useEffect(() => {
     if (expires === undefined) return;
-    const timer = setTimeout(wake, Math.max(0, expires - Date.now()) + 1);
+    const timer = setTimeout(wake, Math.min(Math.max(0, expires - Date.now()) + 1, 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [expires, wakes]);
   const card = shareIdCard(entry, state, {
