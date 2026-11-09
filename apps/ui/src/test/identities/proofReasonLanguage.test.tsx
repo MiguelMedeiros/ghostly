@@ -52,6 +52,19 @@ describe("why a contact's proof failed this app's check, in the app's language",
     expect(shareReason(raw, "ar")).toBe("تعذّر التحقق من هذا الإثبات");
   });
 
+  it("a check that could not run (a host down) says to try again later, not that the proof is bad (agents#3781)", () => {
+    expect(shareReason("github.com could not be reached: Failed to fetch", "pt")).toBe("Sem acesso a github.com. Tente de novo mais tarde.");
+    expect(shareReason("The homeserver homeserver.pubky.app answered 502", "ar")).toBe("لم يقدّم homeserver.pubky.app ملف الإثبات. حاول مرة أخرى لاحقًا.");
+  });
+
+  it("the reason's tooltip, which reads a cut line in full, is the line as shown, not the English", () => {
+    const view = renderApp(<IdentityShareLine entry={entry("GitHub has no account octocat-old")} link={undefined} contact="Alice" onOpen={vi.fn()} />, { language: "pt" });
+    const reason = screen.getByTestId("identity-share-reason");
+    expect(reason).toHaveAttribute("title", reason.textContent!);
+    expect(reason.title).not.toMatch(/has no account/);
+    view.unmount();
+  });
+
   it("on the back of the contact's card, a GitHub account gone reads in Portuguese", async () => {
     const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={vi.fn()} />, { language: "pt" });
     document.documentElement.dataset.reduceMotion = "true";
