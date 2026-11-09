@@ -667,6 +667,23 @@ const RULES: readonly Rule[] = [
   exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
   exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
   exact("Your contact could not verify it", "errors.proof.contactRefused"),
+  // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
+  // did.ts, domain.ts, core didDht.ts, engine/identities.ts): a host, resolver or relay down says nothing about the proof,
+  // so it reads as that and "try again later", never as the proof fallback's "couldn't be verified" (agents#3781). The
+  // host stays a value; an address the contact chose, a status code or a resolver's name goes behind the ⓘ.
+  { match: /^(?<domain>\S+) could not be reached: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The (?:account's server|homeserver) \(?(?<domain>[^\s()]+)\)? could not be reached$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext" },
+  { match: /^The (?:account's server|homeserver) (?<domain>\S+) was not contacted: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<domain>\S+) answered \d{3}$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<host>\S+) answers on port \d+; only port 443 is contacted$/, key: "errors.proof.homeserverPort", detail: true },
+  { match: /^The account's server \((?<host>\S+)\) did not send the record$/, key: "errors.proof.serverNoRecord", next: "errors.proof.laterNext" },
+  { match: /^Unexpected answer from (?<host>\S+)$/, key: "errors.proof.hostBadAnswer", next: "errors.proof.laterNext" },
+  { match: /^(?<domain>\S+) could not be reached\. It must serve https:\/\/\S+ over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?<domain>\S+) answered with a redirect; it must serve exactly https:\/\/\S+$/, key: "errors.proof.hostRedirect", next: "errors.proof.redirectNext", detail: true },
+  { match: /^(?<domain>\S+) answered \d{3} for https:\/\/\S+$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) (?:could not resolve \S+|sent an unusable answer|sent an answer that is too large)$/, key: "errors.proof.resolverFailed", next: "errors.proof.resolverNext", detail: true },
+  { match: /^No Pkarr relay (?:answered for this did:dht|to ask)$/, key: "errors.relays.noneAnswered", next: "errors.relays.noneAnsweredNext", detail: true },
+  { match: /^Hide my IP from contacts is on: \S+, a server your contact chose, was not contacted$/, key: "errors.proof.hiddenIpNotContacted", detail: true },
   // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
   { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
   { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
