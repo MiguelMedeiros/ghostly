@@ -740,6 +740,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   testMintOnMainnet: "errors.engine.testMintOnMainnet",
   realMintOnTestnet: "errors.engine.realMintOnTestnet",
   mintHoldsSats: "errors.engine.mintHoldsSats",
+  mintFailedQuote: "errors.engine.mintFailedQuote",
+  mintFailedFaucet: "errors.engine.mintFailedFaucet",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -800,6 +802,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   lastMint: "errors.engine.lastMintNext",
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
+  mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
@@ -808,7 +812,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 

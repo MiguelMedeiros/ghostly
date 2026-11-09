@@ -533,6 +533,11 @@ describe("errors", () => {
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
     expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
+    // A mint that failed `pay`'s quote or `wallet faucet` (a 500, a closed socket) said only its own words ("internal
+    // error"): now it is named, with nothing paid and the next step, its words kept last. Its code is still `engine`.
+    const mint = { host: "testnut.cashu.space", reason: "internal error" };
+    expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
+    expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

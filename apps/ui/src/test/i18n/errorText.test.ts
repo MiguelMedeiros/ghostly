@@ -992,6 +992,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     for (const language of LANGUAGES) expect(errorText(raw, translators[language]), language).not.toContain("no route");
   });
 
+  it("a mint that failed a quote or the faucet is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const values = { host: "testnut.cashu.space", reason: "fetch failed (other side closed, UND_ERR_SOCKET) at https://testnut.cashu.space" };
+    const quote = engineText("mintFailedQuote", values), faucet = engineText("mintFailedFaucet", values);
+    expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
+    expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
+    for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
     expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
     expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));

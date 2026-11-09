@@ -32,6 +32,15 @@ export function mintRefused(error:unknown):boolean{
  * those outputs is ever signed; new ones on the keyset it signs with now can be. cashu-ts says it in its own English,
  * which is never shown to a person.
  */
+/**
+ * The mint failed, and said nothing of the request: a server error (5xx, "internal error"), or no answer at all (a
+ * closed connection, cashu-ts's `NetworkError`). Unlike a refusal, it may work later. By name, as `mintRefused`.
+ */
+export function mintFailed(error:unknown):boolean{
+ if(!(error instanceof Error))return false;
+ const status=(error as {status?:unknown}).status;
+ return error.name==='NetworkError' || (error.name==='HttpResponseError' && typeof status==='number' && status>=500);
+}
 export function keysetRefused(error:unknown):boolean{
  return error instanceof Error && error.name==='StaleKeysetError' && mintRefused(error);
 }
