@@ -55,10 +55,14 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   const searched = !!search.term.trim() && search.term === search.query;
   const more = t("common.moreInfo");
   return (
-    <div data-testid="chat-search" className="chat-search-bar shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
-      {/* On a phone the buttons' own 44 px keep them apart: the gaps go to the words, on the narrowest phone too. */}
-      <div role="search" className="flex items-center gap-1 max-md:gap-0">
-        <SearchIcon className="shrink-0 text-text-muted" />
+    <div data-testid="chat-search" className="chat-search-bar @container shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
+      {/* On a phone the buttons' own 44 px keep them apart: the gaps go to the words, on the narrowest phone too. There
+          (under md, where they are 44 px) and under 28rem (a phone held upright) the count takes its own line under the
+          field, which keeps the field's width for the words in every language ("Nenhum resultado" left it 12 px at
+          320 px); under 20rem the magnifier gives its room too. Two panes keep one line: their 32 px buttons leave the
+          words room, and a phone on its side has 162 px above the keyboard, where a taller bar hid the message found. */}
+      <div role="search" className="flex items-center gap-1 max-md:gap-0 max-md:@max-[28rem]:flex-wrap">
+        <SearchIcon className="shrink-0 text-text-muted max-md:@max-[20rem]:hidden" />
         <input
           ref={search.inputRef}
           autoFocus
@@ -77,7 +81,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           aria-label={t("chat.search.placeholder")}
           className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
-        <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted">
+        <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted max-md:@max-[28rem]:order-last max-md:@max-[28rem]:basis-full max-md:@max-[28rem]:ps-5.5 max-md:@max-[20rem]:ps-1.5">
           {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.index, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
         </span>
         <button type="button" data-testid="chat-search-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
