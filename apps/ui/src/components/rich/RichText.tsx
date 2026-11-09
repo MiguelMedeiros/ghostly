@@ -16,7 +16,8 @@ function Spoiler({ children }: { children: React.ReactNode }) {
   const [shown, setShown] = useState(false);
   const chat = useCueChat();
   const reveal = () => { setShown(true); playCue("spoiler", { chat }); };
-  if (shown) return <span data-testid="rich-spoiler" data-shown="" className="rich-spoiler-shown">{children}</span>;
+  // The same span, still focusable but out of the Tab order: one revealed from the keyboard keeps the focus on its text.
+  if (shown) return <span data-testid="rich-spoiler" data-shown="" tabIndex={-1} className="rich-spoiler-shown">{children}</span>;
   return (
     <span
       data-testid="rich-spoiler"
