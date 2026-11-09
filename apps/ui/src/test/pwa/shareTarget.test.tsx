@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageInput } from "../../components/MessageInput";
@@ -195,6 +196,105 @@ describe("in the composer", () => {
     });
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("");
     expect(takeShareFor("chat-1")?.text).toBe("for chat 1");
+  });
+});
+
+describe("in a composer editing one of my messages", () => {
+  const onSend = vi.fn(async () => null);
+  const onSendFile = vi.fn(async () => null);
+  const onSave = vi.fn(async (_text: string) => null);
+  beforeEach(() => { onSave.mockClear(); onSend.mockClear(); });
+
+  /** A chat's composer (or a group's, which takes no files) with an edit of `m1` open and "my draft" set aside. */
+  function Editing({ draftId = "chat-1", group = false }: { draftId?: string; group?: boolean }) {
+    const [editing, setEditing] = useState(true);
+    return <LockScreenProvider>
+      <MessageInput draftId={draftId} onSend={onSend} onSendFile={group ? undefined : onSendFile} maxLength={16_384} textBytes={16_384}
+        edit={editing ? { key: "m1", text: "my old words", snippet: "my old words", onSave, onClose: () => setEditing(false) } : undefined} />
+    </LockScreenProvider>;
+  }
+  const field = () => screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+  const deliver = (chat: string, patch: Partial<IncomingShare>) => act(() => {
+    receiveShare(share(patch));
+    sendShareTo(chat);
+  });
+
+  it("a shared text leaves the edit alone; Enter saves the edit without it, and it goes in the draft that comes back", async () => {
+    setSessionDraft("chat-1", "my draft");
+    const { user } = renderApp(<Editing />);
+    expect(field().value).toBe("my old words");
+    deliver("chat-1", { text: "SHARED TEXT" });
+    expect(field().value).toBe("my old words");
+    await user.click(field());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("composer-edit")).toBeNull());
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toBe("my old words");
+    expect(field().value).toBe("my draft\nSHARED TEXT");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(takeShareFor("chat-1")).toBeNull();
+  });
+
+  it("Escape (the edit left) keeps it: the draft comes back with the shared text in it", async () => {
+    setSessionDraft("chat-1", "my draft");
+    const { user } = renderApp(<Editing />);
+    deliver("chat-1", { text: "SHARED TEXT" });
+    expect(field().value).toBe("my old words");
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("composer-edit")).toBeNull();
+    expect(field().value).toBe("my draft\nSHARED TEXT");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("shared files are left waiting, never dropped, and go on the sheet once the edit ends", async () => {
+    const { user } = renderApp(<Editing />);
+    deliver("chat-1", { text: "Look", files: [file()] });
+    expect(field().value).toBe("my old words");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("ghost.txt");
+    expect(field().value).toBe("Look");
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("files still being read as an edit begins wait for it to end, never dropped", async () => {
+    let done!: (files: File[]) => void;
+    const read = vi.fn(() => new Promise<File[]>((resolve) => { done = resolve; }));
+    function Later() {
+      const [editing, setEditing] = useState(false);
+      return <LockScreenProvider>
+        <button onClick={() => setEditing(true)}>edit it</button>
+        <MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile}
+          edit={editing ? { key: "m1", text: "my old words", snippet: "my old words", onSave, onClose: () => setEditing(false) } : undefined} />
+      </LockScreenProvider>;
+    }
+    const { user } = renderApp(<Later />);
+    deliver("chat-1", { files: [{ name: "photo.jpg", size: 3, type: "image/jpeg" }], read });
+    expect(read).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByText("edit it"));
+    expect(field().value).toBe("my old words");
+    await act(async () => done([file("photo.jpg")]));
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("photo.jpg");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("a group's composer: the same, the edit saved without the shared text and the text in the draft after", async () => {
+    setSessionDraft("group:g1", "my draft");
+    const { user } = renderApp(<Editing draftId="group:g1" group />);
+    deliver("group:g1", { text: "SHARED TEXT" });
+    expect(field().value).toBe("my old words");
+    await user.click(field());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("composer-edit")).toBeNull());
+    expect(onSave.mock.calls[0]![0]).toBe("my old words");
+    expect(field().value).toBe("my draft\nSHARED TEXT");
   });
 });
 

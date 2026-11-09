@@ -65,6 +65,7 @@ import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -434,16 +435,17 @@ export function GroupChat() {
   replyingRef.current = replyingTo;
   /**
    * The message of mine the composer edits (WISP 902 § Edits). Only while the group has it: deleted meanwhile, the edit
-   * ends, its words with it, and the draft set aside comes back.
+   * ends, its words with it, and the draft set aside comes back. Kept per group while the page is away or on another
+   * group (lib/keptEdits.ts), as a 1:1 chat's is; until this group's own list is read again, it stays as it was kept.
    */
-  const [chosenEdit, setEditing] = useState<StoredMessage | null>(null);
-  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex, true) ? chosenEdit : null;
-  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
-  useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
+  const [chosenEdit, setEditing] = useKeptEdit<StoredMessage>(`group:${groupId}`);
+  const editing = chosenEdit && (loaded.groupId !== groupId || heldOriginal(chosenEdit, quoteIndex, true)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
+  useEffect(() => { setReplyingTo(null); }, [groupId]);
   // The group no longer takes my messages (removed, left on another device): the composer under the bars is off, and
   // they go. Not while it is off for a moment in a group still active (a join or removal past 16 members).
   const closed = !!rosterGroup && !rosterGroup.canSend && rosterGroup.status !== "active";
-  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed]);
+  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed, setEditing]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
   const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
