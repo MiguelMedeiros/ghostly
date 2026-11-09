@@ -28,6 +28,8 @@ export const RUST_INPUTS = [
   "native/transports/",
   "Cargo.toml",
   "Cargo.lock",
+  // The compiler, clippy and rustfmt the job runs: a bump is checked before it merges.
+  "rust-toolchain.toml",
   // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
   "apps/web/public/app-frame.html",
   "packages/core/src/miniApp.ts",

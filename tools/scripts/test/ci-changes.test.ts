@@ -221,6 +221,11 @@ describe("plan", () => {
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
   });
 
+  it("a Rust toolchain bump alone runs the Rust jobs, so the new clippy and rustfmt are met before it merges", () => {
+    expect(plan(["rust-toolchain.toml"], ready).rust).toBe(true);
+    expect(plan(["rust-toolchain.toml"], draft).rust).toBe(true);
+  });
+
   it("no file list (a push, too many files) turns every path gate on, and the tier still applies", () => {
     expect(plan(null, ready)).toMatchObject({ rust: true, website: true, website_e2e: true, app: true, packages: true, full: true, affected: false });
     expect(plan(null, draft)).toMatchObject({ rust: false, website: true, website_e2e: false, app: false, packages: false, full: false, affected: true });

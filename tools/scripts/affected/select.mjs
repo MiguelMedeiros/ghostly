@@ -108,6 +108,7 @@ export const UNIT_PROJECTS = [
       "packages/cli/package.json": ["npmPublish"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
+      "rust-toolchain.toml": ["rustToolchain"],
       "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
       "{packages/cli/vite.config.ts,e2e/fixtures/chess/**}": ["storeKeys"],
@@ -185,7 +186,7 @@ export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
 /** The Rust crates, as CI's Tauri job checks them. */
 export const RUST = [
-  { name: "desktop", sources: ["apps/desktop/**", "native/transports/**", "Cargo.toml", "Cargo.lock"] },
+  { name: "desktop", sources: ["apps/desktop/**", "native/transports/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"] },
 ];
 
 /** The Playwright config of the web and extension projects: a change there can change every spec. */
