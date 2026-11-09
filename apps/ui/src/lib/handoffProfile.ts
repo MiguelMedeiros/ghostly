@@ -416,9 +416,11 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
-    await dropFileSpace(database).catch(() => {});
+    const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);
+    // Files that stayed are said: whoever names this namespace keeps naming it, and drops it again later.
+    if (files) throw files;
   },
 };
 

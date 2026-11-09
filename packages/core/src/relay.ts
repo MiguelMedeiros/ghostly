@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, PKARR_FUTURE_SKEW_MS, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, PublishFailedError, publishedNowhere, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
@@ -539,6 +539,11 @@ function laterRound(first: unknown, later: unknown): unknown {
   return publishedNowhere(later) && !publishedNowhere(first) ? new PublishFailedError((later as Error).message, true) : later;
 }
 
+/** A packet date no further ahead of this clock than readers take (`newerPacket`): one this client may date past. */
+function withinSkew(timestamp: bigint): boolean {
+  return timestamp <= BigInt(Date.now() + PKARR_FUTURE_SKEW_MS) * 1000n;
+}
+
 /**
  * A read the relays failed (or left alone for failing before), when its caller has another path to ask
  * (`RelayTransport.resolve` with `keptOnFailure` false): `kept` is the newest packet the relays gave for the key before.
@@ -560,7 +565,9 @@ export class RelayTransport implements PkarrTransport {
    * records are written by every member, an inviter warms its contact's key with an empty packet, and this device's
    * own clock may have been set back since it last wrote. A relay and the DHT keep only the packet dated latest, so
    * one dated by this clock alone, when it is behind, was refused (409) or silently never read, until this clock
-   * caught up with the other one: minutes, or an hour.
+   * caught up with the other one: minutes, or an hour. Only up to `PKARR_FUTURE_SKEW_MS` ahead of this clock
+   * (`withinSkew`): a packet one holder of a shared key dated further ahead must not date every later one of this
+   * device past it (past 64 bits, unsignable; else ahead of every reader's clock, never taken over one dated now).
    */
   private readonly seenTimestamp = new Map<string, bigint>();
   /**
@@ -800,7 +807,8 @@ export class RelayTransport implements PkarrTransport {
       redated = (async () => {
         const held = read ? await read().catch(() => null) : await this.heldAt(relay, key, asker(options, true));
         // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
-        if (held === null || held < timestamp) return false;
+        // Dated too far ahead to follow (`seenTimestamp`): that relay keeps it, the others take this one.
+        if (held === null || held < timestamp || !withinSkew(held)) return false;
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
         // A later publication of this key took over meanwhile: it is dated past what was just read.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
@@ -875,7 +883,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** A packet under this key was read (on a relay, or by the CLI on the DHT): its time, for `nextTimestamp`. */
   sawTimestamp(pubKeyZ32: string, timestamp: bigint): void {
-    if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
+    if (withinSkew(timestamp) && timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
   }
 
   /**
@@ -927,7 +935,7 @@ export class RelayTransport implements PkarrTransport {
       redated = (async () => {
         const held = await this.heldAt(relay, key, asker(options, true));
         // Not dated at or after this one: the relay was still putting another packet. The caller tries again, as before.
-        if (held === null || held < timestamp) return false;
+        if (held === null || held < timestamp || !withinSkew(held)) return false;
         // A later packet of this key went out meanwhile: it is dated past this one, and is what the relays should hold.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
         const again = options.redate!(held);

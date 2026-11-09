@@ -65,8 +65,9 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
-import { handOverCall, takeHandedCall } from "../lib/lockedRing";
+import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
+import { othersName } from "../lib/groups";
 import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
@@ -88,7 +89,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { servicesPlatform, type WalletNetwork } from "../lib/platform";
@@ -356,8 +357,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
-  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
+  const ringing = ringingCall(webrtc.ringingOffer);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), ringing.ts);
   // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
   // when closed, or when the chat's next call starts.
   useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
@@ -366,10 +368,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
-  const incomingHasVideo = (() => {
-    if (!incomingCallSignal) return false;
-    return signalHasVideo(parseCallSignal(incomingCallSignal));
-  })();
+  const incomingHasVideo = ringing.video;
 
   const paired = session?.profile === "paired-chat/1";
   // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
@@ -736,8 +735,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // The name in the lines that have a twin of mine ("You reacted…", a reply's "You", "You chose WebRTC"): a contact
+  // named as the app calls me is quoted there (`othersName`).
+  const lineName = useMemo(() => othersName(shownName, t), [shownName, t]);
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
-  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
+  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: lineName, contact: true }), [sessionId, lineName]);
   // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts): no
   // name in it while the app lock is on.
   useCallService(
@@ -751,14 +753,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId, incomingCallSignal);
+    const video = takeHandedCall(sessionId, ringing.signal);
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
@@ -780,7 +782,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const react = useHandler((messageId: string, emoji: string) => {
     if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
   });
-  const reactionName = useCallback((by: string) => by === "peer" ? shownName : by.slice(0, 8), [shownName]);
+  const reactionName = useCallback((by: string) => by === "peer" ? lineName : by.slice(0, 8), [lineName]);
   // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
   const pin = paired ? chatLink?.pin : undefined;
   const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
@@ -817,7 +819,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
-  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
+  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? lineName : undefined;
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -1169,9 +1171,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {(() => {
             const drawn = timeline.slice(rowWindow.from, rowWindow.to);
             const draw = (row: (typeof drawn)[number]) => row.kind === "transport"
-              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={lineName} />
               : row.kind === "identity"
-              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={lineName}
                 onOpen={e => {
                   // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
                   if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
@@ -1184,7 +1186,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 peerAck={peerAck}
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
-                contactName={isAnonymous ? "" : shownName}
+                contactName={isAnonymous ? "" : lineName}
                 onDelete={() => forgetMessage(row.message.id, row.message.sender === "me" && row.message.delivery === "waiting")}
                 onDeleteForEveryone={paired && chatLink && removableForEveryone(row.message) ? () => removeForEveryone(row.message.id) : undefined}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.

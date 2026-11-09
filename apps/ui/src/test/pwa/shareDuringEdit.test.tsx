@@ -8,6 +8,7 @@ import { saveSession } from "../../lib/storage";
 import { Chat } from "../../pages/Chat";
 import { GroupChat } from "../../pages/GroupChat";
 import { SharePicker } from "../../pages/SharePicker";
+import { SEARCH_STATUS_SETTLE_MS } from "../../components/ui/SearchStatus";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -28,6 +29,8 @@ const mine: StoredMessage = { linkId: LINK, id: `me_${WIRE}`, wireId: WIRE, text
 const hello: StoredMessage = { linkId: LINK, id: `peer_${"H".repeat(22)}`, text: "hello there", sender: "peer", timestamp: Date.now() - 120_000, via: "datalink" };
 const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS * 2)));
 const share = (patch: Partial<IncomingShare> = {}): IncomingShare => ({ title: "", text: "", url: "", files: [], ...patch });
+/** The picker acts on a share once it has been seen: the clock moved past that. */
+const settled = () => vi.setSystemTime(Date.now() + SEARCH_STATUS_SETTLE_MS);
 
 /** What brings the picker up as a share comes in (the web app's service worker, Android's intake): the address. */
 function ShareComesIn() {
@@ -65,12 +68,17 @@ async function editThenShare(user: Awaited<ReturnType<typeof openChat>>["user"])
   receiveShare(share({ text: "shared words" }));
   await user.click(screen.getByText("share comes in"));
   expect(screen.queryByTestId("composer-edit")).toBeNull();
-  await user.click(await screen.findByTestId("share-chat"));
+  await screen.findByTestId("share-chat");
+  settled();
+  await user.click(screen.getByTestId("share-chat"));
   await tick();
 }
 
 beforeEach(() => resetIncomingShare());
-afterEach(() => resetIncomingShare());
+afterEach(() => {
+  resetIncomingShare();
+  vi.useRealTimers();
+});
 
 describe("a chat left for the Share to… picker while one of my messages is edited there", () => {
   it("comes back with the edit open and its words; Enter saves only them, then the shared words are in the draft", async () => {
@@ -143,7 +151,9 @@ describe("a group left for the Share to… picker while one of my messages is ed
 
     receiveShare(share({ text: "shared words" }));
     await user.click(screen.getByText("share comes in"));
-    await user.click(await screen.findByTestId("share-group"));
+    await screen.findByTestId("share-group");
+    settled();
+    await user.click(screen.getByTestId("share-group"));
     expect(await screen.findByTestId("composer-edit")).toHaveTextContent("heron note 8812");
     await tick();
     expect(screen.getByTestId("composer-edit")).toHaveTextContent("heron note 8812");

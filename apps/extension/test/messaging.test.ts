@@ -325,7 +325,7 @@ describe("viewer tabs", () => {
   });
 
   it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
-    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
     const policies = (params: Record<string, unknown>) =>
       (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
     const tabId = await openViewer(world);
@@ -342,6 +342,29 @@ describe("viewer tabs", () => {
       throw offline;
     };
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+  });
+
+  it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
+    // A popup is no viewer: no DevTools on it, no binding, so no close (lock, profile switch, Hide my IP) reaches it.
+    const sandboxes = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[])
+        .filter(({ name }) => name.toLowerCase() === "content-security-policy")
+        .flatMap(({ value }) => value.split(/[,;]/).map((directive) => directive.trim().split(/\s+/)))
+        .filter(([name]) => name === "sandbox")
+        .map(([, ...flags]) => flags);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["content-security-policy", "sandbox allow-scripts allow-popups"]]);
+    const served = sandboxes((await pauseRequest(world, tabId, { url })).params);
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
+
+    // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
+    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
   });
 
   it("opens no tab while Hide my IP from contacts is on, and says why", async () => {

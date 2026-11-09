@@ -16,7 +16,7 @@ import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
 import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow, othersName } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
 import { sameValue } from "../lib/sameValue";
@@ -245,7 +245,7 @@ export interface ChatRowProps {
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
 function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate): string {
   if (joiner && joiner !== p.peerPubKey) return t("chat.youJoined");
-  return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
+  return `${p.named ? othersName(p.label, t) : p.keyLabel} ${t("chat.joined")}`;
 }
 
 /**

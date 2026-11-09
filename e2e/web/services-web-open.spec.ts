@@ -16,8 +16,11 @@ import { choose } from "../support/select";
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
-/** A small web app on the bot's machine: a page, a script it loads, an API it posts to, and a cookie it sets. */
-async function demoApp(): Promise<{ server: Server; port: number; seen: { method: string; path: string; cookie?: string }[] }> {
+/**
+ * A small web app on the bot's machine: a page, a script it loads, an API it posts to, and a cookie it sets. Its script
+ * also tries a server on the person's machine (`local`, a port on 127.0.0.1), outside its own origin.
+ */
+async function demoApp(local: number): Promise<{ server: Server; port: number; seen: { method: string; path: string; cookie?: string }[] }> {
   const seen: { method: string; path: string; cookie?: string }[] = [];
   const server = createServer((request, response) => {
     let body = "";
@@ -26,10 +29,11 @@ async function demoApp(): Promise<{ server: Server; port: number; seen: { method
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
         response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
+          fetch("http://127.0.0.1:${local}/local", { mode: "no-cors" }).then(() => "reached", () => "refused").then((said) => { document.getElementById("local").textContent = said; });
           fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
           .then((r) => r.json()).then((j) => { document.getElementById("out").textContent = JSON.stringify({ ...j, origin: location.origin, storage: (() => { try { return Object.keys(localStorage); } catch (e) { return "refused"; } })() }); });`);
       } else if (request.url?.startsWith("/api/echo")) {
@@ -49,7 +53,10 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
   tag: ["@feature:services.web-open", "@feature:headless.web-interop", "@feature:services.http"],
 }, async ({ peer, relay }, info) => {
   const url = await relay.listen();
-  const app = await demoApp();
+  const localSeen: string[] = [];
+  const local = createServer((request, response) => { localSeen.push(request.url ?? ""); response.end("ok"); });
+  await new Promise<void>((done) => local.listen(0, "127.0.0.1", done));
+  const app = await demoApp((local.address() as AddressInfo).port);
   const bot = new HeadlessBot();
   try {
     await bot.start(url, "Demo bot");
@@ -93,6 +100,9 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     // It opens no window of its own: one would be a tab on its origin, outliving the view and the lock.
     await expect(demo.locator("#popup")).toHaveText("refused");
     expect(app.seen.map((r) => r.path)).not.toContain("/popup");
+    // It talks to its own origin only, as on Desktop and in the extension: not to a service on this machine.
+    await expect(demo.locator("#local")).toHaveText("refused");
+    expect(localSeen).toEqual([]);
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
@@ -186,6 +196,7 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
   } finally {
     await bot.stop();
     app.server.close();
+    local.close();
   }
 });
 

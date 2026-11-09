@@ -3,8 +3,8 @@ import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from ".
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, VIEWER_SERVICE_CSP_RELAY_ONLY, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { GhostlyHttpError, HttpClient, LIMITS, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -109,7 +109,7 @@ describe("one request from the app, over the contact's link", () => {
       async (request) => { sent.push(request); return answer(200, [["content-type", "text/plain"], ["set-cookie", "theme=dark; Path=/"], ["x-bad", "a\r\nb"]], ["he", "llo"]); }, jar, words);
     expect(sent[0]).toMatchObject({ method: "POST", path: "/api", headers: [["content-type", "text/plain"], ["cookie", "sid=abc"]] });
     expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
-    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"]] });
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
     expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
@@ -122,11 +122,11 @@ describe("one request from the app, over the contact's link", () => {
     await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
       async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
     expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
-    // Off: the contact's headers as they are.
+    // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's.
     const off = recorder();
     await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
       async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
-    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"]] });
+    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
   });
 
   it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -187,6 +187,46 @@ describe("one request from the app, over the contact's link", () => {
       return { status: 200, headers: [], bytes: async () => new Uint8Array(), body: (async function* () { cancel(); yield new Uint8Array(1); yield new Uint8Array(1); })() };
     }, new CookieJar(), words);
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("holds a bounded number of the app's requests and their bodies in this page, however many it sends: past it, refused at once", async () => {
+    vi.useFakeTimers();
+    try {
+      // The real link client, on a link where the contact never answers: what goes out is counted.
+      let sentOnLink = 0;
+      const channel = {
+        bufferedAmount: LIMITS.sendHighWaterMark + 1, drained: () => new Promise<void>(() => {}), close() {}, onMessage: null, onClose: null,
+        send(data: string | Uint8Array) { if (typeof data === "string" && decodeControl(data)?.t === "req") sentOnLink++; },
+      };
+      const client = new HttpClient(channel);
+      const send = (request: ClientRequest) => client.request("demo", request);
+      const jar = new CookieJar();
+      // One 8 MiB buffer for every POST, as the app can: what counts is what the page holds for each.
+      const body = new ArrayBuffer(MAX_REQUEST_BYTES);
+      const requests = Array.from({ length: 40 }, () => {
+        const r = recorder();
+        let ended = false;
+        void serve(r.port, { type: "request", method: "POST", path: "/up", headers: [], body }, send, jar, words).finally(() => { ended = true; });
+        return { ...r, ended: () => ended };
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const held = requests.filter((r) => !r.ended());
+      const refused = requests.filter((r) => r.ended());
+      expect(held.length * MAX_REQUEST_BYTES, "the bodies this page still holds").toBeLessThanOrEqual(32 * 1024 * 1024);
+      expect(refused.length).toBe(40 - held.length);
+      for (const r of refused) expect(r.replies).toEqual([{ type: "error", status: 503, text: "Failed" }]);
+      // Once those end (here: unanswered in time), the app has its room again.
+      await vi.advanceTimersByTimeAsync(ANSWER_BY_MS);
+      expect(requests.every((r) => r.ended())).toBe(true);
+      const again = recorder();
+      void serve(again.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, send, jar, words);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(again.replies).toEqual([]);
+      expect(sentOnLink).toBe(held.length + 1);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("drops what is not a request, sending nothing", async () => {
@@ -332,7 +372,7 @@ describe("a contact's app shown over the app", () => {
     expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
   });
 
-  it("answers every request of an app opened while Hide my IP from contacts is on with the policy that keeps it to its own origin", async () => {
+  it("answers every request of an app with the viewer policy, and the one that keeps it to its own origin while Hide my IP from contacts is on", async () => {
     for (const relayOnly of [true, false]) {
       await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]), words, relayOnly });
       const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
@@ -344,7 +384,7 @@ describe("a contact's app shown over the app", () => {
       const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
       channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
       const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
-      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : []);
+      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual([["content-security-policy", relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP]]);
       document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     }
   });

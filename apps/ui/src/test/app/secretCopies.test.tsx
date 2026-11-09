@@ -1,22 +1,26 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { GroupLinkPanel } from "../../components/GroupLinkPanel";
+import { MessageBubble } from "../../components/MessageBubble";
 import { QRCodeDisplay } from "../../components/QRCode";
 import { LinkActions } from "../../components/chat/LinkQrDialog";
 import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { networkState } from "../../components/walletCardData";
 import { servicesPlatform, type WalletPlatform, type WalletState } from "../../lib/platform";
 import { copyText } from "../../lib/shareLink";
+import type { ChatMessage } from "../../lib/types";
 import { Wallet } from "../../pages/Wallet";
-import { fakeEngine, groupView, walletView } from "../fakeEngine";
+import { fakeEngine, groupView, linkView, walletView } from "../fakeEngine";
 import { mint, REAL_MINT } from "../payments/fixtures";
 import { renderApp } from "../render";
 
-// covers: invite.copy, devices.enroll.invite, groups.link.share, wallet.cashu.export, wallet.instances.remove
+// covers: invite.copy, devices.enroll.invite, groups.link.share, wallet.cashu.export, wallet.instances.remove, wallet.cashu.receive-token, chat.paired.message-details
 
 const INVITE = "https://ghostly.tools/#ghostly1secretinvite";
+const TOKEN = "cashuB" + "o".repeat(40);
+const message = (text: string, patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "peer_abc", text, sender: "peer", timestamp: 1_700_000_000_000, ...patch });
 
 /**
  * A secret copied (an invite, a device's link, a group's link, ecash) goes through the host's sensitive copy where it
@@ -85,6 +89,75 @@ describe("a secret is copied as one where the platform marks it", () => {
     expect(await screen.findByTestId("wallet-remove-notice")).toHaveTextContent("Ecash copied");
     expect(secret).toHaveBeenCalledWith("cashuBfixture");
     expect(page).not.toHaveBeenCalled();
+  });
+
+  it("an ecash token's card's Copy; a payment request's stays plain", async () => {
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 21, unit: "sat", mint: "https://testnut.cashu.space", accepted: true } }));
+    const { user, unmount } = renderApp(<MessageBubble message={message(`here you go ${TOKEN}`)} peerPubKey="peer" />);
+    const card = await screen.findByTestId("cashu-token-bubble");
+    watchPage();
+    await user.click(within(card).getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(secret).toHaveBeenCalledWith(TOKEN));
+    expect(page).not.toHaveBeenCalled();
+    unmount();
+
+    const request = "creqA" + "o".repeat(40);
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "request", amount: 21, unit: "sat", mints: ["https://testnut.cashu.space"] } }));
+    const again = renderApp(<MessageBubble message={message(request)} peerPubKey="peer" />);
+    const requestCard = await screen.findByTestId("cashu-request-bubble");
+    watchPage();
+    await again.user.click(within(requestCard).getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(page).toHaveBeenCalledWith(request));
+    expect(secret).toHaveBeenCalledTimes(1);
+  });
+
+  it("a message's Copy under a long press, when its words hold a token; other words stay plain", async () => {
+    vi.useFakeTimers();
+    try {
+      const pressCopy = (text: string) => {
+        const { container, unmount } = renderApp(<MessageBubble message={message(text)} peerPubKey="peer" onReact={() => {}} />);
+        watchPage();
+        const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+        fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+        act(() => { vi.advanceTimersByTime(600); });
+        fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+        fireEvent.click(screen.getByTestId("reaction-bar-copy"));
+        return unmount;
+      };
+      // The wallet does not read it here: the text stays a text, as it does until the wallet answers.
+      fakeEngine.on("walletInspectCashu", () => ({ inspection: null }));
+      pressCopy(`take this ${TOKEN} before lunch`)();
+      await act(async () => {});
+      expect(secret).toHaveBeenCalledWith(`take this ${TOKEN} before lunch`);
+      expect(page).not.toHaveBeenCalled();
+      pressCopy("lunch at noon?");
+      await act(async () => {});
+      expect(page).toHaveBeenCalledWith("lunch at noon?");
+      expect(secret).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a message's details: an edit's earlier text that held a token, and Copy all; its ids stay plain", async () => {
+    fakeEngine.setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer" })] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: null }));
+    const edited = message("sorry, wrong paste", { edit: { seq: 1, at: 1_700_000_100_000, history: [{ at: 1_700_000_000_000, text: `here ${TOKEN}` }] } });
+    const { user } = renderApp(<MessageBubble message={edited} peerPubKey="peer" onDelete={() => {}} />);
+    await user.keyboard("{Control>}");
+    await user.dblClick(screen.getByText("sorry, wrong paste"));
+    await user.keyboard("{/Control}");
+    const details = await screen.findByTestId("message-details");
+    watchPage();
+    const before = [...details.querySelectorAll<HTMLElement>("[data-testid=message-details-row]")].find((row) => row.dataset.value === `here ${TOKEN}`)!;
+    await user.click(within(before).getByRole("button"));
+    await waitFor(() => expect(secret).toHaveBeenCalledWith(`here ${TOKEN}`));
+    await user.click(screen.getByTestId("message-details-copy-all"));
+    await waitFor(() => expect(secret).toHaveBeenCalledTimes(2));
+    expect(secret.mock.lastCall![0]).toContain(TOKEN);
+    expect(page).not.toHaveBeenCalled();
+    const id = [...details.querySelectorAll<HTMLElement>("[data-testid=message-details-row]")].find((row) => row.dataset.value === "peer_abc")!;
+    await user.click(within(id).getByRole("button"));
+    await waitFor(() => expect(page).toHaveBeenCalledWith("peer_abc"));
+    expect(secret).toHaveBeenCalledTimes(2);
   });
 
   it("anything else is copied by the page, unmarked", async () => {

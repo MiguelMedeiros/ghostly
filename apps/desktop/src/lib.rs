@@ -373,6 +373,7 @@ pub fn run() {
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
+        .manage(clipboard::SecretSink::system())
         .manage(clipboard::PasteShelf::default())
         .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {

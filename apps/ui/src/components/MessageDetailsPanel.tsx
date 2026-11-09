@@ -7,6 +7,7 @@ import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { buildDetails, type DetailRow } from "../lib/messageDetails";
+import { copyMessageText } from "../lib/shareLink";
 import type { ChatMessage } from "../lib/types";
 import "./message-details.css";
 
@@ -63,7 +64,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
   const excerpt = message.file ? message.file.name : message.text.length > 90 ? `${message.text.slice(0, 90)}…` : message.text;
 
   const copyAll = () => {
-    void navigator.clipboard?.writeText(JSON.stringify(model.json, null, 2)).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); }).catch(() => {});
+    void copyMessageText(JSON.stringify(model.json, null, 2)).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); }).catch(() => {});
   };
 
   return createPortal(<>
@@ -121,7 +122,7 @@ function Row({ row, copyHint, copied }: { row: DetailRow; copyHint: string; copi
     <dd data-testid="message-details-row" data-label={row.label} data-value={row.copy ?? row.value} className="m-0 min-w-0 text-text-secondary text-start">
       {row.copy !== undefined
         ? <button type="button" data-testid="message-details-copy" title={copyHint} aria-label={`${copyHint}: ${row.label}`}
-            onClick={() => { void navigator.clipboard?.writeText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
+            onClick={() => { void copyMessageText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
             className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors min-h-6">{value}</button>
         : value}
     </dd>

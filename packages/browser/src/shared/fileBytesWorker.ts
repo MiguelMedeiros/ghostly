@@ -24,7 +24,8 @@ export type WorkerRequest = { n: number; space: string } & (
   | { op: "flush" | "close" | "size" | "digest" | "remove"; id: string }
   | { op: "truncate"; id: string; size: number }
   | { op: "read"; id: string; offset: number; length: number }
-  | { op: "removeWhere"; prefix: string });
+  | { op: "removeWhere"; prefix: string }
+  | { op: "dropSpace" });
 
 /** `name`: the error's own name when it says what happened (`QuotaExceededError`: no room left). */
 export type WorkerReply = { n: number } & ({ ok: true; value?: unknown } | { ok: false; error: string; name?: string } | { progress: number });
@@ -242,6 +243,17 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       const names: string[] = [];
       for await (const name of (dir as unknown as { keys(): AsyncIterable<string> }).keys()) if (name.startsWith(request.prefix)) names.push(name);
       for (const name of names) { release(space, name); await dir.removeEntry(name).catch(() => {}); }
+      return {};
+    }
+    case "dropSpace": {
+      // After every request on its files, and with their handles closed: a file left open (one a move was writing when
+      // it stopped) is locked, and the folder's removal failed on it, leaving every file not yet removed in place.
+      if (!SPACE.test(space)) throw new Error("Invalid profile space");
+      const prefix = `${space}/`;
+      await Promise.all([...queues].filter(([key]) => key.startsWith(prefix)).map(([, run]) => run));
+      for (const key of [...open.keys()]) if (key.startsWith(prefix)) release(space, key.slice(prefix.length));
+      const root = await navigator.storage.getDirectory().then((dir) => dir.getDirectoryHandle("ghostly-files")).catch(() => null);
+      await root?.removeEntry(space, { recursive: true }).catch((error: { name?: string }) => { if (error?.name !== "NotFoundError") throw error; });
       return {};
     }
   }
