@@ -12,6 +12,7 @@ import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
+import { fillNames } from "../lib/fillNodes";
 import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
@@ -236,11 +237,11 @@ export function CallOverlay({
   const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted, told?.own);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
-  // Sharing is never a surprise, to either side.
+  // Sharing is never a surprise, to either side. The contact's name its own <bdi>: "Ana (2)" keeps its brackets on its side in Arabic.
   const sharingNotice = callState !== "connected" ? null
-    : isScreenSharing && remoteIsScreenSharing ? t("calls.sharing.both", { name: peerName })
+    : isScreenSharing && remoteIsScreenSharing ? fillNames(t("calls.sharing.both"), { name: peerName })
     : isScreenSharing ? t("calls.sharing.you")
-    : remoteIsScreenSharing ? t("calls.sharing.peer", { name: peerName }) : null;
+    : remoteIsScreenSharing ? fillNames(t("calls.sharing.peer"), { name: peerName }) : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -605,7 +606,8 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
       {/* On two lines if need be: cut to one on a phone, "… desconectado. Usand…" never said what the call uses now. */}
-      <span className="call-notice-words min-w-0 break-words">{t(NOTICE_TEXT[notice.type], { name })}</span>
+      {/* The device's name its own <bdi>: "HD Pro Webcam C920 (046d:082d)" reads as in the system's list, in Arabic too. */}
+      <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
           className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
