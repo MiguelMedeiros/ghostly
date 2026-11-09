@@ -52,6 +52,10 @@ export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.m
  */
 export const WEBSITE_INPUTS = [
   "apps/website/",
+  // The /android page's Android build facts, checked by apps/website/scripts/android-page.test.mjs.
+  "apps/desktop/tauri.android.conf.json",
+  "apps/desktop/gen/android/app/build.gradle.kts",
+  "docs/ANDROID.md",
   // Published under /reference by apps/website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
   "docs/wisps/",
   "docs/PROTOCOL.md",

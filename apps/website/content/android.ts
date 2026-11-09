@@ -8,7 +8,7 @@ export const android = {
   meta: {
     title: "Ghostly for Android: install the APK",
     description:
-      "Install Ghostly's native Android app from its signed APK: allow your browser to install it, open it, and the app keeps itself up to date. With the signing certificate's fingerprint to check it.",
+      "Install Ghostly's native Android app from its signed APK, see how it updates, and check the signing certificate's fingerprint.",
   },
   hero: {
     eyebrow: "Android",
