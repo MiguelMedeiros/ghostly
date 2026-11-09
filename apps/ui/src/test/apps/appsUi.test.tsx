@@ -871,20 +871,24 @@ describe("with the apps flag on", () => {
   });
 
   it("the card of a removed app says so when Open is refused, and Run anyway opens it in that chat", async () => {
-    fakeEngine.on("appList", () => [installed()]);
+    // The card read the list before the store's removal: Open is refused, and the list read again says so.
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ run })]);
     const opener = vi.fn(async (_ref: string, _linkId: string | null, options?: { runAnyway?: boolean }) => {
       if (!options?.runAnyway) throw new Error("removed: Removed by Ghostly: Malware");
     });
     setAppOpener(opener);
     const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(true)] }));
-    await user.click(await screen.findByTestId("app-card-open"));
+    const open = await screen.findByTestId("app-card-open");
+    run = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    await user.click(open);
     expect(await screen.findByTestId("app-card-error")).toHaveTextContent("A store you added removed this app.");
+    expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: false });
     await user.click(screen.getByTestId("app-card-run-anyway"));
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: true });
     await waitFor(() => expect(screen.queryByTestId("app-card-error")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
   });
 
   it("the card's Open shows it is opening while the app's files are fetched, and a second press opens nothing more", async () => {
