@@ -323,6 +323,37 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     expect(await screen.findByRole("link", { name: url })).toBeInTheDocument();
     expect(fetched).not.toHaveBeenCalled();
   });
+
+  // Hide my IP from contacts: the server a picture link names learns this device's address when it is read, as a
+  // contact's public profile pictures would (engine/publicProfiles.ts). It stays a link, and says why.
+  it.each([
+    ["a contact's link", {}, {}],
+    ["a member's link in a group", {}, { linkId: "group:g1" }],
+    ["my forwarded copy of someone's link", { sender: "me" as const, forwarded: 1 }, {}],
+  ])("with Hide my IP on, %s is not read, and stays a link that says why", async (_, patch, props) => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const url = "https://their-server.example/cat.png";
+    const { container } = bubble({ text: url, ...patch }, props);
+    expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(screen.getByTestId("picture-hidden-ip")).toHaveTextContent("Not shown while Hide my IP is on");
+    await act(async () => {});
+    expect(fetched).not.toHaveBeenCalled();
+    expect(image(container)).toBeNull();
+  });
+
+  it("with Hide my IP on, the GIF picker's pictures and my own links still show", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const gif = "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif";
+    const { container, unmount } = bubble({ text: gif });
+    expect(image(container)).toHaveAttribute("src", gif);
+    unmount();
+    bubble({ text: "https://cdn.example.com/photos/cat.png", sender: "me" });
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("picture-hidden-ip")).not.toBeInTheDocument();
+  });
 });
 
 describe("MessageBubble: money in a message", () => {

@@ -29,6 +29,7 @@ import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
@@ -980,6 +981,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [revealed, setRevealed] = useState<string | null>(null);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
@@ -1042,9 +1044,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
-  const contentType = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const detected = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const linked = detected === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // Hide my IP from contacts: a picture link someone else chose is never read, as a contact's public profile pictures
+  // are not (engine/publicProfiles.ts): its server would learn this device's address. It stays a link that says why.
+  const hiddenIp = linked !== null && relayOnly && (!isMe || !!message.forwarded) && !needsNoClick(linked);
+  const contentType = hiddenIp ? "text" : detected;
   // The picture this bubble shows, if it shows one (a card or a system line never does).
-  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  const picture = hiddenIp ? null : linked;
   // Whether a picture waits for Show picture: a contact's, or a copy of one I forwarded (mine here, never asked for).
   const asks = picture !== null && (!isMe || !!message.forwarded) && revealed !== picture && !needsNoClick(picture);
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
@@ -1425,6 +1432,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
             <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
+            {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
