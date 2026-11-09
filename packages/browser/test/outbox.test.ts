@@ -351,6 +351,60 @@ it("resumes a DHT receipt timer at the original deadline without retransmitting 
   await restarted.stop();
 });
 
+describe("a DHT receipt deadline stamped by a clock that later went back", () => {
+  const TTL = 5 * 60_000, DAY = 24 * 60 * 60_000;
+  /** A DHT-only chat's text `sent`, its stored deadline `ahead` ms from now, restarted with a receipt window of `TTL`. */
+  const restart = async (ahead: number) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const row: StoredMessage = { linkId: "dht-clock", id: `me_${WIRE}`, wireId: WIRE, text: "pending", sender: "me", timestamp: Date.now(), via: "pkarr", delivery: "sent" };
+    const send = vi.fn(async () => null);
+    const store = { read: async () => [{ ...row }], get: async () => ({ ...row }), update: async (_id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string) => { row.delivery = delivery; row.deliveryError = error; } };
+    const deadline = Date.now() + ahead;
+    const box = new Outbox(store, send, TTL, () => deadline, { resender: { ready: () => false, via: () => "pkarr", requeueExpired: () => false } });
+    await box.recover();
+    return { row, send, box };
+  };
+
+  it("leaves 'sent' one receipt window after the restart, not an hour later", async () => {
+    const t = await restart(60 * 60_000 + 4 * 60_000);
+    await vi.advanceTimersByTimeAsync(TTL - 1);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.row.delivery).toBe("failed");
+    expect(t.row.deliveryError).toContain("No DHT receipt before it expired.");
+    expect(t.send).not.toHaveBeenCalled();
+    await t.box.stop();
+  });
+
+  it("past the timer's 32-bit limit, does not fail at once while the DHT still publishes it", async () => {
+    const t = await restart(30 * DAY);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(TTL - 1_000);
+    expect(t.row.delivery).toBe("failed");
+    expect(t.send).not.toHaveBeenCalled();
+    await t.box.stop();
+  });
+
+  it("keeps a deadline within the window as it was", async () => {
+    const t = await restart(4 * 60_000);
+    await vi.advanceTimersByTimeAsync(4 * 60_000 - 1);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.row.delivery).toBe("failed");
+    await t.box.stop();
+  });
+});
+
+it("a receipt timeout past the timer's 32-bit limit waits instead of firing at once", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const p = memory(async () => null, { ready: () => true }, 30 * 24 * 60 * 60_000);
+  await p.box.transmit(p.id);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect((await p.row()).delivery).toBe("sent");
+  await p.box.stop();
+});
+
 describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", () => {
   it("is kept as waiting, sent once when the chat can carry it, counting no attempt before", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

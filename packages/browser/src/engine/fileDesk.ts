@@ -102,6 +102,12 @@ const floorRefusal = (why: unknown): string =>
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
 
+/**
+ * The clock of a transfer's durations kept in memory (when it last moved, its speed, its last progress write): monotonic,
+ * so the device's clock set back mid-transfer neither hides it stuck nor freezes its speed for as long as the step.
+ */
+const elapsed = () => performance.now();
+
 /** A transfer's state the database refused is written again this often, until it goes (`FileDesk.save`). */
 const REWRITE_AFTER_MS = 5_000;
 
@@ -173,7 +179,7 @@ export class FileDesk {
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;
-      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, Date.now(), this.restored.has(file.id), Date.now())));
+      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, elapsed(), this.restored.has(file.id), elapsed())));
     }
     chat.files.restore(records);
   }
@@ -317,7 +323,7 @@ export class FileDesk {
         const now = out ? chat.files.resend(wireId) : chat.files.request(wireId);
         // Pushed: it counts as stuck again only after another quiet spell.
         this.restored.delete(fileId);
-        this.moved.set(fileId, { at: Date.now() });
+        this.moved.set(fileId, { at: elapsed() });
         const current = chat.files.get(direction, wireId);
         if (current) this.show(linkId, chat, current, chat.files.transferred(direction, wireId));
         this.deps.changed();
@@ -516,7 +522,7 @@ export class FileDesk {
     // as gone, and one that arrived within `changed`'s wait (250 ms behind another's progress) said "No longer available".
     if (offered) this.deps.flush?.();
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
-    const now = Date.now(), last = chat.lastSaved.get(id) ?? 0;
+    const now = elapsed(), last = chat.lastSaved.get(id) ?? -Infinity;
     if (!progress || now - last >= SAVE_EVERY_MS) this.save(chat, id, record);
     else {
       // Held back: the newest is written once the 2 s are up. Only the first ack of each 2 s was, so a cut and a
@@ -569,7 +575,7 @@ export class FileDesk {
     const held = chat.unsaved.get(id);
     if (held) { clearTimeout(held.timer); chat.unsaved.delete(id); }
     // Ended: no more progress to space out.
-    if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, Date.now());
+    if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, elapsed());
     const transfer = this.deps.transfers.get(id);
     const change: FileStateFields = { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) };
     chat.saving = chat.saving.then(() => {
@@ -603,7 +609,7 @@ export class FileDesk {
     if (!id) return;
     const view = this.view(chat, record, transferred, this.stalled(linkId, id, record, progress));
     if (view.state === "transferring" && !view.stage) {
-      const now = Date.now(), last = this.speeds.get(id);
+      const now = elapsed(), last = this.speeds.get(id);
       if (!last) this.speeds.set(id, { bytes: transferred, at: now, rate: 0 });
       else if (now - last.at >= 500) {
         const rate = Math.max(0, (transferred - last.bytes) * 1000 / (now - last.at));
@@ -630,7 +636,7 @@ export class FileDesk {
    */
   private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
     if (transferEnded(record)) { this.unwatch(id); return false; }
-    const now = Date.now();
+    const now = elapsed();
     if (progress || !this.moved.has(id)) this.moved.set(id, { at: now });
     if (progress) this.restored.delete(id);
     const movedAt = this.moved.get(id)!.at;
