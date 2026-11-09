@@ -558,12 +558,12 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
           if (kind !== "audioinput" && devicesOfKind.length === 0) return null;
           const options = [{ id: "", label: t("settings.media.systemDefault") }, ...devicesOfKind.map((d, n) => ({ id: d.id, label: d.label || `${t(KIND_NAME[kind])} ${n + 1}` }))];
           return (
-            <div key={kind} role="group" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
+            <div key={kind} role="radiogroup" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
               <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{t(KIND_NAME[kind])}</p>
               {options.map((option) => {
                 const chosen = devices.current[kind] === option.id;
                 return (
-                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
+                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} radio checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
                     icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={chosen ? "text-accent" : "invisible"}><path d="M5 12l5 5L20 7" /></svg>}
                     onClick={() => { setOpen(false); if (!chosen) devices.choose(kind, option.id); }}>
                     {option.label}

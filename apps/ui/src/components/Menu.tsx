@@ -214,7 +214,7 @@ function titleIfCut(row: HTMLElement) {
   else row.removeAttribute("title");
 }
 
-export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked }: {
+export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
   /** A second, quieter line under the label; one line too. */
@@ -236,11 +236,17 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
    * it (axe's aria-required-parent). The keys stay the menu's: arrows, Home and End move to it; Space or Enter toggle.
    */
   checked?: boolean;
+  /**
+   * With `checked`: a row of a pick-one list (a device, a language, a folder), the one picked checked. A radio
+   * (`role="radio"`), so a screen reader does not say the others could be on too; wrap the list in a `role="radiogroup"`
+   * named for what it picks where the menu holds more than one.
+   */
+  radio?: boolean;
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
-      {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
+      {...(checked === undefined ? {} : { role: radio ? "radio" : "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
       className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
