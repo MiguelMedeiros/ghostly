@@ -4979,8 +4979,9 @@ export class GhostlyNode implements EngineImplementation {
       live.stored = { ...live.stored, peerSpoke: true };
       await db.patchLink(linkId, { peerSpoke: true }).catch(() => {});
     }
-    // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
-    if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
+    // A request not known to have reached the contact (waiting for live, held and not picked up, its hold failed) is
+    // withdrawn with its message: the next session must not send it.
+    if (message?.paymentId && message.delivery && message.delivery !== "sent" && message.delivery !== "delivered") await this.desk.withdraw(message.paymentId).catch(() => {});
     // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
     if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
     // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
