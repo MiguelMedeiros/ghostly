@@ -17,6 +17,7 @@ import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
+import { watchWake } from "./wakeWatch";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -339,10 +340,14 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     await store.close().catch(() => {});
     throw error;
   }
+  // A machine back from sleep or on another network: the engine's wake, as a page's `visibilitychange`/`online` call it
+  // (./wakeWatch.ts). Without it a daemon's chats waited out their background pace, and a phone found it minutes later.
+  const stopWake = options.offline ? () => {} : watchWake(() => { server.node.wake({ network: true }); });
   let closing: Promise<void> | null = null;
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
+      stopWake();
       await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();
