@@ -61,7 +61,8 @@ export const MAX_WAITING_SHARES = 3;
 let pending: IncomingShare | null = null;
 /** Shares that came while `pending` waited (`receiveShare` with `behind`), oldest first: each is shown once the one before it goes. */
 let behind: IncomingShare[] = [];
-const forChat = new Map<string, IncomingShare>();
+/** Shares sent to a chat whose composer has not taken them yet, oldest first (one chat may be picked for several). */
+const forChat = new Map<string, IncomingShare[]>();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
@@ -129,34 +130,58 @@ export function dropIncomingShare(): void {
 
 /**
  * The page is about to go (a profile switch restarts it; on the web, a share into the same window replaces it): the
- * shares that wait for a chat to be picked are kept for the next page, in their order. Those kept are the next page's,
- * no longer this one's, so a second call keeps nothing twice. Whether the one shown was. Nothing is redrawn: the page
- * is going.
+ * shares that wait for a chat to be picked are kept for the next page, in their order, after those sent to a chat
+ * whose composer has not taken them yet (the next page shows them in its picker again). Those kept are the next
+ * page's, no longer this one's, so a second call keeps nothing twice. Whether the next page has one to show. Nothing
+ * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
   const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  let sent = false;
+  for (const [chat, shares] of forChat) {
+    const left = shares.filter((share) => !carry(share));
+    sent ||= left.length < shares.length;
+    if (left.length) forChat.set(chat, left);
+    else forChat.delete(chat);
+  }
   const kept = carry(pending);
   behind = behind.filter((share) => !carry(share));
   if (kept) pending = behind.shift() ?? null;
-  return kept;
+  return kept || sent;
 }
 
-/** The chat picked: the share waits for its composer. `chat` is the composer's draft id (a session id, `group:<id>`). */
+/**
+ * The chat picked: the share waits for its composer, and the next one waiting, if any, is shown. `chat` is the
+ * composer's draft id (a session id, `group:<id>`).
+ */
 export function sendShareTo(chat: string): void {
   if (!pending) return;
-  forChat.set(chat, pending);
+  forChat.set(chat, [...forChat.get(chat) ?? [], pending]);
   pending = behind.shift() ?? null;
   emit();
 }
 
+/** The shares sent to one chat as one: their texts one under the other, and all their files, in their order. */
+function joinShares(shares: IncomingShare[]): IncomingShare {
+  if (shares.length === 1) return shares[0]!;
+  return {
+    title: "",
+    text: shares.map(shareText).filter(Boolean).join("\n"),
+    url: "",
+    files: shares.flatMap((share) => share.files),
+    ...(shares.some((share) => share.read) && { read: async () => (await Promise.all(shares.map(shareFiles))).flat() }),
+  };
+}
+
 /** The share waiting for this chat's composer, left in place. */
 export function peekShareFor(chat: string): IncomingShare | null {
-  return forChat.get(chat) ?? null;
+  const shares = forChat.get(chat);
+  return shares ? joinShares(shares) : null;
 }
 
 /** The share waiting for this chat's composer, taken: it is handed over once. */
 export function takeShareFor(chat: string): IncomingShare | null {
-  const share = forChat.get(chat) ?? null;
+  const share = peekShareFor(chat);
   forChat.delete(chat);
   return share;
 }
@@ -199,7 +224,11 @@ export function onShareChange(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-/** Tests only. */
+/**
+ * Every share this page holds is dropped: those in the picker and those sent to a chat whose composer has not taken
+ * them. The profile's data goes (Clear all data, Remove this profile here), and a share picked for a chat is a draft of
+ * it: none is carried to the page that loads next.
+ */
 export function resetIncomingShare(): void {
   pending = null;
   behind = [];

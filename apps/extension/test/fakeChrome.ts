@@ -13,6 +13,7 @@
  *   offscreen module in the `offscreen` context; `offscreen.closeDocument` fires
  *   its `pagehide`, drops its listeners, disconnects the ports it answered and
  *   releases the Web Locks it held, as a closed page does.
+ * - `storage.session.onChanged` fires for every change, in the listeners of every context, as Chrome's.
  * - `localStorage` and `navigator.locks` are the origin's: every context shares
  *   them, as the extension's pages and its offscreen document do.
  *
@@ -74,6 +75,8 @@ export interface Tab {
   url: string;
   windowId: number;
   active?: boolean;
+  /** Its DevTools target (`debugger.getTargets`): the same while the tab lives, whatever it shows; a new one each browser run. */
+  targetId?: string;
 }
 
 export interface FakeWorld {
@@ -166,17 +169,28 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     return e;
   };
   const record = (api: string, ...args: unknown[]) => world.calls.push({ api, args });
-  const area = (items: Map<string, unknown>) => ({
+  const area = (items: Map<string, unknown>, onChanged = event<(changes: Record<string, chrome.storage.StorageChange>) => void>()) => ({
+    onChanged,
     /** One key, or every item (`null`), as Chrome's. */
     async get(key: string | null) {
       if (key === null) return Object.fromEntries([...items].map(([k, value]) => [k, structuredClone(value)]));
       return items.has(key) ? { [key]: structuredClone(items.get(key)) } : {};
     },
     async set(values: Record<string, unknown>) {
-      for (const [key, value] of Object.entries(values)) items.set(key, structuredClone(value));
+      const changes: Record<string, chrome.storage.StorageChange> = {};
+      for (const [key, value] of Object.entries(values)) {
+        changes[key] = { oldValue: items.get(key), newValue: structuredClone(value) };
+        items.set(key, structuredClone(value));
+      }
+      onChanged.dispatch(changes as never);
     },
     async remove(keys: string | string[]) {
-      for (const key of typeof keys === "string" ? [keys] : keys) items.delete(key);
+      const changes: Record<string, chrome.storage.StorageChange> = {};
+      for (const key of typeof keys === "string" ? [keys] : keys) {
+        if (items.has(key)) changes[key] = { oldValue: items.get(key) };
+        items.delete(key);
+      }
+      if (Object.keys(changes).length) onChanged.dispatch(changes as never);
     },
   });
 
@@ -320,6 +334,17 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       async sendCommand(target: chrome.debugger.Debuggee, method: string, params?: object) {
         record("debugger.sendCommand", target, method, params);
         return {};
+      },
+      /** Every tab's page, at its URL: the `debugger` permission sees them all, `tabs` or not. */
+      async getTargets() {
+        return [...world.tabs.values()].map((tab) => ({
+          type: "page",
+          id: (tab.targetId ??= crypto.randomUUID()),
+          tabId: tab.id,
+          url: tab.url,
+          title: "",
+          attached: false,
+        }));
       },
     },
     notifications: undefined as unknown,

@@ -939,6 +939,35 @@ describe("LinkSession poll pacing", () => {
     await b.s.stop(false);
   });
 
+  it("says its reads of an invite it just made are awaited, until the joiner shows (the relays' budget lets a few go over)", async () => {
+    // An invite this side made: its reads say so while its joiner is due.
+    const { a, b } = pair({ ownInvite: () => true, awaitingSince: NOW }, { getServices: () => [] });
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { awaited?: boolean } | undefined;
+    a.s.start();
+    await settle();
+    expect(last()?.awaited).toBe(true);
+    // The joiner's packet read: the next reads are the contact's like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.lastPacketAt).toBeGreaterThan(0);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.awaited).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+    // Not one this side joined, nor an invite no longer awaited.
+    for (const options of [{ awaitingSince: NOW }, { ownInvite: () => true, awaitingSince: NOW - AWAITING_PEER_MS }]) {
+      const other = pair(options);
+      other.a.s.start();
+      await settle();
+      expect(other.a.transport.resolve).toHaveBeenCalled();
+      expect(((other.a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { awaited?: boolean } | undefined)?.awaited).toBeUndefined();
+      await other.a.s.stop(false);
+    }
+  });
+
   it("says its reads are a resume's back after a restart, until one is answered (a group edge's go on the relays' floor)", async () => {
     const { a, b } = pair({ resumed: true, firstPublish: "after-first-poll" }, { getServices: () => [] });
     b.s.start();

@@ -168,7 +168,8 @@ export function normalizeMintUrl(input: string): string {
 
 export function assertAmount(amount: number): void {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
-  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString()} sats are not supported`);
+  // Written the English way whatever the browser's own (errorText.ts reads the amount back to say it in the app's language).
+  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString("en-US")} sats are not supported`);
 }
 
 /** Stored proofs are plain objects (amounts as numbers), which is what the library calls ProofLike. */
@@ -332,8 +333,16 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * How long a mint that could not be loaded stays so for the payment poll's reads: the payments of one round at a gone
+ * mint share its failure, instead of each loading it again (three requests each).
+ */
+export const MINT_FAILED_MS = 5_000;
+
 export class CashuWallet {
   private readonly wallets = new Map<string, Promise<Wallet>>();
+  /** When the load in `wallets` of a mint failed: it is tried again once `MINT_FAILED_MS` passed. */
+  private readonly failedLoads = new Map<string, number>();
   private readonly names = new Map<string, string>();
   private readonly infos = new Map<string, MintInfoView>();
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -927,7 +936,7 @@ export class CashuWallet {
   async recoverReviewedCashu(review:PaymentReview,prepared:CashuPrepared):Promise<string|undefined> {
     const stored=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(stored?.token)return stored.token;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const {OutputData}=await loadCashu();
     const keep=(prepared.swap.keepOutputs??[]).map(OutputData.deserialize);
     const send=(prepared.swap.sendOutputs??[]).map(OutputData.deserialize);
@@ -993,7 +1002,7 @@ export class CashuWallet {
     const {OutputData,deserializeSwapPreview}=await loadCashu();
     const preview=deserializeSwapPreview(prepared.swap);
     if(!preview.inputs.length)return false;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
     if(states.length!==preview.inputs.length || !states.every(s=>s.state==="UNSPENT"))return false;
     const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
@@ -1010,7 +1019,7 @@ export class CashuWallet {
     const {OutputData,deserializeSwapPreview}=await loadCashu();
     const preview=deserializeSwapPreview(prepared.swap);
     if(!preview.inputs.length)return false;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
     if(await this.signedOutputs(wallet,outputs)!=="none")return false;
     const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
@@ -1085,9 +1094,17 @@ export class CashuWallet {
     return (await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(id)))?.state==="reclaimed";
   }
 
+  /**
+   * Whether a Take it back of this payment of ours is still written down: its redeem reached the mint, whose answer was
+   * lost (`SwapUnsettledError`), and `pollSwaps` settles it. Its ecash reads SPENT meanwhile, by this wallet.
+   */
+  async cashuTakingBack(id:string):Promise<boolean> {
+    return (await this.readSwaps()).some((s)=>s.kind==="receive" && !s.released && s.payment?.id===id && s.payment.direction==="out");
+  }
+
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
     const outputs=(prepared.swap.sendOutputs??[]).map((await loadCashu()).OutputData.deserialize);
-    const states=await (await this.wallet(prepared.mint)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
+    const states=await (await this.wallet(prepared.mint,true)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
     return states.length>0 && states.length===outputs.length && states.every(s=>s.state==="SPENT");
   }
 
@@ -1179,8 +1196,16 @@ export class CashuWallet {
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
         swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
         await this.putSwap(swap);
+      } else if (payment && !this.swapAsk.due(swap.id, Date.now())) {
+        // A contact's payment sent already, and the mint did not take it: asked again at the wallet's own pace
+        // (`pollSwaps`), not each time its payer sends the same token again.
+        throw new SwapUnsettledError(swap);
       }
-      const { keep } = await this.completeSwap(swap);
+      const sent = swap;
+      const { keep } = await this.completeSwap(sent).catch((error: unknown) => {
+        if (error instanceof SwapUnsettledError) this.swapAsk.missed(sent.id, Date.now());
+        throw error;
+      });
       const credited = sats(keep);
       // What the mint signed is what is credited.
       if (swap.tx && credited !== swap.tx.amount) swap = { ...swap, ...records(credited), tx: { ...records(credited).tx, id: swap.tx.id, timestamp: swap.tx.timestamp } };
@@ -1712,6 +1737,9 @@ export class CashuWallet {
       if (swap) stores[STORES.swaps].delete(swap.id);
     });
     this.shownQuotes.delete(quoteId);
+    // Not paid: the review that showed it is still the invoice and amount shown, and Pay on it again pays (the refusal
+    // says it is safe to try again), checked against the mint's quote as the first time.
+    const unpaid = () => { this.shownQuotes.set(quoteId, shown); };
 
     let result: MeltProofsResponse<MeltQuoteBolt11Response>;
     try {
@@ -1722,6 +1750,7 @@ export class CashuWallet {
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
+        unpaid();
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
         if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
@@ -1737,7 +1766,9 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    return this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    if (outcome === "unpaid") unpaid();
+    return outcome;
   }
 
   /**
@@ -1925,18 +1956,26 @@ export class CashuWallet {
 
   // -- storage -----------------------------------------------------------------
 
-  private wallet(mint: string): Promise<Wallet> {
+  /**
+   * A mint's loaded wallet. A failed load is tried again by the next caller, unless that one takes `recentFailure`
+   * (a payment's reads in the poll): a load failed within `MINT_FAILED_MS` is its answer too.
+   */
+  private wallet(mint: string, recentFailure = false): Promise<Wallet> {
+    const failed = this.failedLoads.get(mint);
     let wallet = this.wallets.get(mint);
+    if (failed !== undefined && !(recentFailure && Date.now() - failed < MINT_FAILED_MS)) wallet = undefined;
     if (!wallet) {
-      wallet = (async () => {
+      const loading = (async () => {
         const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
         const info = instance.getMintInfo();
         if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
         return instance;
       })();
-      this.wallets.set(mint, wallet);
-      wallet.catch(() => this.wallets.delete(mint));
+      wallet = loading;
+      this.failedLoads.delete(mint);
+      this.wallets.set(mint, loading);
+      loading.catch(() => { if (this.wallets.get(mint) === loading) this.failedLoads.set(mint, Date.now()); });
     }
     return wallet;
   }

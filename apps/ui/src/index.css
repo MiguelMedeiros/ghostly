@@ -673,6 +673,13 @@ html[data-standalone="true"] {
   font-size: 11px;
 }
 
+/* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
+.call-mini .call-notice-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .call-mini .call-preview {
   top: 8px;
   right: 8px;
@@ -729,6 +736,65 @@ html[data-standalone="true"] {
 
 .call-mini .call-self .call-avatar span {
   font-size: 13px;
+}
+
+/* On a touch screen every button of the small window takes a thumb on 44 px: they were 32 px, 5 px apart, the corner
+   button 30, and Hang up beside Share screen, where a thumb aimed at Share screen could end the call. Hang up stands
+   16 px apart from the others (6 px between those). Five in a row are 254 px: the window is 264 × 168 there at least
+   (CallOverlay.tsx), and the row sits 26 px up, above the corner grips (26 px), which were taking the bottom of the
+   end buttons. The corner button is 44 px at 4 px, the state line beside it, and the avatars in the 48 px between
+   them and the row, ring and all. */
+@media (pointer: coarse) {
+  .call-mini .call-resize {
+    top: 4px;
+    left: 4px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .call-mini .call-resize svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .call-mini .call-top {
+    top: 16px;
+    left: 56px;
+  }
+
+  .call-mini .call-controls,
+  .call-mini .call-controls:has(> :nth-child(5)) {
+    bottom: 26px;
+    gap: 6px;
+  }
+
+  .call-mini .call-controls button,
+  .call-mini .call-controls:has(> :nth-child(5)) button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .call-mini .call-controls svg,
+  .call-mini .call-controls:has(> :nth-child(5)) svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .call-mini .call-controls > button:last-child {
+    margin-inline-start: 10px;
+  }
+
+  .call-mini .call-sides {
+    inset: 50px 0 70px;
+  }
+
+  .call-mini .call-share-notice {
+    bottom: 76px;
+  }
+
+  .call-mini .call-share-error {
+    bottom: 100px;
+  }
 }
 
 /* A low small window (a phone opens it 136 px high, a pulled corner stops at 128): the band is 48 to 56 px, and an
@@ -865,7 +931,9 @@ html[data-standalone="true"] {
     z-index: 60;
     width: 100%;
     max-height: min(82dvh, calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 1rem));
-    margin: 0;
+    /* A dialog that caps its width (the invite QR, New wallet on a phone on its side) stands in the middle, not on the
+       left edge with the page showing beside it. */
+    margin: 0 auto;
     overflow-y: auto;
     border-width: 1px 0 0;
     border-radius: 18px 18px 0 0;
@@ -933,6 +1001,60 @@ html[data-standalone="true"] {
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
     overflow-y: auto;
   }
+}
+
+/* A connected call on a phone on its side (320-480 px high, 320-350 in a browser): the avatars and names are centred in
+   the window, and an avatar over its name (96 + 16 + 28 px, the ring 12 px out) ran into the buttons along its bottom,
+   names over Camera, Devices and Share screen. The avatars are smaller and the buttons (still 56 or 64 px) sit lower.
+   With your side beside the contact's (a voice call, no picture of yours at the top right) each side is a row, its
+   name beside it; the contact alone keeps its name under the avatar, below your picture. At 320 px they stay above
+   212 px down, ring and all, and the buttons start at 232. */
+@media (max-height: 480px) {
+  :not(.call-mini) > .call-controls {
+    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+
+  :not(.call-mini) > .call-sides {
+    align-items: center;
+  }
+
+  :not(.call-mini) > .call-sides .call-peer {
+    gap: 4px;
+  }
+
+  :not(.call-mini) > .call-sides:has(> .call-self) .call-peer {
+    flex-direction: row;
+    gap: 12px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar {
+    width: 72px;
+    height: 72px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar span {
+    font-size: 1.5rem;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar span {
+    font-size: 1.125rem;
+  }
+}
+
+/* A phone on its side with the keyboard up leaves 150-175px: a pinned message's bar and a reply or edit bar between the
+   chat's header and the field took it all, and the field went under the keyboard. The pinned bar goes behind the
+   keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. */
+@media (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"] .pinned-bar { display: none; }
+  html[data-keyboard="true"] .composer-quote { margin-bottom: 4px; }
+  html[data-keyboard="true"] .composer-quote .quote-body { flex-direction: row; align-items: baseline; gap: 6px; padding-block: 2px; }
+  html[data-keyboard="true"] .composer-quote .quote-body > :first-child:not(:last-child) { flex-shrink: 0; max-width: 50%; }
+  html[data-keyboard="true"] .composer-quote .quote-body > :last-child { min-width: 0; flex: 1; }
 }
 
 @keyframes fade-in {
@@ -1119,6 +1241,15 @@ html .toast-place.toast-place-page[data-at="top"] {
 .message-row-x { padding-inline: 63px; }
 @media (width < 48rem) { .message-row-x { padding-inline: 10px; } }
 @container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
+
+/*
+ * A system line (a contact joined, a call, a refused payment) with its ⋮ beside it: on a phone the ⋮'s hit area
+ * reaches 22px past its box towards the row's end (MessageBubble.tsx `MessageMenu`), more than the row's 10px, so a
+ * line long enough to wrap pushed it against the screen's edge, which cut the 44px a thumb needs to 33. The row keeps
+ * those 22px on both sides (the line stays centred, and in Arabic the ⋮ is on the left with the same room).
+ */
+@media (width < 48rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
+@container message-list (width < 36rem) { .message-row-x.system-row-x { padding-inline: 22px; } }
 
 /*
  * A group member's picture beside the last bubble of a run of theirs, or its empty place beside the others
@@ -1460,6 +1591,13 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (min-width: 768px) and (pointer: coarse) and (max-height: 500px) {
   html[data-keyboard="true"] .account-footer { display: none; }
 }
+/* A chat's search with the keyboard up on a short screen (a phone on its side): the chat's header, the search bar and
+   the composer took all the keyboard leaves, and "1 of 8" showed no message. While the search has the focus, the
+   composer goes behind the keyboard and the bar keeps only its buttons' height. */
+@media (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"]:has(.chat-search-bar:focus-within) [data-composer] { display: none; }
+  html[data-keyboard="true"] .chat-search-bar:focus-within { padding-block: 0; }
+}
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
 
@@ -1484,9 +1622,10 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .connection-switch-track, .connection-switch-track::after { transition: none; }
 }
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
-   it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. */
+   it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
+   placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
 @media (width < 48rem) {
-  .tap-target { position: relative; }
+  .tap-target:not(.absolute) { position: relative; }
   .tap-target::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 @container chat-sidebar (max-width: 340px) {

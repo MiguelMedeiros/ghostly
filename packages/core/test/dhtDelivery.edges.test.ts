@@ -719,18 +719,47 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
-  it("reads as signaling once this side leaves DHT only while the contact still says DHT only: three reads in all, not one the budget held back", async () => {
+  it("a contact still saying DHT only that keeps putting fresh link packets gets its signaling reads once, then after a growing wait; once it says it left, the next one counts at once", async () => {
+    const h = setup({ pollMs: null, mode: "stream" }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const control = (mode: "dht" | "stream", seq: number) => h.invitePacket(h.body({ 5: mode, 6: null }, seq));
+    await h.put(control("dht", 1));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.bob.peerMode).toBe("dht");
+    const signaling = (from: number) => (h.transport.resolve.mock.calls as unknown[][]).slice(from).filter(([, o]) => (o as { signal?: boolean } | undefined)?.signal).length;
+    // A fresh link packet every 5 s for ten minutes, the mailbox saying DHT only all along.
+    const from = h.transport.resolve.mock.calls.length;
+    for (let s = 0; s < 600; s += 5) { h.bob.peerLinkPacket(30_000); await vi.advanceTimersByTimeAsync(5_000); }
+    const reads = h.transport.resolve.mock.calls.length - from;    expect(signaling(from), "a few signaling reads in ten minutes, not one every 5 s").toBeLessThanOrEqual(12);
+    expect(reads, "near the background pace, not the DHT pace").toBeLessThanOrEqual(60);
+    // The contact says it left, then goes back to DHT only: its next link packet is a new change, read at once as signaling.
+    await h.put(control("stream", 2)); await vi.advanceTimersByTimeAsync(30_000);
+    await h.put(control("dht", 3)); await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.bob.peerMode).toBe("dht");
+    const again = h.transport.resolve.mock.calls.length;
+    expect(h.bob.peerLinkPacket(30_000)).toBe(true); await vi.advanceTimersByTimeAsync(0);
+    expect(signaling(again)).toBe(1);
+    // The contact's offer (checked against its pinned key by the caller) is never held to that wait.
+    h.bob.peerLinkPacket(30_000); await vi.advanceTimersByTimeAsync(20_000);
+    const offer = h.transport.resolve.mock.calls.length;
+    h.bob.expect(30_000, true); await vi.advanceTimersByTimeAsync(0);
+    expect(signaling(offer)).toBe(1);
+    await h.bob.stop();
+  });
+
+  it("reads as signaling once this side leaves DHT only while the contact still says DHT only: three reads in all after the switch's own, not one the budget held back", async () => {
     // mx-47d9d4bb (2026-11-05): this side read the contact's mailbox once as it left DHT only, a moment before the
     // contact's envelope saying it left too got there, and the relays' minute was spent: the next read waited 41 s.
+    // The read at the switch itself is a plain one (2026-11-08): as signaling, it took a request past a spent minute
+    // that the dialling side's read for the answer needed.
     const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() }); await h.bob.start();
     await vi.advanceTimersByTimeAsync(0);
     const options = () => (h.transport.resolve.mock.calls as unknown[][]).slice(before).map(([, o]) => (o as { signal?: boolean } | undefined)?.signal ?? false);
     let before = h.transport.resolve.mock.calls.length;
     await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
-    expect(options()).toEqual([true]);
+    expect(options()).toEqual([false]);
     // Held back (a refused write goes first): it asked the relays nothing, and goes again when the budget frees a request.
     h.transport.resolve.mockImplementationOnce(async () => { throw new DiscoveryBudgetError(1_000); });
-    for (const [ms, signal] of [[4_010, true], [1_010, true], [4_000, true], [4_000, false]] as const) {
+    for (const [ms, signal] of [[4_010, true], [1_010, true], [4_000, true], [4_000, true], [4_000, false]] as const) {
       before = h.transport.resolve.mock.calls.length;
       await vi.advanceTimersByTimeAsync(ms);
       expect(options()).toEqual([signal]);

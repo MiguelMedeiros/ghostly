@@ -26,6 +26,7 @@
     "title": "Esperando por você"
   },
   "notCopied": "Não copiado",
+  "quotedName": "“{{name}}”",
   "save": "Salvar",
   "size": {
     "b": "{{n}} B",

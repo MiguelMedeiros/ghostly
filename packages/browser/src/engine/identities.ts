@@ -173,6 +173,8 @@ export class IdentityProofs {
   private greeted = new Set<string>();
   /** Automatic re-checks that could not reach the server, by chat and proof: how many in a row, and when to try again (ms). */
   private recheckBackoff = new Map<string, { failures: number; until: number }>();
+  /** When the automatic re-check asked each provider with a `recheck.perHour` (ms), this last hour, by provider id. */
+  private recheckedAt = new Map<string, number[]>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
   constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
@@ -505,7 +507,8 @@ export class IdentityProofs {
   }
   /**
    * The contacts' proofs due for an automatic re-check (`AUTO_RECHECK_AFTER_S`), the longest unchecked first, as many
-   * at a time as keep up with them (`AUTO_RECHECK_SPREAD_TICKS`), one after the other a few seconds apart. A proof whose
+   * at a time as keep up with them (`AUTO_RECHECK_SPREAD_TICKS`), one after the other a few seconds apart, and no more
+   * an hour of a provider's than its `recheck.perHour`. A proof whose
    * record or key is gone shows unconfirmed with the reason, as after "Check again"; one whose server could not be reached (or a network that went away meanwhile) is left as it was and backs off.
    */
   async recheckDue(): Promise<void> {
@@ -521,12 +524,19 @@ export class IdentityProofs {
         due.push({ linkId, r });
       }
     }
-    const batch = Math.min(AUTO_RECHECK_MAX_BATCH, Math.max(AUTO_RECHECK_BATCH, Math.ceil(due.length / AUTO_RECHECK_SPREAD_TICKS)));
+    let batch = Math.min(AUTO_RECHECK_MAX_BATCH, Math.max(AUTO_RECHECK_BATCH, Math.ceil(due.length / AUTO_RECHECK_SPREAD_TICKS)));
     let first = true;
-    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, batch)) {
+    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt)) {
+      if (batch === 0) return;
+      // A provider whose server limits lookups per IP: past its hour's share, its proofs wait for a later time.
+      const perHour = this.providers().find(p => p.id === r.binding.provider)?.recheck?.perHour;
+      const recent = perHour === undefined ? undefined : (this.recheckedAt.get(r.binding.provider) ?? []).filter(t => t > Date.now() - 3_600_000 && t <= Date.now());
+      if (recent && recent.length >= perHour!) continue;
+      batch--;
       if (!first && !await this.recheckPause(AUTO_RECHECK_GAP_MS)) return;
       first = false;
       if (this.ended || !this.running || !this.host.online()) return;
+      if (recent) this.recheckedAt.set(r.binding.provider, [...recent, Date.now()]);
       const key = `${linkId}|${r.id}`;
       try {
         await this.exchange(linkId)?.recheck(r.id, { keepUnavailable: true });

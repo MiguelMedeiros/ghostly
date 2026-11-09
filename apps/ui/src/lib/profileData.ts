@@ -12,6 +12,7 @@ import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
 import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
+import { resetIncomingShare } from "./incomingShare";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -302,6 +303,8 @@ export async function removeProfileHere(): Promise<void> {
   const id = activeProfileId(), ns = namespaceOf(id), dbName = databaseOf(id);
   const record = await readDeviceRecord(dbName);
   if (!record || !(record.state === "removed" || (record.state === "moving" && record.reenroll))) throw new Error("Only a device removed from this profile's devices removes it here");
+  // The shares this page holds go with it: the reload after this would carry them to the next page.
+  resetIncomingShare();
   // The first profile's keys are the ones without another profile's id or space after `ghostly_` (`ownsKey`); the
   // registry stays, which the app needs to start at all.
   await dropProfile(id, (key) => key !== registryKey() && (ns ? key.startsWith(`ghostly_${ns}_`) : ownsKey(key) || key.startsWith(LEGACY_JOIN_PREFIX)));

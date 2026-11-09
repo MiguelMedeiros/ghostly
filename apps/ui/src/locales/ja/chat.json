@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "新着メッセージ {{count}} 件",
     "messagesFrom": "{{name}} から新着メッセージ {{count}} 件",
+    "notSent": "あなたのメッセージ「{{text}}」は送信されませんでした",
+    "notSentCount": "未送信のメッセージ {{count}} 件",
     "pinMoved": "ピン留めしたチャット {{count}} 件中 {{place}} 番目に移動しました",
-    "rowMoved": "{{count}} 件中 {{place}} 番目に移動しました"
+    "rowMoved": "{{count}} 件中 {{place}} 番目に移動しました",
+    "waiting": "あなたのメッセージ「{{text}}」は相手がオンラインになるのを待っています",
+    "waitingCount": "相手のオンラインを待っているメッセージ {{count}} 件"
   },
   "audio": {
     "cantPlay": "この端末ではこの音声（{{format}}）を再生できません。ダウンロードして聴いてください。",

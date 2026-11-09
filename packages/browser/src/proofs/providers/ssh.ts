@@ -133,8 +133,9 @@ function forgeProvider(forge: SshForge): IdentityProofProvider<SshEvidence> {
     subject: { label: `${label} username`, placeholder: forge === "github" ? "octocat" : "username", normalize: input => normalizeLogin(forge, input) },
     publicUri: login => `https://${forge === "github" ? "github.com" : "gitlab.com"}/${login}`,
     validity: { defaultDays: 90, maxDays: 365 },
-    // Keys get removed from accounts; the contact's app offers "Check again" after this.
-    recheck: { afterSeconds: 600 },
+    // Keys get removed from accounts; the contact's app offers "Check again" after this. GitHub answers 60 lookups an
+    // hour per IP without a login: the automatic re-check spends at most half of them.
+    recheck: { afterSeconds: 600, ...forge === "github" && { perHour: 30 } },
     privacy: `Your contact's app asks ${host} for this account's public SSH keys, when you share it and on each re-check: ${label} learns the account was looked up, and from which IP address. So does this app when you add it.`,
     signers: [sshKeygenSigner(forge)],
     parseEvidence: parseSshEvidence,

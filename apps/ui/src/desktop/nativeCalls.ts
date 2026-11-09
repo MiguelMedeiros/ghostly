@@ -420,6 +420,8 @@ export class NativePeerConnection extends EventTarget {
   /** How loud each side is, as Rust last said: our microphone (silence while muted) and the peer's sound. */
   private readonly levels = { mic: 0, peer: 0 };
   private readonly listeners = { mic: new Set<(level: number) => void>(), peer: new Set<(level: number) => void>() };
+  /** Rust was asked to say the levels (`wantLevels`). */
+  private levelsAsked = false;
 
   constructor(private readonly config: RTCConfiguration) {
     super();
@@ -490,6 +492,7 @@ export class NativePeerConnection extends EventTarget {
   private async catchUp(sent: Devices): Promise<void> {
     this.described = true;
     if (this.closed) return;
+    this.wantLevels();
     const now = this.devices();
     const track = this.audio.sender.track;
     // Each as its own command would have done it: one that fails leaves the call as Rust started it. A device picked
@@ -641,7 +644,22 @@ export class NativePeerConnection extends EventTarget {
   listen(side: "mic" | "peer", heard: (level: number) => void): () => void {
     this.listeners[side].add(heard);
     heard(this.levels[side]);
-    return () => { this.listeners[side].delete(heard); };
+    this.wantLevels();
+    return () => {
+      this.listeners[side].delete(heard);
+      this.wantLevels();
+    };
+  }
+
+  /**
+   * Asks Rust for the levels while a ring listens, once it has the call, and lets them go when none does. A video
+   * call draws no ring, and Rust said a level at nearly every reading all the same: 20 evals a second for nobody.
+   */
+  private wantLevels(): void {
+    const want = this.listeners.mic.size + this.listeners.peer.size > 0;
+    if (want === this.levelsAsked || !this.described || this.closed) return;
+    this.levelsAsked = want;
+    void invoke("native_call_levels", { id: this.id, on: want }).catch(() => {});
   }
 
   private heard(bytes: Uint8Array): void {

@@ -9,6 +9,7 @@ import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
 import { engine } from "@ghostly/browser/platform/engine";
+import { RING_MS } from "@ghostly/react";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { servicesPlatform } from "./lib/platform";
 import { useSettings } from "./contexts/SettingsContext";
@@ -133,13 +134,23 @@ function useLoadedChats() {
 
   // A call can come in for a chat that is not open: that chat is loaded, off screen, so it rings.
   const [ringSessions, setRingSessions] = useState<readonly string[]>([]);
-  useEffect(() => engine.onCallSignal((linkId, signal) => {
-    const session = offerSession(linkId, signal);
-    if (!session) return;
-    setRingSessions((current) => (current.includes(session) ? current : [...current, session]));
-    // It holds itself once it rings (a call keeps its chat loaded); one that never does is let go.
-    setTimeout(() => setRingSessions((current) => current.filter((id) => id !== session)), 15_000);
-  }), []);
+  useEffect(() => {
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const off = engine.onCallSignal((linkId, signal) => {
+      const session = offerSession(linkId, signal);
+      if (!session) return;
+      setRingSessions((current) => (current.includes(session) ? current : [...current, session]));
+      // It holds itself once it rings (a call keeps its chat loaded). One that does not, a redial held back as missed
+      // (QUICK_REDIAL_MS), still rings on the contact's side: the chat keeps it for as long as that rings, from its
+      // latest offer, so calling them back rings it here rather than crossing it (`useWebRTC`'s `startCall`).
+      clearTimeout(timers.get(session));
+      timers.set(session, setTimeout(() => {
+        timers.delete(session);
+        setRingSessions((current) => current.filter((id) => id !== session));
+      }, RING_MS));
+    });
+    return () => { off(); for (const timer of timers.values()) clearTimeout(timer); };
+  }, []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
     // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).

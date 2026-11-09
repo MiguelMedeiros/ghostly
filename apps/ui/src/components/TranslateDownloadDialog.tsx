@@ -81,8 +81,9 @@ function DownloadQuestion({ from, to, back, bytes, engine, busy = false, problem
     <div className="mt-5 flex justify-end gap-2">
       <button ref={notNow} type="button" data-testid="translate-download-not-now" onClick={onNotNow}
         className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t(busy ? "common.close" : "translate.download.notNow")}</button>
-      <button type="button" data-testid="translate-download-yes" onClick={onDownload} disabled={busy} aria-busy={busy}
-        className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60">{t("translate.download.download")}</button>
+      {/* Busy while it downloads, not disabled: that would drop a keyboard's focus to the page. */}
+      <button type="button" data-testid="translate-download-yes" onClick={() => { if (!busy) onDownload(); }} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+        className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent aria-disabled:opacity-60 aria-disabled:cursor-not-allowed">{t("translate.download.download")}</button>
     </div>
   </dialog>, document.body);
 }

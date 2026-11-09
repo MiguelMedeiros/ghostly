@@ -218,6 +218,16 @@ function withChanges(base: Record<string, unknown>, before: Record<string, unkno
   return out;
 }
 
+const sameValue = (a: unknown, b: unknown): boolean =>
+  isPlainObject(a) && isPlainObject(b)
+    ? [...new Set([...Object.keys(a), ...Object.keys(b)])].every((key) => sameValue(a[key], b[key]))
+    : JSON.stringify(a) === JSON.stringify(b);
+
+/** Whether two copies of the settings hold the same values, whatever the order of their keys. */
+export function sameSettings(a: AppSettings, b: AppSettings): boolean {
+  return a === b || sameValue(a, b);
+}
+
 /** The settings `stored` with what a page changed from `before` to `after`: its copy of the rest is not taken. */
 export function settingsWithChanges(stored: AppSettings, before: AppSettings, after: AppSettings): AppSettings {
   return withChanges({ ...stored }, { ...before }, { ...after }, 1) as unknown as AppSettings;

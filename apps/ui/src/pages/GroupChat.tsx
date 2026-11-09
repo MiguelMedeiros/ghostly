@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { MessageBubble } from "../components/MessageBubble";
+import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
 import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
+import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -37,7 +38,7 @@ import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { GroupOthers } from "../components/GroupOthers";
-import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, sameNamed } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, othersName, sameNamed } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
@@ -51,6 +52,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useHandler } from "../hooks/useHandler";
 import { useGroupTypingSender } from "../hooks/useTyping";
 import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
@@ -95,7 +97,7 @@ function rosterNames(group: Pick<GroupView, "profile" | "members" | "formerNames
   const same = sameNamed(group.members, myName);
   const members = group.members.map(m => {
     const name = memberName(m, t, same);
-    if (!byKey.has(m.key)) byKey.set(m.key, name);
+    if (!byKey.has(m.key)) byKey.set(m.key, m.me ? name : othersName(name, t));
     return { key: m.key, me: m.me, name: m.me ? myName : name };
   });
   // A former member's name is told apart from the roster's in a community (`authorName`).
@@ -231,7 +233,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
-    const nameOf = (stored: string) => message.member && !me ? formerName(group, message.member, writtenName(stored, t)) : writtenName(stored, t);
+    const nameOf = (stored: string) => message.member && !me ? othersName(formerName(group, message.member, writtenName(stored, t)), t) : writtenName(stored, t);
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";
@@ -248,7 +250,9 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
-  const name = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
+  const shown = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
+  // A member who named themselves as the app calls me is quoted (`othersName`): "“You” joined" is not my "You joined.".
+  const name = me || nameSlot ? shown : othersName(shown, t);
   if (message.event === "joined") return t("group.event.joined", { name });
   // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
   // what happened to me in its own words.
@@ -281,7 +285,7 @@ function eventLine(message: StoredMessage, group: GroupView, t: Translate): Reac
   if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
   if (after === undefined || more.length) return eventText(message, group, t);
-  return <>{before}<bdi>{memberName(member, t, sameNamed(group.members))}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
+  return <>{before}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
 }
 
 /**
@@ -346,6 +350,39 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   return { title: waiting, body: community ? t("group.join.knockingCommunity") : t("group.join.knocking") };
 }
 
+/**
+ * A message row, drawn again only when what it shows changes (as a 1:1 chat's, Chat.tsx): the page is drawn again for
+ * much that changes no row (a member coming online or going away, a message arriving), and each of the 100 to 150 rows
+ * it draws was drawn with it. Its callbacks count only by whether they are there: the page's own are one function each
+ * for its life (`useHandler`), and the rest close over the row's message and setters.
+ */
+const MessageRow = memo(MessageBubble, sameMessageRow);
+
+/** The group as the page draws it: who is typing is read by the header's line alone (`GroupTypingLine`). */
+function withoutTyping(group: GroupView | undefined): GroupView | undefined {
+  if (!group?.typing) return group;
+  const { typing: _typing, ...rest } = group;
+  return rest;
+}
+
+/**
+ * Who is typing in the open group while it lasts, in place of `children` (the member count), as a 1:1 chat's header
+ * does. Read here, not by the page: each start and stop draws this line, not the page with its rows.
+ */
+function GroupTypingLine({ group, children }: { group: GroupView; children: ReactNode }) {
+  const { t } = useI18n();
+  const typing = useEngineValue(state => state?.groups.find(g => g.id === group.id)?.typing);
+  const typers = useMemo(() => (typing ?? []).map(({ key, kind, status }): GroupTyper => {
+    const member = group.members.find(m => m.key === key);
+    return { key, name: member ? memberName(member, t, sameNamed(group.members)) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
+  }), [typing, group, t]);
+  return <>
+    {/* Only who is typing is said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
+    <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
+    {!typers.length && children}
+  </>;
+}
+
 /** One private group: its members and roles behind the header, its history, and the composer. */
 export function GroupChat() {
   const { groupId = "" } = useParams();
@@ -355,7 +392,8 @@ export function GroupChat() {
   // What the page shows of the engine's state, each compared by content (lib/engineState): the whole state drew the
   // open group, its header and its rows' authors on every change, up to 20 a second while a file moves.
   const started = useEngineValue(state => !!state);
-  const rosterGroup = useEngineValue(state => state?.groups.find(g => g.id === groupId));
+  // Who is typing changes all the time, and only the header's line shows it: that line reads it (`GroupTypingLine`).
+  const rosterGroup = useEngineValue(state => withoutTyping(state?.groups.find(g => g.id === groupId)));
   // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
   const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
@@ -599,10 +637,6 @@ export function GroupChat() {
 
   // Typing (WISP 902 · Group Mesh § Typing): private groups only; a community does not carry it yet.
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
-  const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
-    const member = group!.members.find(m => m.key === key);
-    return { key, name: member ? memberName(member, t, sameNamed(group!.members)) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
-  }), [group, t]);
 
   // "@everyone": a private group's admin only; a community has no everyone (WISP 902 § Mentions).
   const mentions = useMemo(() => group ? { candidates: mentionCandidates(group, t), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group, t]);
@@ -615,6 +649,31 @@ export function GroupChat() {
   const admittedLong = usePast(knock === "admitted" ? rosterGroup!.invitation!.admittedAt : undefined, LONG_ADMITTED_MS);
   // Saved messages: kept on this device, never sent; the Saved view lists them. A hook: before the returns below.
   const savedHere = useSavedIn(`group:${groupId}`);
+  /*
+   * A message row's actions: one function each for the page's life, doing what the group says when pressed (as a 1:1
+   * chat's, Chat.tsx). A row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an
+   * earlier draw. Each reads the message as the group has it now.
+   */
+  const rowNow = (m: StoredMessage) => messages.find(x => x.id === m.id) ?? m;
+  const replyRow = useHandler((m: StoredMessage) => { setEditing(null); setReplyingTo(rowNow(m)); });
+  const editRow = useHandler((m: StoredMessage) => { setReplyingTo(null); setEditing(rowNow(m)); });
+  // Mine, taken off every member's device: a refusal (limited mode) rejects, and the bubble says it under the message.
+  const removeRow = useHandler((m: StoredMessage) => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id })
+    .then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }));
+  // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
+  const react = useHandler((messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); });
+  // One function while the roster's names stay (a row draws the names it answers): not one per draw of the page.
+  const reactionName = useMemo(() => {
+    const nameOf = group && replyNames(group, t("chat.reply.you"), t);
+    return (by: string) => nameOf?.("peer", by) ?? by.slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `namesKey` is all of the group the names read
+  }, [namesKey, t]);
+  // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
+  const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
+    void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {});
+  });
+  const pinRow = useHandler((m: StoredMessage) => pinMessage(m.id, replyTarget(rowNow(m), true) === group?.pin?.id));
+  const saveRow = useHandler((messageId: string) => void setSaved(`group:${groupId}`, messageId, savedHere.has(messageId)).catch(() => {}));
   // The composer turned off under the focus (removed, left on another device, the group forked): the field goes disabled
   // and the browser drops the focus to the page. It goes to the line that says why, or to the ⋮ when there is none.
   // Off for a moment on a group still active (a join, leave or removal past 16 members): nothing says why, and the
@@ -631,6 +690,10 @@ export function GroupChat() {
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
   }, [canSend, active]);
+  // On a touch screen the focus goes to the group's name as it opens, not to the page (hooks/useOpenedHeading.ts): once
+  // its header is drawn (the engine's state, then the group).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useOpenedHeading(headingRef, started && group ? groupId : null);
   if (!started) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
@@ -642,12 +705,7 @@ export function GroupChat() {
   </div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf, t);
-  // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
-  const react = (messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); };
-  const reactionName = (by: string) => nameOf("peer", by) ?? by.slice(0, 8);
-  // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
   const canPin = group.canSend && !!group.myKey && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);
-  const pinMessage = (messageId: string | undefined, remove = false) => { void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {}); };
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
@@ -682,21 +740,19 @@ export function GroupChat() {
     // A note about a payment this device is part of is shown under its own bubble instead.
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
-      <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
+      <MessageRow message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
       {(() => { const note = captionOf(payments, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
-    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
-      onReply={replyTarget(m, true) && group.canSend ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+    : <MessageRow key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
+      onReply={replyTarget(m, true) && group.canSend ? () => replyRow(m) : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
-      onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
+      onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => editRow(m) : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
-      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend
-        // A refusal (limited mode) rejects, and the bubble says it under the message.
-        ? () => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }) : undefined}
+      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend ? () => removeRow(m) : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
-      onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
-      onSave={m.event ? undefined : () => void setSaved(`group:${groupId}`, m.id, savedHere.has(m.id)).catch(() => {})} saved={savedHere.has(m.id)} />;
+      onPin={canPin && replyTarget(m, true) ? () => pinRow(m) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
+      onSave={m.event ? undefined : () => saveRow(m.id)} saved={savedHere.has(m.id)} />;
   // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
   // again still has the group as it was kept here: its history stays in the page, and the wait is a line above it.
   const joiningByLink = !!group.invitation?.viaLink && !group.status;
@@ -778,18 +834,15 @@ export function GroupChat() {
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
               {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. The
-                  screen's heading, as a menu page's title is (layout/Page.tsx). */}
-              <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
+                  screen's heading, as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
+              <h1 ref={headingRef} tabIndex={-1} dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary outline-none" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The
             // cut with … is inside it, so it does not clip that taller area.
             : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-6 max-md:min-w-11 max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-5 max-md:before:content-['']">
               <span className="block truncate">
-              {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. Only that is
-                  said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
-              <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
-              {!typers.length && subtitle}
+              <GroupTypingLine group={group}>{subtitle}</GroupTypingLine>
               </span>
             </button>}
           </div>
@@ -863,7 +916,7 @@ export function GroupChat() {
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
-      <GroupOthers group={group} act={act} />
+      <GroupOthers group={group} act={act} focusAfter={headingRef} />
 
 
       {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}

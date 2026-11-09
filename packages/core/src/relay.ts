@@ -1,20 +1,22 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, PKARR_FUTURE_SKEW_MS, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, PublishFailedError, publishedNowhere, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; resume: boolean; back: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; awaited: boolean; resume: boolean; back: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
-  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, resume: !!options.resume && !write, back: !!options.back });
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, awaited: !!options.awaited && !write, resume: !!options.resume && !write, back: !!options.back });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
 const isChatSignal = (who: Asker): boolean => who.signal && isChat(who);
 /** A 1:1 chat's read of a contact that just went away: a few may use the chat's allowance (`DEPARTED_READS`). */
 const isDepartedRead = (who: Asker): boolean => who.departed && isChat(who);
+/** A 1:1 chat's read of an invite this side made, its joiner due: a few may use the chat's allowance (`AWAITED_READS`). */
+const isAwaitedRead = (who: Asker): boolean => who.awaited && isChat(who);
 /** A group's edge looking fast for a signal (`GROUP_BURST_MS`). */
 const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !who.write && !who.background;
 /**
@@ -33,7 +35,7 @@ const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (
 /** A group edge's read for the signal it waits for, the answer to its offer (`signal`): first on the floor (`ANSWER_READ_FIRST_MS`). */
 const isGroupAnswerRead = (who: Asker): boolean => isGroupSignal(who) && who.signal && !who.write;
 /** Such a read, as the budget weighs it (`ANSWER_READ_FIRST_MS`). */
-const ANSWER_READER: Asker = { background: false, group: true, urgent: true, door: false, write: false, signal: true, watch: false, watchWrite: false, departed: false, resume: false, back: false };
+const ANSWER_READER: Asker = { background: false, group: true, urgent: true, door: false, write: false, signal: true, watch: false, watchWrite: false, departed: false, awaited: false, resume: false, back: false };
 /** A community member's way back to its group while it has no edge up: it may use its own allowance (`WAY_BACK_SHARE`). */
 const isWayBack = (who: Asker): boolean => who.back && who.group && !who.background;
 /** Watch reads that the same other limits hold take turns together: urgent or not, background or not; the chats' on their own. */
@@ -219,6 +221,19 @@ export const SIGNALING_ALLOWANCE_SHARE = 1 / 5;
  */
 export const DEPARTED_READS = 6;
 /**
+ * A 1:1 chat's reads of an invite this side made, while its joiner is due and has not shown (`awaited`, `AWAITING_PEER_MS`
+ * in link.ts), may go over a relay's minute within the chat's allowance (`SIGNALING_ALLOWANCE_SHARE`) the same way: at
+ * most this many of each invite's in a minute, every relay together. And while one asked in the last minute, the departed
+ * reads leave them half of that on each relay: the last `AWAITED_READS / 2` of the allowance's reads (`DEPARTED_READS`
+ * then take at most 3 on a relay of 30, against 5). Read every 2 to 4 s, they cover the seconds in which a joiner that
+ * opened the link at once knocks. Within the chats' allowance, they add nothing to what a relay may see in a minute
+ * (`WAY_BACK_SHARE`): 36 at most from the chats on a relay of 30, none past 5 on a relay of 5. An inviter pairing one joiner after
+ * another on relays of 30 spent the minute on both 12 s in (two pairings, about 15 requests a relay each), the departed
+ * reads of the contact that had just left took the allowance, and the third invite's key was read once, then not until
+ * the minute freed: the joiner's knock 48 s late, and join to live in 60 s, against 2.6 and 4.6 s (CLI lab, 2026-11-07).
+ */
+export const AWAITED_READS = 4;
+/**
  * A group edge's requests for a member that may be back may go over a relay's minute by this fraction of it (4 on a
  * relay of 30, 8 on one of 60, none on a relay of 5): its reads of a member that went away and its packet
  * written meanwhile, which that member reads first when it is back (`watch`), its offer or answer, and its reads for
@@ -389,7 +404,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. A group edge's offer or answer goes as its own (`putEverywhere`). */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, resume: false, back: false };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, awaited: false, resume: false, back: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -498,6 +513,38 @@ function looksLikeHost(text: string): boolean {
 class RelayLeftAloneError extends Error {}
 
 /**
+ * A relay a put did not get an answer from. `sent` false: the request never left (its network cooling down after a
+ * failure, or a connection that could not be made, `connectFailed`); true: it may have reached the relay.
+ */
+class RelayNoAnswerError extends Error {
+  constructor(message: string, readonly sent: boolean) { super(message); }
+}
+
+/** What Node says of a connection it could not make: the request never left. A browser's TypeError says nothing either way. */
+const CONNECT_FAILURES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EHOSTDOWN", "EADDRNOTAVAIL", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/** A fetch that failed before its request left this device: Node's `cause.code` (each of an AggregateError's, for several addresses). */
+function connectFailed(error: unknown): boolean {
+  const cause = (error as { cause?: unknown } | null)?.cause as { code?: unknown; errors?: unknown } | undefined;
+  if (!cause || typeof cause !== "object") return false;
+  if (Array.isArray(cause.errors) && cause.errors.length) return cause.errors.every((e) => CONNECT_FAILURES.has((e as { code?: unknown } | null)?.code as string));
+  return CONNECT_FAILURES.has(cause.code as string);
+}
+
+/**
+ * The error a publish ends with after a second round dated past a relay's later copy failed too: one that may have
+ * stored the first round's packet still may, whatever the second round's relays said.
+ */
+function laterRound(first: unknown, later: unknown): unknown {
+  return publishedNowhere(later) && !publishedNowhere(first) ? new PublishFailedError((later as Error).message, true) : later;
+}
+
+/** A packet date no further ahead of this clock than readers take (`newerPacket`): one this client may date past. */
+function withinSkew(timestamp: bigint): boolean {
+  return timestamp <= BigInt(Date.now() + PKARR_FUTURE_SKEW_MS) * 1000n;
+}
+
+/**
  * A read the relays failed (or left alone for failing before), when its caller has another path to ask
  * (`RelayTransport.resolve` with `keptOnFailure` false): `kept` is the newest packet the relays gave for the key before.
  */
@@ -518,7 +565,9 @@ export class RelayTransport implements PkarrTransport {
    * records are written by every member, an inviter warms its contact's key with an empty packet, and this device's
    * own clock may have been set back since it last wrote. A relay and the DHT keep only the packet dated latest, so
    * one dated by this clock alone, when it is behind, was refused (409) or silently never read, until this clock
-   * caught up with the other one: minutes, or an hour.
+   * caught up with the other one: minutes, or an hour. Only up to `PKARR_FUTURE_SKEW_MS` ahead of this clock
+   * (`withinSkew`): a packet one holder of a shared key dated further ahead must not date every later one of this
+   * device past it (past 64 bits, unsignable; else ahead of every reader's clock, never taken over one dated now).
    */
   private readonly seenTimestamp = new Map<string, bigint>();
   /**
@@ -553,6 +602,10 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentAnswerAllowance = new Map<string, number[]>();
   /** Per contact, its departed reads past the limit in the last minute, every relay together (`DEPARTED_READS`). */
   private readonly departedOver = new Map<string, number[]>();
+  /** Per invite, its awaited reads past the limit in the last minute, every relay together (`AWAITED_READS`). */
+  private readonly awaitedOver = new Map<string, number[]>();
+  /** When an awaited invite's read last asked: the departed reads leave it room for a minute (`AWAITED_READS`). */
+  private awaitedAt = -Infinity;
   /**
    * Per key a group reads (not in the background), when a read of it last went out and when it last asked: whose turn
    * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`). And
@@ -605,6 +658,10 @@ export class RelayTransport implements PkarrTransport {
   private readonly hedgeMs: number;
   /** Until when each relay found slow (`SLOW_MS`) goes after the others in a read (`readOrder`). */
   private readonly slowUntil = new Map<string, number>();
+  /** Per relay, when each of this client's requests still waiting for its answer went out (`unanswering`). */
+  private readonly waiting = new Map<string, Set<{ at: number }>>();
+  /** When each relay last answered a request of this client, whatever it said (`unanswering`). */
+  private readonly answeredAt = new Map<string, number>();
   /** Keys whose last read was answered 404: their next read hedges later (`HEDGE_MISSING_MS`). */
   private readonly missing = new Set<string>();
   private readonly listeners = new Set<(change?: DiscoveryChange) => void>();
@@ -655,6 +712,21 @@ export class RelayTransport implements PkarrTransport {
     this.changed("recovered");
   }
 
+  /**
+   * `PkarrTransport.forget`: the packets and dates this client kept under these keys go, on every relay (`written`,
+   * `newest`, `lastTimestamp`, `seenTimestamp`, `lastPut`). A spare invite replaced unused left them here for its two keys
+   * for good: an idle CLI daemon gained 8 keys an hour (343 in `written` and 690 `lastPut` entries after a day). The maps
+   * that bound themselves (`readAt`, `lastReadFrom`, `heldBack`, `missing`, the turns) and the catch-ups, which go once
+   * put, are left as they are. A later put under one of these keys goes as a key's first.
+   */
+  forget(keys: Iterable<string>): void {
+    const gone = new Set(keys);
+    if (gone.size === 0) return;
+    for (const key of gone) for (const perKey of [this.lastTimestamp, this.seenTimestamp, this.newest, this.written]) perKey.delete(key);
+    // Per relay and key (`${relay} ${key}`), on the relays set now and any set before.
+    for (const slot of this.lastPut.keys()) if (gone.has(slot.slice(slot.lastIndexOf(" ") + 1))) this.lastPut.delete(slot);
+  }
+
   /** Called when a relay trips or recovers. */
   subscribe(listener: (change?: DiscoveryChange) => void): () => void {
     this.listeners.add(listener);
@@ -690,7 +762,7 @@ export class RelayTransport implements PkarrTransport {
    * Returns once one relay took the packet: the others finish in the background.
    */
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     await this.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putEverywhere(key, payload, timestamp, options, conflict), options);
   }
 
@@ -735,7 +807,8 @@ export class RelayTransport implements PkarrTransport {
       redated = (async () => {
         const held = read ? await read().catch(() => null) : await this.heldAt(relay, key, asker(options, true));
         // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
-        if (held === null || held < timestamp) return false;
+        // Dated too far ahead to follow (`seenTimestamp`): that relay keeps it, the others take this one.
+        if (held === null || held < timestamp || !withinSkew(held)) return false;
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
         // A later publication of this key took over meanwhile: it is dated past what was just read.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
@@ -748,7 +821,7 @@ export class RelayTransport implements PkarrTransport {
     catch (error) {
       // Refused everywhere, and somewhere for a later-dated packet: what the publication dated past it did is the answer.
       const pending = redated as Promise<boolean> | undefined;
-      if (!pending || !(await pending)) throw error;
+      if (!pending || !(await pending.catch((later: unknown) => { throw laterRound(error, later); }))) throw error;
     }
   }
 
@@ -810,7 +883,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** A packet under this key was read (on a relay, or by the CLI on the DHT): its time, for `nextTimestamp`. */
   sawTimestamp(pubKeyZ32: string, timestamp: bigint): void {
-    if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
+    if (withinSkew(timestamp) && timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
   }
 
   /**
@@ -819,7 +892,7 @@ export class RelayTransport implements PkarrTransport {
    * gives it.
    */
   async putSigned(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     await this.putEverywhere(pubKeyZ32, payload, timestamp, options, conflict);
   }
 
@@ -828,7 +901,7 @@ export class RelayTransport implements PkarrTransport {
    * (`signedAt`) and is not checked again. `conflict`: as `publishDated` gives it.
    */
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
-    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    if (this.relays.length === 0) throw new PublishFailedError("No Pkarr relays configured", false);
     const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     if (options.signedAt === undefined || !options.redate) return this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
     await this.putRedated(pubKeyZ32, payload, seq, options, PAYLOAD_REDATES);
@@ -862,7 +935,7 @@ export class RelayTransport implements PkarrTransport {
       redated = (async () => {
         const held = await this.heldAt(relay, key, asker(options, true));
         // Not dated at or after this one: the relay was still putting another packet. The caller tries again, as before.
-        if (held === null || held < timestamp) return false;
+        if (held === null || held < timestamp || !withinSkew(held)) return false;
         // A later packet of this key went out meanwhile: it is dated past this one, and is what the relays should hold.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
         const again = options.redate!(held);
@@ -876,7 +949,7 @@ export class RelayTransport implements PkarrTransport {
     try { await this.putEverywhere(key, payload, timestamp, options, conflict); }
     catch (error) {
       const pending = redated as Promise<boolean> | undefined;
-      if (!pending || !(await pending)) throw error;
+      if (!pending || !(await pending.catch((later: unknown) => { throw laterRound(error, later); }))) throw error;
     }
   }
 
@@ -912,7 +985,9 @@ export class RelayTransport implements PkarrTransport {
     // background looks. A member reading the other relay found the edge's older offer (or none) until its next packet.
     const edgeSignal = isGroupSignal(asker(options, true));
     const failed = new Set<string>();
-    const puts = this.relays.map(async (relay) => {
+    // Each relay that surely does not hold the packet: not asked now, refused in an answer (a 4xx), or never reached.
+    const nowhere = this.relays.map(() => false);
+    const puts = this.relays.map(async (relay, i) => {
       const slot = `${relay} ${pubKeyZ32}`;
       const previous = this.lastPut.get(slot);
       this.lastPut.set(slot, timestamp);
@@ -924,6 +999,7 @@ export class RelayTransport implements PkarrTransport {
       // That relay's answer is waited for `SLOW_MS` at most: one slow to say it took the packet (up to the 10 s
       // timeout) held the copy here, and a contact reading this relay found nothing, as long.
       if (first && isChat(asker(options, true)) && this.spareHeldFor(relay, Date.now()) > 0 && await answeredWithin(first, SLOW_MS)) {
+        nowhere[i] = true;
         throw new DiscoveryBudgetError(Math.max(CATCH_UP_MIN_MS, this.spareHeldFor(relay, Date.now())));
       }
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
@@ -935,8 +1011,11 @@ export class RelayTransport implements PkarrTransport {
         if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
       } catch (error) {
         if (!isDiscoveryBudgetError(error) && !(error instanceof RelayLeftAloneError)) failed.add(relay);
+        nowhere[i] = isDiscoveryBudgetError(error) || error instanceof RelayLeftAloneError || (error instanceof RelayNoAnswerError && !error.sent);
         throw error;
       }
+      // The relay answered that it did not take it. A server error (5xx) says nothing of what it kept.
+      nowhere[i] = response.status >= 400 && response.status < 500;
       if (response.status >= 500 || response.status === 428) failed.add(relay);
       // 409: this relay holds a packet under the key dated at or after this one (`publishDated` reads it and dates past it).
       if (response.status === 409) conflict?.(relay);
@@ -981,7 +1060,7 @@ export class RelayTransport implements PkarrTransport {
         const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
         if (waits.length === results.length) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay: ${reasons}`));
         else if (waits.length && results.every((r, i) => held[i] !== null || leftAlone(r))) reject(new DiscoveryBudgetError(Math.min(...waits.map((e) => e.retryInMs)), `Publish held back on every relay not left alone: ${reasons}`));
-        else reject(new Error(`Publish failed on every relay: ${reasons}`));
+        else reject(new PublishFailedError(`Publish failed on every relay: ${reasons}`, !nowhere.every(Boolean)));
       });
     });
   }
@@ -1120,10 +1199,12 @@ export class RelayTransport implements PkarrTransport {
         else this.breaker.cancel(relay);
       }
       // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
-      // again). One asked no later than the winner, which a relay beat with the packet, is slow.
+      // again). One asked no later than the winner, which a relay beat with the packet, is slow. So is one beaten by a 404
+      // while still silent past `HEDGE_MISSING_MS`, more than a relay takes to say 404: a relay that takes connections
+      // and never answers was asked first in every read of a key nobody published yet, each one 6 s, and never tripped.
       for (const loser of asked.values()) {
         loser.controller.abort();
-        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
+        if (loser.started <= attempt.started && (outcome.kind === "packet" || Date.now() - loser.started >= HEDGE_MISSING_MS)) this.slow(loser.relay);
         else this.breaker.cancel(loser.relay);
       }
       this.lastRelay = relay;
@@ -1151,7 +1232,8 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /**
-   * The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately last. A relay
+   * The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately or leaving a
+   * request unanswered (`unanswering`) last. A relay
    * with a small share of its own (`RELAY_REQUESTS_PER_MINUTE` under `REQUESTS_PER_MINUTE`: pkarr.miguelmedeiros.dev's 5)
    * takes no turns: it comes after the others, for when they refuse, fail or are slow, unless every relay is one. In the
    * turn, it was spent in seconds and the relay after it took its turns too: pkarr.pubky.org got two reads in three and
@@ -1165,8 +1247,20 @@ export class RelayTransport implements PkarrTransport {
     const after = lastAt < 0 ? -1 : ring.findIndex((relay) => this.relays.indexOf(relay) > lastAt);
     const start = lastAt < 0 ? this.cursor++ : after < 0 ? 0 : after;
     const turn = [...ring.map((_, i) => ring[(start + i) % ring.length]), ...this.relays.filter((relay) => !ring.includes(relay))];
-    const now = Date.now(), slow = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now;
-    return [...turn.filter((relay) => !slow(relay)), ...turn.filter(slow)];
+    const now = Date.now(), behind = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now || this.unanswering(relay, now);
+    return [...turn.filter((relay) => !behind(relay)), ...turn.filter(behind)];
+  }
+
+  /**
+   * A request of this client has waited on the relay for `HEDGE_MS` and it has answered none since: it goes after the
+   * others in a read (`readOrder`), at no cost of a request. A relay that took connections and never answered held a
+   * fresh device's first pairing at its turn: the key's last read had found nothing (`HEDGE_MISSING_MS`), so the read
+   * waited 6 s on it before asking the relay that had held the packet all along (8 s join to live, not 2.5 s).
+   */
+  private unanswering(relay: string, now: number): boolean {
+    const since = this.answeredAt.get(relay) ?? -Infinity;
+    for (const request of this.waiting.get(relay) ?? []) if (request.at > since && now - request.at >= this.hedgeMs) return true;
+    return false;
   }
 
   /** One GET of a key at one relay, which `controller` drops. Never rejects: what happened is the outcome. */
@@ -1293,7 +1387,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** `sent`: told, once the budget took the request, whether the relay takes the packet (a 2xx). */
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false, sent?: (ok: Promise<boolean>) => void): Promise<Response> {
-    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new Error(`${relay} did not answer a moment ago; retry shortly`);
+    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new RelayNoAnswerError(`${relay} did not answer a moment ago; retry shortly`, false);
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
     const blocked = probe ? 0 : this.breaker.blockedFor(relay);
@@ -1310,11 +1404,12 @@ export class RelayTransport implements PkarrTransport {
     });
     sent?.(request.then((r) => r.ok, () => false));
     let response: Response;
-    try { response = await request; } catch {
+    try { response = await request; } catch (error) {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       this.answered(relay, { kind: "error", reason: "no answer" });
-      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened.
-      throw new Error(`${relay} did not answer`);
+      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened. A timeout or a
+      // connection dropped on the way may have left the packet there; one never made did not.
+      throw new RelayNoAnswerError(`${relay} did not answer`, !connectFailed(error));
     }
     // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
     if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
@@ -1338,6 +1433,7 @@ export class RelayTransport implements PkarrTransport {
     }
     if (isGroupRead(who) || isChatWatch(who)) this.readAsked(key, who, now);
     if (isTurnRead(who)) this.turnAsked(key, who, now);
+    if (isAwaitedRead(who)) this.awaitedAt = now;
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
@@ -1366,7 +1462,8 @@ export class RelayTransport implements PkarrTransport {
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
     if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
     const departedOver = isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay);
-    if (departedOver) this.departedOverAdd(key, now);
+    if (departedOver) this.overAdd(this.departedOver, key, now);
+    if (isAwaitedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.overAdd(this.awaitedOver, key, now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (who.background && who.write) this.spentBackgroundWrites.get(relay)!.push(now);
@@ -1387,7 +1484,7 @@ export class RelayTransport implements PkarrTransport {
    * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
    * group reads and background requests, never a chat's. Background requests yield to a link that signals. A chat's
    * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`), and so do a few of its reads of a
-   * contact that just went away (`DEPARTED_READS`). `ownAllowance` false: what holds an edge's read for its answer
+   * contact that just went away (`DEPARTED_READS`) or of an invite awaited (`AWAITED_READS`). `ownAllowance` false: what holds an edge's read for its answer
    * without its own allowance (`ANSWER_READ_ALLOWANCE`).
    */
   private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true, ownAllowance = true): number {
@@ -1403,9 +1500,13 @@ export class RelayTransport implements PkarrTransport {
     // A chat's signaling may go over the minute by its allowance; its reads leave the last of it to a write.
     // A group edge's, for a member that may be back, by a smaller one, its reads one at a time past the limit.
     // A chat's read of a contact that just went away, past the limit: within the chat's allowance, a few per contact.
-    const departed = isDepartedRead(who) && key !== undefined && recent.length >= limit && this.departedReads(key, now) < DEPARTED_READS;
-    const share = isChatSignal(who) || departed ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
-    const allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
+    // So is its read of an invite this side made while the joiner is due, a few per invite.
+    const departed = isDepartedRead(who) && key !== undefined && recent.length >= limit && this.overReads(this.departedOver, key, now) < DEPARTED_READS;
+    const awaited = isAwaitedRead(who) && key !== undefined && recent.length >= limit && this.overReads(this.awaitedOver, key, now) < AWAITED_READS;
+    const share = isChatSignal(who) || departed || awaited ? SIGNALING_ALLOWANCE_SHARE : isGroupSignal(who) ? GROUP_SIGNALING_ALLOWANCE_SHARE : 0;
+    let allowance = share ? Math.max(0, Math.floor(limit * share) - (who.write ? 0 : 1)) : 0;
+    // The departed reads leave the last of it to an awaited invite's, while one is (`AWAITED_READS`).
+    if (departed && now - this.awaitedAt < 60_000) allowance = Math.max(0, allowance - AWAITED_READS / 2);
     // The edges' signaling has its allowance whatever the chats spend: the limit and the chats' reserve wait for it.
     const groupSignaled = within(this.spentGroupSignal.get(relay) ?? [], now, 60_000);
     this.spentGroupSignal.set(relay, groupSignaled);
@@ -1475,9 +1576,13 @@ export class RelayTransport implements PkarrTransport {
       const at = this.writeWaiting.get(`${lane} ${relay}`);
       return at !== undefined && now - at < WRITE_FIRST_MS ? at + WRITE_FIRST_MS - now : 0;
     };
-    // A departed read past the limit takes no request a waiting write could have either (it is no signal).
-    // A starved read goes before them (`READ_STARVED_MS`).
-    if (writer !== "chat" && !departed && !starved) wait = Math.max(wait, waiting("chat"));
+    // A departed or awaited read past the limit takes no request a waiting write could have either (it is no signal).
+    // Nor does a chat's read for a signal past it: an offer or answer has the allowance's last request, and any other
+    // write waits for the limit. Held for one, a live chat back after a reload, next to an invite whose packet the spent
+    // minute refused at every read, read its contact's answer only once the minute freed: 62 s, against 8 s (bug hunt,
+    // 2026-11-07). A starved read goes before them (`READ_STARVED_MS`).
+    const signalOver = isChatSignal(who) && !who.write && recent.length >= limit;
+    if (writer !== "chat" && !departed && !awaited && !signalOver && !starved) wait = Math.max(wait, waiting("chat"));
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     // An edge's read for its answer does not wait for one: the floor's other requests wait for it instead.
     if (((writer === null && who.group && !pastLimit && !isGroupAnswerRead(who)) || who.background) && !starved) wait = Math.max(wait, waiting("group"));
@@ -1603,17 +1708,17 @@ export class RelayTransport implements PkarrTransport {
     return !who.group && !who.write && !who.door && since !== undefined && now - since >= READ_STARVED_MS;
   }
 
-  /** This contact's departed reads past the limit in the last minute (`DEPARTED_READS`). */
-  private departedReads(key: string, now: number): number {
-    const reads = within(this.departedOver.get(key) ?? [], now, 60_000);
-    if (reads.length) this.departedOver.set(key, reads); else this.departedOver.delete(key);
+  /** This key's departed or awaited reads past the limit in the last minute (`DEPARTED_READS`, `AWAITED_READS`). */
+  private overReads(over: Map<string, number[]>, key: string, now: number): number {
+    const reads = within(over.get(key) ?? [], now, 60_000);
+    if (reads.length) over.set(key, reads); else over.delete(key);
     return reads.length;
   }
 
-  /** One more, the contacts with none in the last minute dropped. */
-  private departedOverAdd(key: string, now: number): void {
-    for (const [other, reads] of this.departedOver) if (now - reads[reads.length - 1] >= 60_000) this.departedOver.delete(other);
-    this.departedOver.set(key, [...(this.departedOver.get(key) ?? []), now]);
+  /** One more, the keys with none in the last minute dropped. */
+  private overAdd(over: Map<string, number[]>, key: string, now: number): void {
+    for (const [other, reads] of over) if (now - reads[reads.length - 1] >= 60_000) over.delete(other);
+    over.set(key, [...(over.get(key) ?? []), now]);
   }
 
   /** A chat's request of `key` asked urgently (it needs every relay), or the budget refused it on `relay` (it needs that one). */
@@ -1797,14 +1902,20 @@ export class RelayTransport implements PkarrTransport {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const drop = () => controller.abort();
     cancel?.addEventListener("abort", drop, { once: true });
+    // The relay is the URL up to the key (`unanswering`).
+    const relay = url.slice(0, url.lastIndexOf("/")), request = { at: Date.now() };
+    const waiting = this.waiting.get(relay) ?? new Set<{ at: number }>();
+    this.waiting.set(relay, waiting.add(request));
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
       const sent = Date.now();
       const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      this.answeredAt.set(relay, Date.now());
       this.serverTime(url, response, sent);
       await read?.(response, controller.signal);
       return response;
     } finally {
+      waiting.delete(request);
       clearTimeout(timer);
       cancel?.removeEventListener("abort", drop);
     }

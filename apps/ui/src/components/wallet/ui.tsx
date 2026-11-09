@@ -27,13 +27,14 @@ export const chosenInForcedColors = "forced-colors:forced-color-adjust-none forc
 
 /**
  * An on/off switch. `unavailable`: it cannot be turned on here for now (`aria-disabled`, still reachable by the keys so
- * its reason is read), with that reason in the element `describedBy` names.
+ * its reason is read), with that reason in the element `describedBy` names. A tap lands on 64 × 44 px around its
+ * 48 × 24 px track: a thumb's 44 px, as on every other control on a phone.
  */
 export function Switch({ checked, onChange, label, disabled, unavailable, describedBy, testId, ref }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; unavailable?: boolean; describedBy?: string; testId?: string; ref?: React.Ref<HTMLButtonElement> }) {
   return (
     <button ref={ref} type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} aria-disabled={unavailable || undefined} aria-describedby={describedBy} disabled={disabled}
       onClick={() => { if (!unavailable) onChange(!checked); }}
-      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']`}>
       <SwitchKnob checked={checked} />
     </button>
   );
@@ -52,7 +53,8 @@ export function SwitchLook({ checked, className = "", testId }: { checked: boole
 }
 
 /**
- * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. A radio
+ * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. On a phone
+ * a tap lands on 44 px of an option's height (`tap-target`), drawn 32 px tall. A radio
  * group: one Tab stop (the chosen option), the arrows, Home and End move; Space or Enter chooses, since choosing may be
  * an action (a wallet's network replaces the wallet).
  */
@@ -62,7 +64,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
     <div role="radiogroup" aria-label={label} onKeyDown={radioGroupKeys} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
       {options.map((option, i) => (
         <button key={option.value} type="button" role="radio" aria-checked={value === option.value} tabIndex={i === stop ? 0 : -1} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
-          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} tap-target whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
           {option.label}
         </button>
       ))}

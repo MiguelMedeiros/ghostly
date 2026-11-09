@@ -169,6 +169,7 @@
     "preparing": "Preparazione di {{transport}}; canale attuale: {{current}}.",
     "receiptPending": "Conferma in attesa fino alle {{time}}.",
     "reconnect": "Riconnetti",
+    "reconnecting": "Riconnessione…",
     "relaySettings": "controlla le impostazioni dei relay",
     "relayed": "Via relay",
     "relayedVia": "Via relay tramite {{relays}}",

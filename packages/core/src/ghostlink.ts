@@ -1606,8 +1606,9 @@ export class GhostLink {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
     if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    // Held to a growing wait while the contact's mailbox still says DHT only after the reads one started (`peerLinkPacket`).
+    const read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence), ...(!read && { held: true }) });
   }
 
   /**
@@ -1750,8 +1751,12 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
-    // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
-    else if (!this.quietForTaken) this.session.start();
+    // The link session runs before the contact can learn the new method (from the envelope setMode publishes). Where the
+    // contact dials (the lower key offers), this side's first presence is what it dials on: signaling (`LinkSession.presenceDue`).
+    else if (!this.quietForTaken) {
+      if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) this.session.presenceDue();
+      this.session.start();
+    }
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
@@ -3035,6 +3040,8 @@ export class GhostLink {
   }
   /** What awaits its receipt on the DHT floor now, if anything does. */
   get dhtPendingId(): string | undefined { return this.dht?.pendingId; }
+  /** The last DHT send of this text went nowhere: no relay holds it, and it is off the floor (`DhtDelivery.wentNowhereFor`). */
+  dhtWentNowhere(id: string): boolean { return !!this.dht?.wentNowhereFor(id); }
   /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
   async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
 

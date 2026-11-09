@@ -3,7 +3,7 @@
  * on an origin of its own, full screen over the app, and every request it makes sent over the contact's data link
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
-import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { GhostlyHttpError, VIEWER_SERVICE_CSP, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
@@ -81,9 +81,29 @@ export class CookieJar {
 }
 
 /**
+ * What one opened app (its jar) may have waiting in this page at once, requests and their bodies' bytes: past either, a
+ * request is refused at once, so the app cannot make the page that runs the peer hold unbounded memory.
+ */
+export const MAX_PENDING_REQUESTS = 32;
+export const MAX_PENDING_BODY_BYTES = 32 * 1024 * 1024;
+const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number }>();
+
+/** Takes room for one request of the app's: how to give it back, or null with none left. */
+function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
+  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0 };
+  if (pending.count >= MAX_PENDING_REQUESTS || pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
+  pending.count++;
+  pending.bytes += bytes;
+  pendingOf.set(jar, pending);
+  return () => { pending.count--; pending.bytes -= bytes; };
+}
+
+/**
  * Sends one request from the app over the link and streams the answer back on its port. `view`: aborted once the page
  * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
- * too, rather than running on their machine and holding one of the link's places.
+ * too, rather than running on their machine and holding one of the link's places. Every answer carries Ghostly's viewer
+ * policy after the contact's own (`VIEWER_SERVICE_CSP`, as Desktop, the extension and `ghostly service open` add it):
+ * the app talks to nothing but its own origin, and nothing over plain http.
  */
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal): Promise<void> {
   const request = readRequest(data);
@@ -101,6 +121,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
+  const release = holdRoom(jar, request.body?.byteLength ?? 0);
+  if (!release) {
+    post({ type: "error", status: 503, text: words.failed });
+    port.close();
+    return;
+  }
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
   const pageGone = () => stop.abort();
@@ -128,6 +154,8 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       if (name.toLowerCase() === "set-cookie") jar.take(value);
       else out.push([name, value]);
     }
+    // A browser enforces every policy it is sent: the contact's own cannot widen this one.
+    out.push(["content-security-policy", VIEWER_SERVICE_CSP]);
     headed = true;
     clearTimeout(late);
     if (ended) return;
@@ -143,6 +171,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
+    release();
     clearTimeout(late);
     view?.removeEventListener("abort", pageGone);
     port.close();

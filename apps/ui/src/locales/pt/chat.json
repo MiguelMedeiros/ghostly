@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
+    "notSent": "Sua mensagem “{{text}}” não foi enviada",
+    "notSentCount": "{{count}} mensagens não enviadas",
     "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
-    "rowMoved": "Agora na posição {{place}} de {{count}}"
+    "rowMoved": "Agora na posição {{place}} de {{count}}",
+    "waiting": "Sua mensagem “{{text}}” está aguardando seu contato ficar online",
+    "waitingCount": "{{count}} mensagens aguardando seu contato ficar online"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",

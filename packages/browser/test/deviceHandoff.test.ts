@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
+  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffAttemptAllowed, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
   toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffPart, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
@@ -178,6 +178,8 @@ interface World {
   giverRecords: Records; takerRecords: Records;
   giver: HandoffGiver; taker: HandoffTaker;
   busy: { why: LocalBusy | BusyReport | null };
+  /** The device set is changing on the giver (a device being added, a move of the set). */
+  setChanging: boolean;
   /** Who the giver said would take, at each check of its wallets, and at quiesce. */
   asked: (HandoffTakerFacts | undefined)[]; quiescedFor: (HandoffTakerFacts | undefined)[];
   /** What the engine adds to the record at quiesce (the Breez databases of wallets that move), and what stays here. */
@@ -198,7 +200,7 @@ function world(options: { verifier?: boolean } = {}): World {
   const w = {
     link: new Link(), profile: new Profile(), storage: new Storage(),
     giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
-    busy: { why: null }, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
+    busy: { why: null }, setChanging: false, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
     takeOutcome: () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
   } as unknown as World;
   w.makeGiver = (phase) => {
@@ -207,6 +209,7 @@ function world(options: { verifier?: boolean } = {}): World {
       self: async () => self(w.giverSelf), source: w.profile,
       verifier: async () => (options.verifier === false || phase === "gated" ? null : verifier()),
       busy: async (taker) => { w.asked.push(taker); return w.busy.why; },
+      setChanging: () => w.setChanging,
       staying: async () => w.stays,
       ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
       ...(phase === "gated" ? {
@@ -498,6 +501,20 @@ describe("the password proof and its limits", () => {
     expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
   });
 
+  it("a lock-out the giver counted while its clock ran days ahead lasts at most an hour on the device that takes the profile", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const ahead = Date.now() + 2 * 24 * HANDOFF_ATTEMPTS.hourMs;
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [ahead], total: 5, until: ahead + HANDOFF_ATTEMPTS.hourMs } } });
+    await fullPull(w);
+    const carried = w.takerRecords.record.handoffAttempts![C];
+    expect(carried.total).toBe(5);
+    expect(carried.until).toBeGreaterThan(Date.now());
+    expect(carried.until).toBeLessThanOrEqual(Date.now() + HANDOFF_ATTEMPTS.hourMs);
+    expect(handoffAttemptAllowed(carried, Date.now() + HANDOFF_ATTEMPTS.hourMs)).toBe("ok");
+    expect(carried.recent.every((at) => at <= Date.now())).toBe(true);
+  });
+
   it("a count the giver no longer holds (a right password cleared it) goes from the taker's old copy too", async () => {
     const w = world();
     w.profile.add("f1", bytesOf(100));
@@ -596,6 +613,82 @@ describe("a device that asks and never proves", () => {
     await until(() => w.taker.view()?.step === "offer");
     await w.taker.accept();
     await until(() => w.quiesced.length === 1);
+  });
+
+  // The taker can check its password on the giver's second message alone: one that stops there (no third, its link closed
+  // or the minute out) has made a guess, and is said as a wrong password, like the one it sends (WISP 06 § Authorizing a
+  // handoff: "Every failure raises a notice on the active device").
+  const noticed = (w: World): string[] => {
+    const notices: string[] = [];
+    (w.giver as unknown as { ports: GiverPorts }).ports.notice = (kind, device) => notices.push(`${kind}:${device}`);
+    return notices;
+  };
+  const noThird = (w: World) => { w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" && frame.n === 3 ? null : frame); };
+
+  it("a wrong password the taker says: the notice, and the giver says it was a wrong password", async () => {
+    const w = world();
+    const notices = noticed(w);
+    await w.taker.pull("not the password");
+    await until(() => w.giver.view()?.failure === "password");
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+  });
+
+  it("a taker that closes its link after the second message: the same notice, counted once, and not said as a dropped link", async () => {
+    const w = world();
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "password" });
+    expect(w.giver.view()?.refused).toBeUndefined();
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
+  });
+
+  it("a taker that waits out the minute after the second message: the same notice", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.idleMs + 1);
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "password" });
+    expect(notices).toEqual([`wrong-password:${w.giver.view()!.device}`]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
+  });
+
+  it("the fifteenth guess that stops after the second message leaves the device refused, and Let <device> try again is offered with it", async () => {
+    const w = world();
+    await w.giverRecords.amend({ handoffAttempts: { [B]: { recent: [], total: HANDOFF_ATTEMPTS.total - 1 } } });
+    const notices = noticed(w);
+    noThird(w);
+    await w.taker.pull("not the password");
+    await until(() => w.link.count("handoff-pake", A) === 1);
+    await settle();
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ failure: "password", refused: true });
+    expect(notices).toHaveLength(1);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(HANDOFF_ATTEMPTS.total);
+  });
+
+  it("a link that drops before the second message went out: the move stopped, no notice, and the try still counted", async () => {
+    const w = world();
+    const notices = noticed(w);
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.step === "authorizing");
+    w.link.drop();
+    await until(() => w.giver.view()?.step === "failed");
+    expect(w.giver.view()).toMatchObject({ step: "failed", failure: "dropped" });
+    expect(notices).toEqual([]);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(1);
   });
 });
 
@@ -829,6 +922,98 @@ describe("a copy that stops (WISP 06 § States and events)", () => {
   });
 });
 
+describe("a staging namespace that is not installed (WISP 06 § Installing the staged state)", () => {
+  const FAKE = { toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const, shouldAdvanceTime: true };
+
+  /** A pull that has staged some of the files, and goes on no further. */
+  async function partlyStaged(w: World): Promise<string> {
+    for (let i = 0; i < 4; i++) w.profile.add(`f${i}`, bytesOf(HANDOFF_PIECE_BYTES * 2 + i));
+    let pieces = 0;
+    w.link.meddle = (from, frame) => (from === A && frame.t === "handoff-data" && ++pieces > 4 ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => [...w.storage.spaces.values()].some((space) => space.held.size > 0));
+    return w.takerRecords.record.handoff!.staging!;
+  }
+
+  it("Cancel during the copy: the whole staging goes, files and all, and the record names none", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    await w.taker.cancel();
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.storage.spaces.has(staged)).toBe(false);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+    expect(w.takerRecords.record.state).toBe("standby");
+    // Try again starts a new staging and moves the profile.
+    w.link.meddle = undefined;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.takerRecords.record.handoff!.staging).not.toBe(staged);
+  });
+
+  it("Cancel, and the staging's files could not all be removed: the record still names it, and the next start drops it", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    const drop = w.storage.drop.bind(w.storage);
+    w.storage.drop = async () => { throw new Error("The file is locked"); };
+    await w.taker.cancel();
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "cancelled" });
+    expect(w.takerRecords.record.handoff).toMatchObject({ step: "stopped", staging: staged });
+    w.storage.drop = drop;
+    await w.takerRecords.amend({ handoff: { ...w.takerRecords.record.handoff!, at: Date.now() - HANDOFF_TIMINGS.stagingMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+
+  it("the giver's Cancel during the copy: the taker drops the whole staging too", async () => {
+    const w = world();
+    const staged = await partlyStaged(w);
+    await w.giver.cancel();
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+
+  it("a copy that stalled keeps its staged files for Try again", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    const staged = await partlyStaged(w);
+    // Nothing from the giver reaches the taker any more.
+    w.link.meddle = (from, frame) => (from === A ? null : frame);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.taker.view()?.failure === "stalled");
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.storage.spaces.get(staged)!.held.size).toBeGreaterThan(0);
+    expect(w.takerRecords.record.handoff).toMatchObject({ step: "stopped", staging: staged });
+  });
+
+  it("a stopped staging kept past 24 hours goes at the next start; a younger one stays", async () => {
+    const w = world();
+    const note = { role: "taking" as const, step: "stopped", id: "x".repeat(22), peer: A, from: N, old: "ghostly" };
+    await w.storage.open("ghostly_stage8");
+    await w.takerRecords.amend({ handoff: { ...note, staging: "ghostly_stage8", at: Date.now() - HANDOFF_TIMINGS.stagingMs + 60_000 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.handoff?.staging).toBe("ghostly_stage8");
+
+    await w.takerRecords.amend({ handoff: { ...note, staging: "ghostly_stage8", at: Date.now() - HANDOFF_TIMINGS.stagingMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual(["ghostly_stage8"]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+    expect(w.taker.view()).toBeNull();
+  });
+
+  it("a note that stopped mid-copy and is over 24 hours old: given up at start, its staging with it", async () => {
+    const w = world();
+    await w.storage.open("ghostly_stage8");
+    await w.takerRecords.amend({ handoff: { role: "taking", step: "receiving", id: "x".repeat(22), peer: A, from: N, old: "ghostly", staging: "ghostly_stage8", secret: toBase64Url(randomBytes(32)), at: Date.now() - HANDOFF_TIMINGS.giveUpMs - 1 } });
+    await reloadTaker(w);
+    expect(w.storage.dropped).toEqual(["ghostly_stage8"]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
+  });
+});
+
 describe("a push", () => {
   it("offers, and the taker's Use here moves the profile with no password", async () => {
     const w = world();
@@ -851,6 +1036,8 @@ describe("a push", () => {
     await w.taker.cancel();
     await until(() => w.giver.view()?.failure === "cancelled");
     expect(w.giverRecords.record.state).toBe("active");
+    // The standby chose not to move: nothing failed there, so no "Stopped" and no "Try again" (a pull) on its screen.
+    expect(w.taker.view()).toBeNull();
   });
 
   it("a request with the offer's id from another device is no answer to the offer", async () => {
@@ -1084,6 +1271,25 @@ describe("refusals before a byte is copied", () => {
     expect(w.giver.view()).toMatchObject({ role: "giver", key: B, step: "failed", failure: "expiry", wallet: "bark", expiresAt: 1_800_000_000_000 });
     // The check knew the taker from its hello: its key, its kind and its wallet SDK pins.
     expect(w.asked.at(-1)).toEqual({ key: B, kind: "web", pins: { ark: "0.4.76" } });
+  });
+
+  it("a device being added or a move of the set on the giver: the pull is told it is busy, Move to is refused, and nothing is frozen", async () => {
+    const w = world();
+    w.setChanging = true;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("busy");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["handoff"]);
+    expect(w.link.count("handoff-pake", A)).toBe(0);
+    expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+    expect(w.quiesced).toEqual([]);
+    expect(w.giverRecords.record.state).toBe("active");
+    await expect(w.giver.push(B)).rejects.toThrow("handoff-busy: Another move is in progress.");
+    expect(w.link.count("handoff-offer")).toBe(0);
+    // Once the set stops changing, the profile moves.
+    w.setChanging = false;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
   });
 
   it("a taker with an older database: Update Ghostly on this device first", async () => {
@@ -1386,21 +1592,21 @@ describe("pass 2 and the release", () => {
     expect(releases[0]).toBe(releases[1]);
   });
 
-  it("the giver cancels before the release: the taker drops the rest of pass 2, keeps its staged files and stays on standby", async () => {
+  it("the giver cancels before the release: the taker drops its whole staging and stays on standby", async () => {
     const w = world();
-    const file = w.profile.add("f1", bytesOf(5_000));
+    w.profile.add("f1", bytesOf(5_000));
     w.link.meddle = (from, frame) => (frame.t === "handoff-verified" ? null : frame);
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);
     await reloadGiver(w);
     await until(() => w.takerRecords.record.handoff?.step === "verified");
+    const staged = w.takerRecords.record.handoff!.staging!;
     await w.giver.cancel();
     await until(() => w.taker.view()?.step === "failed");
     expect(w.activeAgain).toBe(1);
     expect(w.giverRecords.record.state).toBe("active");
-    const space = w.storage.spaces.get(w.takerRecords.record.handoff!.staging!)!;
-    expect(space.restored).toBeNull();
-    expect([...space.held.values()].map((f) => f.sha256)).toEqual([file.sha256]);
+    expect(w.storage.dropped).toEqual([staged]);
+    expect(w.takerRecords.record.handoff?.staging).toBeUndefined();
     expect(w.takerRecords.record.state).toBe("standby");
   });
 

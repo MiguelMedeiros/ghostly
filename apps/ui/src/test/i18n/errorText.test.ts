@@ -7,6 +7,7 @@ import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/err
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemLine, problemText } from "../../lib/problemText";
+import { liveAttemptText } from "../../lib/transportEvents";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -114,6 +115,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The HyperDHT relay did not let this chat listen", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["Iroh endpoint is stopped", `${BROWSER}/platform/irohWeb.ts`],
   ["Iroh relay unreachable", "native/transports/iroh-web/src/lib.rs"],
+  // A contact's Iroh relay this device does not dial: not a public https one, or not one of the person's own with Hide my IP on.
+  ["The contact's Iroh relay is not one this device dials", `${BROWSER}/platform/irohWeb.ts`],
+  ["The contact's Iroh relay is not one this device dials", "apps/desktop/src/paired_transport.rs"],
   ["The connection changed. Compare the current code again.", "packages/core/src/pairedSession.ts"],
   ["Compare the current code again.", "packages/core/src/ghostlink.ts"],
   ["The connection closed. Compare again after reconnecting.", "packages/core/src/pairedSession.ts"],
@@ -205,6 +209,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
+  // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
+  ["Keyset '009a1f293253e41e' is not a keyset of this mint", "node_modules/@cashu/cashu-ts/lib/cashu-ts.es.js", "' is not a keyset of this mint"],
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],
@@ -402,6 +408,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["shop.example did not answer with a pay request", `${CORE}/lnurl.ts`, " did not answer with a pay request"],
   ["shop.example did not answer with an invoice", `${CORE}/lnurl.ts`, " did not answer with an invoice"],
   ["The invoice the service answered with has already expired", `${CORE}/lnurl.ts`],
+  // An invoice the Lightning address answered with for another amount than the one chosen, or for any amount.
+  ["The invoice asks for 1,234,567 sats, not the 21,000 sats you chose", `${CORE}/lnurl.ts`, "The invoice asks for "],
+  ["The invoice asks for any amount, not the 21 sats you chose", `${CORE}/lnurl.ts`, "\"any amount\""],
   ["Give the profile a name", "apps/ui/src/lib/profiles.ts"],
   ["That profile already exists", "apps/ui/src/lib/profiles.ts"],
   ["The first profile cannot be removed", "apps/ui/src/lib/profiles.ts"],
@@ -563,6 +572,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],
   ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
   ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
+  // A Lightning card asked for an invoice it could not look up (a Receive, a chat request on it).
+  ["Alby Hub cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed", `${BROWSER}/engine/paymentAdapters/providers/lightningService.ts`, " cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed"],
+  // An OpenPGP key of a kind or size the Add dialog refuses.
+  ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
+  ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -673,6 +687,39 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts("The HyperDHT relay closed the connection", t)).toEqual({ title: t("errors.transport.hyperdhtClosed"), next: t("errors.transport.hyperdhtCheckNext") });
     expect(knownErrorParts("The HyperDHT relay did not let this chat listen", t)).toEqual({ title: t("errors.transport.hyperdhtRefused"), next: t("errors.transport.hyperdhtRefusedNext") });
     for (const key of ["hyperdhtUnreachableNext", "hyperdhtCheckNext", "hyperdhtRefusedNext"] as const) expect(t(`errors.transport.${key}`)).not.toBe(`errors.transport.${key}`);
+  });
+
+  // These were the engine's English in a chat's not-live box, the wallet's Receive, and "Something went wrong" (over
+  // `readable`'s length) in Identities → Add → OpenPGP, in every language.
+  it.each(LANGUAGES)("a contact's Iroh relay this device does not dial says why and what to do in %s, in the not-live box too", (language) => {
+    const t = translators[language];
+    const cases: [string, TranslationKey, TranslationKey][] = [
+      ["The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"],
+    ];
+    for (const [raw, key, next] of cases) {
+      expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key), next: t(next) });
+      const lines = liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "iroh/1", error: raw }] }, "you", "Ana", () => "17:02", t)!.lines;
+      expect(lines, raw).toEqual([t("connection.attempt.failure", { transport: "Iroh", reason: t(key).replace(/\.$/, "") })]);
+    }
+  });
+
+  it.each(LANGUAGES)("a Lightning card that cannot look up its invoices says so and what to do in %s, its name kept", (language) => {
+    const t = translators[language];
+    const raw = "Alby Hub cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.wallet.noLookup", { label: "Alby Hub" }), next: t("errors.wallet.noLookupNext") });
+    expect(knownErrorParts(raw, t)?.title).toContain("Alby Hub");
+  });
+
+  it.each(LANGUAGES)("an OpenPGP key of a kind or size Ghostly refuses says so and which keys to use in %s, not \"Something went wrong\"", (language) => {
+    const t = translators[language];
+    for (const kind of ["RSA 16384", "RSA 1024", "elgamal", "dsa"]) {
+      const raw = `This key uses ${kind}, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.`;
+      const said = problemText(new Error(raw), t);
+      expect(said, raw).toEqual({ tone: "error", title: t("errors.proof.pgpKeyKind", { kind }), next: t("errors.proof.pgpKeyKindNext", { max: "8192" }) });
+      expect(said.title).not.toBe(t("errors.generic"));
+    }
+    const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
+    expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
@@ -799,6 +846,13 @@ describe("errors in the app's language", () => {
     }
   });
 
+  it("a Lightning address's invoice for another amount says so and what to do, in the language; the amounts stay behind the ⓘ", () => {
+    for (const raw of ["The invoice asks for 1,234,567 sats, not the 21,000 sats you chose", "The invoice asks for any amount, not the 21 sats you chose"]) {
+      expect(knownErrorParts(raw, translators.pt)).toEqual({ title: "A fatura não bate com o valor que você escolheu", next: "Nada foi pago. Tente de novo ou pague de outro jeito.", detail: raw });
+      expect(knownErrorParts(raw)).toEqual({ title: "The invoice does not match the amount you chose", next: "Nothing was paid. Try again, or pay another way.", detail: raw });
+    }
+  });
+
   it("each rule has a sample, so none stops matching unseen", () => {
     const covered = new Set(SAMPLES.map(([text]) => matched(text)));
     expect(ERROR_RULES.filter((rule) => !covered.has(rule)).map((rule) => String(rule.match))).toEqual([]);
@@ -879,6 +933,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
     expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
     expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
+  });
+
+  it.each([
+    ["en", "Nothing to take back"], ["pt", "Não há nada para pegar de volta"], ["es", "No hay nada que recuperar"], ["fr", "Rien à reprendre"],
+    ["it", "Niente da riprendere"], ["ja", "取り戻すものはありません"], ["zh", "没有可取回的内容"], ["ar", "لا يوجد ما يُستعاد"],
+  ] as const)("Take it back with nothing left says so with the button's verb in %s, not Redeem's, on Cashu as on Fedimint", (language, said) => {
+    expect(errorText("Nothing to reclaim", translators[language])).toBe(said);
+    expect(errorText("Nothing to take back", translators[language])).toBe(said);
   });
 
   it("the values stay, and amounts are written the app's way", () => {

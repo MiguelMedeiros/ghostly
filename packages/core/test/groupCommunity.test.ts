@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
@@ -942,6 +942,35 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     for (const commit of hers) expect(await bob.session.handle(carol.session.myKey, commitFrame(commit))).toBe(true);
     expect(bob.session.topHash).toBe(adminTip);
     expect(bob.session.state.side).toHaveLength(3);
+  });
+
+  it("losing branches kept, however many, never push out the secrets of the branch followed", async () => {
+    // One member's branches are capped (`sideTips`, `sideCommits`); many members together can still keep more than
+    // `secrets`. Lifted here, so one member stands for them all.
+    const limits = COMMUNITY_LIMITS as unknown as { sideTips: number; sideCommits: number };
+    const kept = { sideTips: limits.sideTips, sideCommits: limits.sideCommits };
+    limits.sideTips = limits.sideCommits = COMMUNITY_LIMITS.side;
+    onTestFinished(() => { Object.assign(limits, kept); });
+    const { net, alice, bob, carol, mallory } = await group();
+    const tip = alice.session.top, tipRoster = alice.session.roster;
+    // Mallory signs more admissions after the tip than secrets are kept, each a branch of its own.
+    const flood = Array.from({ length: COMMUNITY_LIMITS.secrets + 4 }, () => forge(mallory, tip, tipRoster, { k: "add", s: createIdentity().pubKeyZ32 }).commit);
+    for (const commit of flood) for (const m of [alice, bob, carol]) await m.session.handle(mallory.session.myKey, commitFrame(commit));
+    await net.settle();
+    for (const m of [alice, bob, carol]) {
+      // One of them may be followed (it is as long as the others): every member the same one.
+      expect(m.session.topHash).toBe(alice.session.topHash);
+      expect(m.session.state.side.length).toBeGreaterThan(COMMUNITY_LIMITS.secrets - COMMUNITY_LIMITS.window);
+      expect(m.session.canSend).toBe(true);
+    }
+    await say(net, bob, "after the flood");
+    expect(net.texts(carol)).toContain("after the flood");
+    // And past the admin's next commit.
+    await alice.session.rotate();
+    await net.settle();
+    await say(net, carol, "after the rotation");
+    expect(net.texts(bob)).toContain("after the rotation");
+    for (const m of [alice, bob, carol]) expect(m.session.state.secrets[alice.session.topHash]).toBeDefined();
   });
 
   it("a member away through the change who hears the longer branch first ends on the admin's", async () => {

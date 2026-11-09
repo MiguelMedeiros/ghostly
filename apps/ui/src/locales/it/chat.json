@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "notSent": "Il tuo messaggio «{{text}}» non è stato inviato",
+    "notSentCount": "{{count}} messaggi non inviati",
     "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate",
-    "rowMoved": "Ora al posto {{place}} di {{count}}"
+    "rowMoved": "Ora al posto {{place}} di {{count}}",
+    "waiting": "Il tuo messaggio «{{text}}» è in attesa che il tuo contatto sia online",
+    "waitingCount": "{{count}} messaggi in attesa che il tuo contatto sia online"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",

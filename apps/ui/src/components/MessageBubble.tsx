@@ -304,13 +304,13 @@ function EditGlyph() {
 
 /**
  * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
- * not been shown it yet. The earlier versions are in the message's details.
+ * not been shown it yet. The earlier versions are in the message's details. On a picture's dark chip, light as its time.
  */
-function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
+function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean; onPicture?: boolean }) {
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`text-[11px] leading-none italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -860,9 +860,9 @@ export function MessageBubble(props: MessageBubbleProps) {
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
-  const { message, peerAck = 0, selection } = props;
+  const { message, selection } = props;
   // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
-  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const acked = ackedBy(props);
   const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
   return (
     <SameBubble
@@ -879,12 +879,30 @@ export function MessageBubble(props: MessageBubbleProps) {
 
 const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
-/** The same bubble to draw: see `MessageBubble`. */
-function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+/** What both comparisons below read alike: everything a bubble draws with but its acknowledgement and reactions' names. */
+function sameShown(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
+}
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.names === b.names && sameShown(a, b);
+}
+
+/** Whether the contact's acknowledgement covers this message of mine: what `MessageBubble` draws of `peerAck`. */
+const ackedBy = ({ message, peerAck = 0 }: MessageBubbleProps) => message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+
+/**
+ * The same `MessageBubble` to draw again, for a list that keeps its rows from drawing when nothing of them changed
+ * (`memo(MessageBubble, sameMessageRow)`). As `sameBubble`, callbacks only by whether they are there, so the list's
+ * callbacks must do what the list says when called (one function for its life, or one closing over the row's values),
+ * not what it said when the row was last drawn. `reactionName` by identity: the names it answers are drawn.
+ */
+export function sameMessageRow(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return ackedBy(a) === ackedBy(b) && a.reactionName === b.reactionName && sameShown(a, b);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -1086,7 +1104,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <span>{refusedLine(refusedPayment, t)}</span>
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
@@ -1106,7 +1124,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const pubKeyShort = joiner ? publicKeyLabel(joiner) : "";
 
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
@@ -1144,7 +1162,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -1254,11 +1272,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
   // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
+  // A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is.
+  const edit = message.edit && (!buttonsView || !!message.edit.history?.length) ? message.edit : undefined;
   const timestampEl = (
     <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
       <span dir={dir} className="inline-flex items-center gap-[3px]">
-        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} />}
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
@@ -1385,6 +1404,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
             )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+              {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} onPicture />}
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>

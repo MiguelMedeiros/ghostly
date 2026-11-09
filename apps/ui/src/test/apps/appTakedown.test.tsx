@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
 import { setAppOpener, takedownText, type AppOpener } from "../../lib/apps/open";
+import { appErrorText } from "../../lib/apps/errors";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { chatApp } from "../../lib/apps/running";
@@ -33,9 +34,17 @@ vi.mock("../../lib/apps/broker", async (actual) => ({
 }));
 
 const REF = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess";
+/** What the next open's entry waits for: an open that fails (offline) or that is held to look at it meanwhile. */
+let entryWaits: Promise<void> | null = null;
+/** What each open asked the engine: Run anyway or not. */
+const anyway: boolean[] = [];
 const host = {
   runnerUrl: "/app-frame.html",
-  entry: async () => ({ ref: REF, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" }),
+  entry: async (_ref: string, runAnyway: boolean) => {
+    anyway.push(runAnyway);
+    if (entryWaits) await entryWaits;
+    return { ref: REF, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" };
+  },
 } as unknown as AppsPlatform;
 
 let run: InstalledAppView["run"] = { status: "ok" };
@@ -48,6 +57,8 @@ const installed = (): InstalledAppView => ({
 let open: AppOpener;
 beforeEach(() => {
   started.length = 0;
+  anyway.length = 0;
+  entryWaits = null;
   run = { status: "ok" };
   forgetInstalledApps();
   fakeEngine.on("appList", () => [installed()]);
@@ -218,10 +229,85 @@ describe("an app the watchdog stopped", () => {
     expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
     expect(app).toContainElement(started[1]!.frame);
     expect(chatApp("link-1")?.stopped).toBeUndefined();
+    // Its button went with the stopped message: the focus is in the panel, not on the page.
+    await waitFor(() => expect(app.contains(document.activeElement)).toBe(true));
+  });
+
+  it("in a chat: one a store removed, run anyway, opens again as it was run, and a removed check leaves it running", async () => {
+    setAppOpener(open);
+    const { user } = chatPanel();
+    const removed: InstalledAppView["run"] = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    run = removed;
+    await act(() => open(REF, "link-1", { runAnyway: true }));
+    act(() => started[0]!.stop("unresponsive"));
+    const app = screen.getByTestId("mini-app");
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(anyway).toEqual([true, true]);
+    await checked(removed);
+    expect(started[1]!.stop).not.toHaveBeenCalled();
+    expect(within(app).queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
+  });
+
+  it("in a chat: Open again that fails says why under it, in the person's language, and the panel stays", async () => {
+    setAppOpener(open);
+    const { user } = chatPanel();
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("unresponsive"));
+    const app = screen.getByTestId("mini-app");
+    let fail!: (error: Error) => void;
+    entryWaits = new Promise((_, reject) => { fail = reject; });
+    const again = within(app).getByRole("button", { name: "Open again" });
+    await user.click(again);
+    // Busy while it opens: a second press starts nothing more.
+    const busy = again.getAttribute("aria-busy");
+    await user.click(again);
+    await act(async () => { fail(new Error("offline: the runner page could not be reached")); await new Promise((r) => setTimeout(r, 10)); });
+    expect(within(app).queryByRole("alert")).toHaveTextContent("You are offline.");
+    expect(app).toBeVisible();
+    expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
+    expect(busy).toBe("true");
+    expect(again).not.toHaveAttribute("aria-busy");
+    expect(app.contains(document.activeElement)).toBe(true);
+    expect(started).toHaveLength(1);
+    // Pressed again and it works: the line goes with the stopped message.
+    entryWaits = null;
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(within(app).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  const en = translateWith(locales.en, "en");
+  const aloneOpener = () => webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", openAgainLabel: () => "Open again", errorText: (error) => appErrorText(error, en), stoppedLabel: (title, takedown) => takedownText(title, takedown, en) });
+
+  it("alone: Open again that fails keeps the layer and says why there", async () => {
+    open = aloneOpener();
+    await open(REF, null);
+    started[0]!.stop("unresponsive");
+    const app = screen.getByTestId("mini-app");
+    let fail!: (error: Error) => void;
+    entryWaits = new Promise((_, reject) => { fail = reject; });
+    const again = within(app).getByRole("button", { name: "Open again" });
+    again.click();
+    const busy = again.getAttribute("aria-busy");
+    fail(new Error("offline: the runner page could not be reached"));
+    await act(() => new Promise((r) => setTimeout(r, 10)));
+    expect(app).toBeInTheDocument();
+    expect(within(app).queryByRole("alert")).toHaveTextContent("You are offline.");
+    expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
+    expect(busy).toBe("true");
+    expect(again).not.toHaveAttribute("aria-busy");
+    expect(started).toHaveLength(1);
+    // It works the next time: one layer, the app in it.
+    entryWaits = null;
+    again.click();
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(screen.getByTestId("mini-app")).toContainElement(started[1]!.frame);
   });
 
   it("alone: its layer says it stopped responding, and Open again opens it again", async () => {
-    open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", openAgainLabel: () => "Open again", stoppedLabel: (title, takedown) => takedownText(title, takedown, translateWith(locales.en, "en")) });
+    open = aloneOpener();
     await open(REF, null);
     started[0]!.stop("unresponsive");
     const app = screen.getByTestId("mini-app");

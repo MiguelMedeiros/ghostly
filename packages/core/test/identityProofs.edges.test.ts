@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import {
-  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityRefusal, identityStatement, newIdentityBinding,
+  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_CHECKS_PER_HOUR, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IDENTITY_REUSE_CHECK_S, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityRefusal, identityStatement, newIdentityBinding,
   receivedIdentityStatus, signIdentityPresentation, verifyIdentityPresentation,
   type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type ReceivedIdentity, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -440,6 +440,8 @@ describe("verifying a presentation", () => {
     const w = world();
     const id = w.addProof();
     await w.peers.bob.receive(await present(w, id));
+    // Past the reuse of its first check: this presentation goes to the provider.
+    w.advance(IDENTITY_REUSE_CHECK_S);
     const frame = await present(w, id);
     w.verify.mockImplementationOnce(async s => {
       w.state.revoked.add(s.id);
@@ -550,6 +552,63 @@ describe("verifying a presentation", () => {
     await Promise.all(frames.map(f => w.peers.bob.receive(f)));
     expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
     expect(w.sent("idp-result").slice(-8).filter(f => f.frame.ok === false)).toHaveLength(4);
+  });
+
+  it("answers the same proof presented again from the check it already passed, without asking its provider or looking it up", async () => {
+    const w = world();
+    const id = w.addProof();
+    const revoked = vi.spyOn(w.state.revoked, "has");
+    // At the frame limit (a check is two frames): 65 presentations of one proof in a little over three minutes.
+    for (let i = 0; i < 65; i++) {
+      await w.peers.bob.receive(await present(w, id));
+      expect(result(w)).toEqual({ t: "idp-result", id, ok: true });
+      w.advance(3);
+    }
+    expect(w.verify).toHaveBeenCalledTimes(1);
+    expect(revoked).toHaveBeenCalledTimes(1);
+    // Answered from that check, it keeps that check's time: the daily re-check still comes due from it.
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, status: "verified", verifiedAt: NOW, checkedAt: NOW })]);
+    // Once that check is older than the reuse window, a presentation is checked again.
+    w.advance(IDENTITY_REUSE_CHECK_S);
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(2);
+    expect(revoked).toHaveBeenCalledTimes(2);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, checkedAt: w.now() })]);
+  });
+
+  it("checks a held proof again when its evidence changed or it no longer reads verified", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    w.proofs.set(id, { ...w.proofs.get(id)!, evidence: { for: id, again: true } });
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(2);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, evidence: { for: id, again: true } })]);
+    w.ledgers.bob = { ...w.ledgers.bob, received: w.ledgers.bob.received.map(r => ({ ...r, status: "unconfirmed" as const, error: "gone" })) };
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(3);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, status: "verified" })]);
+  });
+
+  it("checks at most a bounded number of a contact's proofs an hour with their provider", async () => {
+    const w = world();
+    // Fresh proofs of one identity (each a new statement, so none is held yet), at the frame limit.
+    const results: Frame[] = [];
+    for (let i = 0; i < 65; i++) {
+      const id = w.addProof();
+      await w.peers.bob.receive(await present(w, id));
+      results.push(result(w)!);
+      w.advance(3);
+    }
+    expect(w.verify).toHaveBeenCalledTimes(IDENTITY_MAX_CHECKS_PER_HOUR);
+    expect(results.slice(IDENTITY_MAX_CHECKS_PER_HOUR).every(r => r.ok === false && r.error === "Your contact's app could not check it. Try again later.")).toBe(true);
+    // The person's own re-check is not held by it.
+    await w.peers.bob.recheck(w.ledgers.bob.received[0]!.id);
+    expect(w.verify).toHaveBeenCalledTimes(IDENTITY_MAX_CHECKS_PER_HOUR + 1);
+    // An hour after the first checks, there is room again.
+    w.advance(3600);
+    await w.peers.bob.receive(await present(w, w.addProof()));
+    expect(result(w)).toMatchObject({ ok: true });
   });
 
 });

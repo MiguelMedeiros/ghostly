@@ -186,6 +186,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   const [error, setError] = useState<Problem | null>(null);
   // The engine refuses when the offer is gone or the copy has nowhere to go: said under the buttons, as Use here's dialog does.
   const act = (work: () => Promise<unknown>) => {
+    if (busy) return;
     setBusy(true); setError(null);
     void work().catch((cause: unknown) => { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); })
       .finally(() => setBusy(false));
@@ -196,9 +197,10 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
         <p className="font-semibold text-text-primary">{fillNames(t("devices.handoff.offerTitle"), { device })}</p>
         <p className="text-sm text-text-secondary">{t("devices.handoff.offerHint", { size: sizeText(view.offer ?? 0, t) })}</p>
       </div>
+      {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button type="button" data-testid="handoff-decline" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffCancel"))} className={`${quietButton} max-sm:order-last`}>{t("devices.handoff.notNow")}</button>
-        <button type="button" data-testid="handoff-accept" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffAccept", { later: meteredConnection() ? HANDOFF_LATER_BYTES : 0 }))} className={primaryButton}>{t("devices.handoff.useHere")}</button>
+        <button type="button" data-testid="handoff-decline" aria-disabled={busy || undefined} onClick={() => act(() => engine.call("deviceHandoffCancel"))} className={`${quietButton} max-sm:order-last`}>{t("devices.handoff.notNow")}</button>
+        <button type="button" data-testid="handoff-accept" aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => act(() => engine.call("deviceHandoffAccept", { later: meteredConnection() ? HANDOFF_LATER_BYTES : 0 }))} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </div>
       {error && <Notice problem={error} testId="handoff-offer-error" className="" />}
     </div>

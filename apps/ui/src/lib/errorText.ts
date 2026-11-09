@@ -272,6 +272,9 @@ const RULES: readonly Rule[] = [
   exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
   exact("Iroh relay unreachable", "errors.transport.irohUnreachable", "errors.transport.irohUnreachableNext"),
+  // A contact's Iroh relay this device does not dial (irohWeb.ts, apps/desktop paired_transport.rs): not a public https
+  // one nor one of the person's own, or, with Hide my IP from contacts on, not one of theirs.
+  exact("The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
@@ -304,6 +307,8 @@ const RULES: readonly Rule[] = [
   exact("This wallet has no test mint to ask for test coins", "errors.cashu.noTestMint"),
   exact("Select a configured mint", "errors.cashu.selectMint"),
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
+  // Redeeming a token whose keyset its mint does not have (cashu-ts): a crafted token, or one of a keyset the mint dropped.
+  { match: /^Keyset '[^']*' is not a keyset of this mint$/, key: "errors.cashu.unknownKeyset", next: "errors.cashu.unknownKeysetNext" },
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
   { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
@@ -349,7 +354,8 @@ const RULES: readonly Rule[] = [
   { match: /^The Lightning fee \((?<fee>\d+) sats\) is too high$/, key: "errors.pay.feeTooHigh" },
   exact("Nothing to take back", "errors.pay.nothingToTakeBack"),
   exact("The federation has not answered yet: try again in a moment", "errors.pay.federationSilent"),
-  exact("Nothing to reclaim", "errors.pay.nothingToReclaim"),
+  // The Cashu side of Take it back: said in the button's words, as the Fedimint side above.
+  exact("Nothing to reclaim", "errors.pay.nothingToTakeBack"),
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
@@ -441,6 +447,9 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) did not answer with a pay request$/, key: "errors.lnurl.noPayRequest" },
   { match: /^(?<domain>\S+) did not answer with an invoice$/, key: "errors.lnurl.noInvoice" },
   exact("The invoice the service answered with has already expired", "errors.lnurl.invoiceExpired"),
+  // An invoice for another amount than the one chosen, or for any amount (lnurl.ts parseInvoiceCallback): nothing was
+  // paid; the amounts the service and the person named go behind the ⓘ.
+  { match: /^The invoice asks for (?:any amount|[\d,]+ sats), not the [\d,]+ sats you chose$/, key: "wallet.lightning.mismatch", next: "errors.lnurl.mismatchNext", detail: true },
 
   // Groups (packages/core/src/groupSession.ts and groupCommunity.ts, packages/browser/src/engine/groups.ts and
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
@@ -554,6 +563,8 @@ const RULES: readonly Rule[] = [
   { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
   { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", reason: "next" },
   { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", reason: "next" },
+  // A Receive, or a chat request, on a Lightning card connected without invoice lookup (paymentAdapters/providers/lightningService.ts).
+  { match: /^(?<label>.+?) cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed$/, key: "errors.wallet.noLookup", next: "errors.wallet.noLookupNext" },
   { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
   { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
   { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent", reason: "next" },
@@ -619,6 +630,9 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
   { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
+  { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
+  { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
   exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),

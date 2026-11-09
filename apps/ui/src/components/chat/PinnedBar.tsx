@@ -33,14 +33,14 @@ export function PinnedBar({ pin, index, onUnpin, returnFocus }: { pin?: PinView;
   const open = () => { if (original && !jumpToMessage(original.id) && revealMessage(original.id)) jumpToMessage(original.id); };
   const more = t("common.moreInfo");
   return (
-    <div data-testid="pinned-bar" className="shrink-0 border-b border-border bg-panel-header px-3 py-1 max-md:px-2">
+    <div data-testid="pinned-bar" className="pinned-bar shrink-0 border-b border-border bg-panel-header px-3 py-1 max-md:px-2">
       <div className="flex items-center gap-1">
         <button type="button" data-testid="pinned-open" onClick={open} disabled={!original}
           className="min-w-0 flex-1 flex items-center gap-2 rounded px-1 py-0.5 text-start enabled:cursor-pointer enabled:hover:bg-surface-hover">
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
-            <span data-testid="pinned-snippet" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t) : t("chat.pinned.notHere")}</span>
+            <span data-testid="pinned-snippet" dir="auto" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original, t) : t("chat.pinned.notHere")}</span>
           </span>
         </button>
         <button type="button" data-testid="pinned-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}

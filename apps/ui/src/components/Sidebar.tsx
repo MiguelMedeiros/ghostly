@@ -4,7 +4,7 @@ import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
-import { ChatRow, GroupRow } from "./ChatRow";
+import { ChatRow, GroupRow, type ListedGroup } from "./ChatRow";
 import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
 import { OTHER_CHATS_ID, createFolder, folderChatsId, inOrder, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, setSectionOrder, useChatFolders } from "../lib/chatFolders";
 import { FolderNameDialog } from "./chat/ChatFolderDialogs";
@@ -63,9 +63,12 @@ import { useComposition } from "../hooks/useComposition";
 import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
-const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+const NO_GROUPS: ListedGroup[] = [];
+/** A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing. */
+const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup =>
+  ({ ...group, members: members.map(({ key, role, me, nick }) => ({ key, role, me, nick })) });
 /** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
-const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups?.map(listedGroup) ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -159,8 +162,8 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
-  // a file moves), and the whole of it drew the list and every row in it on each.
+  // Its groups only, as it reads them, compared by content: the engine sends its whole state anew on every change (up to
+  // 20 a second while a file moves), and the whole of it drew the list and every row in it on each.
   const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();

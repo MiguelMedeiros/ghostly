@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ANSWER_READ_ALLOWANCE, ANSWER_READ_SPACING_MS, BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, CarriedTransport, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { ANSWER_READ_ALLOWANCE, ANSWER_READ_SPACING_MS, AWAITED_READS,BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, CarriedTransport, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -774,7 +774,7 @@ describe("relay transport: a chat before its groups", () => {
     const url = "https://a.test";
     const relay = new RelayTransport({ freshReadMs: 0, relays: [url], fetch: (async () => new Response(null, { status: 404 })) as typeof fetch });
     const who = (options: { urgent?: boolean; write?: boolean; group?: boolean; background?: boolean }) =>
-      ({ background: false, group: false, urgent: false, door: false, write: false, signal: false, watch: false, watchWrite: false, departed: false, resume: false, back: false, ...options });
+      ({ background: false, group: false, urgent: false, door: false, write: false, signal: false, watch: false, watchWrite: false, departed: false, awaited: false, resume: false, back: false, ...options });
     const chats = 5_000;
     for (let i = 0; i < chats; i++) relay["take"](url, who({ urgent: true, write: true }), `chat-${i}`);
     const start = performance.now();
@@ -1091,6 +1091,17 @@ describe("relay transport: a chat's offer or answer goes over a spent minute", (
     expect(log.slice(REQUESTS_PER_MINUTE)).toEqual([...Array(allowance - 1).fill("GET"), "PUT"]);
   });
 
+  it("lets the reads for an answer past another chat's packet that waits for the minute: it cannot go before the minute frees anyway", async () => {
+    // A web app reloaded with 150 contacts away and 4 invites made just before: the newest invite's presence, refused at
+    // every poll, held the live chat's reads for its answer 5 s at a time for the whole minute, and the chat came back
+    // only when the minute freed: 62 s, against 8 s without the invites (bug hunt, 2026-11-07).
+    const { relay, log, went } = counting();
+    await spendTheMinute(relay);
+    expect(await went(write(relay, false))).toBe(false);
+    expect(await went(read(relay))).toBe(true);
+    expect(log.slice(REQUESTS_PER_MINUTE)).toEqual(["GET"]);
+  });
+
   it("leaves a group's edge a smaller one, which a chat still goes past, and a background request none", async () => {
     const { relay, went } = counting();
     await spendTheMinute(relay);
@@ -1180,6 +1191,73 @@ describe("relay transport: a chat's reads of a contact that just went away go ov
       vi.setSystemTime(Date.now() + 60_000);
       await spendBoth(relay);
       expect(await went(look(relay, contact.pubKeyZ32))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: reads of an invite this side just made go over a spent minute", () => {
+  // A CLI inviter pairing joiners one after another on relays of 30 had both relays' minute spent 12 s in: two pairings
+  // (about 15 requests a relay each), and the departed reads of the contact that had just left took the chats' allowance
+  // past it. The third invite's key was read once, then not until the minute freed: the joiner's knock 48 s late, and
+  // join to live 60 s against 2.6 and 4.6 s for the first two.
+  const invite = createIdentity(), gone = createIdentity(), goneToo = createIdentity(), other = createIdentity();
+  function counting() {
+    const log: { key: string; method: string; host: string }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const key = url.pathname.slice(1);
+      log.push({ key, method: init?.method ?? "GET", host: url.host });
+      const peer = [invite, gone, goneToo].find((p) => p.pubKeyZ32 === key) ?? other;
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(peer, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+    return { relay, log, went };
+  }
+  const spendBoth = async (relay: RelayTransport) => { for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) await relay.resolve(other.pubKeyZ32); };
+  /** The inviter's read of its invite while the joiner is due (`AWAITING_PEER_MS`): the active pace, not urgent. */
+  const awaited = (relay: PkarrTransport, flagged = true) => () => relay.resolve(invite.pubKeyZ32, { urgent: false, ...(flagged && { awaited: true }) });
+  const departed = (relay: PkarrTransport, key: string) => () => relay.resolve(key, { urgent: true, watch: true, departed: true });
+  const allowance = Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE);
+
+  it("reads the invite a few times past the limit, on the relays in turn, then holds its reads back as before", async () => {
+    const { relay, log, went } = counting();
+    await spendBoth(relay);
+    expect(await went(awaited(relay, false))).toBe(false);
+    expect(AWAITED_READS).toBe(4);
+    for (let i = 0; i < AWAITED_READS; i++) expect(await went(awaited(relay))).toBe(true);
+    expect(await went(awaited(relay))).toBe(false);
+    const over = log.slice(2 * REQUESTS_PER_MINUTE);
+    expect(over.every((r) => r.key === invite.pubKeyZ32 && r.method === "GET")).toBe(true);
+    for (const host of ["a.test", "b.test"]) expect(over.filter((r) => r.host === host)).toHaveLength(AWAITED_READS / 2);
+    // Only a chat's: a group's or a background read has its own rules.
+    expect(await went(() => withRequestOptions(relay, { group: true }).resolve(other.pubKeyZ32, { awaited: true }))).toBe(false);
+    expect(await went(() => relay.resolve(other.pubKeyZ32, { background: true, awaited: true }))).toBe(false);
+  });
+
+  it("reads the joiner's knock at once though contacts that just left read past the limit, within the chats' allowance", async () => {
+    const { relay, log, went } = counting();
+    await spendBoth(relay);
+    // The invite's first read, then two contacts that just left read fast (every relay together, 6 each at most).
+    expect(await went(awaited(relay))).toBe(true);
+    for (let i = 0; i < DEPARTED_READS; i++) { await went(departed(relay, gone.pubKeyZ32)); await went(departed(relay, goneToo.pubKeyZ32)); }
+    // The joiner knocked: the next reads of the invite still go, all of them.
+    for (let i = 1; i < AWAITED_READS; i++) expect(await went(awaited(relay))).toBe(true);
+    // Each relay saw no more than the limit and the chats' allowance past it, and an answer still goes.
+    expect(await went(() => relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }))).toBe(true);
+    for (const host of ["a.test", "b.test"]) expect(log.filter((r) => r.host === host).length).toBeLessThanOrEqual(REQUESTS_PER_MINUTE + allowance);
+    expect(await went(departed(relay, gone.pubKeyZ32))).toBe(false);
+  });
+
+  it("has its reads back a minute on, once the minute frees", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, went } = counting();
+      await spendBoth(relay);
+      for (let i = 0; i < AWAITED_READS; i++) await went(awaited(relay));
+      expect(await went(awaited(relay))).toBe(false);
+      vi.setSystemTime(Date.now() + 60_000);
+      await spendBoth(relay);
+      expect(await went(awaited(relay))).toBe(true);
     } finally { vi.useRealTimers(); }
   });
 });

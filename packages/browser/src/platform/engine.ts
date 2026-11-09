@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, PostedEvent, PostedState } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
@@ -353,14 +353,25 @@ class EngineClient {
 
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
 function keptState(posted: PostedState, before: EngineState | null): EngineState {
-  const kept = posted.keptPictures;
+  const kept = posted.keptPictures, views = posted.keptViews;
   const payments = "payments" in posted ? undefined : before?.payments, wallet = "wallet" in posted ? undefined : before?.wallet;
-  if (!payments && !wallet && !kept) return posted as EngineState;
-  const { keptPictures: _, ...state } = posted;
+  if (!payments && !wallet && !kept && !views) return posted as EngineState;
+  const { keptPictures: _, keptViews: __, ...sent } = posted;
+  const state = views ? keptViews(sent, before, views) : sent;
   return {
     ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}),
     ...(kept && keptPictures(state, before, kept)),
   } as EngineState;
+}
+
+/** The chats and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
+function keptViews<S extends Pick<EngineState, "links" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
+  const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined): T[] => {
+    if (!ids) return list;
+    const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
+    return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
+  };
+  return { ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups) };
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */

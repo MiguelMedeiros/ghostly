@@ -316,6 +316,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "send" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+            {/* The result, paid or pending, as Receive's: Done takes the keys, so only a line that was there, empty,
+                before its text says which. Refusals are the error's own alert. */}
+            <p role="status" className="sr-only">{sent ?? ""}</p>
             {sent ? (
               <div className="text-center py-3 space-y-3" data-testid="wallet-send-result">
                 {sent === t("wallet.cashu.paid") && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

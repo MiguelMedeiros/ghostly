@@ -41,22 +41,59 @@ export const SERVICE_LOCKED = "The profile locked before the contact's app opene
  */
 let viewCloser: (() => void) | null = null;
 let callWindows = 0;
+/** Others drawn over the whole app that make way too: a video filling the window (Desktop on Linux). */
+const makingWay = new Set<() => void>();
 
 /** How to close a contact's app drawn over the app: set by the web host. */
 export function setServiceViewCloser(next: (() => void) | null): void {
   viewCloser = next;
 }
 
+/** Calls `leave` when a call's window comes on screen, until the returned end. */
+export function onCallWindowShown(leave: () => void): () => void {
+  makingWay.add(leave);
+  return () => { makingWay.delete(leave); };
+}
+
 /** A call's window (a ringing call, a call full screen or small) on screen, from its effect: returns its end. */
 export function callWindowShown(): () => void {
   callWindows += 1;
   viewCloser?.();
+  for (const leave of [...makingWay]) leave();
   return () => { callWindows -= 1; };
 }
 
 /** Whether a call's window is on screen: a contact's app does not open over it. */
 export function callWindowOn(): boolean {
   return callWindows > 0;
+}
+
+/*
+ * A video filling the window (Desktop on Linux) is drawn over everything. A call already in its small window when it
+ * started stays over it: its End call and Mute in reach, a video call's picture in sight.
+ */
+let filling = 0;
+const fillingWatchers = new Set<() => void>();
+
+/** A video fills the window, from its effect: returns its end. */
+export function windowFilled(): () => void {
+  filling += 1;
+  for (const watch of [...fillingWatchers]) watch();
+  return () => {
+    filling -= 1;
+    for (const watch of [...fillingWatchers]) watch();
+  };
+}
+
+/** For `useSyncExternalStore`: `watch` is called when a video starts or stops filling the window. */
+export function watchWindowFilled(watch: () => void): () => void {
+  fillingWatchers.add(watch);
+  return () => { fillingWatchers.delete(watch); };
+}
+
+/** Whether a video fills the window now. */
+export function windowFilledNow(): boolean {
+  return filling > 0;
 }
 
 const HOST_ERRORS: Record<string, TranslationKey> = {
