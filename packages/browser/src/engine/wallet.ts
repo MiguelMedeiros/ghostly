@@ -15,7 +15,7 @@ import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintRefused } from "./paymentAdapters/cashu";
+import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
@@ -627,7 +627,13 @@ export class CashuWallet {
     assertAmount(amount);
     const mint = this.getMints(network).find(paysItsOwnInvoices);
     if (!mint) throw new Error("This wallet has no test mint to ask for test coins");
-    const response = await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(mint), amount, "Ghostly test coins"), mint);
+    let response: Awaited<ReturnType<typeof mintInvoice>>;
+    try {
+      response = await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(mint), amount, "Ghostly test coins"), mint);
+    } catch (error) {
+      // A test mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+      throw mintFailed(error) ? Object.assign(engineError("mintFailedFaucet", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
+    }
     const quote: StoredQuote = {
       quote: response.quote,
       mint,
@@ -1661,7 +1667,8 @@ export class CashuWallet {
         this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve: fee });
         return { quote: quote.quote, mint, amount, feeReserve: fee };
       } catch (error) {
-        lastError = error;
+        // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+        lastError = mintFailed(error) ? Object.assign(engineError("mintFailedQuote", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
