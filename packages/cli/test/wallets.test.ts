@@ -198,6 +198,44 @@ describe("wallets", () => {
     expect(asCliError(await callApi(ctx, "wallet.receive", { amount: 10 }).catch((e: unknown) => e)).code).toBe("engine");
   });
 
+  it("a payment's state that refuses what was asked is said with its code, not as the engine failing", async () => {
+    // Found in a bug hunt: each of these was `engine` (exit 1), on two real daemons with a local test mint.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.payments.sent = { id: "sent", linkId: "chat-one", kind: "payment", direction: "out", amount: 3, unit: "sat", state: "settled", createdAt: 3, network: "testnet" } as unknown as typeof s.payments[string];
+      s.payments.asked = { id: "asked", linkId: "chat-one", kind: "request", direction: "out", amount: 3, unit: "sat", state: "pending", createdAt: 4, network: "testnet" } as unknown as typeof s.payments[string];
+      return s;
+    };
+    Object.assign(node, {
+      reclaimPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Nothing to reclaim"); }),
+      checkPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Unknown payment request"); }),
+    });
+    // The mint asked for the swap of a payment and did not answer: the engine's `SwapUnsettledError`, read by its name.
+    const unsettled = Object.assign(new Error("testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."), { name: "SwapUnsettledError" });
+    const cases: [() => void, string, Record<string, unknown>, string, RegExp?][] = [
+      [() => {}, "payment.reclaim", { payment: "sent" }, "refused", /^Nothing to reclaim$/],
+      [() => {}, "payment.reclaim", { payment: "asked" }, "refused"],
+      [() => {}, "payment.check", { chat: "Alice", payment: "sent" }, "bad_request", /^"sent" is a payment you sent: payment check is for a request the contact made of you$/],
+      [() => {}, "payment.check", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: /],
+      [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
+      [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
+      [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
+    ];
+    const answered = [], wanted = [];
+    for (const [arrange, method, params, code, message] of cases) {
+      arrange();
+      const error = asCliError(await callApi(ctx, method, params).catch((e: unknown) => e));
+      answered.push({ method, params, code: error.code, message: error.message });
+      wanted.push({ method, params, code, message: message ? expect.stringMatching(message) : expect.any(String) });
+    }
+    expect(answered).toEqual(wanted);
+    // A check of the contact's own request still reaches the engine.
+    (node as unknown as { checkPayment: ReturnType<typeof vi.fn> }).checkPayment.mockResolvedValueOnce(undefined);
+    expect(await callApi(ctx, "payment.check", { chat: "Alice", payment: "test" })).toEqual({ chat: "chat-one", paymentId: "test" });
+  });
+
   it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
     // Found in a bug hunt: `chat pay` answered `engine` "Not enough sats in your wallet" (a code a bot may retry) and
     // `chat request` `unavailable` "No mint configured", from a profile that had no wallet at all.
