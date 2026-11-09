@@ -150,8 +150,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
   says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
-  cursor moves past its event: it is not run again.
+  arguments, so a contact's text cannot reach the shell). A command that exits non-zero, or that a signal kills
+  ("--exec was killed by SIGKILL on event N"), is said on stderr and the cursor moves past its event: it is not run
+  again. With `--print`, the command's own stdout goes to listen's stderr, so stdout carries the JSON events only;
+  without `--print`, it is listen's stdout.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
