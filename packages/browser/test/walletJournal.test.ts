@@ -479,7 +479,7 @@ describe("Lightning out", () => {
   });
 
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
@@ -524,8 +524,8 @@ describe("Lightning out", () => {
   describe("a melt whose answer was lost", () => {
     /** A melt request's longest life plus the margin for a mint slow to act on it: past it, none can reach the mint. */
     const OVERDUE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
-    // The wallet's clock moves with the polls: a melt is only given up once its request can no longer land.
-    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    // The wallet's clocks (wall and monotonic) move with the polls: a melt is only given up once its request can no longer land.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }); });
 
     it("stays pending while its request may still reach the mint, and is paid when the mint acts on it late", async () => {
       mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
