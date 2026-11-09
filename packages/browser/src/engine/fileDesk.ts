@@ -454,7 +454,8 @@ export class FileDesk {
     // A file of no bytes gets no append: it is made here, so there is a file to check and to save. Every backend
     // but IndexedDB reads a file never written as missing, and its check said "arrived damaged".
     if (size === null && record.file.size === 0) await bytes.append(id, 0, new Uint8Array());
-    if (stored && stored.bytes !== bytes.kind) await fileStore.patch(id, { bytes: bytes.kind });
+    // One a light backup left out, still under way then, comes again whole: it is no longer "not in this backup".
+    if (stored && (stored.bytes !== bytes.kind || stored.leftOut)) await fileStore.patch(id, { bytes: bytes.kind, ...(stored.leftOut && { leftOut: false }) });
     const appender = new FileAppender(bytes, id, offset);
     return {
       offset,
