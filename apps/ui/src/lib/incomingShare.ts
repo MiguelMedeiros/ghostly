@@ -187,6 +187,15 @@ export function takeShareFor(chat: string): IncomingShare | null {
 }
 
 /**
+ * A share a composer took but could not keep (its files read only once an edit had begun there): it waits for that
+ * chat's composer again, ahead of any sent there since. Nothing is said: the composer looks again once it can take
+ * files (the edit ended), and a share made meanwhile is still shown in the picker as usual.
+ */
+export function keepShareFor(chat: string, share: IncomingShare): void {
+  forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
+}
+
+/**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
  */

@@ -24,7 +24,7 @@ import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
-import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
+import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
 import { useKeptOnScreen } from "./composer/keptOnScreen";
 import { useComposition } from "../hooks/useComposition";
@@ -751,9 +751,14 @@ export function MessageInput({
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
-  /** A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a paste's. */
+  /**
+   * A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a
+   * paste's. Read to its end where files cannot go any more (an edit began meanwhile), they wait for this chat again.
+   */
   const offerShared = (share: IncomingShare) => {
-    shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
+    shareFiles(share).then((files) => {
+      if (files.length && !offerRef.current(files) && draftId) keepShareFor(draftId, { title: "", text: "", url: "", files });
+    }, (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
   /**
@@ -834,12 +839,14 @@ export function MessageInput({
   // Files are listened for where they can go, and where there is a reason to give for why they cannot (a group).
   const hearsFiles = canAttach || (!!fileUnavailable && !disabled && !locked);
   // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
-  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked).
+  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked). While
+  // one of my messages is edited here, the whole share waits for the edit to end (saved or left): the field holds the
+  // edit's words, the draft it goes into is set aside, and an edit takes no files.
   useEffect(() => {
     if (!draftId) return;
     const take = () => {
       const waiting = peekShareFor(draftId);
-      if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
+      if (!waiting || editing || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
       // Longer than the field takes, or than one message can be once in the draft (counted in bytes, as Send counts):
@@ -858,7 +865,7 @@ export function MessageInput({
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
+  }, [draftId, editing, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
   // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them. A dialog
