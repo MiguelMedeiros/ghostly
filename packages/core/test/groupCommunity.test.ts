@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
@@ -945,6 +945,12 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
   });
 
   it("losing branches kept, however many, never push out the secrets of the branch followed", async () => {
+    // One member's branches are capped (`sideTips`, `sideCommits`); many members together can still keep more than
+    // `secrets`. Lifted here, so one member stands for them all.
+    const limits = COMMUNITY_LIMITS as unknown as { sideTips: number; sideCommits: number };
+    const kept = { sideTips: limits.sideTips, sideCommits: limits.sideCommits };
+    limits.sideTips = limits.sideCommits = COMMUNITY_LIMITS.side;
+    onTestFinished(() => { Object.assign(limits, kept); });
     const { net, alice, bob, carol, mallory } = await group();
     const tip = alice.session.top, tipRoster = alice.session.roster;
     // Mallory signs more admissions after the tip than secrets are kept, each a branch of its own.
