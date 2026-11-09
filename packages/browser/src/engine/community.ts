@@ -263,6 +263,12 @@ const CHECK_MS = 3 * 60_000;
 /** How long a community I left follows its chain (`leftBehind`): a hand-over that crossed my leave reaches me within it. */
 const LEFT_FOLLOW_MS = 10 * 60_000;
 /**
+ * While no commit took me out of a community I left, my leave is said again this often on the edges up (`leftMoved`):
+ * the one frame Leave sent can be lost on the wire (a phone's network changing while its data channel still looks
+ * ready), and nobody else asks for it. A hub that holds it already drops the copy.
+ */
+const LEAVE_AGAIN_MS = 30_000;
+/**
  * A role that reached my leave goes on this long after: the leave its giver said right after its `role` commit (an
  * admin's leave does) is heard first, so the role does not go back to a leaver.
  */
@@ -427,7 +433,7 @@ export class Communities {
    * Communities I left, gone from here but for their session and edges, which follow the chain a while
    * (`LEFT_FOLLOW_MS`): the leave I said, whose leaves I heard since, and when a role that reached me goes on.
    */
-  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number; askedAt?: number }>();
+  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number; askedAt?: number; saidAt: number }>();
   /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
   private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
@@ -807,7 +813,7 @@ export class Communities {
     // The group goes from here, but its session and edges follow the chain a while: a hand-over said at the same moment
     // as my leave makes me the admin, of a group that has gone from my app, and nobody else could hand the role on.
     const frame = await s.leave(true);
-    if (frame) this.leftBehind.set(groupId, { session: s, frame, since: this.now(), heard: new Set() });
+    if (frame) this.leftBehind.set(groupId, { session: s, frame, since: this.now(), heard: new Set(), saidAt: this.now() });
     await this.forget(groupId, !!frame);
     await s.followAfterLeave();
     return next;
@@ -832,7 +838,10 @@ export class Communities {
     await this.leftMoved(groupId, this.now());
   }
 
-  /** Where the chain of a community I left stands now: out (done), or the admin (the role goes on), or neither. */
+  /**
+   * Where the chain of a community I left stands now: out (done), or the admin (the role goes on), or neither; while I
+   * am still in, my leave is said again now and then (`LEAVE_AGAIN_MS`).
+   */
   private async leftMoved(groupId: string, now: number): Promise<void> {
     const left = this.leftBehind.get(groupId), s = left?.session;
     if (!left || !s) return;
@@ -853,6 +862,10 @@ export class Communities {
       if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
       else if (now >= left.handOnAt) await this.handOn(groupId, now);
     }
+    // Still in, and following: no commit took my leave yet, so it is said again to the members I am connected to.
+    if (this.leftBehind.get(groupId) !== left || !rosterHas(s.roster, s.myKey) || now - left.saidAt < LEAVE_AGAIN_MS) return;
+    left.saidAt = now;
+    for (const [key, linkId] of this.host.edges(groupId)) if (key !== s.myKey && rosterHas(s.roster, key) && this.host.linkReady(linkId, 2)) this.sendTo(linkId, left.frame);
   }
 
   /**
@@ -891,6 +904,7 @@ export class Communities {
     catch { return; /* admin work off here, or its turn unconfirmed: tried again at the next tick */ }
     left.handOnAt = undefined;
     left.since = now;
+    left.saidAt = now;
     for (const [, linkId] of this.host.edges(groupId)) this.sendTo(linkId, left.frame);
   }
 
@@ -2268,7 +2282,9 @@ export class Communities {
 
   /** An edge came up: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
-    const live = this.live.get(groupId);
+    const live = this.live.get(groupId), left = this.leftBehind.get(groupId), ls = left?.session;
+    // A community I left: an edge back up (the network changed as I left) hears my leave, while no commit took it.
+    if (!live && left && ls && rosterHas(ls.roster, ls.myKey) && rosterHas(ls.roster, peerKey)) { this.sendTo(linkId, left.frame); return; }
     if (!live || live.session.wasRemoved(peerKey)) return;
     if (live.hub && !this.peerIsHub(live, peerKey) && rosterHas(live.session.roster, peerKey)) live.members.set(peerKey, this.now());
     this.sendTo(linkId, live.session.syncFrame(peerKey));

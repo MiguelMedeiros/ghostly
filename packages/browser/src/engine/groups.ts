@@ -537,6 +537,8 @@ const ENTRY_RELEASE_MS = 2_000;
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
+/** Meanwhile, my leave is said again this often on its edges up: the one said at Leave can be lost on the wire. */
+const LEAVE_AGAIN_MS = 30_000;
 /**
  * A tombstone the role reached (a hand-over that crossed my leave) hands it on this long after: a leave its giver said
  * right after its `role` commit (an admin's leave does) is heard first, so the role does not go back to a leaver.
@@ -1517,6 +1519,8 @@ export class Groups {
   }
   /** Tombstones the role went on from, removed already, and when they go (`leaveConfirmed`). */
   private readonly passedOnUntil = new Map<string, number>();
+  /** Tombstones: when my leave was last said again (`LEAVE_AGAIN_MS`). */
+  private readonly leaveSaidAt = new Map<string, number>();
 
   async remove(groupId: string, key: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
@@ -1762,6 +1766,7 @@ export class Groups {
     this.leavesHeard.delete(groupId);
     this.handOnAt.delete(groupId);
     this.passedOnUntil.delete(groupId);
+    this.leaveSaidAt.delete(groupId);
     this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
     this.entryHosts.delete(groupId);
@@ -1926,6 +1931,12 @@ export class Groups {
           if (group.left.heard !== undefined && !group.farewells) { await this.forget(group.id); continue; }
           // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
           if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
+          // No commit took me out yet: my leave may have been lost on an edge that looked up (the network changing as I
+          // left), and it is said again now and then on the edges up, not only when one opens.
+          else if (group.left.heard === undefined && !this.passedOnUntil.has(group.id) && now - Math.max(group.left.at, this.leaveSaidAt.get(group.id) ?? 0) >= LEAVE_AGAIN_MS) {
+            this.leaveSaidAt.set(group.id, now);
+            for (const [key, linkId] of this.host.edges(group.id)) if (this.host.linkReady(linkId)) this.sayLeft(group.id, key, linkId);
+          }
           continue;
         }
         if (group.declined) { await this.declineOwed(group, now); if (!group.state && !group.invitation) continue; }
@@ -2772,6 +2783,14 @@ export class Groups {
     await this.leaveFollows(groupId);
   }
 
+  /** My leave, on an edge of my tombstone: to the admin, and signed to a hub, which carries it to an admin I have no edge with. */
+  private sayLeft(groupId: string, peerKey: string, linkId: string): void {
+    const group = this.stored.get(groupId), left = group?.left, session = this.sessions.get(groupId);
+    if (!group || !left) return;
+    if (peerKey === left.admin) { try { if (session) this.sayLeave(groupId, session, group, linkId); else this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
+    else if (left.bye && left.hubs?.includes(peerKey)) { try { this.host.sendOnLink(linkId, left.bye); } catch { /* next time it opens */ } }
+  }
+
   /** A validly signed commit, by the admin I told, that takes me out of the roster. */
   private removesMe(groupId: string, from: string, raw: unknown): boolean {
     const group = this.stored.get(groupId), session = this.sessions.get(groupId);
@@ -2784,13 +2803,11 @@ export class Groups {
   /** An edge came up with groups on both sides: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
     if (this.isCommunity(groupId)) { this.communities.edgeReady(groupId, peerKey, linkId); this.files?.edgeReady(groupId, peerKey, linkId); return; }
-    const left = this.stored.get(groupId)?.left;
-    if (left) {
-      // The admin was away when I left: now it hears it (and a hub carries it, signed, to an admin I have no edge with).
+    if (this.stored.get(groupId)?.left) {
       const session = this.sessions.get(groupId), group = this.stored.get(groupId)!;
       if (session && group.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
-      if (peerKey === left.admin) { try { if (session) this.sayLeave(groupId, session, group, linkId); else this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
-      else if (left.bye && left.hubs?.includes(peerKey)) { try { this.host.sendOnLink(linkId, left.bye); } catch { /* next time it opens */ } }
+      // The admin was away when I left: now it hears it.
+      this.sayLeft(groupId, peerKey, linkId);
       return;
     }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
