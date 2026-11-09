@@ -104,9 +104,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // No poster from the sender: one made here from the first frame, once the file is in.
   useEffect(() => {
     if (meta?.poster || !ready || !playable || !visible || !platform) return;
-    let cancelled = false;
-    void localPoster(file.id, () => platform.getFile(file.id)).then((made) => { if (!cancelled && made) setLocal(made); });
-    return () => { cancelled = true; };
+    const left = new AbortController();
+    void localPoster(file.id, () => platform.getFile(file.id), left.signal).then((made) => { if (!left.signal.aborted && made) setLocal(made); });
+    return () => left.abort();
   }, [meta?.poster, ready, playable, visible, platform, file.id]);
 
   const unload = useCallback(() => {
