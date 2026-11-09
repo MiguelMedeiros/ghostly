@@ -39,6 +39,8 @@ export interface FakeEngineControl {
   history?: Record<string, StoredMessage[]>;
   /** What the peer answers a page's call, as `EngineServer.handle` posts it; undefined: no answer. */
   answer?: (method: string, params: unknown) => Promise<unknown> | undefined;
+  /** Runs as a peer stops, before its stop is over: what the peer and its pages still do while it ends. */
+  onShutdown?: () => Promise<void>;
 }
 
 export function engineControl(): FakeEngineControl {
@@ -88,7 +90,9 @@ export class FakeEngineServer {
     },
     shutdown: async () => {
       this.shutdowns++;
-      engineControl().log.push(`stop ${this.database}`);
+      const control = engineControl();
+      if (control.onShutdown) await control.onShutdown();
+      control.log.push(`stop ${this.database}`);
     },
     /** "Clear all data", the peer's part: as the engine's, it ends with the peer stopped (node.ts `clearProfileData`). */
     clearProfileData: async () => {
