@@ -56,6 +56,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -570,10 +571,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   /**
    * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
    * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   * Kept while this page is away (the Share to… picker, another chat: lib/keptEdits.ts), so it is open again on return,
+   * also before the chat's messages are read again (none yet): it is looked for in them once they are.
    */
-  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
-  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
-  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
+  const [chosenEdit, setEditing] = useKeptEdit<ChatMessage>(sessionId);
+  const editing = chosenEdit && (!messages.length || heldOriginal(chosenEdit, quoteIndex)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
@@ -646,7 +649,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCodeCopied(false);
     setMenuOpen(false);
     setReplyingTo(null);
-    setEditing(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
