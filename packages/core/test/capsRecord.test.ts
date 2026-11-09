@@ -574,9 +574,10 @@ describe("capability record: publishing and reading", () => {
         await vi.advanceTimersByTimeAsync(4_000);
       }
       const hinted = calls().slice(before);
-      // One read per spacing (15 s), and the read-again chain once: 40 + 6 in ten minutes at most.
+      // One read per spacing (15 s), and the read-again chain once: 40 + 6 in ten minutes at most. Only that first chase
+      // is on the chats' budget; every other read is upkeep.
       expect(hinted.length, `${naming}: reads in 10 min`).toBeLessThanOrEqual(46);
-      expect(hinted.every(([, options]) => options?.background), `${naming}: upkeep, not the chats' budget`).toBe(true);
+      expect(hinted.filter(call => !((call as unknown[])[1] as { background?: boolean } | undefined)?.background).length, `${naming}: on the chats' budget`).toBeLessThanOrEqual(6);
 
       // The contact really publishes: read within the spacing, and the read-again chain is there for it again.
       aName = "Ada L."; await aSide.update();
@@ -586,6 +587,38 @@ describe("capability record: publishing and reading", () => {
       expect(bSide.peer, `${naming}: a real revision is read`).toMatchObject({ rev: out, name: "Ada L." });
       await aSide.stop(); await bSide.stop();
     }
+  });
+
+  it("a revision named after the read-again chain ran out is still read, while a link signals and the relays hold background reads", async () => {
+    // Two browsers with WebRTC blocked, B's Iroh not running: B's record lists Iroh with no descriptor, so A spends its
+    // read-again chain on it at pairing. B's Iroh starts later and its envelope names the record with the descriptor,
+    // which is not out yet. Read as background upkeep, with no chain left, A got the old copy (the relays answer a held
+    // background read with what they know) and never read again: the chat never went live on Iroh.
+    vi.useFakeTimers();
+    const { link, a, b } = pair(), { packets, transport } = exchange();
+    const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
+    let bContent = content({ descriptors: {} }), signaling = false, stale: SignedPacket | undefined, staleReads = 0;
+    transport.publish.mockImplementation(async (identity: { pubKeyZ32: string }, records: GhostRecord[]) => {
+      stale = packets.get(identity.pubKeyZ32);
+      packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: 0n, records });
+    });
+    transport.resolve.mockImplementation(async (key: string, options?: { background?: boolean }) => {
+      if (stale?.pubKeyZ32 === key && (staleReads > 0 || (signaling && options?.background))) { staleReads = Math.max(0, staleReads - 1); return stale; }
+      return packets.get(key) ?? null;
+    });
+    const bSide = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => bContent, save: async () => {} });
+    const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => content(), save: async () => {} });
+    bSide.start(); await vi.advanceTimersByTimeAsync(0);
+    aSide.start(); await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(aSide.peer).toMatchObject({ rev: 1, descriptors: {} });
+
+    signaling = true;
+    bContent = content(); await bSide.update();
+    staleReads = 1;
+    aSide.peerRev(bSide.rev);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(aSide.peer, "B's descriptors, within the spacing and a read again").toMatchObject({ rev: 2, descriptors: { "iroh/1": expect.anything(), "hyperdht/1": expect.anything() } });
+    await aSide.stop(); await bSide.stop();
   });
 
   it("merges reads asked for close together", async () => {

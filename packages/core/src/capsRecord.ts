@@ -345,6 +345,8 @@ export class CapsExchange {
   /** The newest revision of the contact's record an envelope named, and the reads made again since for it. */
   private named = -1;
   private retries = 0;
+  /** A revision named since the last new record read started the read-again chain: the next ones named are only background reads. */
+  private chased = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** What the last publication of this run carried. */
   private lastOut?: CapsContent;
@@ -461,13 +463,17 @@ export class CapsExchange {
 
   /**
    * An envelope named this revision of the contact's record: read it when it is newer than the one known. The number is
-   * the contact's word, not a record: read at the spacing, as background upkeep, and the read-again chain is not started
-   * over for it (a new record read does that). An envelope every 4 s naming a higher one each time made 45 reads a minute.
+   * the contact's word, not a record: read at the spacing. The first one named since the last new record read is read as
+   * the chat's own (not background) and starts the read-again chain over: a chat waits on it (a transport chosen, a
+   * descriptor), and while a link signals the relays hand a held background read the old copy. Any other is background
+   * upkeep until a new record is read. An envelope every 4 s naming a higher one each time made 45 reads a minute.
    */
   peerRev(rev: number): void {
     if (!Number.isSafeInteger(rev) || rev <= (this.state.peer?.rev ?? -1)) return;
+    const chase = rev > this.named && !this.chased;
     if (rev > this.named) this.named = rev;
-    this.refresh(false, true);
+    if (chase) { this.chased = true; this.retries = 0; }
+    this.refresh(false, !chase);
   }
 
   /**
@@ -501,7 +507,7 @@ export class CapsExchange {
       if (this.state.peer && record.rev === this.state.peer.rev && record.author === this.state.peer.author) return this.state.peer;
       await this.persist({ peer: record });
       // A new revision: what it still lacks (a transport without its descriptor) is worth a few reads again.
-      this.retries = 0;
+      this.retries = 0; this.chased = false;
       this.options.changed?.(record);
       return record;
     }, "readChain");
@@ -512,7 +518,8 @@ export class CapsExchange {
    * Read again in a moment, a few times at most, while the record known is short of what the contact has: of the
    * revision an envelope named, or of a descriptor for a native transport it lists (its endpoint was still starting)
    * that this side runs too. Its next revision, with the descriptor, is named only once, by an envelope that may
-   * come before the record is out; without it neither side could dial the other.
+   * come before the record is out; without it neither side could dial the other. Started over only by a new record read,
+   * the first revision named after one, or this side's own endpoint coming up: the chat's reads, not background ones.
    */
   private readAgainIfBehind(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -522,6 +529,6 @@ export class CapsExchange {
     const behind = this.named > (peer?.rev ?? -1);
     const starting = !!peer && described(this.options.local()).some(t => peer.transports.includes(t) && !peer.descriptors[t]);
     if (!behind && !starting) return;
-    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.read({ background: true }).catch(() => {}); }, CAPS_READ_RETRY_MS[this.retries++]);
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.read().catch(() => {}); }, CAPS_READ_RETRY_MS[this.retries++]);
   }
 }
