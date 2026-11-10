@@ -117,6 +117,27 @@ describe("the status picker in the account menu", () => {
     expect(engine.callsTo("setOwnStatus")).toEqual([{ status: { availability: "away", until: new Date(2026, 10, 10, 9, 30).getTime() } }]);
   });
 
+  it("refuses a kept end that passed while it was open, rather than clearing the status without a word", async () => {
+    // The engine takes a status already over as none (`liveStatus`), and cleared it: the new words were lost too.
+    answerStatus({ availability: "busy", text: "Meeting", until: NOW + 60_000 });
+    const { user, engine } = renderBar();
+    const dialog = await openPicker(user);
+    vi.setSystemTime(NOW + 120_000);
+    const text = within(dialog).getByRole("textbox", { name: "Status text" });
+    await user.clear(text);
+    await user.type(text, "Meeting runs late");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toEqual([]);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Choose a time later than now.");
+
+    // Another end, and it saves with the new words.
+    await choose(user, within(dialog).getByTestId("status-end"), "1h");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toEqual([{ status: { availability: "busy", text: "Meeting runs late", until: NOW + 120_000 + 3_600_000 } }]);
+  });
+
   it("ends Today at midnight, and Don't clear sends no end", async () => {
     answerStatus();
     const { user, engine } = renderBar();

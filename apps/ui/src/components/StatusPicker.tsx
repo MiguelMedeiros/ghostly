@@ -97,7 +97,9 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     const until = end === "keep" ? status?.until : end === "custom" ? new Date(at).getTime() : statusEnd(end, language);
-    if (end === "custom" && !(until && until > Date.now())) { setPast(true); return; }
+    // A chosen time, or the end kept from before, already over (the picker stayed open past it): the engine takes a
+    // status already over as none, and would clear it, the new words with it.
+    if ((end === "custom" || end === "keep") && !(until && until > Date.now())) { setPast(true); return; }
     const words = text.trim();
     void run(() => engine.call("setOwnStatus", { status: { availability, ...(emoji ? { emoji } : {}), ...(words ? { text: words } : {}), ...(until ? { until } : {}) } }));
   };
