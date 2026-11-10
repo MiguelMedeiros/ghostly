@@ -26,7 +26,8 @@ const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks"
  * The fields of the record a row of their own holds (`GroupLight`) while nothing else of it changed: what a pin (mine
  * or a member's) and a deletion for everyone change. Each wrote the whole record, as a message did before (150 KB in a
  * group of 31 after 20 joins and leaves, 350 KB after 60). Apart from the small row: up to 500 ids each, which a message
- * would write again every time. `came` is the small row's.
+ * would write again every time. `came` is the small row's. The same row holds the state's `relayEdits` (up to 64 frames):
+ * each edit and deletion for everyone a member's app takes in changes them, and wrote the whole record too.
  *
  * And the hubs I keep for my next start (`StoredGroup.hubs`, at most eight keys): they change each time a hub goes
  * offline or comes back, and wrote the whole record each time (two hubs away 90 s every 2 minutes: 30 whole records,
@@ -41,11 +42,14 @@ const LIGHT = ["pin", "removedIds", "removals", "hubs", "large"] as const;
 
 const topOf = (state: GroupState): string => state.chain[state.chain.length - 1]?.sig ?? "";
 
-/** The state as its record holds it, but for `LIVE`, in one string: its frames and statements by their signatures. */
+/** The members' edits the state keeps to hand on, by their signatures. */
+const editsOf = (state: GroupState): string => (state.relayEdits ?? []).map(f => f.sig).join(" ");
+
+/** The state as its record holds it, but for `LIVE` and `relayEdits`, in one string: its frames and statements by their signatures. */
 function recordKey(state: GroupState): string {
-  const { chain, relay, relayEdits, meta, metaPast, ...rest } = state;
+  const { chain, relay, relayEdits: _edits, meta, metaPast, ...rest } = state;
   for (const field of LIVE) delete (rest as Partial<GroupState>)[field];
-  return JSON.stringify([rest, chain.length, chain[0]?.sig, topOf(state), relay?.map(f => f.sig), relayEdits?.map(f => f.sig), meta?.sig, metaPast?.map(m => m.sig)]);
+  return JSON.stringify([rest, chain.length, chain[0]?.sig, topOf(state), relay?.map(f => f.sig), meta?.sig, metaPast?.map(m => m.sig)]);
 }
 
 /** The record but for its state, `LIGHT` and `came` (the small row's), in one string. */
@@ -58,7 +62,7 @@ function restKey(group: StoredGroup): string {
 /** The row for `group`, whose record holds the members' apps in `kept` (`StoredGroup.large`) already. */
 function lightOf(group: StoredGroup, kept: readonly string[]): GroupLight {
   const large = group.large?.filter(key => !kept.includes(key));
-  return { ...(group.pin && { pin: group.pin }), removedIds: group.removedIds ?? [], removals: group.removals ?? [], ...(group.hubs && { hubs: group.hubs }), ...(large?.length ? { large } : {}) };
+  return { ...(group.pin && { pin: group.pin }), removedIds: group.removedIds ?? [], removals: group.removals ?? [], relayEdits: group.state?.relayEdits ?? [], ...(group.hubs && { hubs: group.hubs }), ...(large?.length ? { large } : {}) };
 }
 
 /**
@@ -75,13 +79,16 @@ function liveOf(group: StoredGroup): GroupLive {
     ...(group.came && { came: group.came }) };
 }
 
+const cameOf = (group: StoredGroup): string => JSON.stringify(group.came ?? {});
+
 const later = (a: number | undefined, b: number | undefined) => a === undefined ? b : b === undefined ? a : Math.max(a, b);
 
 /**
  * A group's record as written: its state now (`seq` reserved), its `recordKey`, the rest of it (`restKey`), what it
- * holds of `LIGHT` (`markOf`), and the members' apps it notes (`StoredGroup.large`).
+ * holds of `LIGHT` (`markOf`), the members' apps it notes (`StoredGroup.large`), the members' edits written last, in the
+ * record or in their row (`editsOf`), and the `came` its small row holds (`cameOf`).
  */
-interface Written { key: string; state: GroupState; rest: string; of: string; large: string[] }
+interface Written { key: string; state: GroupState; rest: string; of: string; large: string[]; edits: string; came: string }
 
 export class GroupRows {
   private readonly written = new Map<string, Written>();
@@ -99,8 +106,8 @@ export class GroupRows {
 
   /**
    * At load: the state of each record that no app from before wrote since takes what its small row says, and its pin,
-   * deletions for everyone, hubs and members' apps what their row says while the record still holds of them what it did
-   * when the row was written (`of`).
+   * deletions for everyone, hubs, members' apps and members' edits what their row says while the record still holds of
+   * them what it did when the row was written (`of`).
    */
   async load(groups: StoredGroup[]): Promise<void> {
     if (!this.raw.getGroupLive) return;
@@ -109,29 +116,44 @@ export class GroupRows {
     for (const group of groups) {
       const live = rows.get(group.id), state = group.state, held = group.seqReserved;
       if (!live || !state || group.community) continue;
-      if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
-      if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || live.state.seqEpoch !== state.seqEpoch || !(live.state.seq <= state.seq)) continue;
-      const light = lights.get(group.id), recorded = group.large ?? [], of = markOf(JSON.stringify(lightOf(group, recorded)));
-      // Else an app from before took a pin, a deletion or other hubs since, from the record: the record counts.
-      if (light && (light.of === undefined || light.of === of)) {
-        if (light.pin) group.pin = light.pin; else delete group.pin;
-        if (light.removedIds.length) group.removedIds = light.removedIds; else delete group.removedIds;
-        if (light.removals.length) group.removals = light.removals; else delete group.removals;
-        // Absent from a row of a build from before they were kept there: the record's count.
-        if (light.hubs) group.hubs = light.hubs;
-        if (light.large) group.large = [...new Set([...recorded, ...light.large])];
+      if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || live.state.seqEpoch !== state.seqEpoch || !(live.state.seq <= state.seq)) {
+        if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
+        continue;
       }
-      this.written.set(group.id, { key: recordKey(state), state: structuredClone(state), rest: restKey(group), of, large: recorded });
+      // Written with the record and each time `came` changed since: a mark taken back (`unmark`) stays back.
+      if (live.came) group.came = live.came; else delete group.came;
+      const recorded = group.large ?? [], of = markOf(JSON.stringify(lightOf(group, recorded)));
+      // Else an app from before took a pin, a deletion, other hubs or an edit since, from the record: the record counts.
+      const light = lights.get(group.id), fresh = light && (light.of === undefined || light.of === of) ? light : undefined;
+      if (fresh) {
+        if (fresh.pin) group.pin = fresh.pin; else delete group.pin;
+        if (fresh.removedIds.length) group.removedIds = fresh.removedIds; else delete group.removedIds;
+        if (fresh.removals.length) group.removals = fresh.removals; else delete group.removals;
+        // Absent from a row of a build from before they were kept there: the record's count.
+        if (fresh.hubs) group.hubs = fresh.hubs;
+        if (fresh.large) group.large = [...new Set([...recorded, ...fresh.large])];
+      }
       const merged = { ...state };
       for (const field of LIVE) delete (merged as Partial<GroupState>)[field];
-      group.state = Object.assign(merged, live.state);
+      group.state = Object.assign(merged, live.state, fresh?.relayEdits && { relayEdits: fresh.relayEdits });
+      this.written.set(group.id, { key: recordKey(state), state: structuredClone(state), rest: restKey(group), of, large: recorded, edits: editsOf(group.state), came: cameOf(group) });
     }
   }
 
-  /** A session's save: its small row alone while the rest of its state is what the record holds, else the record too. */
+  /**
+   * A session's save: its small row alone while the rest of its state is what the record holds, and the members' edits'
+   * row when they changed; else the record too.
+   */
   async save(group: StoredGroup): Promise<void> {
-    const written = this.written.get(group.id);
-    if (this.raw.putGroupLive && written && holds(written.state, written.key, group.state!)) return this.raw.putGroupLive(group.id, liveOf(group));
+    const written = this.written.get(group.id), state = group.state!, edits = editsOf(state);
+    if (this.raw.putGroupLive && written && holds(written.state, written.key, state) && (edits === written.edits || this.raw.putGroupLight)) {
+      await this.raw.putGroupLive(group.id, liveOf(group));
+      written.came = cameOf(group);
+      if (edits === written.edits) return;
+      await this.raw.putGroupLight!(group.id, { ...lightOf(group, written.large), of: written.of });
+      written.edits = edits;
+      return;
+    }
     await this.put(group);
   }
 
@@ -143,17 +165,25 @@ export class GroupRows {
     const was = this.written.get(group.id);
     if (was && holds(was.state, was.key, state)) {
       const rest = restKey(group);
-      // Only a pin, a deletion for everyone, the hubs or a member's app noted changed: their row alone, the record stays
-      // as it is.
-      if (rest === was.rest && this.raw.putGroupLight) return this.raw.putGroupLight(group.id, { ...lightOf(group, was.large), of: was.of });
-      const record = { ...group, state: was.state, seqReserved: { e: was.state.seqEpoch, n: was.state.seq } };
+      // Only a pin, a deletion for everyone, the hubs, a member's app noted or the members' edits changed: their row alone,
+      // the record stays as it is.
+      if (rest === was.rest && this.raw.putGroupLight) {
+        await this.raw.putGroupLight(group.id, { ...lightOf(group, was.large), of: was.of });
+        was.edits = editsOf(state);
+        // A mark taken back with them (`unmark`): the small row says so.
+        const came = cameOf(group);
+        if (came !== was.came) { await this.raw.putGroupLive(group.id, liveOf(group)); was.came = came; }
+        return;
+      }
+      // The record holds the edits as they are now, with the rest of the state as it holds it.
+      const record = { ...group, state: { ...was.state, relayEdits: state.relayEdits }, seqReserved: { e: was.state.seqEpoch, n: was.state.seq } };
       await this.whole(group, record, was);
-      was.rest = rest; was.large = record.large ?? [];
+      Object.assign(was, { rest, large: record.large ?? [], edits: editsOf(state), came: cameOf(group) });
       return;
     }
     // A copy: the session goes on changing the state it holds (a commit pushed on its chain) before it saves it.
     // `of`: `whole` sets it.
-    const written: Written = { key: recordKey(state), state: { ...structuredClone(state), seq: state.seq + SEQ_BLOCK }, rest: restKey(group), of: "", large: group.large ?? [] };
+    const written: Written = { key: recordKey(state), state: { ...structuredClone(state), seq: state.seq + SEQ_BLOCK }, rest: restKey(group), of: "", large: group.large ?? [], edits: editsOf(state), came: cameOf(group) };
     this.written.set(group.id, written);
     try {
       await this.whole(group, { ...group, state: written.state, seqReserved: { e: state.seqEpoch, n: written.state.seq } }, written);
@@ -166,8 +196,8 @@ export class GroupRows {
 
   /**
    * The record written whole as `record`, with the small row, and its `GroupLight` row deleted: the record holds the pin,
-   * the deletions, the hubs and the members' apps again (`written.of`). One that changed while it was being written goes
-   * to its row again after it.
+   * the deletions, the hubs, the members' apps and the members' edits again (`written.of`). One that changed while it was
+   * being written goes to its row again after it.
    */
   private async whole(group: StoredGroup, record: StoredGroup, written: Written): Promise<void> {
     const kept = record.large ?? [], light = JSON.stringify(lightOf(record, kept)), of = markOf(light);
