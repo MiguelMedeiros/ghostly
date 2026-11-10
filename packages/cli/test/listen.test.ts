@@ -454,7 +454,9 @@ describe("hooks", () => {
       await slow.stop();
       expect(Date.now() - started).toBeLessThan(3000);
       await slow.idle();
-      expect(() => process.kill(child, 0)).toThrow();
+      // The whole group is signalled, but a stop waits for the shell alone: what it started ends, and is reaped, a moment
+      // later (on a busy runner, after this line).
+      await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5000 });
       expect(readFileSync(log, "utf8")).toBe(`${first.seq}\n`);
       expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
       expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toContain(`ghostly: stopped while --exec ran on event ${third.seq} (message.received): ended it, and the event is handed again at the next start\n`);
