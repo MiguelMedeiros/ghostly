@@ -900,12 +900,23 @@ export class Apps {
     if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
   }
-  /** Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them). */
-  private async putApp(app: InstalledApp): Promise<void> {
+  /**
+   * Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them).
+   * Only while the app has a record: one uninstalled since the caller read it (another tab, Uninstall while Update was
+   * busy) is not put back with its data gone. False: not written.
+   */
+  private async putApp(app: InstalledApp): Promise<boolean> {
     const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
-    read.onsuccess = () => { tx.objectStore(STORES.apps).put(withRevocations(app, (read.result as InstalledApp | undefined)?.revocations ?? [])); };
+    read.onsuccess = () => {
+      const now = read.result as InstalledApp | undefined;
+      if (!now) return;
+      tx.objectStore(STORES.apps).put(withRevocations(app, now.revocations ?? []));
+      put = true;
+    };
     try { await done(tx); } finally { this.held.delete(app.ref); }
+    return put;
   }
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
@@ -1769,7 +1780,7 @@ export class Apps {
     const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
       const { pending: _p, ...rest } = installed;
-      await this.putApp(rest);
+      if (!(await this.putApp(rest))) fail("not-installed", "This app is not installed");
       fail("needs-files", "The update's files are gone; it is fetched again at the next check");
     }
     const stores = await this.stores();
@@ -1784,7 +1795,7 @@ export class Apps {
     // It grants only what the person was shown: an update that now adds other permissions is shown again first.
     const added = plan.action === "ask" ? plan.added : [];
     if (added.length !== pending.added.length || added.some((p) => !pending.added.includes(p as AppPermission))) {
-      await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } });
+      if (!(await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } }))) fail("not-installed", "This app is not installed");
       fail("permissions-changed", `This update now adds ${added.length ? added.join(", ") : "no permission"}; look at it again`);
     }
     if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
@@ -2013,8 +2024,10 @@ export class Apps {
       if (held) {
         const kind = await this.writeBundle(app.digest, held.bytes);
         const now = await this.app(app.ref);
-        if (!now || now.digest !== app.digest) { await this.removeBundle(kind, app.digest); fail("not-installed", "This app is not installed"); }
-        if (now.bytes !== kind) await this.putApp({ ...now, bytes: kind });
+        if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
+          await this.removeBundle(kind, app.digest);
+          fail("not-installed", "This app is not installed");
+        }
         return this.runCheckOf({ ...now, bytes: kind }, stores);
       }
     }
@@ -2035,8 +2048,10 @@ export class Apps {
       const kind = await this.writeBundle(app.digest, fetched.bytes);
       // Uninstalled meanwhile: its files go again.
       const now = await this.app(app.ref);
-      if (!now || now.digest !== app.digest) { await this.removeBundle(kind, app.digest); fail("not-installed", "This app is not installed"); }
-      if (now.bytes !== kind) await this.putApp({ ...now, bytes: kind });
+      if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
+        await this.removeBundle(kind, app.digest);
+        fail("not-installed", "This app is not installed");
+      }
       return this.runCheckOf({ ...now, bytes: kind }, stores);
     }
     return { status: "needs-files" };
