@@ -458,10 +458,10 @@
         "placeholder": "smp… (BIP-322) أو توقيع base64 الذي تعرضه محفظتك"
       },
       "scripts": {
-        "p2pkh": "قديم (1…)",
-        "p2sh": "SegWit متداخل (3…)",
-        "p2tr": "Taproot (bc1p…)",
-        "p2wpkh": "SegWit أصلي (bc1q…)",
+        "p2pkh": "قديم (\u20661…\u2069)",
+        "p2sh": "SegWit متداخل (\u20663…\u2069)",
+        "p2tr": "Taproot (\u2066bc1p…\u2069)",
+        "p2wpkh": "SegWit أصلي (\u2066bc1q…\u2069)",
         "p2wsh": "سكربت / متعدد التوقيع (P2WSH)",
         "witness-unknown": "إصدار SegWit مستقبلي"
       },
@@ -484,21 +484,21 @@
           "testnet": "شغّله مع -signet أو -testnet4 أو -regtest؛ وأضف الخيار نفسه إلى bitcoin-cli."
         },
         "coldcard": {
-          "note": "البرامج الثابتة الأقدم توقّع بالصيغة القديمة فقط (يقبلها Ghostly لعنوان قديم 1…) وتحدّ من طول الرسالة وأحرفها.",
+          "note": "البرامج الثابتة الأقدم توقّع بالصيغة القديمة فقط (يقبلها Ghostly لعنوان قديم \u20661…\u2069) وتحدّ من طول الرسالة وأحرفها.",
           "step1": "اتبع دليل BIP-322 من COLDCARD الخاص ببرنامجك الثابت: يوقّع البيان لأحد عناوينه عبر MicroSD أو NFC أو QR، بحسب الطراز.",
           "step2": "أعطه البيان كما يعرضه Ghostly تمامًا والعنوان الذي تثبته.",
           "step3": "الصق في Ghostly التوقيع الذي ينتجه."
         },
         "electrum": {
-          "step1": "يوقّع Electrum بالصيغة القديمة، التي يقبلها Ghostly لعنوان قديم 1… فقط (m…/n… على شبكات الاختبار)؛ ومحافظه الافتراضية bc1… تحتاج إلى محفظة أخرى.",
-          "step2": "تبويب Addresses ‏(View → Show Addresses)، انقر بالزر الأيمن على العنوان ← Sign/verify message.",
+          "step1": "يوقّع Electrum بالصيغة القديمة، التي يقبلها Ghostly لعنوان قديم 1… فقط (\u2066m…/n…\u2069 على شبكات الاختبار)؛ ومحافظه الافتراضية bc1… تحتاج إلى محفظة أخرى.",
+          "step2": "تبويب Addresses \u200f(View → Show Addresses)، انقر بالزر الأيمن على العنوان ← Sign/verify message.",
           "step3": "الصق البيان في Message، وانقر Sign، وانسخ Signature والصقه في Ghostly.",
           "testnet": "شغّل Electrum مع --testnet أو --signet."
         },
         "other": {
           "step1": "ابحث عن \"توقيع رسالة\" (Sign message) في المحفظة. اختر BIP-322 حين تطلب صيغة.",
           "step2": "وقّع البيان كما يعرضه Ghostly تمامًا، بالعنوان الذي تثبته.",
-          "step3": "عنوان SegWit المتداخل (3…، أو 2… على شبكات الاختبار) يحتاج إلى توقيع BIP-322 كامل (يبدأ بـ ful…).",
+          "step3": "عنوان SegWit المتداخل (3…، أو 2… على شبكات الاختبار) يحتاج إلى توقيع BIP-322 كامل (يبدأ بـ \u2066ful…\u2069).",
           "step4": "الصق التوقيع في Ghostly؛ سيخبرك فورًا إن لم يتطابق."
         },
         "sparrow": {
@@ -506,12 +506,12 @@
           "step1": "افتح المحفظة التي تحمل العنوان، ثم Tools → Sign/Verify Message.",
           "step2": "Address: الصق العنوان الذي تثبته.",
           "step3": "Message: الصق البيان الذي يعرضه Ghostly، كما هو تمامًا.",
-          "step4": "Format: ‏BIP322 (Simple) لعنوان bc1q… أو bc1p… (‏tb1… على شبكات الاختبار). ولعنوان قديم 1…، ‏Standard (Electrum).",
-          "step5": "Sign Message، ثم انسخ Signature كاملًا (يبدأ بـ smp…) والصقه في Ghostly.",
+          "step4": "Format: \u200fBIP322 (Simple) لعنوان bc1q… أو bc1p… (\u200ftb1… على شبكات الاختبار). ولعنوان قديم 1…، \u200fStandard (Electrum).",
+          "step5": "Sign Message، ثم انسخ Signature كاملًا (يبدأ بـ \u2066smp…\u2069) والصقه في Ghostly.",
           "testnet": "Tools → Restart In → Testnet أو Signet، مع محفظة على تلك الشبكة."
         },
         "trezor": {
-          "step1": "توقّع Trezor الرسائل بالصيغة القديمة؛ ويقبلها Ghostly لعنوان من حساب Legacy ‏(1…).",
+          "step1": "توقّع Trezor الرسائل بالصيغة القديمة؛ ويقبلها Ghostly لعنوان من حساب Legacy \u200f(\u20661…\u2069).",
           "step2": "افتح حساب Legacy واختر Sign & verify من قائمته.",
           "step3": "الصق البيان في Message، واختر العنوان، ثم Sign، وأكّد على الجهاز، وانسخ التوقيع إلى Ghostly."
         }
@@ -551,8 +551,8 @@
       },
       "steps": {
         "anyKey": "مفتاح مدرج تحت authentication أو assertionMethod",
-        "jose": "باستخدام jose ‏(Node.js 20 أو أحدث)، توقيع JWS: احفظ هذا باسم sign.mjs وشغّله بمفتاحك الخاص {{curve}} كملف JWK.",
-        "noble": "باستخدام @noble/curves ‏(Node.js)، توقيع خام: احفظ هذا باسم sign.mjs وشغّله بمفتاحك الخاص {{curve}} بالنظام الست عشري.",
+        "jose": "باستخدام jose \u200f(Node.js 20 أو أحدث)، توقيع JWS: احفظ هذا باسم sign.mjs وشغّله بمفتاحك الخاص {{curve}} كملف JWK.",
+        "noble": "باستخدام @noble/curves \u200f(Node.js)، توقيع خام: احفظ هذا باسم sign.mjs وشغّله بمفتاحك الخاص {{curve}} بالنظام الست عشري.",
         "openssl": "أو باستخدام OpenSSL 3 ومفتاحك {{curve}} بصيغة PEM:",
         "paste": "الصق ما يطبعه: JWS مضغوطًا ({{alg}}، مرفقًا أو منفصلًا)، أو التوقيع بالنظام الست عشري أو base64. إن كان DID الخاص بك يدرج عدة مفاتيح، يمكنك كتابة معرّف المفتاح أولًا: #key-1 <التوقيع>.",
         "sign": "وقّع هذا البيان بالمفتاح الخاص لـ {{key}}. هو سطر واحد، دون فاصل أسطر في نهايته:"
