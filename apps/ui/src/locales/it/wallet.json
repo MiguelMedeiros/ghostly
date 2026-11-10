@@ -137,6 +137,7 @@
       "needsKey": "Serve una chiave",
       "noFederation": "Nessuna federazione",
       "noSource": "Nessuna fonte",
+      "shared": "Usa il tuo saldo {{name}}",
       "unavailable": "Non disponibile"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "EVM locale · token di prova",
       "usdtSepolia": "Sepolia · token di prova"
     },
+    "sameBalance": "Stesso saldo della tua carta {{name}}",
     "status": {
       "away": "Altrove",
       "checkSettings": "Controlla le impostazioni",
@@ -873,6 +875,22 @@
       "github": "Chiede un accesso GitHub, quindi Ghostly non lo chiede per te.",
       "login": "Chiede un accesso, quindi Ghostly non lo chiede per te."
     }
+  },
+  "total": {
+    "away": "Su {{device}}, fuori dal totale",
+    "federation": "Ecash custodito dalla federazione",
+    "info": "Il totale somma solo i saldi che Ghostly è riuscito a leggere ora. Una carta non letta resta fuori, e Testnet non si somma mai a Mainnet.",
+    "label": "Saldi",
+    "mint": "Ecash custodito dalle tue mint",
+    "none": "Non configurato",
+    "ready": "Spendibile ora",
+    "shared": "Stesso saldo di {{name}}, contato una volta",
+    "title": "Da dove viene il saldo",
+    "total": "Totale",
+    "uncounted": "{{count}} carte fuori dal totale",
+    "uncounted_one": "{{count}} carta fuori dal totale",
+    "unknown": "Non leggibile ora, fuori dal totale",
+    "waiting": "{{amount}} {{unit}} non ancora spendibili"
   },
   "ui": {
     "amountIn": "Importo in {{unit}}",
