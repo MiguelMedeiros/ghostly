@@ -5487,7 +5487,7 @@ export class GhostlyNode implements EngineImplementation {
     live.stored = { ...live.stored, ...patch }; this.emitState();
     const log = this.transportLogOf(live);
     if (log?.chose("you", "automatic", Date.now())) this.saveTransportLog(live, log);
-    // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
+    // The app's rule (`automaticTransport`): Iroh first where it runs, then WebRTC, then HyperDHT; fallback on.
     await live.link.setTransportPreference(automaticTransport(live.link.availableTransports), true, true);
     this.capsChanged(linkId);
   }

@@ -18,16 +18,19 @@ it("calls a transport relayed when either side's descriptor is relay only", () =
   expect(relayedTransports({ "iroh/1": "iroh" }, { "hyperdht/1": null, "iroh/1": { relayed: "yes" } } as TransportDescriptors)).toEqual([]);
 });
 
-it("ranks a relayed transport after every direct one, the same from both sides", () => {
-  // Without the flag a tie goes to the fixed order (Iroh first); relayed, WebRTC wins.
-  expect(rankTransports(["webrtc/1", "iroh/1"], ["iroh/1", "webrtc/1"])).toEqual(["iroh/1", "webrtc/1"]);
-  expect(rankTransports(["webrtc/1", "iroh/1"], ["iroh/1", "webrtc/1"], ["iroh/1"])).toEqual(["webrtc/1", "iroh/1"]);
-  // Even a side that put Iroh first gets the direct path first.
-  expect(rankTransports(["iroh/1", "webrtc/1"], ["iroh/1", "webrtc/1"], ["iroh/1"])).toEqual(["webrtc/1", "iroh/1"]);
+it("ranks a relayed transport after every direct one, Iroh through its relay excepted, the same from both sides", () => {
+  // A relayed HyperDHT (a browser's, through a HyperDHT relay) goes after WebRTC even where both put it first.
+  expect(rankTransports(["hyperdht/1", "webrtc/1"], ["hyperdht/1", "webrtc/1"], ["hyperdht/1"])).toEqual(["webrtc/1", "hyperdht/1"]);
+  // Iroh through its relay keeps its place by the rank sum (WISP 100, revision 2026-11-08): a tie goes to the fixed
+  // order (Iroh first), and two apps that put it first use it.
+  expect(rankTransports(["webrtc/1", "iroh/1"], ["iroh/1", "webrtc/1"], ["iroh/1"])).toEqual(["iroh/1", "webrtc/1"]);
+  expect(rankTransports(["iroh/1", "webrtc/1"], ["iroh/1", "webrtc/1"], ["iroh/1"])).toEqual(["iroh/1", "webrtc/1"]);
+  // Where both put WebRTC first (an explicit choice on each side), WebRTC.
+  expect(rankTransports(["webrtc/1", "iroh/1"], ["webrtc/1", "iroh/1"], ["iroh/1"])).toEqual(["webrtc/1", "iroh/1"]);
   // Between direct transports the rank sum still decides.
-  expect(rankTransports(["hyperdht/1", "iroh/1", "webrtc/1"], ["hyperdht/1", "webrtc/1", "iroh/1"], ["iroh/1"])).toEqual(["hyperdht/1", "webrtc/1", "iroh/1"]);
+  expect(rankTransports(["hyperdht/1", "iroh/1", "webrtc/1"], ["hyperdht/1", "webrtc/1", "iroh/1"], ["hyperdht/1"])).toEqual(["iroh/1", "webrtc/1", "hyperdht/1"]);
   // The only common transport is used, relayed or not.
-  expect(rankTransports(["iroh/1"], ["iroh/1", "hyperdht/1"], ["iroh/1"])).toEqual(["iroh/1"]);
+  expect(rankTransports(["hyperdht/1"], ["iroh/1", "hyperdht/1"], ["hyperdht/1"])).toEqual(["hyperdht/1"]);
 
   const orders = (list: readonly PairedTransport[]): PairedTransport[][] => list.length <= 1 ? [[...list]]
     : list.flatMap((t, i) => orders([...list.slice(0, i), ...list.slice(i + 1)]).map(rest => [t, ...rest]));
@@ -35,8 +38,10 @@ it("ranks a relayed transport after every direct one, the same from both sides",
     for (const a of orders(TRANSPORTS)) for (const b of orders(TRANSPORTS)) {
       const ranked = rankTransports(a, b, relayed);
       expect(rankTransports(b, a, relayed)).toEqual(ranked);
-      const direct = ranked.filter(t => !relayed.includes(t));
-      expect(ranked.slice(0, direct.length)).toEqual(direct);
+      // What is penalised (a relayed transport other than Iroh) comes last; Iroh is ranked as if direct.
+      const penalised = (t: string) => t !== "iroh/1" && relayed.includes(t);
+      expect(ranked.slice(0, ranked.filter(t => !penalised(t)).length)).toEqual(ranked.filter(t => !penalised(t)));
+      expect(rankTransports(a, b, relayed.filter(t => t !== "iroh/1"))).toEqual(ranked);
     }
 });
 
@@ -69,14 +74,32 @@ it("keeps a relayed session where it is while live: no probing for WebRTC (WISP 
   h.switches.forEach(s => s.stop());
 });
 
-it("puts the relayed transport last among a switch's fallbacks", () => {
+it("puts a relayed HyperDHT last among a switch's fallbacks, and a relayed Iroh by its rank", () => {
   const h = peers("webrtc/1");
   h.policies[0].available = ["webrtc/1", "iroh/1", "hyperdht/1"];
-  h.policies[0].descriptors = { "iroh/1": browser, "hyperdht/1": "hyper" };
+  h.policies[0].descriptors = { "iroh/1": browser, "hyperdht/1": { publicKey: "c".repeat(64), relayed: true } };
   h.switches[0].changed(false); h.flush();
-  h.policies[1].preferred = "hyperdht/1"; h.switches[1].changed(); h.flush();
-  expect(h.prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: ["hyperdht/1", "webrtc/1", "iroh/1"] }), true);
+  h.policies[1].preferred = "iroh/1"; h.switches[1].changed(); h.flush();
+  expect(h.prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: ["iroh/1", "webrtc/1", "hyperdht/1"] }), true);
   h.switches.forEach(s => s.stop());
+});
+
+it("moves a session on Iroh through its relay, ranked first, to WebRTC on the session, nobody having chosen (`upgrade/1`)", () => {
+  const policies: Omit<TransportPolicy, "revision" | "intent">[] = [
+    { preferred: "iroh/1", fallback: true, available: ["webrtc/1", "iroh/1"], descriptors: { "iroh/1": browser } },
+    { preferred: "iroh/1", fallback: true, available: ["webrtc/1", "iroh/1", "hyperdht/1"], descriptors: { "iroh/1": desktop } },
+  ];
+  const queue: { side: number; frame: Record<string, unknown> }[] = [];
+  const prepare = [vi.fn(), vi.fn()];
+  const switches = [0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1 - i),
+    policy: () => structuredClone(policies[i]), send: frame => queue.push({ side: 1 - i, frame: frame as Record<string, unknown> }),
+    peer: vi.fn(), state: vi.fn(), prepare: prepare[i], cancel: vi.fn(), upgrade: () => true, timeoutMs: 100 }));
+  switches.forEach(s => s.begin("session-1", "iroh/1"));
+  while (queue.length) { const { side, frame } = queue.shift()!; switches[side].handle(frame); }
+  // Iroh ranks first (the way back after an absence), and the direct WebRTC is where the session goes once live.
+  expect(prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: ["webrtc/1", "iroh/1"], upgrade: true }), true);
+  expect(prepare[1]).toHaveBeenCalledWith(expect.objectContaining({ upgrade: true }), false);
+  switches.forEach(s => s.stop());
 });
 
 it("lets an explicit choice of the relayed transport stand", () => {

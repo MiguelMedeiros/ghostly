@@ -7,7 +7,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS, IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
-import { TRANSPORTS, irohRelayUrl, checkedDescriptors, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { TRANSPORTS, automaticTransport, irohRelayUrl, checkedDescriptors, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
@@ -1472,7 +1472,7 @@ export class GhostLink {
     });
     this.switcher = new TransportSwitch({
       key: this.myPubKeyZ32, peerKey: options.params.peerPubKeyZ32,
-      policy: () => ({ preferred: this.preferred, fallback: this.fallback, available: this.availableTransports,
+      policy: () => ({ preferred: this.ownPreferred, fallback: this.fallback, available: this.availableTransports,
         descriptors: Object.fromEntries([...this.endpoints].map(([transport, endpoint]) => [transport, endpoint.descriptor])) }),
       send: frame => {
         try { if (this.channel && this.paired?.state.status === "ready") this.channel.send(JSON.stringify(frame)); }
@@ -2119,7 +2119,7 @@ export class GhostLink {
       const wanted = this.switcher.wanted();
       return wanted && wanted.transport !== state.transport ? wanted : undefined;
     }
-    if (!this.fallback) return { transport: this.preferred, ...(this.automatic ? {} : { by: "you" as const }) };
+    if (!this.fallback) return { transport: this.ownPreferred, ...(this.automatic ? {} : { by: "you" as const }) };
     // Any transport may carry the chat, but someone chose one (WISP 100, "A choice made while not live"): a side that
     // lacks it says so, as with Fallback off.
     return this.choiceApart;
@@ -2215,7 +2215,9 @@ export class GhostLink {
   get availableTransports(): PairedTransport[] {
     return [...(this.options.rtcAvailable !== false ? ["webrtc/1" as const] : []), ...this.endpoints.keys()];
   }
-  private transportOffer(): PairedTransport[] { return transportOrder(this.availableTransports, this.preferred, this.fallback); }
+  /** The transport this side's policy names: on Automatic, the app's rule for what runs now (Iroh once its endpoint is up). */
+  private get ownPreferred(): PairedTransport { return this.automatic ? automaticTransport(this.availableTransports) : this.preferred; }
+  private transportOffer(): PairedTransport[] { return transportOrder(this.availableTransports, this.ownPreferred, this.fallback); }
 
   registerEndpoint(endpoint: NativeEndpoint): void {
     if (this.stopped || this.deliveryMode === "dht" || this.quietForTaken || !this.options.params.profile) { void endpoint.close(); return; }
@@ -2557,6 +2559,9 @@ export class GhostLink {
       const ranked = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports, relayed) : local.filter(t => t === "webrtc/1");
       // A standing explicit choice goes first, relayed or not: the session starts where the agreement would move it
       // anyway. With no session behind it, the choice this side or the contact made meanwhile (WISP 100).
+      // A resume over WebRTC on Automatic, where Iroh now ranks ahead of it (a chat live on WebRTC before Automatic put
+      // Iroh first, WISP 100 revision 2026-11-08): it resumes on Iroh, which a dial in takes over a held session on.
+      if (this.automatic && this.resuming === "webrtc/1" && ranked.includes("iroh/1") && ranked.indexOf("iroh/1") < ranked.indexOf("webrtc/1")) this.resuming = "iroh/1";
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
       const resume = this.resuming === "webrtc/1", woke = resume && this.resumingWoke;
       if (chosen && chosen === this.resuming && ranked.includes(chosen)) { this.resuming = undefined; this.resumingWoke = false; }

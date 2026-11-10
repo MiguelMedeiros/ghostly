@@ -141,8 +141,7 @@
   "ms": "{{ms}} مللي ثانية",
   "option": {
     "automatic": "تلقائي",
-    "automaticHint": "يختار التطبيقان، WebRTC أولًا",
-    "automaticHintNative": "يختار التطبيقان، {{transport}} أولًا: هذا التطبيق لا يدعم WebRTC",
+    "automaticFirst": "يختار التطبيقان، {{transport}} أولًا",
     "chosenNotInUse": "مختار · غير مستخدم",
     "chosenWaiting": "مختار · في انتظاره",
     "contactLacks": "تطبيق جهة اتصالك لا يدعم {{transport}}",
@@ -231,6 +230,7 @@
     "automatic": "تلقائي: يضع التطبيقان {{transport}} أولًا.",
     "automaticNoWebrtc": "تلقائي: يستخدم التطبيقان {{transport}} المتوفر لدى كليهما؛ أحدهما لا يدعم WebRTC.",
     "automaticWebrtc": "تلقائي: يضع التطبيقان WebRTC أولًا، والاقتران الأول يستخدم WebRTC دائمًا.",
+    "automaticWebrtcIroh": "تلقائي: يتصل التطبيقان أولًا عبر Iroh الذي يعود فورًا تقريبًا، ثم ينتقلان إلى WebRTC الأسرع والمباشر.",
     "contactChose": "اختار {{contact}} {{transport}} لهذه المحادثة.",
     "contactChoseUnnamed": "اختارت جهة اتصالك {{transport}} لهذه المحادثة.",
     "fallback": "اخترت {{preferred}} لهذه المحادثة؛ وهو غير متاح الآن، لذا تستخدم المحادثة {{transport}}.",

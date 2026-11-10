@@ -514,12 +514,27 @@ describe("ChatConnection: what the panel does", () => {
   it("in an app with no WebRTC (Linux Desktop), Automatic and the summary say what Automatic does there", () => {
     const link = { pairing: ready({ transport: "hyperdht/1" }), availableTransports: ["iroh/1", "hyperdht/1"] as LinkView["availableTransports"], peerTransports: all, transportAutomatic: true };
     banner(link);
-    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first: this app has no WebRTC");
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first");
     // The contact's app ranks WebRTC first: "both apps rank HyperDHT first" would be untrue.
     expect(connectionSummary(linkView(link), Date.now())?.why).toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
     expect(connectionSummary(linkView({ ...link, availableTransports: all, peerTransports: ["iroh/1", "hyperdht/1"] }), Date.now())?.why)
       .toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
     expect(connectionSummary(linkView({ ...link, availableTransports: all }), Date.now())?.why).toBe("Automatic: both apps rank HyperDHT first.");
+  });
+
+  it("in the web app with Iroh, Automatic says it puts Iroh first, and on WebRTC that it came back over Iroh and moved", () => {
+    const web = ["webrtc/1", "iroh/1"] as LinkView["availableTransports"];
+    const link = { pairing: ready({ transport: "webrtc/1" }), availableTransports: web, peerTransports: web, transportAutomatic: true };
+    banner(link);
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first");
+    expect(connectionSummary(linkView(link), Date.now())?.why)
+      .toBe("Automatic: the apps connect over Iroh first, which is back almost at once, then move to WebRTC, which is direct and faster.");
+    // A contact with no Iroh: WebRTC first, as before.
+    expect(connectionSummary(linkView({ ...link, peerTransports: ["webrtc/1"] as LinkView["availableTransports"] }), Date.now())?.why)
+      .toBe("Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.");
+    // Left on Iroh's relay: WebRTC could not connect.
+    expect(connectionSummary(linkView({ ...link, pairing: ready({ transport: "iroh/1" }), transportRelayed: { relays: ["relay.test"] } }), Date.now())?.why)
+      .toBe("Automatic: a direct connection could not be made, so the chat goes through Iroh's relay. Relayed: relay.test sees which devices talk and when, never what they say.");
   });
 
   it("goes back to Automatic", async () => {

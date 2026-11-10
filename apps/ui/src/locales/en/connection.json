@@ -125,8 +125,7 @@
   "ms": "{{ms}} ms",
   "option": {
     "automatic": "Automatic",
-    "automaticHint": "The apps choose, WebRTC first",
-    "automaticHintNative": "The apps choose, {{transport}} first: this app has no WebRTC",
+    "automaticFirst": "The apps choose, {{transport}} first",
     "chosenNotInUse": "Chosen · not in use",
     "chosenWaiting": "Chosen · waiting for it",
     "contactLacks": "Your contact's app doesn't support {{transport}}",
@@ -215,6 +214,7 @@
     "automatic": "Automatic: both apps rank {{transport}} first.",
     "automaticNoWebrtc": "Automatic: the apps use {{transport}}, which both have; one of them has no WebRTC.",
     "automaticWebrtc": "Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.",
+    "automaticWebrtcIroh": "Automatic: the apps connect over Iroh first, which is back almost at once, then move to WebRTC, which is direct and faster.",
     "contactChose": "{{contact}} chose {{transport}} for this chat.",
     "contactChoseUnnamed": "Your contact chose {{transport}} for this chat.",
     "fallback": "You chose {{preferred}} for this chat; it is not available now, so the chat uses {{transport}}.",
