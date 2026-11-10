@@ -38,7 +38,7 @@ function profileDir(name: string): { dir: string; socket: string } {
 describe.skipIf(process.platform === "win32")("a daemon that stops while a call waits", () => {
   it("answers a send --wait still waiting before it ends the connection: timeout, with messageId, delivery and reason daemon-stopped", async () => {
     const address = profileDir("send-wait");
-    const node = { getMessage: async (_chat: string, id: string) => ({ id, delivery: "waiting" }) };
+    const node = { getMessage: async (_chat: string, id: string) => ({ id, delivery: "waiting" }), getState: () => ({ links: [] }) };
     const ctx = { runtime: { paths: address, server: { node } }, hub: { onEvent: () => () => {} }, mode: "daemon" };
     const served = await serve({ ctx } as unknown as Host);
     const client = (await connectDaemon(address))!;

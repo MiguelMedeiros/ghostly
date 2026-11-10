@@ -7,13 +7,16 @@ import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForRemoval } from
 /** A timed-out `edit --wait confirmed` and `group edit --wait sent` say what happens next, as `send`'s timeout does. */
 const pending = { linkId: "chat-one", id: "me_1", text: "new", sender: "me", timestamp: 1, via: "datalink", edit: { seq: 2, pending: true } } as unknown as StoredMessage;
 
-function fake(mode: "one-shot" | "daemon") {
+function fake(mode: "one-shot" | "daemon", links: unknown[] = []) {
   const node = {
     getMessage: vi.fn(async () => pending), groupTaken: vi.fn(() => 0), removalPending: vi.fn(() => true),
-    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })),
+    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), getState: () => ({ links }),
   };
   return { runtime: { server: { node } }, mode } as unknown as ApiContext;
 }
+
+/** A chat of mine whose invite nobody took yet. */
+const unjoined = { id: "chat-one", profile: "default", inviteCode: "ghostly1-code" };
 
 async function timedOut(wait: Promise<unknown>) {
   const caught = wait.catch((error: unknown) => error);
@@ -43,6 +46,17 @@ describe("an edit's timeout", () => {
     });
     expect(await timedOut(waitForGroupFrame(fake("daemon"), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({
       message: "Timed out after 30 s: no member's edge took it yet (it stays in the group and goes when one opens). It still goes by itself while this profile is online",
+    });
+  });
+
+  // It said "goes with this profile's next command": nothing goes to a chat nobody joined before they do.
+  it("on a chat nobody joined yet says it goes once the contact joins", async () => {
+    vi.useFakeTimers();
+    expect(await timedOut(waitForEdit(fake("one-shot", [unjoined]), "chat-one", "me_1", 30_000))).toMatchObject({
+      message: "Timed out after 30 s: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It goes once the contact joins this chat (nobody has yet) while this profile is online (`ghostly daemon --detach`)",
+    });
+    expect(await timedOut(waitForConfirmed(fake("daemon", [unjoined]), "chat-one", "reaction", (left) => left.reactions.length > 0, 30_000))).toMatchObject({
+      message: "Timed out after 30 s: the contact has not confirmed the reaction yet. It is kept here and goes once the contact joins this chat (nobody has yet)",
     });
   });
 });

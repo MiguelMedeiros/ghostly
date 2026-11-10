@@ -7,7 +7,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, shownName, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, shownName, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -425,14 +425,14 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
-    const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
-    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
+    const { wait, ms } = confirmWait(ctx, params, link.id);
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, { group: false, ref: str(params, "chat", true) }, result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
-    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
+    const confirmed = !!message && !message.edit?.pending;
+    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the edit")) };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
@@ -465,13 +465,14 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.react"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group react", "<message> <emoji>");
-    const { wait, ms } = confirmWait(ctx, params);
+    const { wait, ms } = confirmWait(ctx, params, link.id);
     // A new reaction of mine is numbered past every one still waiting: it is confirmed once none past those is left.
     const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
     const result = await react(ctx, link.id, params, { group: false, ref: str(params, "chat", true) });
     const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
     if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
-    return { chat: link.id, ...result, confirmed: !pending(node(ctx).chatUnconfirmed({ linkId: link.id })) };
+    const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: link.id }));
+    return { chat: link.id, ...result, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the reaction")) };
   },
   /**
    * WISP 400 § Pinned message: one per chat or group, a new pin replaces it; `remove` unpins. In a community only the
@@ -487,7 +488,7 @@ const METHODS: Record<string, Method> = {
     if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
     const { wait, ms } = target.group
       ? { wait: oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none"), ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 }
-      : confirmWait(ctx, params);
+      : confirmWait(ctx, params, target.linkId);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     const gone = result.error && messageId ? notHere(result.error, messageId, { group: target.group, ref: str(params, "chat", true) }) : undefined;
     if (gone) throw gone;
@@ -503,7 +504,8 @@ const METHODS: Record<string, Method> = {
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
     if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms);
-    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed: !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId })) };
+    const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId }));
+    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed, ...(!confirmed && keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin")) };
   },
   /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
   async "saved.add"(ctx, params) {
@@ -989,11 +991,12 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
 }
 
 /**
- * How long `react` and `pin` in a 1:1 chat wait for the contact: a one-shot until it confirmed (as `edit`), since what
- * is not said yet leaves with the process; a daemon goes on saying it, so it answers at once unless asked to wait.
+ * How long `edit`, `react` and `pin` in a 1:1 chat wait for the contact: a one-shot until it confirmed, since what is
+ * not said yet leaves with the process; a daemon goes on saying it, so it answers at once unless asked to wait, as a
+ * one-shot does on a chat nobody joined yet (`oneShotWaits`).
  */
-function confirmWait(ctx: ApiContext, params: Params): { wait: "none" | "confirmed"; ms: number } {
-  const wait = oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
+function confirmWait(ctx: ApiContext, params: Params, chat: string): { wait: "none" | "confirmed"; ms: number } {
+  const wait = oneOf(params, "wait", ["none", "confirmed"] as const, oneShotWaits(ctx, chat) ? "confirmed" : "none");
   return { wait, ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 };
 }
 
