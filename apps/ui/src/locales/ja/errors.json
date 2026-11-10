@@ -663,6 +663,8 @@
   "services": {
     "addressNext": "localhost:3400 のような、このパソコン上のアドレスを使ってください。",
     "badAddress": "そのアドレスは読み取れません",
+    "lockedBeforeOpen": "アプリが開く前にプロフィールがロックされました",
+    "lockedBeforeOpenNext": "ロックを解除して、もう一度アプリを開いてください。",
     "name": "サービスに名前を付けてください",
     "noCredentials": "アドレスにユーザー名やパスワードは含められません",
     "noQuery": "アドレスに ? や # の部分は含められません",

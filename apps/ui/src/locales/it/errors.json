@@ -663,6 +663,8 @@
   "services": {
     "addressNext": "Usa un indirizzo di questo computer, come localhost:3400.",
     "badAddress": "Impossibile leggere questo indirizzo",
+    "lockedBeforeOpen": "Il profilo si è bloccato prima che l'app si aprisse",
+    "lockedBeforeOpenNext": "Sbloccalo, poi apri di nuovo l'app.",
     "name": "Dai un nome al servizio",
     "noCredentials": "L'indirizzo non può contenere nome utente o password",
     "noQuery": "L'indirizzo non può avere una parte con ? o #",

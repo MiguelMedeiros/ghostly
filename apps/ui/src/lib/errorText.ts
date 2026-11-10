@@ -2,6 +2,7 @@ import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
 import { formatAmount } from "./amount";
 import { english } from "./english";
+import { SERVICE_LOCKED } from "./serviceWindows";
 
 /*
  * An error said in the app's language. The engine, the platform layer and the extension throw plain English (they
@@ -730,6 +731,8 @@ const RULES: readonly Rule[] = [
   // apps/web/src/host.ts, RELAY_ONLY_REFUSED): one short line, and why, with the desktop app that opens it, behind the ⓘ.
   { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", info: "errors.relayOnly.appInBrowserInfo" },
   { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", info: "errors.relayOnly.appInBrowserInfo" },
+  // A contact's app the profile's lock overtook while it opened on the web (apps/web/src/host.ts): it showed nothing.
+  exact(SERVICE_LOCKED, "errors.services.lockedBeforeOpen", "errors.services.lockedBeforeOpenNext"),
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").

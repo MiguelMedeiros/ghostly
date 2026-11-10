@@ -663,6 +663,8 @@
   "services": {
     "addressNext": "请使用这台电脑上的地址，例如 localhost:3400。",
     "badAddress": "无法识别该地址",
+    "lockedBeforeOpen": "应用打开前个人资料已锁定",
+    "lockedBeforeOpenNext": "请解锁，然后重新打开应用。",
     "name": "请给服务起个名字",
     "noCredentials": "地址中不能包含用户名或密码",
     "noQuery": "地址中不能包含 ? 或 # 部分",

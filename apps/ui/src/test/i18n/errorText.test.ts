@@ -610,6 +610,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["A contact's app does not open in the browser extension while Hide my IP from contacts is on", "apps/extension/src/background.ts"],
   ["A contact's app does not open in the web app while Hide my IP from contacts is on", "apps/web/src/host.ts"],
+  ["The profile locked before the contact's app opened", "apps/ui/src/lib/serviceWindows.ts"],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
