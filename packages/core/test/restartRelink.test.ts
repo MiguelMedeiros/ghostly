@@ -22,9 +22,11 @@ import { setLinkTraceSink } from "../src/linkTrace";
 
 /**
  * `iroh`, `webrtc`: the one transport both apps run. `webrtc+hyperdht`: the CLI's, WebRTC first and HyperDHT (direct)
- * after it. `webrtc+iroh`: WebRTC first and an Iroh reached through its relay (no direct address), ranked last.
+ * after it. `webrtc+iroh`: WebRTC first and an Iroh reached through its relay (no direct address), ranked last, as
+ * Automatic ranked them before WISP 100 revision 2026-11-08 and as a chat whose person chose WebRTC still does.
+ * `auto+iroh`: the same transports on Automatic, which puts Iroh first, through its relay too.
  */
-type Kind = "iroh" | "webrtc" | "webrtc+hyperdht" | "webrtc+iroh";
+type Kind = "iroh" | "webrtc" | "webrtc+hyperdht" | "webrtc+iroh" | "auto+iroh";
 interface App {
   name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number; read?: string }[]; stopped?: Promise<void>;
   /** While set, the relays' request budget holds back every publish of this app (it throws `DiscoveryBudgetError`). */
@@ -82,9 +84,10 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     dht: { state: dhtState, save: async state => { app.dhtState = state; } },
     native: native
       ? { peerDescriptors: { [native]: peerNative }, peerTransports: [...(rtcToo ? ["webrtc/1" as const] : []), native], peerFallback: true,
-        ...(chosen ? { preferred: native, automatic: false } : { automatic: true }) }
+        ...(chosen ? { preferred: native, automatic: false } : kind === "webrtc+iroh" ? { preferred: "webrtc/1" as const, automatic: false } : { automatic: true }) }
       : { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
-    // What the app was live on when it quit: WebRTC wherever the app has it (it ranks first).
+    // What the app was live on when it quit: WebRTC wherever the app has it (it ranked first; on `auto+iroh`, a chat
+    // live on WebRTC from before Automatic put Iroh first).
     ...(wasLive ? { resume: chosen && native ? native : rtcToo ? "webrtc/1" as const : "iroh/1" as const } : {}),
     transport: counted(world.pkarr, app),
     pollIntervals: RELAY_POLL_INTERVALS,
@@ -223,6 +226,23 @@ describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app 
       expect(result.dialFailures).toBe(0);
     }, 240_000);
   });
+});
+
+/**
+ * Automatic puts Iroh first, through its relay too (WISP 100, revision 2026-11-08). A chat on it that was live on
+ * WebRTC when the app quit (from before the rule) resumes on Iroh. (These apps do not list `upgrade/1`, so nothing then
+ * moves the session to WebRTC; the wake tests below have it.)
+ */
+describe("a chat on Automatic, both apps with WebRTC and an Iroh through its relay, after one app restarts", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key, $how: live again on Iroh within the target", async ({ restarted, how }) => {
+    const result = await restart("auto+iroh", restarted, how);
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(how === "crash" ? 15_000 : 5_000);
+    expect(result.transport).toBe("iroh/1");
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+  }, 240_000);
 });
 
 /**
@@ -478,13 +498,13 @@ describe("a restart whose WebRTC answer the relays' budget holds back", () => {
     expect((low.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport).toBe("hyperdht/1");
   }, 240_000);
 
-  it("a relayed transport ranked after WebRTC waits for a contact reading in the background first", async () => {
-    const result = await restart("webrtc+iroh", "lower", "crash", BUDGET_HELD_MS);
-    // Before: 90.7 s, 19.5 requests a minute. After: 40.6 s, 15.5: an offer out reads the relays fast until it ends,
-    // now at 40 s rather than 90 s.
-    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(45_000);
+  it("on Automatic, Iroh through its relay goes first: the answer held back holds nothing back", async () => {
+    const result = await restart("auto+iroh", "lower", "crash", BUDGET_HELD_MS);
+    // WebRTC first with a relayed Iroh ranked after it (the rule before WISP 100 revision 2026-11-08): 90.7 s before
+    // revision 0.7, 40.6 s after it (the relayed Iroh raced 40 s after the offer), 15.5 requests a minute.
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
     expect(result.transport).toBe("iroh/1");
-    expect(result.requestsPerMin).toBeLessThanOrEqual(16);
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
     expect(result.dialFailures).toBe(0);
   }, 240_000);
 });
@@ -668,18 +688,20 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs, kind = "webrtc+iroh" }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
     /** The app's Iroh is off its relay at the wake, and back on it this long after (`NativeWorld.offRelay`). */
     relayBackMs?: number;
     /** A dial that reaches nobody fails this long after it began (Iroh's: 20 s). */
-    dialFailMs?: number }) {
+    dialFailMs?: number;
+    /** `auto+iroh`: both on Automatic, which dials Iroh first. */
+    kind?: "webrtc+iroh" | "auto+iroh" }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     if (dialFailMs) world.native.dialFailMs = dialFailMs;
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
     const up = { mine: true, contact: true };
-    const phone = startApp(world, "phone", phoneSide, { side: cliSide, name: "cli" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
-    const cli = startApp(world, "cli", cliSide, { side: phoneSide, name: "phone" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
+    const phone = startApp(world, "phone", phoneSide, { side: cliSide, name: "cli" }, kind, emptyDhtDeliveryState(), false, undefined, false, up);
+    const cli = startApp(world, "cli", cliSide, { side: phoneSide, name: "phone" }, kind, emptyDhtDeliveryState(), false, undefined, false, up);
     expect(await until(() => phone.link.isDataLinkOpen && cli.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
     await run(20_000);
     expect(transportOf(phone)).toBe("webrtc/1");
@@ -758,6 +780,24 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(liveMs, "from the return to live on both sides").toBeLessThan(relayBackMs + 2_000);
     expect(firstOn).toBe("iroh/1");
     expect(knocks.filter(step => step === "knock-again")).toHaveLength(1);
+  }, 240_000);
+
+  /**
+   * On Automatic (WISP 100, revision 2026-11-08) a return dials Iroh through its relay first, whatever transport the
+   * chat was live on: no WebRTC offer to wait on. Once live, the session moves to WebRTC on itself (`upgrade/1`), which
+   * carries files many times faster than the relay. Away 30 s, 2 and 10 minutes.
+   */
+  it.each([
+    { higher: false, awayMs: 30_000 }, { higher: true, awayMs: 30_000 },
+    { higher: false, awayMs: 2 * 60_000 }, { higher: true, awayMs: 2 * 60_000 },
+    { higher: false, awayMs: 10 * 60_000 }, { higher: true, awayMs: 10 * 60_000 },
+  ])("on Automatic, live again on Iroh within seconds of coming back, then on WebRTC (higher key: $higher, away $awayMs ms)", async ({ higher, awayMs }) => {
+    const { liveMs, firstOn, directMs, requestsToLive } = await sleepAndWake({ higher, awayMs, frozen: true, kind: "auto+iroh" });
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ kind: "auto+iroh", higher, awayMs, liveMs, firstOn, directMs, requestsToLive }) + "\n");
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
+    expect(requestsToLive).toBeLessThanOrEqual(10);
   }, 240_000);
 
   it.each([

@@ -5431,15 +5431,18 @@ export class GhostlyNode implements EngineImplementation {
    * `chosen`: a choice from the chat's Connection menu, a row in its timeline even when it names the transport already
    * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again, and
    * is neither a row nor a switch intent. On Automatic it sends back the transport Automatic names: only the fallback
-   * changes, and the chat stays on Automatic.
+   * changes (and with it what Automatic names), and the chat stays on Automatic.
    */
   async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
-    if (chosen === undefined && live.stored.preferredTransport === undefined && preferred === automaticTransport(live.link.availableTransports)) {
+    // What Automatic names with either Fallback (`automaticTransport`): the view the switch read names it with the old
+    // one, and may be from before the Iroh endpoint came up (WebRTC, as with Fallback off). Another transport is a choice.
+    const available = live.link.availableTransports;
+    if (chosen === undefined && live.stored.preferredTransport === undefined && [true, false].some(f => preferred === automaticTransport(available, f))) {
       await db.patchLink(linkId, { transportFallback: fallback });
       live.stored = { ...live.stored, transportFallback: fallback }; this.emitState();
-      await live.link.setTransportPreference(preferred, fallback, true, false);
+      await live.link.setTransportPreference(automaticTransport(available, fallback), fallback, true, false);
       this.capsChanged(linkId);
       return;
     }
@@ -5487,7 +5490,7 @@ export class GhostlyNode implements EngineImplementation {
     live.stored = { ...live.stored, ...patch }; this.emitState();
     const log = this.transportLogOf(live);
     if (log?.chose("you", "automatic", Date.now())) this.saveTransportLog(live, log);
-    // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
+    // The app's rule (`automaticTransport`): Iroh first where it runs, then WebRTC, then HyperDHT; fallback on.
     await live.link.setTransportPreference(automaticTransport(live.link.availableTransports), true, true);
     this.capsChanged(linkId);
   }
@@ -10294,7 +10297,7 @@ export class GhostlyNode implements EngineImplementation {
       textDelivery: this.holdingFor(live) ? "hold" : live.link?.textDelivery ?? "unavailable",
       transportErrors: live.transportErrors,
       // Automatic: what the app's rule prefers here, so the Fallback switch sends a transport this app has.
-      preferredTransport: live.stored.preferredTransport ?? automaticTransport(live.link?.availableTransports ?? []),
+      preferredTransport: live.stored.preferredTransport ?? automaticTransport(live.link?.availableTransports ?? [], live.stored.transportFallback ?? true),
       transportFallback: live.stored.transportFallback ?? true,
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,

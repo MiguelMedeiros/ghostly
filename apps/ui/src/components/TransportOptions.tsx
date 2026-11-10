@@ -53,9 +53,8 @@ export function TransportOptions({ link, disabled = false, dhtBlocked, relayOnly
     const active = document.activeElement;
     if (!active || active === document.body) toTabStop();
   }, [single]);
-  // An app with no WebRTC (Linux Desktop) puts its first native transport first.
-  const automaticHint = own.includes("webrtc/1") ? t("connection.option.automaticHint")
-    : t("connection.option.automaticHintNative", { transport: transportName(automaticTransport(own)) });
+  // Iroh where this app runs it, else WebRTC, else HyperDHT; WebRTC first with Fallback off (`automaticTransport`).
+  const automaticHint = t("connection.option.automaticFirst", { transport: transportName(automaticTransport(own, link.transportFallback ?? true)) });
   function choose(choice: ConnectionChoice) {
     // A single transport here: choosing it means leaving DHT only, back to the app's rule.
     if (single && choice !== "dht") choice = "auto";
