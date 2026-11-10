@@ -17,6 +17,7 @@
     "recent": "Recenti",
     "symbols": "Simboli"
   },
+  "chooseFiles": "Scegli i file",
   "closeCamera": "Chiudi fotocamera",
   "dhtTooLong": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o connettiti dal vivo; la bozza resta.",
   "document": "Documento",
