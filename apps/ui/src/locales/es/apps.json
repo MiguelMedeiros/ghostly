@@ -195,6 +195,7 @@
     "resumeSharing": "compartiendo un archivo",
     "sharingWith": "compartiendo un archivo con {{name}}",
     "stoppedFailed": "{{title}} dejó de funcionar y se cerró. Si sigue pasando, avisa a su editor.",
+    "stoppedFocus": "{{title}} se detuvo: seguía tomando el teclado",
     "stoppedOffline": "{{title}} no pudo iniciarse: estás sin conexión. Ábrela de nuevo cuando tengas conexión.",
     "stoppedRemoved": "{{title}} se detuvo: {{store}} retiró esta versión",
     "stoppedRevoked": "{{title}} se detuvo: su editor revocó esta versión",

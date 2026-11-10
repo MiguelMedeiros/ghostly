@@ -195,6 +195,7 @@
     "resumeSharing": "sharing a file",
     "sharingWith": "sharing a file with {{name}}",
     "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its publisher.",
+    "stoppedFocus": "{{title}} was stopped: it kept taking the keyboard",
     "stoppedOffline": "{{title}} couldn't start: you are offline. Open it again once you're connected.",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its publisher revoked this version",
