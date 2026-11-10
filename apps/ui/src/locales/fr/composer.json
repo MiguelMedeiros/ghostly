@@ -17,6 +17,7 @@
     "recent": "Récents",
     "symbols": "Symboles"
   },
+  "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
