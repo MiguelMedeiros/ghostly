@@ -18,6 +18,8 @@ export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-sho
 function oneShotWait(method: string, params: Record<string, unknown>): string | undefined {
   const group = typeof params.group === "string" || (typeof params.chat === "string" && params.chat.startsWith("group:"));
   switch (method) {
+    // To a chat nobody joined yet it answers at once; its notice comes only if a send is still going after WAIT_NOTICE_MS.
+    case "chat.send": return "sent";
     case "file.send": case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
     // `--all` reports to each 1:1 chat in turn, each waiting as one named would.
     case "usage.send": return group ? undefined : "sent";
