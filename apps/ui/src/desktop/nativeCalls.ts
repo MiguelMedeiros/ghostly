@@ -553,7 +553,14 @@ export class NativePeerConnection extends EventTarget {
     this.started = true;
     const sent = this.devices();
     const track = this.audio.sender.track;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent })).catch(relayFailure);
+    // A try, not a `.catch`, which would add a tick before `catchUp` and change the order a device picked meanwhile has.
+    let made: Described;
+    try {
+      made = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
+    } catch (error) {
+      relayFailure(error);
+    }
+    const { sdp, microphone } = made;
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);
@@ -572,7 +579,13 @@ export class NativePeerConnection extends EventTarget {
     this.started = true;
     const sent = this.devices();
     const track = this.audio.sender.track;
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent })).catch(relayFailure);
+    let made: Described;
+    try {
+      made = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
+    } catch (error) {
+      relayFailure(error);
+    }
+    const { sdp, microphone } = made;
     this.using(track, microphone);
     if (this.muted) await this.mute(true);
     await this.catchUp(sent);
