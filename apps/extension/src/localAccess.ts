@@ -43,13 +43,41 @@ async function patternsInUse(): Promise<Set<string>> {
   return used;
 }
 
+/**
+ * The Web Lock (the extension's origin: every page, the worker and the offscreen document share it) under which a page
+ * reads the apps and gives a pattern back, and under which a share checks its pattern and adds its app. Without it,
+ * a share in another tab, answered at once while the pattern is still granted, adds its app between the read and the
+ * remove, and the remove takes the access that app needs. Never held over a prompt: the share asks before taking it.
+ */
+const LOCK = "ghostly-local-access";
+
+async function locked<T>(task: () => Promise<T>): Promise<T> {
+  // Every context of the extension has `navigator.locks` (Chrome 69); a test or a context without it runs unordered.
+  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+  return locks ? await locks.request(LOCK, task) : task();
+}
+
 /** Gives back those of `patterns` no profile needs. A profile that could not be read keeps them all: asking again costs a prompt. */
-async function release(patterns: string[]): Promise<void> {
-  if (!patterns.length) return;
-  let used: Set<string>;
-  try { used = await patternsInUse(); } catch { return; }
-  const unused = [...new Set(patterns)].filter((pattern) => !used.has(pattern));
-  if (unused.length) await chrome.permissions.remove({ origins: unused });
+function release(patterns: string[]): Promise<void> {
+  if (!patterns.length) return Promise.resolve();
+  return locked(async () => {
+    let used: Set<string>;
+    try { used = await patternsInUse(); } catch { return; }
+    const unused = [...new Set(patterns)].filter((pattern) => !used.has(pattern));
+    if (unused.length) await chrome.permissions.remove({ origins: unused });
+  });
+}
+
+/**
+ * A share's `addService`, once Chrome said yes to `pattern`: run while no page can give the pattern back, and only if
+ * Chrome still holds it (another tab may have given it back after the yes). False: it was not run, ask again.
+ */
+export function withLocalAccess(pattern: string, task: () => Promise<void>): Promise<boolean> {
+  return locked(async () => {
+    if (!(await chrome.permissions.contains({ origins: [pattern] }))) return false;
+    await task();
+    return true;
+  });
 }
 
 /** The last app of this profile at `origin` went (`removeService`): off its list (localAllowList.ts), and its host's pattern, if nothing else is there. */

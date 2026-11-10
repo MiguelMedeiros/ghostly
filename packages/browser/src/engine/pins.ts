@@ -1,4 +1,4 @@
-import { mayPin, nextPinNumber, type WirePin } from "@ghostly/core";
+import { mayPin, nextPinNumber, pinNumberHolds, type WirePin } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
 import type { GroupView, PinView, StoredMessage, StoredPin } from "../shared/types";
 import { reactionTarget } from "./reactions";
@@ -77,9 +77,10 @@ export async function pinnedRow(host: PinsHost, chat: string, id: string): Promi
 
 /**
  * This side's pin (`messageId` its row here or the id both sides know; `remove` unpins): numbered past the pin shown
- * now, or why it cannot be.
+ * now, or why it cannot be. The message pinned already (its number holding) is `already`: nothing is numbered or sent,
+ * so the pin stays its pinner's, and goes only when they leave a group.
  */
-export async function myPin(host: PinsHost, chat: string, messageId: unknown, remove: boolean, current: WirePin | undefined, now = Date.now()): Promise<StoredPin | { error: string }> {
+export async function myPin(host: PinsHost, chat: string, messageId: unknown, remove: boolean, current: WirePin | undefined, now = Date.now()): Promise<StoredPin | { error: string } | { already: true }> {
   const n = nextPinNumber(current?.n, now);
   const group = isGroup(chat);
   if (remove) return current?.id ? { id: "", n, by: "me", at: now } : { error: `Nothing is pinned in this ${group ? "group" : "chat"}` };
@@ -91,5 +92,6 @@ export async function myPin(host: PinsHost, chat: string, messageId: unknown, re
     : (await host.messages(chat)).find(m => m.id === messageId) ?? await pinnedRow(host, chat, messageId);
   const id = target && replyRef(target, group);
   if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or cannot be pinned` };
+  if (current?.id === id && pinNumberHolds(current.n, now)) return { already: true };
   return { id, n, by: "me", at: now, messageId: target.id };
 }

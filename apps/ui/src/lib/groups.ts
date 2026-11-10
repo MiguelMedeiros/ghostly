@@ -39,7 +39,8 @@ const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
 
 /**
  * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
- * key's end a name already shows ("Alice (…3r69cg)"), so "alice ", "Ali‍ce" and "Alice (…k1p0aa)" are all "Alice".
+ * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
+ * and "Alice (…k1p0aa)" are all "Alice".
  */
 const sameNameForm = (nick: string) =>
   nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();

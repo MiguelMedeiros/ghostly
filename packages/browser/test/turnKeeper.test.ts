@@ -432,7 +432,9 @@ describe("the active device", () => {
     const waits = device(1, third, standby());
     third.seed(await tombstone(2, [0, 2]));
     expect(await waits.keeper.check(false)).toMatchObject({ kind: "gated", state: "moving" });
-    expect(waits.store.record!.reenroll).toBeUndefined();
+    // Not removed. It does not list this device, which holds no copy: it may be the real one of a move this device
+    // missed, so Add this device is offered until the believed device's frame arrives.
+    expect(waits.store.record!.reenroll).toBe(true);
   });
 
   it("signed junk just under the tombstone's sequence closes the address only while it is there: it is never kept as the mark", async () => {

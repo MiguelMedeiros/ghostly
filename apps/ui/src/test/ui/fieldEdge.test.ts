@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { escapeRegExp } from "../regExp";
 
 // covers: app.accessibility
 
@@ -70,7 +71,7 @@ function classesWith(file: string, marker: string): string {
 /** The composer's well edge per scheme (composer.css): `--composer-well-edge`, dark from :root, light from its own block. */
 function composerEdge(scheme: "dark" | "light"): string | null {
   const css = read("components/composer/composer.css");
-  const block = (selector: string) => css.match(new RegExp(`${selector.replace(/[[\]"]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+  const block = (selector: string) => css.match(new RegExp(`${escapeRegExp(selector)} \\{([^}]*)\\}`))?.[1] ?? "";
   const edge = (body: string) => body.match(/--composer-well-edge:\s*([^;]+);/)?.[1].trim();
   const value = (scheme === "light" ? edge(block(':root[data-theme="light"]')) : undefined) ?? edge(block(":root"));
   return value?.match(/^var\(--color-([\w-]+)\)$/)?.[1] ?? value ?? null;

@@ -583,6 +583,12 @@ export class GroupSession {
    * them is not handed them again at every sync. In memory only.
    */
   private leaversHanded = new Map<string, Set<string>>();
+  /**
+   * The kept edits each hub I count on was handed that it cannot read (`editKey`): of epochs from before it was let in,
+   * for it to carry to the members of those epochs. Each goes to a hub once while my app runs, not at every sync of its
+   * own. In memory only.
+   */
+  private carriedHanded = new Map<string, Set<string>>();
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /**
@@ -633,7 +639,13 @@ export class GroupSession {
           const handed = this.leaversHanded.get(to) ?? new Set<string>();
           this.leaversHanded.set(to, handed.add(editKey(frame)));
         }
-        return hooks.send(to, frame);
+        const took = hooks.send(to, frame);
+        // So does an edit a hub carries unread (`receiveSync`), once its edge took it.
+        if (took !== false && frame.t === GROUP_EDIT_FRAME && !rosterHas(this.state.chain[frame.e]?.m ?? [], to)) {
+          const carried = this.carriedHanded.get(to) ?? new Set<string>();
+          this.carriedHanded.set(to, carried.add(editKey(frame)));
+        }
+        return took;
       },
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
@@ -2184,8 +2196,14 @@ export class GroupSession {
     }
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     const readable = (f: GroupEditFrame) => !!this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from);
+    // A hub I count on gets those of epochs from before it was let in too, unread, each once (`carriedHanded`): it
+    // carries them to the members of those epochs, whose only edge may be that hub. Hubs change, and one let in after an
+    // edit was said is handed none by its author or by a catch-up otherwise (WISP 902 § Edits, "Carried unread").
+    const carrier = !!this.hooks.carriers?.().includes(from), carried = this.carriedHanded.get(from);
+    if (carried) { const held = new Set((this.state.relayEdits ?? []).map(editKey)); for (const key of carried) if (!held.has(key)) carried.delete(key); }
+    const owed = (f: GroupEditFrame) => readable(f) || (carrier && !!this.state.chain[f.e] && !carried?.has(editKey(f)));
     for (const author of asked) {
-      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && readable(f));
+      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && owed(f));
       answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
     // And the removals of authors out of the roster (all `pruneRelay` keeps of theirs), whom nobody names in `ask`: each

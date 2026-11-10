@@ -5,11 +5,12 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
+import { GroupRows } from "./groupRows";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
@@ -91,6 +92,12 @@ export interface GroupsHost {
    * link does (the joiner closes its side on the welcome), rather than dialing the joiner again.
    */
   entryDone?(linkId: string): void;
+  /**
+   * Whether this app accepts the group invitations that come over this contact chat by itself (the CLI's `group auto on
+   * --from`). One that comes while 32 wait takes the place of another chat's (`Groups.roomForAutoJoin`): invitations
+   * nobody here may ever answer do not keep it out. Absent: none.
+   */
+  autoJoins?(linkId: string): boolean;
   /** The other end of this link is here (its packet is fresh), or a connection with it is under way (`otherEndSeen`). */
   linkSeen?(linkId: string): boolean;
   /** The other end of this link, up before, has published since it dropped: its app is back (a restart, say). */
@@ -191,10 +198,15 @@ export interface GroupsHost {
 
 /** The key an edit of message `id` goes by in `FramesTaken`. */
 export const editKey = (id: string, e: number) => `${id}#e${e}`;
+/** The key my reaction numbered `n` goes by in `FramesTaken` (the number is mine in the group, whatever the message). */
+export const reactionKey = (n: number) => `#r${n}`;
+/** The key my pin (or unpin) numbered `n` goes by in `FramesTaken`: one pin per group, its number newer each time. */
+export const pinKey = (n: number) => `#p${n}`;
 
 /**
  * Which of my frames an edge took (handed to an open session), per group: what `ghostly group send --wait sent` waits
- * for. A message by its id, an edit by `editKey`. A group has no receipts: this is as far as the author can see.
+ * for. A message by its id, an edit by `editKey`, a reaction by `reactionKey`, a pin by `pinKey`. A group has no
+ * receipts: this is as far as the author can see.
  */
 export class FramesTaken {
   private readonly counts = new Map<string, number>();
@@ -209,9 +221,22 @@ export class FramesTaken {
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
 export interface GroupStore {
   getGroups(): Promise<StoredGroup[]>;
-  putGroup(group: StoredGroup): Promise<void>;
+  /** `live`: a private group's small row too, in the same write (`null` deletes it); only with `putGroupLive`. */
+  putGroup(group: StoredGroup, live?: GroupLive | null): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
   getMessages(linkId: string): Promise<StoredMessage[]>;
+  /**
+   * The private groups' small rows (`engine/groupRows.ts`): what a message changes is written there alone. A store
+   * without them writes the whole record at every save, as before.
+   */
+  getGroupLive?(): Promise<Map<string, GroupLive>>;
+  putGroupLive?(groupId: string, live: GroupLive): Promise<void>;
+  /**
+   * A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`); `putGroup` with
+   * a small row deletes it. A store without them writes the whole record for each, as before.
+   */
+  getGroupLight?(): Promise<Map<string, GroupLight>>;
+  putGroupLight?(groupId: string, light: GroupLight): Promise<void>;
 }
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
@@ -428,6 +453,14 @@ const JAMMED_ENTRIES = 8;
 const JAMMED_WINDOW_MS = 15 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/**
+ * A full group's admin answers a knock with `group-full` (WISP 902 § A full group): the same joiner at most this often
+ * while there is no room, its side of the entry session closed `FULL_LINGER_MS` after. The joiner shows it is full for
+ * `FULL_SAID_MS` after the last one (one answer missed included), then waits as before.
+ */
+const FULL_TELL_MS = 5 * 60_000;
+const FULL_LINGER_MS = 5_000;
+const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
 /** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
 export const MAX_REMOVED_IDS = 500;
 
@@ -489,6 +522,8 @@ const ACCEPT_AGAINS = 5;
 const REWELCOME_MS = ACCEPT_AGAIN_MS / 2;
 /** Invitee side: the invitations one contact chat may have waiting here at a time. More are answered as declined. */
 const MAX_INVITATIONS_PER_CHAT = 4;
+/** Invitee side: the invitations that may wait here at a time, all contact chats together. More are not kept. */
+const MAX_WAITING_INVITATIONS = 32;
 /** Other groups kept beside one under its id (`StoredGroup.others`), at most; an invitation past them is declined. */
 const MAX_OTHER_GROUPS = 4;
 /** Invitee side, removed and invited again: the chat that let me into the group I kept, if it is its admin's. */
@@ -615,6 +650,12 @@ export class Groups {
   private readonly refused = new Map<string, number>();
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
   private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
+  /** Admin side: joiners told the group has no room (`group-full`), per group: member key → when. */
+  private readonly fullTold = new Map<string, Map<string, number>>();
+  /** Admin side: entry sessions a `group-full` went over, closed at `until`. */
+  private readonly fullClosing = new Map<string, { groupId: string; until: number }>();
+  /** Joiner side: the last `group-full` the admin's app answered with, and when. */
+  private readonly toldFull = new Map<string, { n: number; max: number; update: boolean; at: number }>();
   private readonly lastPoll = new Map<string, number>();
   /** Admin side: when a link nobody is using was last read. Those links share one `pollMs` between them, read in turn. */
   private lastQuietPoll = 0;
@@ -716,7 +757,13 @@ export class Groups {
   /** Files and voice messages in every group, private or community (WISP 503 · Group Files). */
   readonly files?: GroupFileDesk;
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
+  /** Where private groups are written: a message writes the group's small row, a commit its record too (`GroupRows`). */
+  private readonly rows: GroupRows;
+  private readonly store: GroupStore;
+
+  constructor(private readonly host: GroupsHost, store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
+    this.rows = new GroupRows(store);
+    this.store = this.rows.store;
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
@@ -778,6 +825,7 @@ export class Groups {
   /** `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it. */
   async load(asItIs = false): Promise<void> {
     const all = await this.store.getGroups();
+    await this.rows.load(all);
     await this.communities.load(all.filter(g => g.community || g.joining));
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
@@ -861,11 +909,12 @@ export class Groups {
     const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
       memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])), ...(group.others?.length ? { others: group.others.map(other => this.otherView(other)) } : {}) };
     if (!session) {
-      const invitation = group.invitation!;
+      const invitation = group.invitation!, full = invitation.entry && !invitation.admin ? this.fullSaid(group.id) : undefined;
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
           ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }),
+            ...(full && { full: { n: full.n, max: full.max } }),
             ...(this.othersKnocked.has(group.id) && { othersKnocked: true }) } : {}) } };
     }
     const nicks = session.state.nicks;
@@ -924,17 +973,20 @@ export class Groups {
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
-  sendCommunityApp(groupId: string, frame: Record<string, unknown>): Promise<void> { return this.communities.sendApp(groupId, frame); }
+  sendCommunityApp(groupId: string, frame: Record<string, unknown>, key?: string): Promise<void> { return this.communities.sendApp(groupId, frame, key); }
   sendCommunityPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> { return this.communities.sendPair(groupId, to, payload); }
 
   /**
-   * How many edges took my message `messageId` (or its edit number `edit`) so far: in a private group, members' edges;
-   * in a community, the edges to my hubs, which pass it on. 0 while none did.
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, or my pin
+   * numbered `pin`) so far: in a private group, members' edges; in a community, the edges to my hubs, which pass it on.
+   * 0 while none did.
    */
-  taken(groupId: string, messageId: string, edit?: number): number {
-    const key = edit ? editKey(messageId, edit) : messageId;
+  taken(groupId: string, messageId: string, edit?: number, reaction?: number, pin?: number): number {
+    const key = pin ? pinKey(pin) : reaction ? reactionKey(reaction) : edit ? editKey(messageId, edit) : messageId;
     return this.isCommunity(groupId) ? this.communities.taken(groupId, key) : this.frames.count(groupId, key);
   }
+  /** An edge of a private group took a frame of mine the engine said on it (a reaction, a pin): `key` as `taken` reads it. */
+  noteTaken(groupId: string, key: string): void { this.frames.add(groupId, key); }
 
   /**
    * Says an edit of my message to the group (WISP 902 § Edits): over the edges of a private group (to member `to`
@@ -1137,6 +1189,31 @@ export class Groups {
   /** Invitee side: says no to an invitation. With the inviter's chat down (its app is closed, say), returns the answer owed, said when that chat is next up. */
   private sayDecline(groupId: string, linkId: string): StoredGroup["declined"] {
     try { this.host.sendOnLink(linkId, { t: "group-decline", g: groupId }); return undefined; } catch { return { at: Date.now(), linkId }; }
+  }
+
+  /**
+   * Invitee side: 32 invitations wait, and a new one comes over a chat whose invitations this app accepts by itself
+   * (`GroupsHost.autoJoins`). It takes the place of the oldest waiting from the chat that holds the most (of chats tied,
+   * the one whose oldest is oldest), its inviter told no as one past the 32 is, so that contacts whose invitations
+   * nobody here answers cannot keep it out. Never one over such a chat, one being accepted, or a link's join. Nothing
+   * is made room for when the new one replaces one waiting under its id (it takes no new room) or its chat holds its
+   * four already. True when room was made.
+   */
+  private async roomForAutoJoin(linkId: string, existing: StoredGroup | undefined): Promise<boolean> {
+    if (!this.host.autoJoins?.(linkId) || (existing?.invitation && !existing.invitation.takenBack)) return false;
+    const waiting = [...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack);
+    if (waiting.filter(x => x.invitation!.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT) return false;
+    const autoJoined = new Map<string, boolean>();
+    const autoJoins = (chat: string): boolean => autoJoined.get(chat) ?? autoJoined.set(chat, !!this.host.autoJoins?.(chat)).get(chat)!;
+    const others = waiting.filter(x => !x.state && !x.invitation!.entry && !x.invitation!.seedB64 && !autoJoins(x.invitation!.linkId));
+    const held = new Map<string, number>();
+    for (const x of others) held.set(x.invitation!.linkId, (held.get(x.invitation!.linkId) ?? 0) + 1);
+    const most = Math.max(0, ...held.values());
+    const oldest = others.filter(x => held.get(x.invitation!.linkId) === most).sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (!oldest) return false;
+    try { this.host.sendOnLink(oldest.invitation!.linkId, { t: "group-decline", g: oldest.id }); } catch { /* they may invite again */ }
+    await this.dropInvitation(oldest);
+    return true;
   }
 
   /** Invitee side: a decline its inviter's chat was down for is said once that chat is up, or dropped after `LEFT_KEPT_MS`. */
@@ -1590,6 +1667,8 @@ export class Groups {
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.fullTold.delete(groupId);
+    this.toldFull.delete(groupId);
     this.entriesSeen.delete(groupId);
     this.unansweredEntries.delete(groupId);
     this.framesKept.delete(groupId);
@@ -1777,8 +1856,9 @@ export class Groups {
           if (linkId) await this.host.closeEdge(linkId);
         }
         this.noteUnanswered(group.id, now, unanswered);
-        // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
-        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
+        // With every entry session taken, a knock read now could open nothing: its requests go to the edges. A group with
+        // no room reads them all the same, to tell a knocking joiner so (`group-full`).
+        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES;
         const since = now - (this.lastPoll.get(group.id) ?? 0);
         if (busy) continue;
         // A read the relays' budget held back is no reading: none while the hold lasts, and one as soon as it ends.
@@ -1796,6 +1876,10 @@ export class Groups {
         }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      for (const [linkId, { groupId, until }] of this.fullClosing) if (now >= until || !this.host.linkReady(linkId)) {
+        this.fullClosing.delete(linkId);
+        if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId);
+      }
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
       for (const [groupId, kept] of this.lingering) if (now >= kept.until) await this.endLinger(groupId);
       this.meshTick(now);
@@ -1853,6 +1937,18 @@ export class Groups {
     if (this.isCommunity(groupId)) { this.communities.entryReady(groupId, linkId, peer); return; }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session?.isAdmin || !group || !this.pendingEntries.get(groupId)?.has(peer)) return;
+    // No room (WISP 902 § A full group): the joiner is told so, and knocks on at its slow pace until there is.
+    const full = rosterHas(session.roster, peer) ? null : this.noRoom(group, session, peer);
+    if (full) {
+      try { this.host.sendOnLink(linkId, { t: "group-full", g: groupId, n: full.n, max: GROUP_MEMBER_CAP.max, ...(full.update && { why: "update" }) }); traceJoin(groupId, "full.sent"); } catch { /* it closed */ }
+      const now = this.now();
+      this.pendingEntries.get(groupId)?.delete(peer);
+      let told = this.fullTold.get(groupId);
+      if (!told) this.fullTold.set(groupId, (told = new Map()));
+      told.set(peer, now);
+      this.fullClosing.set(linkId, { groupId, until: now + FULL_LINGER_MS });
+      return;
+    }
     // An app that takes only eight cannot follow a larger roster: it is not let in past eight (and not answered for a while).
     if (!rosterHas(session.roster, peer) && this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
       this.pendingEntries.get(groupId)?.delete(peer);
@@ -1903,8 +1999,16 @@ export class Groups {
   private joinStage(group: StoredGroup): GroupJoinStage {
     const invitation = group.invitation!;
     if (invitation.admin) return "admitted";
+    const full = this.fullSaid(group.id);
+    if (full) return full.update ? "blocked" : "full";
     if (this.host.linkReady(invitation.linkId) || this.host.linkSeen?.(invitation.linkId)) return "answered";
     return this.knocked.has(group.id) ? "knocked" : "knocking";
+  }
+
+  /** The admin's app said lately that the group has no room (`group-full`): how full, as it said, and whether it waits for updates. */
+  private fullSaid(groupId: string): { n: number; max: number; update: boolean } | undefined {
+    const told = this.toldFull.get(groupId);
+    return told && this.now() - told.at < FULL_SAID_MS ? { n: told.n, max: told.max, update: told.update } : undefined;
   }
 
   private entryOf(group: StoredGroup): { link: GroupEntryLink; seedB64: string } | undefined {
@@ -2026,6 +2130,8 @@ export class Groups {
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length, ...(held !== undefined && { held }) });
     let pending = this.pendingEntries.get(group.id);
     let ever: Set<string> | undefined;
+    const told = this.fullTold.get(group.id);
+    for (const [key, at] of told ?? []) if (now - at >= FULL_TELL_MS) told?.delete(key);
     for (const { key, ts } of knocks) {
       // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
       const again = this.unwelcomed(group, session, key);
@@ -2037,12 +2143,14 @@ export class Groups {
       if (!again && (ever ??= everMembers(session)).has(key)) continue;
       // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
       if (again && this.rewelcomedLately(group.id, key)) continue;
-      const entryIds = new Set(this.host.entries(group.id).values());
-      const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
-      const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
-      // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES) break;
+      // No room: the session opens all the same, to say so (`entryReady`), at most every `FULL_TELL_MS` per joiner, and
+      // not while the one that said it is still closing (opened again, it would come up with nothing said on it).
       // A member let in already takes no new place.
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || (!again && (size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)))) break;
+      if (!again && this.noRoom(group, session)) {
+        const linkId = this.host.entries(group.id).get(key);
+        if (this.fullTold.get(group.id)?.has(key) || (linkId && this.fullClosing.has(linkId))) continue;
+      }
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -2050,6 +2158,20 @@ export class Groups {
       try { await this.host.openEntry(entry.link, "host", entry.seedB64, key); } catch { pending.delete(key); }
     }
     return held;
+  }
+
+  /**
+   * Why the group has no room for one more joiner, or null: full (those invited and those being let in counted, `except`
+   * the joiner asked about), or past eight while a member's app takes only eight (`update`; the newcomer's own app is
+   * checked on its entry session). `n`: the members it has.
+   */
+  private noRoom(group: StoredGroup, session: GroupSession, except?: string): { n: number; update: boolean } | null {
+    const entryIds = new Set(this.host.entries(group.id).values());
+    const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
+    const pending = [...this.pendingEntries.get(group.id)?.keys() ?? []].filter(key => key !== except).length;
+    const size = session.roster.length + contactsInvited + pending;
+    if (size >= GROUP_MEMBER_CAP.max) return { n: session.roster.length, update: false };
+    return this.growthBlocked(group, session, size + 1) ? { n: session.roster.length, update: true } : null;
   }
 
   /** The admin's entry sessions of this group whose other side was seen, once and for as long as they are open. */
@@ -2095,18 +2217,18 @@ export class Groups {
         const existing = this.stored.get(g);
         // Another group under an id held here, from a contact: kept beside it and shown, for the person to say which is real.
         const other = (): Promise<void> => this.noteOther(existing!, { at: Date.now(), linkId, name: groupName(frame.name) ?? "Group", admin: frame.admin as string, ...invitationClaims(frame) });
-        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
-        // Past that the inviter is told no, as it would be by a Decline, and may invite again later; past 32 waiting
-        // from all chats, nothing is said. Only one of its own waiting, sent again, takes no new room: one taken back, or
-        // another chat's under the same id, counts as new. Checked before whatever is held under the id, and one kept
-        // beside a group held takes room as one waiting does: the answer, now or to the next, must not tell a contact
-        // whether I am in the group.
+        // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need, and
+        // all chats together 32 (one over a chat this app accepts by itself makes room, `roomForAutoJoin`). Past either
+        // the inviter is told no, as it would be by a Decline, and may invite again later. Only one of its own waiting,
+        // sent again, takes no new room: one taken back, or another chat's under the same id, counts as new. Checked
+        // before whatever is held under the id, and one kept beside a group held takes room as one waiting does: the
+        // answer, now or to the next, must not tell a contact whether I am in the group.
         const ownWaiting = (existing?.invitation && !existing.invitation.takenBack && existing.invitation.linkId === linkId)
           || existing?.others?.some(o => "linkId" in o && o.linkId === linkId);
         const waiting = [...this.stored.values()].flatMap(x => [...x.invitation && !x.invitation.takenBack ? [x.invitation.linkId] : [],
           ...(x.others ?? []).flatMap(o => "linkId" in o ? [o.linkId] : [])]);
-        if (!ownWaiting && waiting.length >= 32) return;
-        if (!ownWaiting && waiting.filter(chat => chat === linkId).length >= MAX_INVITATIONS_PER_CHAT) {
+        if (!ownWaiting && (waiting.filter(chat => chat === linkId).length >= MAX_INVITATIONS_PER_CHAT
+          || (waiting.length >= MAX_WAITING_INVITATIONS && !await this.roomForAutoJoin(linkId, existing)))) {
           try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
           return;
         }
@@ -2116,6 +2238,7 @@ export class Groups {
           existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
             ...invitationClaims(frame) };
           await this.store.putGroup(existing);
+          this.toldFull.delete(g);
           traceJoin(g, "invite.received");
           this.host.sendOnLink(linkId, { t: "group-accept", g, key: identityFromSeedB64(existing.invitation.seedB64!).pubKeyZ32 });
           this.host.emit();
@@ -2156,6 +2279,16 @@ export class Groups {
         this.stored.set(g, invitation);
         this.acceptSaid.delete(g);
         await this.store.putGroup(invitation);
+        this.host.emit();
+        return;
+      }
+      case "group-full": {
+        // No room yet, from the admin's side of my entry session: the knock goes on at its slow pace, and the page says why it waits.
+        const invitation = this.stored.get(g)?.invitation, { n, max } = frame;
+        if (!invitation?.entry || this.stored.get(g)!.state || invitation.linkId !== linkId || invitation.admin) return;
+        if (!Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        this.toldFull.set(g, { n: n as number, max: max as number, update: frame.why === "update", at: this.now() });
+        traceJoin(g, "full.received");
         this.host.emit();
         return;
       }
@@ -3066,7 +3199,7 @@ export class Groups {
         // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
         if (!group || this.sessions.get(state.id) !== session) return;
         group.state = next;
-        await this.store.putGroup(group);
+        await this.rows.save(group);
       },
       send: (to, frame: GroupEdgeFrame) => {
         const edge = this.host.edges(state.id).get(to);

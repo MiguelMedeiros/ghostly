@@ -299,8 +299,9 @@ export function Tasks() {
                 <div role="group" aria-label={t("cards.board.tags")} data-testid="tasks-tags" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 py-1.5 [scrollbar-width:none]">
                   <span aria-hidden="true" className="shrink-0 text-xs text-text-muted">{t("cards.board.tags")}</span>
                   {model.tags.map((name) => (
-                    <button key={name} type="button" data-testid="tasks-tag" aria-pressed={tag === name} onClick={() => setTag(tag === name ? undefined : name)} className={`${pill(tag === name)} max-w-40 shrink-0 truncate`}>
-                      <bdi>{name}</bdi>
+                    <button key={name} type="button" data-testid="tasks-tag" aria-pressed={tag === name} onClick={() => setTag(tag === name ? undefined : name)} className={`${pill(tag === name)} flex max-w-40 shrink-0 items-center`}>
+                      {/* Cut in the tag's own direction: cut by the pill in the page's, a Latin tag lost its start in Arabic. */}
+                      <bdi className="min-w-0 truncate">{name}</bdi>
                     </button>
                   ))}
                 </div>

@@ -2,7 +2,7 @@ import {
   parseSshPublicKey, parseSshSignature, sshSignCommand, SshSigError, SSHSIG_MAX_ARMOR, SSHSIG_NAMESPACE, utf8Encode, verifySshSignature,
   type IdentityStatement, type SshSignatureCheck,
 } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider, VerifyContext } from "../contract";
+import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type VerifyContext } from "../contract";
 import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type SshForge } from "../sshForges";
 
 /**
@@ -65,16 +65,19 @@ function sshKeygenSigner(forAccount?: SshForge): ExternalToolSigner<SshEvidence>
     description: forAccount
       ? `Sign with an SSH key that your ${SSH_FORGE_LABEL[forAccount]} account lists (Settings → SSH keys).`
       : "Sign with OpenSSH's ssh-keygen (8.1 or later): a key file, ssh-agent, or a FIDO security key.",
-    instructions: statement => {
+    instructions: (statement, say = englishSay) => {
       let command: string | undefined;
       try { command = sshSignCommand(statement.text); } catch { command = undefined; }
+      const sign = { namespace: SSHSIG_NAMESPACE };
       return {
         steps: [
-          ...(command ? [{ text: "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key.", copy: command }] : []),
-          { text: `${command ? "Or save" : "Save"} this statement to a file, run ssh-keygen -Y sign -n ${SSHSIG_NAMESPACE} -f <your key> <file>, and paste the <file>.sig it writes.`, copy: statement.text },
-          { text: "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer." },
+          ...(command ? [{ text: say("steps.run", "Run this in a terminal (macOS, Linux, or Git Bash/WSL on Windows). If your key is not ~/.ssh/id_ed25519, change the path after -f; a .pub path works when the private key is in ssh-agent or on a security key."), copy: command }] : []),
+          { text: command
+            ? say("steps.orSave", "Or save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.", sign)
+            : say("steps.save", "Save this statement to a file, run ssh-keygen -Y sign -n {{namespace}} -f <your key> <file>, and paste the <file>.sig it writes.", sign), copy: statement.text },
+          { text: say("steps.paste", "Paste the whole signature it prints, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----. Your private key never leaves your computer.") },
         ],
-        paste: { label: "SSH signature", placeholder: "-----BEGIN SSH SIGNATURE-----", multiline: true },
+        paste: { label: say("paste.label", "SSH signature"), placeholder: "-----BEGIN SSH SIGNATURE-----", multiline: true },
       };
     },
     parse(pasted, statement) {

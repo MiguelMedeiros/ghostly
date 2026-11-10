@@ -93,6 +93,13 @@ function forgetServicesOfDeleted(): void {
 }
 forgetServicesOfDeleted();
 addEventListener("online", forgetServicesOfDeleted);
+/**
+ * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
+ * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
+ * frame), and that server would see this device's address. The extension (`RELAY_ONLY_REFUSED` in its background.ts)
+ * and `ghostly service open` refuse too; the Desktop app opens one.
+ */
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the web app while Hide my IP from contacts is on";
 let peer: EngineServer | null = null;
 // A contact's app closes when the profile locks, as Desktop's windows do: this page answers its requests.
 // A reload ends it with the page.
@@ -152,7 +159,8 @@ export const webHost = createInPageHost({
   oidc: { platform: "web", open: async () => popupWindow() },
   // The same popup and callback page, for an AT Protocol server (Bluesky or another PDS).
   atproto: { platform: "web", open: async () => atprotoPopupWindow() },
-  openService: async (peerPubKeyZ32, serviceId, tag) => {
+  openService: async (peerPubKeyZ32, serviceId, tag, relayOnly) => {
+    if (relayOnly) throw new Error(RELAY_ONLY_REFUSED);
     const node = peer?.node;
     if (!servicesHost || !node) throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
     const t = translatorFor(loadSettings().language);
@@ -169,7 +177,7 @@ export const webHost = createInPageHost({
     // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
     const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };
     await openServiceView({
-      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
+      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
       presence: { offline, watch: (changed) => engine.subscribe(changed) },
       words: {

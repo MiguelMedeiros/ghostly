@@ -7,10 +7,10 @@ import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
 import { NAME, aroundName } from "./aroundName";
-import { appStopped, useInstalledApp } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/apps/installed";
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
-import { appErrorCode, appErrorText } from "../../lib/apps/errors";
+import { appErrorText } from "../../lib/apps/errors";
 
 /*
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
@@ -41,11 +41,14 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const block = usePlatformValue(() => appsBlock(servicesPlatform?.getPeer(peerKey)));
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [removed, setRemoved] = useState(false);
   // Open on its way: an app whose files are missing here (a restored profile) fetches them first, which a slow link
   // makes long. The pressed button turns busy so the press shows, and a second press opens nothing more.
   const [opening, setOpening] = useState<"open" | "anyway" | null>(null);
   const app = useInstalledApp(card.ref);
+  // A refused Open's line is of the app as it was: once the installed app reads otherwise (a store allows it again,
+  // its publisher revokes it), the card says what the Apps page says, not the old refusal.
+  const [errorOf, setErrorOf] = useState(app);
+  if (errorOf !== app) { setErrorOf(app); setError(null); }
   const stopped = !!app && appStopped(app);
   // Open goes when the app stops (found revoked or removed, often by an update check): its focus would drop to the
   // page. The ref's cleanup runs while the button is still there. The focus stays on the card: on Run anyway when it
@@ -69,8 +72,10 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const waiting = appsUnavailable(block, title, contact, t);
   const open = (runAnyway = false) => {
     if (opening) return;
-    setError(null); setRemoved(false); setOpening(runAnyway ? "anyway" : "open");
-    void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); })
+    setError(null); setOpening(runAnyway ? "anyway" : "open");
+    // Refused (removed or revoked since the list was read): the list is read again first, so the card says Stopped,
+    // and offers Run anyway only for a store's removal, as the Apps page then does.
+    void openApp(card.ref, linkId, { runAnyway }).catch(async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
       .finally(() => setOpening(null));
   };
   return (
@@ -98,7 +103,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
-        {app && (removed || app.run.status === "removed") && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
+        {app?.run.status === "removed" &&<Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (

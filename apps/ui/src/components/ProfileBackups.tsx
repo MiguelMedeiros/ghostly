@@ -214,7 +214,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           {s3 && <Segmented label={t("profile.backups.restoreFrom")} value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: t("profile.backups.fromFile") }, { value: "s3", label: "S3" }]} />}
           {from === "file" || !s3 ? (
-            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json,application/octet-stream" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
+            <input data-testid="restore-file" type="file" aria-label={t("profile.backups.toRestore")} accept=".ghostly-backup,application/json,application/octet-stream" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
           ) : (
             <InputGroup>
               {listing?.length ? (

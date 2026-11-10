@@ -319,12 +319,28 @@
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
   },
+  "pictureHiddenIp": "Não mostrada com Ocultar meu IP ligado",
   "pinned": {
     "bar": "Mensagem fixada",
     "info": "Uma mensagem fixada por conversa, vista por todos nela. Uma nova fixação substitui a anterior. Numa comunidade, só o admin fixa.",
     "notHere": "Não está neste dispositivo",
     "pin": "Fixar",
     "unpin": "Desafixar"
+  },
+  "presence": {
+    "availability": {
+      "away": "Ausente",
+      "busy": "Ocupado",
+      "dnd": "Não perturbe"
+    },
+    "dot": {
+      "away": "Online, ausente",
+      "busy": "Online, ocupado",
+      "dnd": "Online, não perturbe",
+      "idle": "Online, inativo",
+      "online": "Online"
+    },
+    "status": "Status: {{status}}"
   },
   "preview": {
     "arkAddress": "Endereço Ark",
@@ -498,6 +514,7 @@
     "limit": "Mensagens de voz têm no máximo {{minutes}} minutos",
     "message": "Mensagem de voz",
     "micDenied": "Sem acesso ao microfone. Permita nos ajustes do navegador ou do sistema.",
+    "micDeniedAndroid": "Sem acesso ao microfone. Permita quando o Android pedir, ou nos ajustes do Android para o Ghostly.",
     "micUnavailable": "Nenhum microfone encontrado. Conecte um, ou feche o app que o usa.",
     "micUnsupported": "Este navegador não grava mensagens de voz.",
     "pause": "Pausar mensagem de voz",

@@ -62,11 +62,13 @@
     "title": "Apps con {{name}}"
   },
   "errors": {
+    "damaged": "Sus archivos en este dispositivo están dañados. Descarga sus archivos de nuevo.",
     "equivocation": "Este enlace tiene otra copia de una versión que ya tienes. Ghostly conservó la tuya.",
     "expired": "Tardó demasiado. Vuelve a comprobar la app.",
     "githubLink": "Esa página de GitHub no es una app. Pega el enlace del repositorio o el del archivo de la app.",
     "host": "Las apps solo vienen de GitHub (raw.githubusercontent.com) o de jsDelivr en un commit.",
     "hostProblem": "El servidor tuvo un problema (error {{status}}). Inténtalo de nuevo más tarde.",
+    "locked": "El perfil se bloqueó antes de que la app se abriera. Ábrela de nuevo.",
     "needsFiles": "Sus archivos aún no están en este dispositivo.",
     "network": "No se pudo conectar con el servidor.",
     "notListed": "Esta tienda ya no lista esa app.",
@@ -156,6 +158,7 @@
     "title": "Abrir {{title}} en un chat"
   },
   "store": {
+    "clockLate": "La lista de esta tienda tiene una fecha posterior al reloj de este dispositivo. Revisa la fecha y la hora de este dispositivo.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -177,8 +180,10 @@
     "removeNamed": "Quitar {{name}}",
     "removeNone": "Para añadirla de nuevo, necesitarás su enlace.",
     "removeTitle": "¿Quitar {{name}}?",
+    "rollback": "El enlace de esta tienda ahora tiene una lista más antigua que la tuya. Ghostly conservó la tuya.",
     "showMore": "Mostrar más ({{count}})",
-    "stale": "Desactualizada desde el {{date}}"
+    "stale": "Desactualizada desde el {{date}}",
+    "tooLarge": "La lista de esta tienda es demasiado grande para que Ghostly la lea."
   },
   "title": "Apps",
   "view": {

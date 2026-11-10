@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, useNoPushService, useWakeOn, wakeIsOn } from "../lib/wakePush";
+import { isNoPushService, noPushService, pushPlatform, pushUnavailable, setWake, setWakeOnline, useNoPushService, useWakeOn, useWakeOnline, wakeIsOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -16,7 +16,10 @@ import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
 import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
+import { StayConnectedRow } from "../components/settings/StayConnected";
+import { androidApp } from "../lib/touchOnly";
 import { TranslateSettings } from "../components/settings/TranslateSettings";
+import { TextSizeSetting } from "../components/settings/TextSize";
 import { translateOffered } from "../lib/translateSettings";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
@@ -32,6 +35,8 @@ import { servicesPlatform } from "../lib/platform";
 import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
+import { useSharePresence } from "../hooks/useOwnStatus";
+import { setSharePresence } from "../lib/ownStatus";
 import { Select } from "../components/ui/Select";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
@@ -140,6 +145,13 @@ export function Settings() {
       if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
     } finally { setWakeBusy(false); }
   };
+  // Online notices ride on the same subscription: the switch shows while one is shared, on by default.
+  const wakeOnline = useWakeOnline();
+  const [wakeOnlineError, setWakeOnlineError] = useState("");
+  const changeWakeOnline = async (on: boolean) => {
+    setWakeOnlineError("");
+    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError(problemLine(e, t)); }
+  };
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
@@ -148,6 +160,7 @@ export function Settings() {
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
   const sendTyping = useSendTyping();
+  const sharePresence = useSharePresence();
 
   // Which section the address names (`/settings/appearance`); an old address (`/settings/advanced`) leads to its new place.
   const params = useParams();
@@ -524,7 +537,8 @@ export function Settings() {
 
   // What this device has: the options it lacks are not offered, nor found by the search.
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
-    : needs === "wake" ? canWake : needs === "translate" ? translateOffered() : hasMediaDevices();
+    : needs === "wake" ? canWake : needs === "wakeOn" ? canWake && wakeOnline.shared : needs === "translate" ? translateOffered()
+    : needs === "android" ? androidApp() : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
   // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
   const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
@@ -638,6 +652,7 @@ export function Settings() {
             ))}
           </div>
         </Row>
+        <TextSizeSetting />
         <Row label={t("settings.language")}
           hint={languageNotLoaded ? (
             <span role="status" data-testid="settings-language-not-loaded">
@@ -681,19 +696,26 @@ export function Settings() {
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}
-          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
+          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} busy={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
             hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
-            {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
-            {wakeNoPush && <Button data-testid="settings-wake-retry" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
-            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
+            {wakeOn && <Button data-testid="settings-wake-rotate" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
+            {wakeNoPush && <Button data-testid="settings-wake-retry" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} busy={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
+          </Row>
+        )}
+        {canWake && wakeOnline.shared && (
+          <Row label={t("pwa.wakeOnline")} testId="settings-wake-online-row" info={t("pwa.wakeOnlineInfo")}
+            hint={<span role="status">{wakeOnlineError || t("pwa.wakeOnlineHint")}</span>}>
+            <Switch testId="settings-wake-online" label={t("pwa.wakeOnline")} checked={wakeOnline.on} onChange={(on) => void changeWakeOnline(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (
           <Row label={t("pwa.wake")} testId="settings-wake-unavailable" hint={<span role="status">{t("pwa.wakeUnavailable")}</span>} />
         )}
+        {androidApp() && <StayConnectedRow />}
       </Section>
       </SettingsGroup>
 
@@ -708,6 +730,9 @@ export function Settings() {
         </Row>
         <Row label={t("settings.sendTyping")} hint={t("settings.sendTypingHint")} testId="settings-send-typing-row">
           <Switch testId="settings-send-typing" label={t("settings.sendTyping")} checked={sendTyping} onChange={(on) => void setSendTyping(on).catch(() => {})} />
+        </Row>
+        <Row label={t("settings.sharePresence")} hint={t("settings.sharePresenceHint")} testId="settings-share-presence-row">
+          <Switch testId="settings-share-presence" label={t("settings.sharePresence")} checked={sharePresence} onChange={(on) => void setSharePresence(on).catch(() => {})} />
         </Row>
         <Row label={t("settings.publicProfiles")} hint={t("settings.publicProfilesHint")} info={t("settings.publicProfilesInfo")} testId="settings-public-profiles-row">
           <Switch testId="settings-public-profiles" label={t("settings.publicProfiles")} checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />

@@ -12,13 +12,16 @@ afterEach(() => { vi.useRealTimers(); });
 function setup(initial = "en0/192.168.0.10") {
   vi.useFakeTimers();
   let clock = 1_000_000;
+  // The monotonic clock runs with the process and pauses in sleep; the wall clock can also be set.
+  let mono = 0;
   let addresses = initial;
   const wakes: string[] = [];
-  const stop = watchWake((why) => wakes.push(why), { now: () => clock, addresses: () => addresses });
+  const stop = watchWake((why) => wakes.push(why), { now: () => clock, monotonic: () => mono, addresses: () => addresses });
   return {
     wakes, stop,
-    tick: async (ms = WAKE_TICK_MS) => { clock += ms; await vi.advanceTimersByTimeAsync(WAKE_TICK_MS); },
+    tick: async (ms = WAKE_TICK_MS) => { clock += ms; mono += ms; await vi.advanceTimersByTimeAsync(WAKE_TICK_MS); },
     sleep: (ms: number) => { clock += ms; },
+    setClock: (ms: number) => { clock += ms; },
     move: (to: string) => { addresses = to; },
   };
 }
@@ -115,6 +118,39 @@ describe("wake watch", () => {
     for (let i = 0; i < 12; i++) await w.tick();
     expect(w.wakes).toEqual(["network", "sleep"]);
     w.stop();
+  });
+
+  it("a device clock set back an hour after a wake does not hold the next network's wake for the hour", async () => {
+    const w = setup();
+    w.move("en1/10.0.0.7");
+    await w.tick();
+    for (let i = 0; i < 9; i++) await w.tick();
+    w.setClock(-60 * 60_000);
+    w.move("en0/192.168.0.10");
+    await w.tick();
+    // Before: held until the wall clock caught up with the wake (3560 s of ticks).
+    expect(w.wakes).toEqual(["network", "network"]);
+    w.stop();
+  });
+
+  it("back from sleep on another network, wakes for the new network at its first tick", async () => {
+    for (const atSleep of ["", "en0/192.168.0.10"]) {
+      const w = setup();
+      await w.tick();
+      // Wi-Fi has not rejoined yet at the sleep tick: no address, or still the old one.
+      w.move(atSleep);
+      w.sleep(30 * 60_000);
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep"]);
+      w.move("en1/10.0.0.7");
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep", "network"]);
+      // A change right after that one is a flap again: held.
+      w.move("en1/10.0.0.8");
+      await w.tick();
+      expect(w.wakes).toEqual(["sleep", "network"]);
+      w.stop();
+    }
   });
 
   it("stops ticking once stopped", async () => {

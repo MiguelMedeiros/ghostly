@@ -99,8 +99,11 @@ describe("a private group's record carries none of the frames handed on", { time
     const { world, peers, id } = await meshOf(["alice", "bob"]);
     const [alice, bob] = peers;
     const sizes: number[] = [];
-    const put = bob.store.putGroup.bind(bob.store);
-    bob.store.putGroup = async group => { if (group.id === id) sizes.push(JSON.stringify(group).length); await put(group); };
+    // What a save writes: the group's record, or its small row alone (a message received changes only that).
+    const put = bob.store.putGroup.bind(bob.store), putLive = bob.store.putGroupLive!.bind(bob.store);
+    let records = 0;
+    bob.store.putGroup = async (group, live) => { if (group.id === id) { records++; sizes.push(JSON.stringify(group).length + JSON.stringify(live ?? null).length); } await put(group, live); };
+    bob.store.putGroupLive = async (groupId, live) => { if (groupId === id) sizes.push(JSON.stringify(live).length); await putLive(groupId, live); };
     for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.run(400); await world.settle(); await bob.groups.flush(); }
     const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
     expect(stored.state!.relay ?? []).toEqual([]);
@@ -108,6 +111,9 @@ describe("a private group's record carries none of the frames handed on", { time
     // Fifty frames of some 700 bytes were 35 KiB in the record, written again for each message.
     expect(sizes.length).toBeGreaterThanOrEqual(50);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(4_000);
+    // And none of them wrote the record, with its membership chain: the group's small row took what they changed. Only
+    // Alice's name record, which came with her first one, is the record's to keep (`names`): written once.
+    expect(records).toBeLessThanOrEqual(1);
   });
 
   it("a member whose app started again hands on what it had received to one who was away", async () => {

@@ -141,8 +141,7 @@
   "ms": "{{ms}} مللي ثانية",
   "option": {
     "automatic": "تلقائي",
-    "automaticHint": "يختار التطبيقان، WebRTC أولًا",
-    "automaticHintNative": "يختار التطبيقان، {{transport}} أولًا: هذا التطبيق لا يدعم WebRTC",
+    "automaticFirst": "يختار التطبيقان، {{transport}} أولًا",
     "chosenNotInUse": "مختار · غير مستخدم",
     "chosenWaiting": "مختار · في انتظاره",
     "contactLacks": "تطبيق جهة اتصالك لا يدعم {{transport}}",
@@ -155,6 +154,8 @@
     "inUse": "قيد الاستخدام",
     "needsDesktop": "يحتاج {{transport}} إلى Ghostly Desktop",
     "noWebrtc": "هذا التطبيق لا يدعم WebRTC",
+    "relayOnlyHyperdht": "مع تشغيل إخفاء IP، يحتاج HyperDHT إلى مرحّل HyperDHT · الإعدادات، الشبكة",
+    "relayOnlyOff": "متوقف أثناء تشغيل إخفاء IP · الإعدادات، الشبكة",
     "relayUnreached": "تعذّر على {{transport}} الوصول إلى مرحّله · الإعدادات، الشبكة",
     "throughRelay": "عبر مرحّل · يُستخدم حين يتعذّر الاتصال المباشر",
     "waiting": "في الانتظار"
@@ -229,6 +230,7 @@
     "automatic": "تلقائي: يضع التطبيقان {{transport}} أولًا.",
     "automaticNoWebrtc": "تلقائي: يستخدم التطبيقان {{transport}} المتوفر لدى كليهما؛ أحدهما لا يدعم WebRTC.",
     "automaticWebrtc": "تلقائي: يضع التطبيقان WebRTC أولًا، والاقتران الأول يستخدم WebRTC دائمًا.",
+    "automaticWebrtcIroh": "تلقائي: يضع التطبيقان Iroh أولًا لأنه يعود فورًا تقريبًا، ثم ينتقلان بعد الاتصال إلى WebRTC الأسرع.",
     "contactChose": "اختار {{contact}} {{transport}} لهذه المحادثة.",
     "contactChoseUnnamed": "اختارت جهة اتصالك {{transport}} لهذه المحادثة.",
     "fallback": "اخترت {{preferred}} لهذه المحادثة؛ وهو غير متاح الآن، لذا تستخدم المحادثة {{transport}}.",

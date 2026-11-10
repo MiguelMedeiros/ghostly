@@ -3,6 +3,14 @@
     <string name="channel_transfers">نقل الملفات</string>
     <string name="transfer_title">جارٍ إرسال الملفات واستلامها</string>
     <string name="transfer_text">يواصل Ghostly العمل حتى يكتمل نقلها.</string>
+    <string name="channel_connection">الاتصال</string>
+    <string name="connection_title">Ghostly متصل</string>
+    <string name="connection_text">تبقى محادثاتك ومجموعاتك متصلة في الخلفية.</string>
+    <string name="channel_calls">المكالمات</string>
+    <string name="call_title">مكالمة مع %1$s</string>
+    <string name="call_public">مكالمة جارية</string>
+    <string name="call_text">انقر للعودة إلى المكالمة.</string>
+    <string name="call_hang_up">إنهاء</string>
     <string name="webview_title">حدّث Android System WebView</string>
     <string name="webview_text">يعمل Ghostly داخل Android System WebView، والإصدار الموجود على هذا الهاتف قديم جدًا (الإصدار %1$s، ويحتاج Ghostly إلى %2$d أو أحدث). حدّثه من متجر Play، ثم افتح Ghostly من جديد.</string>
     <string name="webview_update">تحديث</string>

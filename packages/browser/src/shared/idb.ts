@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 15;
+export const DB_VERSION = 16;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -130,6 +130,8 @@ function storedVersion(name: string): Promise<number | undefined> {
 }
 /** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
 export const CARD_INDEX = "byCardKind";
+/** The messages store's index of the messages that carry a file, by chat (`linkId`, `file.id`): what `db.getFileMessages` reads. */
+export const FILE_INDEX = "byLinkFile";
 /** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
 export const WALLET_TX_INDEX = "byMintTime";
 
@@ -211,7 +213,7 @@ export interface StoredFile {
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
-type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group">>;
+type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group" | "leftOut">>;
 type FileState = { id: string } & FileStateFields;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -288,6 +290,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v15: the wallet history by mint and time, so a refresh reads each network's newest movements without the rest.
       const walletTx = request.transaction!.objectStore(STORES.walletTx);
       if (!walletTx.indexNames.contains(WALLET_TX_INDEX)) walletTx.createIndex(WALLET_TX_INDEX, ["mint", "timestamp"]);
+      // v16: the messages that carry a file, by chat or group, so a chat's files are read without its texts (`file list`).
+      // A message without a file has no such key and is not in it.
+      if (!messages.indexNames.contains(FILE_INDEX)) messages.createIndex(FILE_INDEX, ["linkId", "file.id"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -328,6 +333,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  */
 export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
+/** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
+export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
+export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKey(""), `${groupLiveKey("")}￿`);
+/** A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`): the profile's too. */
+export const groupLightKey = (groupId: string): string => `groupLight:${groupId}`;
+export const GROUP_LIGHT_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLightKey(""), `${groupLightKey("")}￿`);
+
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
  * wallet setup and the backup reminders. Everything else in it is the profile's (name, picture, network settings,
@@ -350,6 +362,8 @@ export async function clearProfileStores(): Promise<void> {
   if (names.includes(STORES.settings)) {
     const settings = tx.objectStore(STORES.settings);
     for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
+    settings.delete(GROUP_LIVE_RANGE());
+    settings.delete(GROUP_LIGHT_RANGE());
     const read = settings.get("settings");
     read.onsuccess = () => {
       const record = read.result as Record<string, unknown> | undefined;

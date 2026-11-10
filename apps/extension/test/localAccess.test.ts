@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FakeWorld } from "./fakeChrome";
+import { settle, type FakeWorld } from "./fakeChrome";
 import { webLocalFetch, type LocalFetch } from "@ghostly/core";
 import { resetEngine } from "./fakeEngine";
 import { bootExtension, engine, useProfile } from "./extension";
@@ -230,5 +230,131 @@ describe("a profile's apps all going at once", () => {
     await clearAllData();
     expect(world.callsTo("permissions.remove")).toEqual([]);
     expect([...world.hostAccess]).toEqual(["https://example.com/*"]);
+  });
+});
+
+/** The apps a profile's database lists now. */
+async function targetsIn(dbName: string): Promise<string[]> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(dbName);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    if (!db.objectStoreNames.contains("services")) return [];
+    return await new Promise<string[]>((resolve, reject) => {
+      const request = db.transaction("services", "readonly").objectStore("services").getAll();
+      request.onsuccess = () => resolve((request.result as { target: string }[]).map((row) => row.target).sort());
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+describe("a share in another tab while the last app at its host goes", () => {
+  /** A Services page of the other profile on the extension's host; the peer adds the app's row as `addService` does. */
+  async function servicesPage() {
+    const extensionHost = await host();
+    return world.load("page", async () => {
+      const { setBrowserHost } = await import("@ghostly/browser/host");
+      setBrowserHost(extensionHost);
+      const { engine } = await import("@ghostly/browser/platform/engine");
+      const call = vi.spyOn(engine, "call").mockImplementation((async (method: string, params: { target: string }) => {
+        if (method === "addService") await shareIn(`ghostly_${WORK}`, params.target);
+      }) as never);
+      const { servicesPlatform } = await import("@ghostly/browser/platform/services");
+      return { services: servicesPlatform!, adds: () => call.mock.calls.filter(([method]) => method === "addService").length };
+    });
+  }
+
+  /** Holds Chrome's next `permissions.remove` until `open()`; `reached` resolves once it is called. */
+  function holdRemove(): { reached: Promise<void>; open: () => void } {
+    const remove = world.chrome.permissions.remove.bind(world.chrome.permissions) as (request: chrome.permissions.Permissions) => Promise<boolean>;
+    let open!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const at = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(world.chrome.permissions, "remove").mockImplementationOnce((async (request: chrome.permissions.Permissions) => {
+      reached();
+      await gate;
+      return remove(request);
+    }) as never);
+    return { reached: at, open };
+  }
+
+  it("keeps Chrome's access for the app shared between the other tab's read and its remove", async () => {
+    await granted("http://127.0.0.1/*");
+    await shareIn("ghostly", "http://127.0.0.1:3400");
+    const { services, adds } = await servicesPage();
+    // Tab A: its only app at 127.0.0.1 went, it read every profile's apps and is about to give the pattern back.
+    await unshareIn("ghostly", "http://127.0.0.1:3400");
+    const held = holdRemove();
+    const forgetting = (await host()).forgetLocalAccess!("http://127.0.0.1:3400");
+    await held.reached;
+    // Tab B shares an app at the same host: Chrome says yes at once, the pattern being still granted.
+    const sharing = services.shareService("notes", "http://127.0.0.1:5000");
+    await settle();
+    held.open();
+    await Promise.all([forgetting, sharing]);
+    expect(await targetsIn(`ghostly_${WORK}`)).toEqual(["http://127.0.0.1:5000"]);
+    expect([...world.hostAccess]).toEqual(["http://127.0.0.1/*"]);
+    // B's app was added once, after the give-back, with Chrome asked again for what A gave back.
+    expect(adds()).toBe(1);
+    expect(world.callsTo("permissions.request").slice(1)).toEqual([[{ origins: ["http://127.0.0.1/*"] }], [{ origins: ["http://127.0.0.1/*"] }]]);
+  });
+
+  it("still gives the pattern back when two tabs remove the last two apps at one host", async () => {
+    await granted("http://127.0.0.1/*");
+    await shareIn("ghostly", "http://127.0.0.1:3400");
+    await shareIn(`ghostly_${WORK}`, "http://127.0.0.1:8080");
+    await unshareIn("ghostly", "http://127.0.0.1:3400");
+    const held = holdRemove();
+    const extensionHost = await host();
+    const first = extensionHost.forgetLocalAccess!("http://127.0.0.1:3400").catch(() => {});
+    // A's read saw the other app gone already (no remove) or held its remove: either way B's ends with nothing left.
+    await Promise.race([held.reached, first]);
+    await unshareIn(`ghostly_${WORK}`);
+    const second = extensionHost.forgetLocalAccess!("http://127.0.0.1:8080");
+    await settle();
+    held.open();
+    await Promise.all([first, second]);
+    expect([...world.hostAccess]).toEqual([]);
+  });
+
+  it("shares and gives back as before when nothing runs alongside", async () => {
+    const { services, adds } = await servicesPage();
+    await services.shareService("notes", "http://127.0.0.1:5000");
+    expect(world.callsTo("permissions.request")).toEqual([[{ origins: ["http://127.0.0.1/*"] }]]);
+    expect(adds()).toBe(1);
+    expect([...world.hostAccess]).toEqual(["http://127.0.0.1/*"]);
+    await unshareIn(`ghostly_${WORK}`);
+    await (await host()).forgetLocalAccess!("http://127.0.0.1:5000");
+    expect([...world.hostAccess]).toEqual([]);
+    // Chrome says no: nothing is added.
+    world.permissionsGranted = false;
+    await expect(services.shareService("notes", "http://127.0.0.1:5000")).rejects.toThrow("Ghostly needs your permission");
+    expect(adds()).toBe(1);
+    expect(await targetsIn(`ghostly_${WORK}`)).toEqual([]);
+  });
+
+  it("gives a pattern back while another tab's prompt for a new host is still open", async () => {
+    await granted("http://127.0.0.1/*");
+    const { services, adds } = await servicesPage();
+    let answer!: (yes: boolean) => void;
+    const request = world.chrome.permissions.request.bind(world.chrome.permissions) as (request: chrome.permissions.Permissions) => Promise<boolean>;
+    vi.spyOn(world.chrome.permissions, "request").mockImplementationOnce((async (asked: chrome.permissions.Permissions) => {
+      await new Promise<boolean>((resolve) => { answer = resolve; });
+      return request(asked);
+    }) as never);
+    const sharing = services.shareService("notes", "http://localhost:3400");
+    await settle();
+    // The prompt holds no lock: the other tab's give-back is not kept waiting behind the person's answer.
+    await (await host()).forgetLocalAccess!("http://127.0.0.1:3400");
+    expect([...world.hostAccess]).toEqual([]);
+    answer(true);
+    await sharing;
+    expect(adds()).toBe(1);
+    expect([...world.hostAccess]).toEqual(["http://localhost/*"]);
   });
 });

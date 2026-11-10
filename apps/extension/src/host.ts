@@ -9,7 +9,7 @@ import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
-import { forgetLocalAccess, releaseUnusedLocalAccess } from "./localAccess";
+import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
 import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
 
 // A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
@@ -71,6 +71,8 @@ export const extensionHost: BrowserHost = {
     return granted;
   },
   localAccessAllowed: (origin) => localOriginAllowed(activeNamespace(), origin),
+  // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
+  withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).
   forgetLocalAccess,
   releaseUnusedLocalAccess,
@@ -80,7 +82,7 @@ export const extensionHost: BrowserHost = {
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open a wallet");
   },
 
-  async openService(peerPubKeyZ32, serviceId, tag) {
+  async openService(peerPubKeyZ32, serviceId, tag, relayOnly) {
     // A page of the profile before a switch: the peer runs the other one now, which must not serve this one's app.
     if (!pageProfileIsCurrent()) {
       startAsProfileInUse();
@@ -95,6 +97,7 @@ export const extensionHost: BrowserHost = {
       // The page's own, as checked just above.
       profile: activeNamespace(),
       page: viewerPage(engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name),
+      relayOnly,
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },

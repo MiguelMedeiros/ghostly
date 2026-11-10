@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -63,7 +63,8 @@ describe("the service worker keeps one peer", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.runtime.onInstalled, { reason: "install" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      // Its wait, then a new document's in its place.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
     } finally {
       vi.useRealTimers();
@@ -77,8 +78,11 @@ describe("the service worker keeps one peer", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       const reply = send({ target: "background", type: "ensure-engine" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(await reply).toEqual({ ok: false, error: expect.stringContaining("did not start") });
+      // The silent document went, and the one made in its place was waited on too.
+      expect(world.callsTo("offscreen.closeDocument")).toHaveLength(1);
+      expect(world.callsTo("offscreen.createDocument")).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
@@ -234,7 +238,7 @@ describe("the page and the peer talk over the 'ui' port", () => {
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       const connecting = extensionHost.connect(() => {}, () => {});
       const failed = expect(connecting).rejects.toThrow("did not start");
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(11_000);
       await failed;
       expect(world.callsTo("runtime.connect")).toEqual([]);
     } finally {
@@ -361,6 +365,72 @@ describe("viewer tabs", () => {
 
     // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
     for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+  });
+
+  it("opens no tab while Hide my IP from contacts is on, and says why", async () => {
+    // covers: settings.network.relay-only
+    // The app could send the tab, or a frame of its own, to a server of the contact's: Chrome connects there before
+    // any policy or DevTools refuses the page, and that server learns this device's address.
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, relayOnly: true });
+    expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.callsTo("debugger.attach")).toEqual([]);
+    expect(world.session.size).toBe(0);
+    // A page that says anything but true counts as off.
+    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
+    expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
+  describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
+    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" };
+    const close = { target: "background", type: "close-services" };
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle();
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when both come in the same tick", async () => {
+      const opened = send(open);
+      const closed = send(close);
+      expect(await closed).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the close comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = send(open);
+      await settle();
+      expect(await send(close)).toEqual({ ok: true });
+      ready();
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("closes the tab it was making when the close comes right after the tab is created", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      let closed: Promise<unknown> | undefined;
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        const tab = await create(props);
+        closed = send(close);
+        return tab;
+      }) as typeof world.chrome.tabs.create;
+      expect(await send(open)).toEqual({ ok: true });
+      expect(await closed).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("a close before the open does not keep a later open from opening", async () => {
+      expect(await send(close)).toEqual({ ok: true });
+      const tabId = await openViewer(world);
+      expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+    });
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
@@ -698,7 +768,8 @@ describe("the toolbar button", () => {
       world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.action.onClicked);
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      // The silent document is waited on, replaced once, and the new one waited on too, before the start gives up.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
     } finally {
       vi.useRealTimers();

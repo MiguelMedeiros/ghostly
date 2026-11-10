@@ -541,6 +541,19 @@ describe("with the apps flag on", () => {
     expect([...within(update).getByTestId("app-permissions").querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["internet"]);
   });
 
+  it("keeps what an installed app may do now on its screen while an update that asks for more waits", async () => {
+    fakeEngine.on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ permissions: ["chat", "name"], pending: { sequence: 8, version: "1.3.0", added: ["internet"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    const lists = screen.getAllByTestId("app-permissions");
+    expect(lists).toHaveLength(2);
+    const now = lists.find((list) => !update.contains(list))!;
+    expect(now).toHaveTextContent("It can");
+    expect([...now.querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["storage", "chat", "name"]);
+    expect([...within(update).getByTestId("app-permissions").querySelectorAll("[data-permission]")].map((li) => li.getAttribute("data-permission"))).toEqual(["internet"]);
+  });
+
   it("the install screen of an update lists only the added permission", async () => {
     fakeEngine.on("appPreview", () => preview({ install: "update", asks: ["name"] }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
@@ -859,20 +872,24 @@ describe("with the apps flag on", () => {
   });
 
   it("the card of a removed app says so when Open is refused, and Run anyway opens it in that chat", async () => {
-    fakeEngine.on("appList", () => [installed()]);
+    // The card read the list before the store's removal: Open is refused, and the list read again says so.
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ run })]);
     const opener = vi.fn(async (_ref: string, _linkId: string | null, options?: { runAnyway?: boolean }) => {
       if (!options?.runAnyway) throw new Error("removed: Removed by Ghostly: Malware");
     });
     setAppOpener(opener);
     const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     act(() => fakeEngine.update({ links: [ana(true)] }));
-    await user.click(await screen.findByTestId("app-card-open"));
+    const open = await screen.findByTestId("app-card-open");
+    run = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    await user.click(open);
     expect(await screen.findByTestId("app-card-error")).toHaveTextContent("A store you added removed this app.");
+    expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: false });
     await user.click(screen.getByTestId("app-card-run-anyway"));
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: true });
     await waitFor(() => expect(screen.queryByTestId("app-card-error")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
   });
 
   it("the card's Open shows it is opening while the app's files are fetched, and a second press opens nothing more", async () => {
@@ -975,6 +992,28 @@ describe("with the apps flag on", () => {
     act(() => fakeEngine.emit({ kind: "apps-checked" }));
     expect(await screen.findByTestId("installed-app-hint")).toHaveTextContent("Stopped");
     expect(screen.queryByTestId("installed-app-open")).not.toBeInTheDocument();
+  });
+
+  it("Open on an app whose files here are damaged says so, and the page then offers Get its files", async () => {
+    let run: InstalledAppView["run"] = { status: "ok" };
+    fakeEngine.on("appList", () => [installed({ view: "full", run })]).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appFetchFiles", () => ({ status: "ok" as const }));
+    // The engine dropped the files it found damaged and told every page to read the list again.
+    setAppOpener(vi.fn(async () => {
+      run = { status: "needs-files" };
+      fakeEngine.emit({ kind: "apps-checked" });
+      throw new Error("damaged: This app's stored files do not match what was installed");
+    }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("installed-app-open"));
+    expect(await screen.findByText("Its files on this device are damaged. Get its files again.")).toBeInTheDocument();
+    expect(screen.queryByText("Ghostly won't install it")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("installed-app-hint")).toHaveTextContent("Needs its files");
+    await user.click(screen.getByRole("button", { name: detailsOf("Chess") }));
+    run = { status: "ok" };
+    await user.click(await screen.findByTestId("app-fetch-files"));
+    expect(fakeEngine.callsTo("appFetchFiles")).toHaveLength(1);
+    expect(await screen.findByTestId("app-open")).toBeInTheDocument();
   });
 
   it("lists installed apps and stores; uninstall offers an export first", async () => {
@@ -1210,6 +1249,23 @@ describe("with the apps flag on", () => {
     const store = await screen.findByTestId("apps-add-store");
     wraps(within(store).getByText(`${long}5`));
     wraps(within(store).getByText(`${long}6`));
+  });
+
+  it("names a store not read yet by its whole link, over two lines on a phone, so the part after the host that names it shows", async () => {
+    // Cut on one line, a 375 px phone showed "https://raw.githubusercontent.com/MiguelMedei…": two GitHub stores looked the same.
+    const unread = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-store/main/index.json";
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []).on("appStoreList", () => [
+      { key: "u", fingerprint: "abcd efgh ijkl mnop", url: unread, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      { key: "s", fingerprint: "qrst uvwx yz12 3456", url: "https://example.com/hunt.json", preloaded: false, name: "Hunt", kind: "curated", sequence: 1,
+        expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] },
+    ]);
+    renderApp(<Apps />, { route: "/apps" });
+    const [first, named] = await screen.findAllByTestId("app-store");
+    const link = within(first!).getByText(unread);
+    expect(link).not.toHaveClass("truncate");
+    expect(link.className).toContain("[overflow-wrap:anywhere]");
+    // A store's own name stays on one line, cut at its end.
+    expect(within(named!).getByText("Hunt")).toHaveClass("truncate");
   });
 
   it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {

@@ -376,8 +376,10 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
-    const iceServers = this.host.engine.getState().settings?.iceServers ?? [];
-    if (callUsesTurn(callIceServers(iceServers))) return;
+    const settings = this.host.engine.getState().settings;
+    const iceServers = settings?.iceServers ?? [];
+    // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
+    if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
     this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
@@ -650,11 +652,19 @@ export class CallManager {
   private watch(call: Call): void {
     const { afterMs, endMs } = this.host.stall ?? { afterMs: STALL_MS, endMs: STALL_END_MS };
     // On the audio's clock (`monotonic`): on the device's, a clock set ahead read as that long without a packet, and ended the call.
-    const since = monotonic();
+    const since = monotonic(), every = Math.min(1000, afterMs / 5);
+    // A tick that comes far past its interval comes after a stall of this side's own (its loop held by other work, the
+    // process stopped or swapped out), and before the packets the contact sent meanwhile are read: that time is not the
+    // contact's silence (`own`, until something is heard after it), and the call is judged on the next tick, once read.
+    let ticked = since, own = 0, ownUntil = 0;
     call.watcher = setInterval(() => {
       if (call.ended) return;
+      const now = monotonic(), gap = now - ticked;
+      ticked = now;
+      if (gap > 2 * every) { own += gap - every; ownUntil = now; return; }
       const heardAt = Math.max(since, call.media?.audio.heardAt ?? 0);
-      const silentMs = monotonic() - heardAt;
+      if (heardAt >= ownUntil) own = 0;
+      const silentMs = now - heardAt - own;
       const fields = { call: call.id, chat: call.chat, direction: call.direction };
       if (silentMs >= endMs) {
         process.stderr.write(`ghostly: call ${call.id}: nothing heard from the contact for ${Math.round(silentMs / 1000)} s\n`);
@@ -670,7 +680,7 @@ export class CallManager {
         process.stderr.write(`ghostly: call ${call.id}: resumed after ${gapMs} ms\n`);
         this.host.emit("call.resumed", `call.resumed:${call.id}:${call.stalls}`, { ...fields, silentMs: gapMs });
       }
-    }, Math.min(1000, afterMs / 5));
+    }, every);
     call.watcher.unref?.();
   }
 
@@ -829,6 +839,7 @@ export class CallManager {
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
+    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
@@ -838,6 +849,13 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/**
+ * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
+ * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct
+ * pair in a local lab. So the CLI places and answers no call while it is on, as the apps do with media that cannot keep
+ * to the relay.
+ */
+const CALLS_OFF_RELAY_ONLY = "Calls are off while Hide my IP from contacts is on: this headless Ghostly cannot keep a call to the relay";
 
 function nameOf(link: LinkView): string | null {
   return link.label?.trim() || link.peerNick?.trim() || null;

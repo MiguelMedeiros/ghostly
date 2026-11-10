@@ -70,6 +70,20 @@ describe("the connection choices, by keyboard", () => {
     expect(focused()).toBe("auto");
   });
 
+  it("leaving DHT only by Automatic, with Iroh out of reach, keeps the focus in the group when the Automatic row goes", async () => {
+    // On the web on DHT only, the choices are what this app can run (WebRTC and Iroh); off DHT only, what it runs
+    // now: WebRTC alone, as Iroh cannot start. Automatic then is the only choice and its row goes from under the focus.
+    const dhtOnly = { availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true } as Partial<LinkView>;
+    const { user, radio, engine } = await open({ ...dhtOnly, deliveryMode: "dht" });
+    await user.click(radio("auto"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+    act(() => engine.update({ links: [linkView({ pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open", ...dhtOnly, deliveryMode: "stream" })] }));
+    expect(screen.queryByTestId("connection-option-auto")).toBeNull();
+    // The group's Tab stop, WebRTC (now checked), has it: never the page.
+    expect(radio("webrtc")).toHaveFocus();
+    expect(radio("webrtc")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("show the keyboard focus with the accent ring, not only a background a shade off the dialog's", async () => {
     const { radio } = await open({ availableTransports: all, transportAutomatic: true });
     for (const id of ["auto", "webrtc", "iroh", "hyperdht", "dht"])

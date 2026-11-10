@@ -13,7 +13,7 @@ import { useFocusLanding } from "../hooks/useFocusLanding";
 import { Toast } from "../components/ui/Toast";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
-import { problemLine } from "../lib/problemText";
+import { problemLine, problemText, type Problem } from "../lib/problemText";
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
 /**
@@ -89,7 +89,8 @@ export function Services() {
     if (!open) setLanding((was) => (was && "sharing" in was ? { shared: was.sharing } : { cancelled: true }));
   };
   const [error, setError] = useState("");
-  const [openError, setOpenError] = useState("");
+  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ.
+  const [openError, setOpenError] = useState<Problem | null>(null);
   // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
   const sharing = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -174,9 +175,9 @@ export function Services() {
                   // 51 px past a 375 px phone's edge, its start cut off in Arabic. The whole label is in the title.
                   <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
                     className="flex items-center max-w-full min-w-0" onClick={() => {
-                      setOpenError("");
-                      if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
+                      setOpenError(null);
+                      if (!platform.features.openServices) { setOpenError({ tone: "error", title: t("services.openNeedsApp") }); return; }
+                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemText(e, t)));
                     }}>
                     {before && <span className="whitespace-pre">{before}</span>}
                     <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
@@ -186,7 +187,7 @@ export function Services() {
               })}
             </Row>
           ))}
-        {openError && <Block><Notice tone="error">{openError}</Notice></Block>}
+        {openError && <Block><Notice problem={openError} /></Block>}
       </Section>
     </Page>
   );

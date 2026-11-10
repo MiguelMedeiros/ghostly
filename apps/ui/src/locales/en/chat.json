@@ -319,12 +319,28 @@
     "off": "Off in this chat: turn a way on in Accept",
     "offOrOld": "Your contact has payments off in this chat, or needs an updated Ghostly"
   },
+  "pictureHiddenIp": "Not shown while Hide my IP is on",
   "pinned": {
     "bar": "Pinned message",
     "info": "One pinned message per chat, seen by everyone in it. A new pin replaces it. In a community, only the admin pins.",
     "notHere": "Not on this device",
     "pin": "Pin",
     "unpin": "Unpin"
+  },
+  "presence": {
+    "availability": {
+      "away": "Away",
+      "busy": "Busy",
+      "dnd": "Do not disturb"
+    },
+    "dot": {
+      "away": "Online, away",
+      "busy": "Online, busy",
+      "dnd": "Online, do not disturb",
+      "idle": "Online, idle",
+      "online": "Online"
+    },
+    "status": "Status: {{status}}"
   },
   "preview": {
     "arkAddress": "Ark address",
@@ -498,6 +514,7 @@
     "limit": "Voice messages are at most {{minutes}} minutes",
     "message": "Voice message",
     "micDenied": "No access to the microphone. Allow it in your browser or system settings.",
+    "micDeniedAndroid": "No access to the microphone. Allow it when Android asks, or in Android's settings for Ghostly.",
     "micUnavailable": "No microphone found. Connect one, or close the app using it.",
     "micUnsupported": "This browser can't record voice messages.",
     "pause": "Pause voice message",

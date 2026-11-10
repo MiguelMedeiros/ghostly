@@ -17,7 +17,10 @@ import { WalletSetupStatus } from "../components/wallet/WalletSetupStatus";
 import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
 import { WalletAway } from "../components/wallet/WalletAway";
+import { WalletTotals } from "../components/wallet/WalletTotals";
+import { sharedBalanceCards, sharedSources } from "../components/walletTotals";
 import { BackupReminder } from "../components/wallet/BackupReminder";
+import { SentEcash } from "../components/wallet/SentEcash";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { BackupDue } from "@ghostly/browser/shared/backupReminder";
@@ -223,13 +226,16 @@ export function Wallet() {
             {due && <BackupReminder key={due.id} due={due} busy={puttingOff} problem={laterProblem?.wallet === due.id ? laterProblem.problem : null} onBackUp={() => backUp(due)} onLater={() => later(due)} />}
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
-              {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
+              {selected && <WalletTotals state={state} network={network} cards={shown} />}
+              {selected ? <WalletDeck network={network} cards={sharedBalanceCards(state, network, shown, t)} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border px-4 py-3" data-testid={`wallet-network-${network}-empty`}>
                   <p className="text-sm text-text-secondary">{t("wallet.page.none", { network: NETWORK_NAME[network] })}</p>
                   <Button data-testid={`wallet-network-${network}-new`} onClick={() => setCreating(network)}>{t("wallet.page.new", { network: NETWORK_NAME[network] })}</Button>
                 </div>
               )}
             </div>
+            {/* Ecash sent in a chat deleted since and not taken: the chat's Take it back went with it. */}
+            <SentEcash wallet={wallet.forNetwork(network)} network={network} awaiting={state.networks?.[network]?.awaiting} />
             {selected && <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${selected.id}`} data-testid="wallet-panel" data-network={selected.network} className="space-y-6">
               <p className="flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid="wallet-panel-title">
                 <NetworkTag network={selected.network} testId="wallet-panel-network" />
@@ -239,7 +245,7 @@ export function Wallet() {
               {panel && awayWallet(state, panel) && <WalletAway wallet={awayWallet(state, panel)!} platform={cardWallet(wallet, parseCardId(panel)!)} />}
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
               {panel && !awayWallet(state, panel) && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
-              {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
+              {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} sharedWith={parseCardId(panel) && sharedSources(state, parseCardId(panel)!.network, cards).get(panel)} focus={focusPanel} backup={backup === panel} onOpen={select} />}
               {panel && !awayWallet(state, panel) && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} card={parseCardId(panel)!.card} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
             </div>}
           </div>
@@ -262,13 +268,13 @@ function awayWallet(state: WalletState, id: string): WalletInstanceView | undefi
 }
 
 /** The chosen wallet's panel, on its own network: its calls and its state are that network's. */
-function WalletPanel({ id, wallet, state, focus, backup, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; focus: boolean; backup: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
+function WalletPanel({ id, wallet, state, sharedWith, focus, backup, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; sharedWith?: string; focus: boolean; backup: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
   const card = parseCardId(id);
   if (!card) return null;
   const { rail, network } = card;
   const scoped = cardWallet(wallet, card), shown = networkState(state, network, card.card);
   switch (rail) {
-    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
+    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} sharedWith={sharedWith} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
     case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;

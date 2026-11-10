@@ -291,10 +291,18 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   async shareService(name, target) {
     const { origin } = parseLocalTarget(target);
-    // Where the platform asks the user, it only does so from a user gesture: this has to come first.
-    const granted = await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin);
-    if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
-    await engine.call("addService", { name, target });
+    const pattern = localAccessPattern(origin);
+    const host = getBrowserHost();
+    const add = async () => { await engine.call("addService", { name, target }); };
+    // A second round only when another tab gave the access back between the yes and the app's row (the extension).
+    for (let round = 0; round < 2; round++) {
+      // Where the platform asks the user, it only does so from a user gesture: this has to come first.
+      const granted = await host.requestLocalAccess(pattern, origin);
+      if (!granted) break;
+      if (!host.withLocalAccess) return add();
+      if (await host.withLocalAccess(pattern, add)) return;
+    }
+    throw new Error("Ghostly needs your permission to reach that local address");
   },
   async localAccessNeeded(target) {
     const host = getBrowserHost();
@@ -342,7 +350,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async openService(peerPubKeyZ32, serviceId) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+    // Hide my IP from contacts as it is now: while it is on, the app loads nothing but its own origin.
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32), engine.state?.settings.relayOnly === true);
   },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;
@@ -586,12 +595,14 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
       pushRelay: state.settings.pushRelay ?? "",
+      ...(state.pushRelayRefused ? { pushRelayRefused: { http: state.pushRelayRefused.http, ...(state.pushRelayRefused.text !== undefined ? { text: state.pushRelayRefused.text } : {}) } } : {}),
+      relayOnly: state.settings.relayOnly === true,
       ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
       ...(state.transport.directBlocked ? { directBlocked: true } : {}),
       ...(state.transport.clockOffMs !== undefined ? { clockOffMs: state.transport.clockOffMs } : {}),
     };
   },
-  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>
+  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay, relayOnly }) =>
     // `turn` left out leaves the TURN server as it is (a switch saved on its own, say).
-    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
+    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}), ...(relayOnly !== undefined ? { relayOnly } : {}) } }),
 };

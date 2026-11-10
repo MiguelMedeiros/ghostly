@@ -51,15 +51,16 @@
 .rich-codeblock pre {
   margin: 0;
   padding: 6px 8px 8px;
-  font-size: 12.5px;
-  line-height: 17px;
+  /* 12.5px and 17px at the default text size, larger or smaller with Settings → Text size (index.css). */
+  font-size: calc(12.5rem / 16 * var(--chat-text-scale));
+  line-height: calc(17rem / 16 * var(--chat-text-scale));
   white-space: pre;
   overflow-x: auto;
   text-align: left;
 }
 
 .rich-action {
-  font-size: 12px;
+  font-size: calc(12rem / 16 * var(--chat-text-scale));
   color: var(--color-link);
   cursor: pointer;
   padding: 0 2px;
@@ -99,7 +100,7 @@
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12.5px;
+  font-size: calc(12.5rem / 16 * var(--chat-text-scale));
 }
 .rich-blob-actions { flex: none; display: inline-flex; gap: 6px; }
 .rich-blob-open { flex-direction: column; gap: 2px; white-space: normal; }

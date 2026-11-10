@@ -416,6 +416,38 @@ describe("richer task cards on the board", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
   });
 
+  it("in Arabic, cuts a long Latin tag to filter by in the tag's own direction, so it keeps its start", async () => {
+    // The pill cut the tag in the page's direction with the tag in a <bdi> inside it: in Arabic a Latin tag longer than
+    // the pill's 160 px lost its start. The <bdi> (dir=auto) is the box that cuts, as a card's own tag chip is.
+    const long = "infrastructure-releasing";
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const rendered = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    rendered.engine.on("statusCardIndex", () => [row("link-1", task({ id: "a", tags: [long] }))]).setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })], groups: [] });
+    await loaded();
+    const pill = within(screen.getByTestId("tasks-tags")).getByTestId("tasks-tag");
+    const name = pill.querySelector("bdi")!;
+    expect(name).toHaveTextContent(long);
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // The pill lays the tag out at 160 px at most and does not cut it in the page's direction itself.
+    expect(pill).toHaveClass("max-w-40");
+    expect(pill).not.toHaveClass("truncate");
+  });
+
+  it("gives a card's tag and pull request chips a 24 px tall box on a phone, keeping the pill's look, and its parts toggle 24 px", async () => {
+    profile([
+      row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
+      row("link-1", task({ id: "part", title: "Part", parent: "b" })),
+    ]);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-testid="board-card"][data-card-id="b"]')!;
+    // An 18 px pill in a transparent 3 px border on each side: the box is 24 px, the colour stays on the pill.
+    for (const target of [within(card).getByTestId("board-card-tag"), within(card).getByTestId("board-card-pr")]) {
+      expect(target).toHaveClass("max-md:border-y-[3px]", "border-transparent", "bg-clip-padding");
+      expect(target).not.toHaveClass("border-none");
+    }
+    expect(within(card).getByTestId("board-card-stack-toggle")).toHaveClass("min-h-6", "max-md:min-h-8");
+  });
+
   it("stacks a task's parts under it with how many are done; a part opens its own message", async () => {
     const rows = [
       row("group:g1", task({ id: "epic", title: "Relay rework" }), { member: "hermes-key" }),

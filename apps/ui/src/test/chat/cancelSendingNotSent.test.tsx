@@ -24,7 +24,7 @@ function chat(first: Record<string, unknown>) {
       { id: "me_f2", ref: "f2", text: SECOND, sender: "me", timestamp: 1_700_000_000_600, via: "datalink", delivery: "waiting", deliveryError: "Waits for the text before it to be confirmed." },
     ] as never });
   const app = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "en" });
-  app.engine.on("deleteMessage", () => undefined)
+  app.engine.on("deleteMessage", () => ({ everyone: false }))
     .update({ settings: { online: true }, links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, profile: "paired-chat/1" } as never)] } as never);
   return app;
 }

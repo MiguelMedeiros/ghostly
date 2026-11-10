@@ -100,12 +100,19 @@ export function NetworkSettings() {
   // A TURN server restored from a backup comes without its credential (backups leave it out): calls skip it until then.
   const credentialGone = !!network.turn?.urls && !network.turn.credential && !turn.credential;
   const direct = network.readRelays !== undefined;
+  // Hide my IP from contacts: this app reads and writes through the relays alone, whatever the switch below says.
+  const relayOnly = direct && network.relayOnly === true;
+  // How this app reaches the DHT now: with Hide my IP on, the Desktop's DHT node is closed and it goes through the relays.
+  const reaches = relayOnly ? "relays" : network.kind;
 
   const refuse = (refused: Problems) => { focusFirst.current = true; setProblems(refused); };
   // An edit of a refused field takes its error away; the others stay until the next Save.
   const edited = (...names: FieldName[]) => {
     if (names.some((name) => problems[name])) setProblems((now) => Object.fromEntries(Object.entries(now).filter(([name]) => !names.includes(name as FieldName))));
   };
+  // The Desktop runs HyperDHT itself and ignores the relay, except while "Hide my IP from contacts" is on: its
+  // HyperDHT then goes through the relay, as a browser's does.
+  const relaysHyperdht = !direct || network.relayOnly === true;
 
   const save = async () => {
     setError("");
@@ -113,7 +120,7 @@ export function NetworkSettings() {
     setSavedAs(null);
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes: every field at once.
-    const relay = direct ? "" : hyperdhtRelay.trim();
+    const relay = relaysHyperdht ? hyperdhtRelay.trim() : "";
     const push = pushRelay.trim();
     // The engine keeps only the Pkarr relays it can read and drops the rest unsaid: a typo next to working relays is
     // named instead (with nothing usable at all, the engine's own "Enter at least one relay address" says it).
@@ -134,7 +141,7 @@ export function NetworkSettings() {
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
       const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
-      await platform.setNetwork({ relays: relayList, turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(direct ? {} : { hyperdhtRelay: relay }), pushRelay: push });
+      await platform.setNetwork({ relays: relayList, turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(relaysHyperdht ? { hyperdhtRelay: relay } : {}), pushRelay: push });
     } catch (e) {
       const field = refusedField(rawError(e), irohRelays);
       if (field) refuse({ [field]: problemLine(e, t) }); else setError(problemLine(e, t));
@@ -151,6 +158,14 @@ export function NetworkSettings() {
     catch (e) { setError(problemLine(e, t)); }
     finally { setSwitching(false); }
   };
+  // The same, for "Hide my IP from contacts": the TURN server as saved is the one it needs (the engine says so if none).
+  const hideMyIp = async (on: boolean) => {
+    setError("");
+    setSwitching(true);
+    try { await platform.setNetwork({ relays: network.relays, relayOnly: on }); }
+    catch (e) { setError(problemLine(e, t)); }
+    finally { setSwitching(false); }
+  };
 
   // Addresses read left to right in every language (in Arabic a wrapped relay's trailing "/" would start the next line); labels and hints follow the page.
   const field =
@@ -164,8 +179,8 @@ export function NetworkSettings() {
     <Section title={t("network.title")}>
       {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
       {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
-      {direct && <Row label={t("network.readRelays")} hint={t("network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
-        <Switch label={t("network.readRelays")} checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+      {direct && <Row label={t("network.readRelays")} hint={t(relayOnly ? "network.readRelaysRelayOnly" : "network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
+        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={relayOnly} busy={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
@@ -181,8 +196,9 @@ export function NetworkSettings() {
         {problemUnder("iroh")}
       </Field>}
 
-      {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved. */}
-      {!direct && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
+      {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved,
+          unless "Hide my IP from contacts" is on (`relaysHyperdht`). */}
+      {relaysHyperdht && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
         <input id={FIELDS.hyperdht} value={hyperdhtRelay} onChange={(e) => { setHyperdhtRelay(e.target.value); edited("hyperdht"); }} placeholder="wss://relay.example.org"
           {...exactText} dir="ltr" data-testid="network-hyperdht-relay" {...invalid("hyperdht")} className={`${field} font-mono text-sm`} />
         {problemUnder("hyperdht")}
@@ -192,9 +208,16 @@ export function NetworkSettings() {
         <input id={FIELDS.push} value={pushRelay} onChange={(e) => { setPushRelay(e.target.value); edited("push"); }} placeholder="https://push-relay.example.org"
           {...exactText} dir="ltr" data-testid="network-push-relay" {...invalid("push")} className={`${field} font-mono text-sm`} />
         {problemUnder("push")}
+        {/* The saved relay answered the last wake-up, but not as a push relay (a web page, its own refusal): said until it forwards one. */}
+        {network.pushRelayRefused && pushRelay.trim() === network.pushRelay && <div data-testid="network-push-relay-refused" className="mt-1 text-xs text-warn-ink">
+          <p>{t("network.pushRelayRefused", { http: String(network.pushRelayRefused.http) })}</p>
+          {network.pushRelayRefused.text && <p data-testid="network-push-relay-said">{fillNames(t("network.pushRelayRefusedSaid"), { text: network.pushRelayRefused.text })}</p>}
+        </div>}
       </Field>
 
-      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
+      {/* With Hide my IP from contacts on (every client), every connection to a contact goes through it: not optional. */}
+      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url"
+        hint={t(credentialGone ? "network.turnCredentialAgain" : network.relayOnly === true ? "network.turnHintRelayOnly" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id={FIELDS.turnUrl} aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => { setTurn({ ...turn, urls: e.target.value }); edited("turnUrl"); }}
           placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" {...invalid("turnUrl")} className={`${field} font-mono text-sm`} />
         {problemUnder("turnUrl")}
@@ -208,6 +231,10 @@ export function NetworkSettings() {
         {problemUnder("turnCredential")}
       </Field>
 
+      <Row label={t("network.relayOnly")} hint={t("network.relayOnlyHint")} info={t("network.relayOnlyInfo")} testId="network-relay-only-row">
+        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} busy={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
+      </Row>
+
       <Block>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button
@@ -219,7 +246,7 @@ export function NetworkSettings() {
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
           {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
-          <span data-testid="network-protocol" data-kind={network.kind} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(network.kind === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
+          <span data-testid="network-protocol" data-kind={reaches} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(reaches === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>
     </Section>

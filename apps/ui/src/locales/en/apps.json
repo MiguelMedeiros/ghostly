@@ -62,11 +62,13 @@
     "title": "Apps with {{name}}"
   },
   "errors": {
+    "damaged": "Its files on this device are damaged. Get its files again.",
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
     "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",
     "host": "Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.",
     "hostProblem": "The host had a problem (error {{status}}). Try again later.",
+    "locked": "The profile locked before the app opened. Open it again.",
     "needsFiles": "Its files are not on this device yet.",
     "network": "Could not reach the host.",
     "notListed": "This store no longer lists that app.",
@@ -156,6 +158,7 @@
     "title": "Open {{title}} in a chat"
   },
   "store": {
+    "clockLate": "This store's list is dated ahead of this device's clock. Check the date and time on this device.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -177,8 +180,10 @@
     "removeNamed": "Remove {{name}}",
     "removeNone": "To add it again, you will need its link.",
     "removeTitle": "Remove {{name}}?",
+    "rollback": "This store's link now holds an older list than yours. Ghostly kept yours.",
     "showMore": "Show more ({{count}})",
-    "stale": "Out of date since {{date}}"
+    "stale": "Out of date since {{date}}",
+    "tooLarge": "This store's list is too large for Ghostly to read."
   },
   "title": "Apps",
   "view": {

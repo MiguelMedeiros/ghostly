@@ -10,12 +10,14 @@ import { DaySections } from "../components/chat/DaySections";
 import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
+import { useNarrowPhone } from "../hooks/usePhoneHeader";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupLinkAskDialog } from "../components/GroupLinkAskDialog";
 import { GroupConnection } from "../components/GroupConnection";
+import { useNoLinksHint } from "../hooks/useNoLinksHint";
 import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
@@ -41,13 +43,15 @@ import { GroupOthers } from "../components/GroupOthers";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, formerName, memberName, memberPhoto, othersName, sameNamed } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
 import { rowDaysReader } from "../lib/chatDays";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
-import { chatNamesForPeer } from "../lib/storage";
+import { chatsByPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
@@ -63,6 +67,7 @@ import { useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -329,9 +334,9 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
-/** A step at a stage: done once reached, current while it is the next one, else still to come. Full: the knock is there. */
+/** A step at a stage: done once reached, current while it is the next one, else still to come. Full or blocked: the knock is there. */
 function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
-  const stage = at === "full" ? "knocked" : at;
+  const stage = at === "full" || at === "blocked" ? "knocked" : at;
   if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
   return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
 }
@@ -341,6 +346,8 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
   // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
+  // Or that it grows only once every member's app is updated: the same, until they are.
+  if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -398,11 +405,14 @@ export function GroupChat() {
   const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
-  // A member's nickname from that contact's chat, read only for members who are contacts and parsed again only when the
+  // A member's nickname from that contact's chat, read only when a member is a contact and parsed again only when the
   // chat changed: every engine state comes through here, and a read of every chat each time grew with the chat list.
+  // One look through the stored chats for the whole roster, not one per member: each walks every key of the page's
+  // storage, and this runs again at each message in the group.
   const group = useMemo(() => {
     if (!rosterGroup) return undefined;
-    return withContactFaces(rosterGroup, links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
+    let chats: ReturnType<typeof chatsByPeer> | undefined;
+    return withContactFaces(rosterGroup, links, faceOf, peerKey => (chats ??= chatsByPeer()).get(peerKey)?.label);
   }, [rosterGroup, links, faceOf]);
   // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
   // groups the last one's messages would still be here (the timeline would open on them, and never find where this
@@ -429,16 +439,17 @@ export function GroupChat() {
   replyingRef.current = replyingTo;
   /**
    * The message of mine the composer edits (WISP 902 § Edits). Only while the group has it: deleted meanwhile, the edit
-   * ends, its words with it, and the draft set aside comes back.
+   * ends, its words with it, and the draft set aside comes back. Kept per group while the page is away or on another
+   * group (lib/keptEdits.ts), as a 1:1 chat's is; until this group's own list is read again, it stays as it was kept.
    */
-  const [chosenEdit, setEditing] = useState<StoredMessage | null>(null);
-  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex, true) ? chosenEdit : null;
-  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
-  useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
+  const [chosenEdit, setEditing] = useKeptEdit<StoredMessage>(`group:${groupId}`);
+  const editing = chosenEdit && (loaded.groupId !== groupId || heldOriginal(chosenEdit, quoteIndex, true)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
+  useEffect(() => { setReplyingTo(null); }, [groupId]);
   // The group no longer takes my messages (removed, left on another device): the composer under the bars is off, and
   // they go. Not while it is off for a moment in a group still active (a join or removal past 16 members).
   const closed = !!rosterGroup && !rosterGroup.canSend && rosterGroup.status !== "active";
-  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed]);
+  useEffect(() => { if (closed) { setReplyingTo(null); setEditing(null); } }, [closed, setEditing]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
   const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
@@ -464,6 +475,8 @@ export function GroupChat() {
   const [resetting, setResetting] = useState(false);
   /** Its "Make a new link?" question, asked as every other New link's is: the link shared so far stops letting anyone in. */
   const [askingReset, setAskingReset] = useState(false);
+  /** Cancel joining, on the joining card or the knocking-again notice: it stays when Try again goes, so the focus goes there. */
+  const cancelJoinRef = useRef<HTMLButtonElement>(null);
   // Its dialog waits for the link (a new group's, or one just turned on, comes with the state that follows), then stays
   // until it is closed: turned off in it, the link says so there, and one turned on again later opens nothing by itself.
   const [shareShown, setShareShown] = useState(false);
@@ -483,8 +496,12 @@ export function GroupChat() {
   openGroupId.current = groupId;
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
-  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it.
+  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it (or
+  // Share is a row of ⋮, on the narrowest phone).
   const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
+  // At 320px the back button, the picture, the connection, Share and ⋮ left the name about 70px ("Clube d…" for every
+  // "Clube de …"): there Share is a row of ⋮, and the name has half again as much room, as a 1:1 chat's has.
+  const narrow = useNarrowPhone();
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
   // The group is a new object on every state of the engine (up to 20 a second): the names, and so the rows, are made
@@ -578,26 +595,31 @@ export function GroupChat() {
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
   const noLinks = useEngineValue(state => state?.transport.groupLinks === false);
+  const noLinksHint = useNoLinksHint();
   const [pickMyJoin] = useState(() => rowPicker<StoredMessage, number>(m => m.event === "joined" && !m.member ? m.timestamp : undefined));
   const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
-  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
-  // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  const search = useChatSearch({ messages: shown, chat: groupChat(groupId), active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
+  // Read while the page shows; in a hidden window what comes stays unread (usePageShown), and under the lock screen too
+  // (the app stays mounted there): read once unlocked, as a chat's is.
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  const locked = useIsLocked();
   // Up to the newest of what the list calls unread: after a restart a message written before the mark but handed over
   // later has lastMessageAt at its writing, lastPeerMessageAt and lastMentionAt at its arrival.
   const readGroupId = group?.id;
   const readUpTo = group && Math.max(group.lastMessageAt, groupUnreadAt(group), group.lastMentionAt ?? 0);
   useEffect(() => {
-    if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
+    if (!readGroupId || readUpTo === undefined || !pageShown || locked || groupReadAt(readGroupId) >= readUpTo) return;
     markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
-  }, [readGroupId, readUpTo, pageShown]);
-  // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
+  }, [readGroupId, readUpTo, pageShown, locked]);
+  // Its notification goes once the window has the focus too, and not under the lock, as a chat's does (Chat.tsx).
   const away = useWindowAway();
   useEffect(() => {
-    if (group && !windowAway()) clearChatNotification(`group:${group.id}`);
-  }, [group?.id, group?.lastMessageAt, group, away]);
+    if (!group || locked || windowAway()) return;
+    clearChatNotification(`group:${group.id}`);
+    closeWakeNotices(groupPath(group.id));
+  }, [group?.id, group?.lastMessageAt, group, away, locked]);
 
   /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
   const send = useCallback(async (text: string, mentions?: GroupMention[], extra?: { translated?: SentTranslation }): Promise<string | null> => {
@@ -769,7 +791,7 @@ export function GroupChat() {
   const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
   // The link was replaced since it was shared: nothing more happens here, only the current link gets in.
   const linkReplaced = stage === "replaced";
-  const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
+  const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: noLinksHint }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
     : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong, !!group.invitation?.othersKnocked);
   // The joining card's one live line: what changed, not the card. The five-minute line when let in and still no keys,
@@ -778,7 +800,7 @@ export function GroupChat() {
   // Others waiting too (a community's queue, a private group's fresh knocks): the group is busy, not the link dead.
   const staleText = waitingWith > 0 || group.invitation?.othersKnocked ? t("group.join.staleBusy") : t("group.join.stale");
   const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
-  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" || stage === "blocked" ? joining.title
     : admittedLong ? joining.body : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
@@ -810,6 +832,11 @@ export function GroupChat() {
     setMenuOpen(false); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
+  // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
+  const tryAgain = (pressed: HTMLElement) => void act(async () => {
+    await engine.call("acceptGroupInvitation", { groupId });
+    if (document.activeElement === pressed || document.activeElement === document.body) cancelJoinRef.current?.focus({ preventScroll: true });
+  });
 
   return (
     <CueChat.Provider value={groupChat(groupId)}>
@@ -851,7 +878,7 @@ export function GroupChat() {
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
-          {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
+          {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
@@ -861,6 +888,7 @@ export function GroupChat() {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
+              {canShare && narrow && <MenuItem testId="group-share" title={t("group.chat.shareHint")} onClick={() => { closeMenu(); void openShare(); }}>{t("group.chat.shareLink")}</MenuItem>}
               {/* Not on a group not joined: it has no member list yet, and nothing comes from it to mute. */}
               {!invited && <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>}
               {!invited && <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />}
@@ -908,10 +936,10 @@ export function GroupChat() {
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
-          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
-          <button data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
+          <button ref={cancelJoinRef} data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
             className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
@@ -948,9 +976,9 @@ export function GroupChat() {
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
           {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{staleText}</p>}
-          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
-          <button onClick={cancelJoin} data-testid="group-joining-cancel"
+          <button ref={cancelJoinRef} onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">

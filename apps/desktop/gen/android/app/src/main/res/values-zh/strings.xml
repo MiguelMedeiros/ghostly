@@ -3,6 +3,14 @@
     <string name="channel_transfers">文件传输</string>
     <string name="transfer_title">正在收发文件</string>
     <string name="transfer_text">Ghostly 会继续运行，直到传输完成。</string>
+    <string name="channel_connection">连接</string>
+    <string name="connection_title">Ghostly 已连接</string>
+    <string name="connection_text">你的聊天和群组在后台保持连接。</string>
+    <string name="channel_calls">通话</string>
+    <string name="call_title">与 %1$s 通话中</string>
+    <string name="call_public">通话中</string>
+    <string name="call_text">轻触即可返回通话。</string>
+    <string name="call_hang_up">挂断</string>
     <string name="webview_title">请更新 Android System WebView</string>
     <string name="webview_text">Ghostly 运行在 Android System WebView 中，而这部手机上的版本太旧（版本 %1$s，Ghostly 需要 %2$d 或更高版本）。请在 Play 商店中更新，然后重新打开 Ghostly。</string>
     <string name="webview_update">更新</string>

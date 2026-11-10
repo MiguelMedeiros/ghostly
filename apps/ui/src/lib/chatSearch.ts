@@ -72,21 +72,27 @@ export function fileKindWords(file: ChatFile, t: Translate): string | undefined 
 }
 
 /**
- * What a message offers search: a file's name and its kind in `t`'s language and in English, a text's text; nothing
- * for notices, call lines and payments.
+ * A received text's translation where its bubble shows one in place of the text (hooks/useTranslation.ts
+ * `useShownTranslations`): search finds the words on screen, and the bubble marks them there.
  */
-export function searchText(message: ChatMessage, t: Translate = englishT): string | undefined {
+export type TranslatedText = (message: ChatMessage) => string | undefined;
+
+/**
+ * What a message offers search: a file's name and its kind in `t`'s language and in English, a text's text as its
+ * bubble shows it (`translated`, where it is shown translated); nothing for notices, call lines and payments.
+ */
+export function searchText(message: ChatMessage, t: Translate = englishT, translated?: TranslatedText): string | undefined {
   if (message.sender === "system" || message.systemEvent || message.callEvent || message.paymentId) return undefined;
-  if (!message.file) return shownText(message.text);
+  if (!message.file) return shownText(translated?.(message) ?? message.text);
   const words = new Set([fileKindWords(message.file, t), fileKindWords(message.file, englishT)]);
   return [message.file.name, ...words].filter(Boolean).join("\n");
 }
 
 /** The messages that can be found, in the timeline's order, folded. */
-export function searchable(messages: readonly ChatMessage[], t: Translate = englishT): Searchable[] {
+export function searchable(messages: readonly ChatMessage[], t: Translate = englishT, translated?: TranslatedText): Searchable[] {
   const out: Searchable[] = [];
   for (const message of messages) {
-    const text = searchText(message, t);
+    const text = searchText(message, t, translated);
     if (text) out.push({ id: message.id, folded: foldText(text) });
   }
   return out;

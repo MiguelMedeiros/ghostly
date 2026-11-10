@@ -171,9 +171,14 @@ export class FakeEngine implements BrowserHost {
 
   private handlers = new Map<EngineMethod, (params: never) => unknown>();
   private send: ((message: EngineEvent | RpcResponse) => void) | null = null;
+  private disconnect: (() => void) | null = null;
+  /** Set by a test: the page's tries to connect fail with it, as when the peer does not start again. */
+  refuse: Error | null = null;
 
-  async connect(onMessage: (message: EngineEvent | RpcResponse) => void) {
+  async connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect?: () => void) {
+    if (this.refuse) throw this.refuse;
     this.send = onMessage;
+    this.disconnect = onDisconnect ?? null;
     onMessage({ kind: "state", state: this.state });
     return { send: (request: ClientMessage) => (request.kind === "history" ? this.history(request.linkId) : this.handle(request)) };
   }
@@ -219,6 +224,14 @@ export class FakeEngine implements BrowserHost {
   /** Patches the current state. */
   update(patch: StatePatch): void {
     this.setState({ ...this.state, ...patch } as StatePatch);
+  }
+
+  /** The peer goes away (the extension's restarted): the page loses its connection and tries again by itself. */
+  drop(): void {
+    const disconnect = this.disconnect;
+    this.send = null;
+    this.disconnect = null;
+    disconnect?.();
   }
 
   emit(event: EngineEvent): void {

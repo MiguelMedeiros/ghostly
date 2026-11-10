@@ -6,6 +6,7 @@ import { Notice } from "./ui/Notice";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
+import { fillNames } from "../lib/fillNodes";
 import type { Translate } from "../locales/translate";
 
 const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
@@ -17,10 +18,11 @@ export function ChatHoldLine({ hold, name }: { hold: PeerHoldState; name: string
   return (
     <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border" role="status">
       {/* The whole sentence, on two lines if need be: cut to one on a 320 px phone, it lost the quota at its end. */}
-      {hold.outstanding > 0 && <p className="m-0 break-words">{t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
-        count: hold.outstanding, name,
+      {/* The contact's name its own <bdi>: "Ana (2)" keeps its brackets on its side in Arabic. */}
+      {hold.outstanding > 0 && <p className="m-0 break-words">{fillNames(t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+        count: hold.outstanding,
         used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(hold.bytes / 1024 / 1024),
-        max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) })}</p>}
+        max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) }), { name })}</p>}
       {hold.error && <Notice testId="hold-error" problem={problemText(hold.error, t)} className="text-[11px]" />}
     </div>
   );
@@ -56,7 +58,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
               <p className="text-sm text-text-primary">{t("chat.hold.switch")}</p>
               <p className="text-[11px] text-text-secondary" data-testid="chat-hold-contact">{contact}</p>
             </div>
-            <Switch testId="chat-hold-toggle" label={t("chat.hold.switch")} checked={enabled} disabled={busy} onChange={setEnabled} />
+            <Switch testId="chat-hold-toggle" label={t("chat.hold.switch")} checked={enabled} busy={busy} onChange={setEnabled} />
           </div>
           <div className="px-4 py-3 space-y-1">
             <p className="text-[11px] text-text-secondary" data-testid="chat-hold-storage">{hold?.storage ? t("chat.hold.storage") : t("chat.hold.noStorage")}</p>
@@ -71,9 +73,10 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
-          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial || busy}
-            onClick={() => { setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}
+          <button type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+            onClick={() => { if (busy) return; setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
           </button>
         </div>

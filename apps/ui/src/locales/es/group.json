@@ -115,6 +115,8 @@
     "answered": "La app del admin vio tu llamada y se está conectando contigo. Entrarás en un momento.",
     "answeredCommunity": "La app de un miembro vio tu llamada y se está conectando contigo. Entrarás en un momento.",
     "answeredTitleCommunity": "Un miembro te está dejando entrar",
+    "blocked": "Este grupo está esperando actualizaciones",
+    "blockedBody": "Vuelve a aceptar miembros cuando todos en él tengan Ghostly actualizado. Entonces entras: deja la app abierta.",
     "cancel": "Cancelar la unión",
     "full": "Este grupo está lleno",
     "fullBody": "Tiene {{n}} de {{max}} miembros. Entras cuando alguien salga: deja la app abierta.",

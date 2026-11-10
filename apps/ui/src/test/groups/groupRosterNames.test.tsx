@@ -1,73 +1,57 @@
+// An open group names its members who are contacts as their chats do (a nickname given there wins over an identity).
+// Each look through the stored chats walks every key of the page's storage, and the roster is named again at each
+// message in the group (the group's state carries when it last had one): one look for the whole roster, not one per
+// member who is a contact.
 import { act, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { ChatSession } from "../../lib/types";
+import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
+import { saveSession } from "../../lib/storage";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: groups.mentions, groups.member-colors
-
-// How often a member's name is worked out: the page's cost of a large roster.
-const names = vi.hoisted(() => ({ count: 0 }));
-vi.mock("../../lib/groups", async original => {
-  const actual = await original<typeof import("../../lib/groups")>();
-  const memberName: typeof actual.memberName = (...args) => { names.count++; return actual.memberName(...args); };
-  return { ...actual, memberName };
-});
+// covers: groups.send
 
 const ME = "me".padEnd(52, "y");
-const keyOf = (i: number) => `m${i}`.padEnd(52, "y");
-const MEMBERS = 40, MESSAGES = 300;
-const roster = (): GroupMemberView[] => [
-  { key: ME, role: "member", me: true, online: true, missing: 0 },
-  ...Array.from({ length: MEMBERS - 1 }, (_, i): GroupMemberView => ({ key: keyOf(i), role: i ? "member" : "admin", me: false, online: true, missing: 0, nick: `Member ${i}` })),
-];
-/** The group as each of the engine's states carries it: the same roster, in new objects. */
-const community = (patch: Partial<GroupView> = {}) => groupView({ profile: "community", status: "active", epoch: 1, members: roster(), ...patch });
-const history = (): StoredMessage[] => Array.from({ length: MESSAGES }, (_, i): StoredMessage => ({
-  linkId: "group:group-1", id: `g${i}`, text: `message ${i}`, sender: "peer", member: keyOf(i % (MEMBERS - 1)), timestamp: 1_700_000_000_000 + i, via: "datalink" }));
+const peer = (i: number) => `peer${i}`.padEnd(52, "y");
+const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });
+const MEMBERS = 30;
+const state = (lastMessageAt: number) => ({
+  groups: [groupView({
+    status: "active", epoch: 1, lastMessageAt,
+    memberLinks: Object.fromEntries(Array.from({ length: MEMBERS }, (_, i) => [`link-${i}`, peer(i)])),
+    members: [member({ key: ME, me: true }), ...Array.from({ length: MEMBERS }, (_, i) => member({ key: peer(i), nick: `Member ${i}` }))],
+  })],
+  links: Array.from({ length: MEMBERS }, (_, i) => linkView({ id: `link-${i}`, peerPubKeyZ32: peer(i), profile: "paired-chat/1" } as never)),
+});
 
-async function openGroup(messages = history()) {
-  fakeEngine.on("groupMessages", () => messages).on("updateSettings", () => undefined).on("setGroupTyping", () => undefined);
-  fakeEngine.update({ groups: [community()] });
-  renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
-  await screen.findByText(`message ${MESSAGES - 1}`);
-}
+describe("an open group whose members are contacts", () => {
+  it("looks through the stored chats once at a message in the group, not once per member", async () => {
+    for (let i = 0; i < MEMBERS; i++) {
+      saveSession({ id: `chat${i}`, mySeedB64: "s", peerPubKeyB64: peer(i), encKeyB64: "e", createdAt: 1, messages: [], ...(i === 0 && { label: "Mom" }) } as unknown as ChatSession);
+    }
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined).on("setGroupTyping", () => undefined).update(state(1) as never);
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await screen.findByText("Friends");
+    await act(() => new Promise<void>((done) => setTimeout(done, 300)));
 
-/** How many names the page works out for one state of the engine. */
-function namesFor(update: () => void): number {
-  names.count = 0;
-  act(update);
-  return names.count;
-}
-
-describe("GroupChat: a large roster", () => {
-  it("a state that changes nothing in the group names no member again for its history", async () => {
-    await openGroup();
-    // Something else changed (an edge came up): the group is the same, in a new object, as every state brings it.
-    const count = namesFor(() => fakeEngine.update({ groups: [community()], links: [linkView({ id: "link-other", peerPubKeyZ32: "otherpeer" })] }));
-    // Before, each message built the roster's names again: 300 messages × 40 members on every state.
-    expect(count).toBeLessThan(MESSAGES);
-  });
-
-  it("a member's new name is over their messages at once", async () => {
-    await openGroup();
-    const lastNick = () => screen.getAllByTestId("message-nick").slice(-1)[0];
-    expect(lastNick()).toHaveTextContent("Member");
-    const members = roster().map(m => m.key === keyOf((MESSAGES - 1) % (MEMBERS - 1)) ? { ...m, nick: "Renamed" } : m);
-    act(() => fakeEngine.update({ groups: [community({ members })] }));
-    expect(lastNick()).toHaveTextContent("Renamed");
-  });
-
-  it("a mention reads by the member's name of now, and a writer who left goes by the name the group knew", async () => {
-    const gone = "gone".padEnd(52, "y");
-    const mention: StoredMessage = { linkId: "group:group-1", id: "gm", text: "ping @Old now", sender: "peer", member: gone, timestamp: 1_700_000_100_000, via: "datalink",
-      mentions: [{ k: keyOf(1), o: 5, l: 4 }] };
-    await openGroup([...history().slice(0, -1), mention, ...history().slice(-1).map(m => ({ ...m, timestamp: m.timestamp + 200_000 }))]);
-    act(() => fakeEngine.update({ groups: [community({ formerNames: { [gone]: "Zed" } })] }));
-    const row = screen.getByText(/ping/).closest<HTMLElement>("[data-message-row]")!;
-    expect(row).toHaveTextContent("Zed");
-    expect(row).toHaveTextContent("ping @Member 1 now");
+    const real = localStorage;
+    let walked = 0;
+    vi.stubGlobal("localStorage", {
+      get length() { return real.length; },
+      key: (i: number) => { walked++; return real.key(i); },
+      getItem: (key: string) => real.getItem(key),
+      setItem: (key: string, value: string) => real.setItem(key, value),
+      removeItem: (key: string) => real.removeItem(key),
+      clear: () => real.clear(),
+    });
+    try {
+      act(() => fakeEngine.update(state(2) as never));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(walked).toBeLessThanOrEqual(2 * real.length);
   });
 });

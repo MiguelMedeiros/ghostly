@@ -70,8 +70,8 @@ const CAPTIONS = new Set(["text", "sbtl", "subt", "clcp"]);
 /** The handlers whose sample descriptions are a visual one's, a compressor's name in each. */
 const VISUAL = new Set(["vide", "auxv", "pict"]);
 
-/** Zeros put in a Blob a part at a time. */
-const ZEROS = new Uint8Array(1024 * 1024);
+/** Zeros put in a Blob a slice at a time: a Blob's Blob parts are not copied, so a zeroed range of any size holds no more. */
+const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
 
 const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
@@ -443,7 +443,7 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   for (const patch of patches) {
     if (patch.start > at) parts.push(source.slice(at, patch.start));
     if (patch.bytes) parts.push(patch.bytes as BlobPart);
-    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.length) parts.push(ZEROS.subarray(0, Math.min(left, ZEROS.length)) as BlobPart);
+    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.size) parts.push(ZEROS.slice(0, Math.min(left, ZEROS.size)));
     at = patch.end;
   }
   if (at < source.size) parts.push(source.slice(at));

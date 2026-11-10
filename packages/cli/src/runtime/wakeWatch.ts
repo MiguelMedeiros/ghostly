@@ -17,7 +17,7 @@ export const WAKE_LATE_MS = 30_000;
  * A wake republishes every chat with nothing published in the last seconds (on the CLI the DHT copy goes whatever the
  * relays' budgets say: 200 chats are 200 DHT puts and a ~76 ms turn). A network that flaps (Wi-Fi at the edge of range,
  * a VPN in a reconnect loop) changed the addresses every tick and woke the engine every 10 s for nothing new. A network
- * wake within this long of the previous wake is held and runs once when the gap is over, the latest change included; each
+ * wake within this long of the previous network wake is held and runs once when the gap is over, the latest change included; each
  * held one run doubles the gap, up to `WAKE_GAP_MAX_MS`, and a whole gap with no change brings it back. A network change
  * after a quiet spell, and a sleep, still wake at once.
  */
@@ -51,6 +51,8 @@ export interface WakeWatchOptions {
   tickMs?: number;
   lateMs?: number;
   now?: () => number;
+  /** Measures the gap between wakes: a device clock set back or ahead does not move it. */
+  monotonic?: () => number;
   addresses?: () => string;
 }
 
@@ -58,7 +60,9 @@ export interface WakeWatchOptions {
 export function watchWake(onWake: (why: "sleep" | "network") => void, options: WakeWatchOptions = {}): () => void {
   const tickMs = options.tickMs ?? WAKE_TICK_MS;
   const lateMs = options.lateMs ?? WAKE_LATE_MS;
+  // The sleep check reads the wall clock (a monotonic one pauses in sleep on macOS); the gap reads the monotonic one.
   const now = options.now ?? Date.now;
+  const monotonic = options.monotonic ?? (() => performance.now());
   const addresses = options.addresses ?? (() => addressesKey());
   let last = now();
   let key = safe(addresses);
@@ -67,7 +71,8 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
   /** A network change seen within the gap, not woken for yet. */
   let held = false;
   const wake = (why: "sleep" | "network", at: number) => {
-    wokeAt = at;
+    // Only a network wake starts the gap: back from sleep, Wi-Fi often rejoins a tick or two after the sleep wake.
+    if (why === "network") wokeAt = at;
     held = false;
     try { onWake(why); } catch { /* the engine's own wake logs its trouble */ }
   };
@@ -80,17 +85,18 @@ export function watchWake(onWake: (why: "sleep" | "network") => void, options: W
     // network coming back included (relays left alone while it was gone are asked again).
     const moved = next !== "" && next !== key;
     key = next;
-    if (slept) return wake("sleep", at);
-    const due = at - wokeAt >= gap;
+    const mono = monotonic();
+    if (slept) return wake("sleep", mono);
+    const due = mono - wokeAt >= gap;
     if (!due) { held ||= moved; return; }
     if (held) {
       // The network kept changing through the whole gap: wake for the latest, and wait longer before the next one.
       gap = Math.min(gap * 2, WAKE_GAP_MAX_MS);
-      return wake("network", at);
+      return wake("network", mono);
     }
     // A whole gap since the last wake with no change: the network settled.
     gap = WAKE_GAP_MS;
-    if (moved) wake("network", at);
+    if (moved) wake("network", mono);
   }, tickMs);
   timer.unref?.();
   return () => clearInterval(timer);

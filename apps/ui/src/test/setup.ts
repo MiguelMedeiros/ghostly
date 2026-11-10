@@ -5,6 +5,7 @@ import { resetGifSearch } from "../lib/gifSearch";
 import { resetUnseenSats } from "../hooks/useUnseenSats";
 import { forgetPictures } from "../lib/pictureReads";
 import { forgetVoicePlayed } from "../lib/voicePlayback";
+import { forgetKeptEdits } from "../lib/keptEdits";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 import type { Language } from "../lib/settings";
 import { loadLocale } from "../locales";
@@ -53,6 +54,8 @@ beforeEach(() => {
   forgetPictures();
   // And the voice messages it played, read once from the storage just cleared.
   forgetVoicePlayed();
+  // And the edits left open in a chat's composer (lib/keptEdits.ts), kept for the app session.
+  forgetKeptEdits();
   delete document.documentElement.dataset.reduceMotion;
   document.documentElement.removeAttribute("lang");
   document.documentElement.removeAttribute("dir");

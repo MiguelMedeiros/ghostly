@@ -8,6 +8,7 @@ import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
+import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
@@ -49,11 +50,13 @@ import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
-import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
+import { preferredDevice } from "../lib/mediaDevices";
+import { CallMediaProblem } from "../components/CallMediaProblem";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -105,6 +108,7 @@ import { useHandler } from "../hooks/useHandler";
 import { useEngineValue } from "../lib/engineState";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
+import { PeerPresenceLine } from "../components/PresenceMarks";
 import { TransportLine } from "../components/TransportTimeline";
 import { timelineMerger, type TimelineRow } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
@@ -130,6 +134,7 @@ import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
@@ -137,15 +142,6 @@ import { problemText, type Problem, problemLine } from "../lib/problemText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
-
-/** Why a call did not start or could not use the microphone or camera (`useWebRTC`'s `mediaProblem`): its title and next step. */
-const MEDIA_PROBLEM_TEXT = {
-  denied: ["calls.mediaDenied", "calls.mediaDeniedNext"],
-  unavailable: ["calls.mediaUnavailable", "calls.mediaUnavailableNext"],
-  relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
-  relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
-  relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
-} as const;
 
 /** The lines a call ends with that are said as it ends (`callEndSaid`); "no answer" has its own notice. */
 const CALL_END_LINES: ReadonlySet<CallEventType> = new Set(["call_ended", "call_missed", "call_cancelled", "call_rejected", "call_failed"]);
@@ -380,8 +376,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const compat = !!session && !paired;
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
-  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
+  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot. With Hide my IP on,
+  // media that cannot keep to the relay makes no call at all, live or not: that first.
+  const callsBlocked = webrtc.relayOnlyCallsOff ? t("calls.relayOnlyOff")
+    : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
@@ -482,8 +480,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       const card = lightningCard ? onNetwork.forLightning(lightningCard) : onNetwork;
       try {
         const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
-        const sats = network === "testnet" ? "test sats" : "sats";
-        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
+        // The engine's English line (payments.ts), its digits too: the bubble reads it back in the app's language.
+        const sats = `${amount.toLocaleString("en-US")} ${network === "testnet" ? "test sats" : "sats"}`;
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${sats}` : `⚡ Requested ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         return null;
       } catch (e) {
@@ -572,10 +571,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   /**
    * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
    * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   * Kept while this page is away (the Share to… picker, another chat: lib/keptEdits.ts), so it is open again on return,
+   * also before the chat's messages are read again (none yet): it is looked for in them once they are.
    */
-  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
-  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
-  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
+  const [chosenEdit, setEditing] = useKeptEdit<ChatMessage>(sessionId);
+  const editing = chosenEdit && (!messages.length || heldOriginal(chosenEdit, quoteIndex)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
@@ -648,7 +649,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCodeCopied(false);
     setMenuOpen(false);
     setReplyingTo(null);
-    setEditing(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
@@ -685,27 +685,37 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
   }, [sceneOn, messages.length, pairingSceneId]);
 
-  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
+  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown),
+  // nor one under the lock screen: the app stays mounted there (LockGate), and only the lock screen is seen. Unlocked
+  // with the chat in front, it is read then.
   const pageShown = usePageShown();
+  // (Under the lock a ringing call would only hold the keys here too: the lock screen shows the call instead.)
+  const locked = useIsLocked();
+  const seen = visible && pageShown && !locked;
   useEffect(() => {
-    seenRef.current = visible && pageShown;
-    if (!visible || !pageShown) return;
+    seenRef.current = seen;
+    if (!seen) return;
     markSessionAsRead(sessionId);
-  }, [visible, pageShown, sessionId, messages.length]);
+  }, [seen, sessionId, messages.length]);
   // Its notification goes once the window has the focus too: one on screen behind another app's has just been told of
   // the message (AttentionFeedback), and taking it back then would take it back before anyone saw it. The window is
   // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
   const away = useWindowAway();
+  // Under the lock they stay: nothing of the chat has been seen.
   useEffect(() => {
-    if (visible && !windowAway()) clearChatNotification(sessionId);
-  }, [visible, away, sessionId, messages.length]);
+    if (!visible || locked || windowAway()) return;
+    clearChatNotification(sessionId);
+    // The installed web app: this chat's wake-up notices too (a ringing call's stays).
+    closeWakeNotices(chatPath(sessionId));
+  }, [visible, locked, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
-  useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
+  useEffect(() => (seen ? showChatOnScreen(sessionId) : undefined), [seen, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
+  // Nor with calls off under Hide my IP: the contact would be shown "Incoming call" for a call that never starts.
   const deviceOnline = useOnline();
-  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
@@ -731,6 +741,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const lineName = useMemo(() => othersName(shownName, t), [shownName, t]);
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
   const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: lineName, contact: true }), [sessionId, lineName]);
+  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts): no
+  // name in it while the app lock is on.
+  useCallService(
+    callHoldsService(callState, webrtc.localStream) ? { name: shownName, video: !webrtc.isVideoOff && !webrtc.isScreenSharing } : null,
+    webrtc.hangUp,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash,
+  );
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
@@ -748,8 +765,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
-  // Under the lock it would only hold the keys: the lock screen shows the call instead.
-  const locked = useIsLocked();
   // A bot's usage card (WISP 405 § Usage): the meter in the header.
   const usage = useUsageOf(params?.peerPubKeyB64);
   // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
@@ -862,14 +877,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
-          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it. */}
-      {webrtc.mediaProblem && (
-        <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
-          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
-          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
-        </div>
-      )}
+          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
+          A call refused again while it shows is a new alert, said again. */}
+      {webrtc.mediaProblem && <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -899,7 +909,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
             className="relative w-10 h-10 max-md:w-9 max-md:h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
-            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" presence={paired} />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
@@ -970,6 +980,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 )}
               </button>
               </h1>
+              {/* The contact's status (WISP 401 § Presence and status), and the dot's words for a screen reader; a phone shows the emoji. */}
+              {paired && <PeerPresenceLine peerKey={params.peerPubKeyB64} testId="chat-presence" emojiOnPhone className="max-w-[40%] text-xs" />}
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}

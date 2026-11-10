@@ -140,7 +140,9 @@ macro_rules! commands {
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::call_service,
             commands::close_service_windows,
+            commands::connection_service,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -155,6 +157,7 @@ macro_rules! commands {
             commands::local_fetch,
             commands::local_service_allow,
             commands::local_service_forget,
+            commands::open_app_settings,
             commands::open_payment_link,
             commands::open_project_link,
             commands::open_pubky_passport,
@@ -379,6 +382,10 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // The DHT node, unless the last run kept to the relays (Hide my IP from contacts).
+            app.state::<AppState>()
+                .pkarr
+                .start(app.path().app_data_dir().ok());
             notifications::install(app.handle());
             #[cfg(target_os = "linux")]
             {
@@ -1160,6 +1167,7 @@ mod tests {
             "atlas".into(),
             "ybndrfg8ejkmcpqx".into(),
             "Atlas".into(),
+            None,
             None,
         )
         .unwrap();

@@ -15,9 +15,9 @@ function QuoteBody({ name, snippet, mine, member, note, italic }: { name?: strin
   // wide as it is, so a short one stays at the line's start.
   return (
     <span className={`quote-body flex min-w-0 flex-col border-s-4 ps-2 pe-1 py-1 ${mine ? "border-accent" : colour ? `border-current ${colour}` : "border-link"}`}>
-      {name && <span data-testid="reply-quote-name" data-key={colour && member} dir="auto" className={`max-w-full self-start truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
-      <span data-testid="reply-quote-snippet" dir="auto" className={`truncate text-[13px] leading-[18px] text-text-primary/70 ${italic ? "italic" : ""}`}>{snippet}</span>
-      {note && <span data-testid="reply-quote-note" className="truncate text-[11px] leading-[15px] text-text-muted">{note}</span>}
+      {name && <span data-testid="reply-quote-name" data-key={colour && member} dir="auto" className={`max-w-full self-start truncate chat-text-quote-name font-medium ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
+      <span data-testid="reply-quote-snippet" dir="auto" className={`truncate chat-text-quote text-text-primary/70 ${italic ? "italic" : ""}`}>{snippet}</span>
+      {note && <span data-testid="reply-quote-note" className="truncate chat-text-quote-note text-text-muted">{note}</span>}
     </span>
   );
 }

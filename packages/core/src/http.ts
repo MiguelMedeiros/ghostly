@@ -208,21 +208,47 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 }
 
 /**
+ * The contact's headers a viewer does not pass on: each makes the browser send something to a place it names, outside
+ * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
+ * early connections). With Hide my IP from contacts on, that place would learn this device's address. The same list
+ * as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's `DROPPED_HEADERS`.
+ */
+export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+
+/** The directives of a contact's policy that send reports to a URL it names, dropped from it (`OPENED_SERVICE_DROPPED_DIRECTIVES`). */
+export const VIEWER_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
+
+/** A contact's `Content-Security-Policy` value (one policy or several joined by commas) without its report directives. */
+function withoutReports(value: string): string {
+  return value.split(",")
+    .map((policy) => policy.split(";").filter((directive) => !VIEWER_DROPPED_DIRECTIVES.includes(directive.trim().split(/\s+/)[0].toLowerCase())).join(";").trim())
+    .filter((policy) => policy.replace(/;/g, "").trim())
+    .join(", ");
+}
+
+/**
  * A contact's response headers as a viewer serves them to the page (the extension's viewer tab, Desktop's viewer
- * window). The contact's app decides them, and the wire checks only that they are strings, so a header whose name
+ * window, the web app's view).
+ * The contact's app decides them, and the wire checks only that they are strings, so a header whose name
  * is not a token or whose value carries CR, LF or NUL is dropped: it could otherwise add headers of its own. Each
  * `Set-Cookie` stays on the exact origin it came from (no `Domain=`), and one holding several cookies on separate
- * lines becomes one header per cookie.
+ * lines becomes one header per cookie. No header or policy directive that sends a report or an early request elsewhere
+ * (`VIEWER_DROPPED_HEADERS`, `VIEWER_DROPPED_DIRECTIVES`); a policy left empty goes.
  */
 export function viewerResponseHeaders(headers: HeaderList): HeaderList {
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     if (typeof name !== "string" || typeof value !== "string" || !HEADER_NAME.test(name)) continue;
-    if (name.toLowerCase() === "set-cookie") {
+    const lower = name.toLowerCase();
+    if (VIEWER_DROPPED_HEADERS.includes(lower)) continue;
+    if (lower === "set-cookie") {
       for (const cookie of value.split(/\r?\n/)) {
         const scoped = cookie.replace(/;\s*domain\s*=[^;]*/gi, "");
         if (scoped.trim() && isCleanHeaderValue(scoped)) out.push([name, scoped]);
       }
+    } else if (lower === "content-security-policy") {
+      const policy = withoutReports(value);
+      if (policy && isCleanHeaderValue(policy)) out.push([name, policy]);
     } else if (isCleanHeaderValue(value)) {
       out.push([name, value]);
     }
@@ -240,17 +266,30 @@ export function viewerResponseHeaders(headers: HeaderList): HeaderList {
 export const VIEWER_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
 /**
+ * The policy while Hide my IP from contacts is on (`relayOnly`, WISP 100 § Relay only): `VIEWER_SERVICE_CSP` without
+ * `https:`, so the app loads nothing but its own origin (and inline, data: and blob: content). A picture, script or
+ * frame from a server the contact names would show that server this device's address. The same value as Desktop's
+ * `SERVICE_CSP_RELAY_ONLY` and `OPENED_SERVICE_CSP_RELAY_ONLY`.
+ */
+export const VIEWER_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/** Ghostly's policy for a contact's app, by whether Hide my IP from contacts is on. */
+export function viewerServicePolicy(relayOnly: boolean): string {
+  return relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP;
+}
+
+/**
  * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
  * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
  */
-export function withViewerPolicy(headers: HeaderList): HeaderList {
+export function withViewerPolicy(headers: HeaderList, relayOnly = false): HeaderList {
   const policies: string[] = [];
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     if (name.toLowerCase() === "content-security-policy") policies.push(value);
     else out.push([name, value]);
   }
-  out.push(["content-security-policy", [...policies, VIEWER_SERVICE_CSP].join(", ")]);
+  out.push(["content-security-policy", [...policies, viewerServicePolicy(relayOnly)].join(", ")]);
   return out;
 }
 

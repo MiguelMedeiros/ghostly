@@ -76,6 +76,13 @@ export interface BrowserHost {
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /**
+   * Runs `task` (the share's `addService`, right after `requestLocalAccess` said yes) while no `forgetLocalAccess` or
+   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back. Resolves false without running
+   * it when the access went back between the two: ask again. Left out where nothing gives access back under a share
+   * (Desktop keeps one list per profile, in Rust).
+   */
+  withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
+  /**
    * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
    * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.
    */
@@ -90,8 +97,12 @@ export interface BrowserHost {
    * access no profile on this device still needs. The extension's host permissions are every profile's at once.
    */
   releaseUnusedLocalAccess?(): Promise<void>;
-  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
-  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
+  /**
+   * `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own.
+   * `relayOnly`: Hide my IP from contacts is on, and the app loads nothing but its own origin while open
+   * (`viewerServicePolicy`): a picture or script from a server the contact names would show it this device's address.
+   */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string, relayOnly: boolean): Promise<void>;
   /**
    * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
    * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own

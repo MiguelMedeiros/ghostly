@@ -819,8 +819,9 @@ describe("texts written behind one no relay took", () => {
     const attempts = send.mock.calls.length;
     reads.rows = reads.whole = 0;
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(20);
-    expect(reads.whole / 2, "whole-chat reads per idle minute").toBeLessThanOrEqual(2);
+    // About one look a minute, at the waiting rows by id: never the chat's whole history, however long it is.
+    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(rows.length + 20);
+    expect(reads.whole, "whole-chat reads while idle").toBe(0);
     // Only the first is published again, at its own checks.
     expect(send.mock.calls.slice(attempts).every(([m]) => m.text === "m0")).toBe(true);
     relays.taken = true;

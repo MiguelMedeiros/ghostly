@@ -29,7 +29,7 @@ afterAll(() => {
 type IceServers = { urls: string; username?: string; credential?: string }[];
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -37,8 +37,8 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
     return side;
   };
   const a = make("chat-ab"), b = make("chat-ba");
-  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = []): CallEngine => ({
-    getState: () => ({ links: [me.link], settings: { iceServers } }) as unknown as EngineState,
+  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = [], relayOnly = false): CallEngine => ({
+    getState: () => ({ links: [me.link], settings: { iceServers, ...(relayOnly ? { relayOnly } : {}) } }) as unknown as EngineState,
     setCallSignal: async ({ signal }) => {
       me.signals.push(signal);
       // The chat session carries it to the contact, a moment later, and the contact's engine says when it heard it.
@@ -46,7 +46,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
     },
   });
   a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
-  b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
+  b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
 }
 
@@ -505,6 +505,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     stack.deaf(false);
   });
 
+  // The watch's timer runs before the packets that came meanwhile are read: after a stall of the daemon's own (a loop
+  // held by other work, the process stopped or swapped out), the contact read as silent for as long, while it was not.
+  it("a stall of the daemon's own is not read as the contact's silence: the call stays on", async () => {
+    const { a, b } = pairOfManagers({ stall: { afterMs: 800, endMs: 3000 } });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const placed = await a.calls.start("chat-ab", {}) as { audio: { socket: string } };
+    const alice = await program(placed.audio.socket);
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // The loop held past the watch's end: the contact's packets wait in the connection meanwhile.
+    const held = performance.now() + 3500;
+    while (performance.now() < held) { /* held */ }
+    await new Promise((r) => setTimeout(r, 1500));
+
+    expect(a.events.filter((e) => e.type === "call.stalled" || e.type === "call.ended")).toEqual([]);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: false });
+    await a.calls.hangup("chat-ab");
+    await alice.ended;
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+  });
+
   // Its codecs' delete throwing (a broken Opus module: "memory access out of bounds") went up through the media's close
   // and stopped the call's end there: no hang-up to the contact, no call.ended, the connection left open.
   it("a call whose codecs throw as it ends still ends: the contact is told, call.ended goes out, the connection closes", async () => {
@@ -759,6 +781,27 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await until(() => counted.open() === 0);
       await a.calls.stopAll();
       await b.calls.stopAll();
+    });
+  });
+
+  // Hide my IP from contacts: libdatachannel's relay policy still checks from this machine's own sockets (a local lab
+  // connected two relay-only calls on a direct pair), so the CLI makes no call while it is on, not even one ahead.
+  it("with Hide my IP from contacts on, places no call and answers none, and makes no connection while one rings", async () => {
+    await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+      const counted = countingStack();
+      const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300, callPaceMs: 0, relayOnlyB: true });
+      const off = { code: "unavailable", message: expect.stringContaining("Hide my IP from contacts") };
+      await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject(off);
+      expect(b.signals, "nothing went to the contact").toEqual([]);
+
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"));
+      await new Promise((r) => setTimeout(r, 1000));
+      await expect(b.calls.answer(undefined, {})).rejects.toMatchObject(off);
+      expect(counted.made(), "no connection was made, ahead or to answer").toBe(0);
+      expect(b.signals.filter((s) => s && JSON.parse(s).t === "a"), "no answer went out").toEqual([]);
+      await a.calls.hangup(undefined);
+      await until(() => b.events.find((e) => e.type === "call.ended"));
     });
   });
 

@@ -27,19 +27,34 @@ afterAll(() => {
 const T0 = Date.now() - 10 * 86_400_000;
 const row = (linkId: string, i: number): StoredMessage => ({ linkId, id: `peer_${i}`, text: `message ${i}`, sender: "peer", timestamp: T0 + i * 1000, via: "datalink" });
 
-/** A process's life with the profile: the engine and the store are new each time, as after a restart. */
-async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: { db: typeof import("@ghostly/browser/engine/db").db; wholeReads: (chat: string) => number; reported: () => string[] }) => Promise<T>): Promise<T> {
+interface Tools {
+  db: typeof import("@ghostly/browser/engine/db").db;
+  wholeReads: (chat: string) => number;
+  /** The newest pages the host read itself (`messagePage`). */
+  pageReads: (chat: string) => number;
+  reported: () => string[];
+}
+
+/**
+ * A process's life with the profile: the engine and the store are new each time, as after a restart. `reread`: the
+ * host reads each newest page itself, as it did before the engine handed it the rows its start read.
+ */
+async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: Tools) => Promise<T>, reread = false): Promise<T> {
   vi.resetModules();
   const { GhostlyNode } = await import("@ghostly/browser/engine/node");
   const whole = vi.spyOn(GhostlyNode.prototype, "getMessages");
+  const page = vi.spyOn(GhostlyNode.prototype, "messagePage");
+  const { EngineServer } = await import("@ghostly/browser/engine/server");
+  const handed = reread ? vi.spyOn(EngineServer.prototype, "takeStartNewest").mockReturnValue(new Map()) : null;
   const { openHost } = await import("../src/host");
   const { db } = await import("@ghostly/browser/engine/db");
   const host = await openHost(paths, "one-shot", "test");
   // Every message event the profile ever reported, this start's included.
   const reported = () => host.ctx.hub.replay(0).filter((event) => event.type.startsWith("message.")).map((event) => event.id);
+  const calls = (spy: typeof whole | typeof page, chat: string) => spy.mock.calls.filter(([id]) => (typeof id === "string" ? id : id.linkId) === chat).length;
   try {
-    return await work(host, { db, wholeReads: (chat) => whole.mock.calls.filter(([id]) => id === chat).length, reported });
-  } finally { await host.close(); whole.mockRestore(); }
+    return await work(host, { db, wholeReads: (chat) => calls(whole, chat), pageReads: (chat) => calls(page, chat), reported });
+  } finally { await host.close(); whole.mockRestore(); page.mockRestore(); handed?.mockRestore(); }
 }
 
 describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
@@ -81,5 +96,57 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
       expect(reported()).toHaveLength(LONG + 1);
       expect(reported().at(-1)).toBe(`message.received:${chat}:peer_0`);
     });
+  });
+
+  it("its newest messages from what the engine's start read: no page read again, the same events as reading it", async () => {
+    const home = join(root, "handed");
+    const paths = profilePaths(home, "base");
+    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+    const { callApi } = await import("../src/api");
+    const member = (linkId: string, i: number): StoredMessage => ({ ...row(linkId, i), id: `member_${i}`, member: "ab".repeat(32) });
+
+    // A chat and a community, each with a long history, then a start that reports all of it and closes in step.
+    const { chat, group } = await run(paths, async (host, { db }) => {
+      const { chat } = (await callApi(host.ctx, "invite.create", { label: "long" })) as { chat: string };
+      const group = `group:${((await callApi(host.ctx, "group.create", { name: "long" })) as { group: string }).group}`;
+      for (let i = 1; i <= LONG; i++) { await db.putMessage(row(chat, i)); await db.putMessage(member(group, i)); }
+      return { chat, group };
+    });
+    await run(paths, async (host, { reported }) => {
+      expect(reported()).toHaveLength(LONG);
+      expect(host.ctx.hub.replay(0).filter((event) => event.type === "group.message")).toHaveLength(LONG);
+    });
+
+    // Each case on a copy of the profile as closed, started twice: as now, and reading the newest pages itself.
+    const cases: [string, (db: Tools["db"]) => Promise<void>, number][] = [
+      ["closed in step", async () => {}, 0],
+      ["a message no start reported, among the newest", async (db) => { await db.putMessage(row(chat, LONG + 1)); await db.putMessage(member(group, LONG + 1)); }, 1],
+      ["a message no start reported, past the newest 100", async (db) => { await db.putMessage(row(chat, -1)); await db.putMessage(member(group, -1)); }, 0],
+    ];
+    for (const [name, change, whole] of cases) {
+      await run(paths, async (_host, { db }) => {
+        await change(db);
+        // The rows' transactions end a turn after their requests answer.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      const starts: { events: string; pages: number[]; wholes: number }[] = [];
+      for (const reread of [false, true]) {
+        const copy = profilePaths(home, `${name.replaceAll(/\W+/g, "-")}-${reread ? "reread" : "handed"}`);
+        mkdirSync(copy.dir, { recursive: true, mode: 0o700 });
+        cpSync(paths.db, copy.db, { recursive: true });
+        cpSync(paths.events, copy.events);
+        starts.push(await run(copy, async (host, { pageReads, wholeReads }) => ({
+          // When each event was made is this start's clock.
+          events: host.ctx.hub.replay(0).map(({ at: _at, ...event }) => JSON.stringify(event)).join("\n"),
+          pages: [pageReads(chat), pageReads(group)],
+          wholes: wholeReads(chat),
+        }), reread));
+      }
+      const [handed, reread] = starts;
+      expect(handed!.pages, name).toEqual([0, 0]);
+      expect(reread!.pages, name).toEqual([1, 1]);
+      expect([handed!.wholes, reread!.wholes], name).toEqual([whole, whole]);
+      expect(handed!.events, name).toBe(reread!.events);
+    }
   });
 });

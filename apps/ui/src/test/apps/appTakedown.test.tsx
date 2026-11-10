@@ -68,8 +68,8 @@ afterEach(() => {
   document.querySelectorAll("[data-place=alone]").forEach((node) => node.remove());
 });
 
-function chatPanel() {
-  windowIs(false);
+function chatPanel(phone = false) {
+  windowIs(phone);
   const view = renderApp(<div className="chat-pane"><div className="chat-column"><textarea aria-label="Message" /></div>
     <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" /></div>);
   act(() => fakeEngine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1" })] }));
@@ -363,5 +363,45 @@ describe("an app stopped for taking the keyboard", () => {
     for (const line of lines) expect(line).toContain("Chess");
     expect(new Set(lines).size).toBe(lines.length);
     expect(lines).toContain(FOCUS);
+  });
+});
+
+// The focus was in the app's frame, gone with it: it stays in the panel, as it does in the layer of an app alone, so
+// the stopped message and Open again are reached by keyboard and Escape still closes.
+describe("an app in a chat that stops while the focus is in it", () => {
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); setAppOpener(open); });
+  afterEach(() => { setAppOpener(null); });
+
+  for (const phone of [false, true]) {
+    const where = phone ? "on a phone" : "beside the chat";
+    for (const reason of ["unresponsive", "protocol", "navigated", "revoked"]) {
+      it(`${where}, ${reason}: the focus goes into the panel, and Escape closes it`, async () => {
+        const { user } = chatPanel(phone);
+        await act(() => open(REF, "link-1"));
+        const app = screen.getByTestId("mini-app");
+        act(() => started[0]!.frame.focus());
+        expect(document.activeElement).toBe(started[0]!.frame);
+        if (reason === "revoked") await checked({ status: "revoked" });
+        else act(() => started[0]!.stop(reason));
+        expect(within(app).getByTestId("mini-app-stopped")).toBeVisible();
+        expect(app.contains(document.activeElement)).toBe(true);
+        // Open again when the watchdog stopped it, else Back on a phone, else the panel.
+        expect(document.activeElement).toBe(reason === "unresponsive" ? within(app).getByRole("button", { name: "Open again" })
+          : phone ? within(app).getByTestId("mini-app-back") : app);
+        await user.keyboard("{Escape}");
+        expect(app).not.toBeVisible();
+        expect(chatApp("link-1")).toBeUndefined();
+      });
+    }
+  }
+
+  it("never taken from where the person went meanwhile", async () => {
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    const field = screen.getByRole("textbox", { name: "Message" });
+    act(() => field.focus());
+    act(() => started[0]!.stop("unresponsive"));
+    expect(screen.getByTestId("mini-app-stopped")).toBeVisible();
+    expect(document.activeElement).toBe(field);
   });
 });

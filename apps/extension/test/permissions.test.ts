@@ -91,7 +91,7 @@ describe("the host the app page runs on", () => {
   it("says what went wrong when the worker refuses a payment link or a service", async () => {
     const { extensionHost } = await load();
     await expect(extensionHost.openPaymentLink!("https://evil.example")).rejects.toThrow("Not a payment link");
-    await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx")).rejects.toThrow("Invalid service");
+    await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx", false)).rejects.toThrow("Invalid service");
     await extensionHost.openPaymentLink!("lightning:lnbc1");
     expect(world.callsTo("tabs.create")).toEqual([["lightning:lnbc1"]]);
   });
@@ -102,7 +102,7 @@ describe("the host the app page runs on", () => {
     const { loadLocale } = await import("../../ui/src/locales");
     saveSettings({ ...loadSettings(), language: "ar" });
     await loadLocale("ar");
-    await extensionHost.openService!(PEER, SERVICE, TAG);
+    await extensionHost.openService!(PEER, SERVICE, TAG, false);
     const [tabId] = [...world.tabs.keys()];
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({
       page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed },
@@ -113,9 +113,16 @@ describe("the host the app page runs on", () => {
     const { extensionHost } = await load();
     const { engine } = await world.load("page", () => import("@ghostly/browser/platform/engine"));
     vi.spyOn(engine, "linkByPeer").mockReturnValue({ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "Atlas" }] } as unknown as ReturnType<typeof engine.linkByPeer>);
-    await extensionHost.openService!(PEER, SERVICE, TAG);
+    await extensionHost.openService!(PEER, SERVICE, TAG, false);
     const [tabId] = [...world.tabs.keys()];
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ page: { app: "Atlas" } });
+  });
+
+  it("tells the worker Hide my IP from contacts is on, which opens no tab and says why", async () => {
+    // covers: settings.network.relay-only
+    const { extensionHost } = await load();
+    await expect(extensionHost.openService!(PEER, SERVICE, TAG, true)).rejects.toThrow("A contact's app does not open in the browser extension while Hide my IP from contacts is on");
+    expect(world.tabs.size).toBe(0);
   });
 
   it("reports the manifest's version", async () => {

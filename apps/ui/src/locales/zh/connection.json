@@ -125,8 +125,7 @@
   "ms": "{{ms}} 毫秒",
   "option": {
     "automatic": "自动",
-    "automaticHint": "由应用选择，优先 WebRTC",
-    "automaticHintNative": "由应用选择，优先 {{transport}}：此应用没有 WebRTC",
+    "automaticFirst": "由应用选择，优先 {{transport}}",
     "chosenNotInUse": "已选择 · 未使用",
     "chosenWaiting": "已选择 · 等待中",
     "contactLacks": "你联系人的应用不支持 {{transport}}",
@@ -139,6 +138,8 @@
     "inUse": "使用中",
     "needsDesktop": "{{transport}} 需要 Ghostly Desktop",
     "noWebrtc": "此应用没有 WebRTC",
+    "relayOnlyHyperdht": "隐藏 IP 开启时，HyperDHT 需要 HyperDHT 中继 · 设置，网络",
+    "relayOnlyOff": "隐藏 IP 开启时已关闭 · 设置，网络",
     "relayUnreached": "{{transport}} 无法连接其中继 · 设置，网络",
     "throughRelay": "经中继 · 无法直连时使用",
     "waiting": "等待中"
@@ -213,6 +214,7 @@
     "automatic": "自动：双方应用都优先 {{transport}}。",
     "automaticNoWebrtc": "自动：应用使用双方都有的 {{transport}}；其中一方没有 WebRTC。",
     "automaticWebrtc": "自动：双方应用都优先 WebRTC，而且首次配对总是使用 WebRTC。",
+    "automaticWebrtcIroh": "自动：应用优先使用几乎立即恢复的 Iroh，连接后再切换到更快的 WebRTC。",
     "contactChose": "{{contact}} 为此聊天选择了 {{transport}}。",
     "contactChoseUnnamed": "你的联系人为此聊天选择了 {{transport}}。",
     "fallback": "你为此聊天选择了 {{preferred}}，但它现在不可用，因此聊天使用 {{transport}}。",

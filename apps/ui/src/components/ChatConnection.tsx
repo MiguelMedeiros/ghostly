@@ -93,9 +93,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   callOn?: boolean;
 }) {
   // What it shows of the engine's state, compared by content: the whole state drew the chat's header on every change.
-  const { link, ghostlyOnline, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
+  const { link, ghostlyOnline, relayOnly, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
     link: paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
     ghostlyOnline: state?.settings.online ?? true,
+    relayOnly: state?.settings.relayOnly === true,
     directBlocked: state?.transport?.directBlocked,
     clockOffMs: state?.transport?.clockOffMs,
     discovery: state?.transport?.discovery,
@@ -176,6 +177,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     return () => window.clearTimeout(timer);
   }, [quietUntil]);
   const justClosed = Date.now() < quietUntil;
+  // Hide my IP on, and no transport this app can run (the Linux Desktop with no HyperDHT relay: no WebRTC, its own Iroh
+  // and HyperDHT left out for contacts): nothing goes live until that changes. On the DHT plainly, no Reconnect, and why.
+  const liveOff = paired && relayOnly && link?.runnableTransports?.length === 0;
   // While the scene is on, the icon tells the same pairing, whatever carries texts meanwhile (the DHT, from the moment the
   // contact is pinned): the two never disagree. Only a failure says more (the relays, the connection). Once the scene
   // has given the chat back, the connection speaks for itself.
@@ -183,7 +187,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "publication" : "discovery")
     : pairingOn || pairingFailed ? "pairing"
     : dht ? "dhtByYou" : (textDht || holding) && link?.dhtDelivery?.peerMode === "dht" ? "dhtByContact" : holding ? (justClosed ? "heldPlain" : "held")
-    : waitOff && pair?.transitionTarget ? "switching" : waitOff ? (textDht ? "dhtWaiting" : "waiting") : textDht ? (justClosed ? "dhtPlain" : "onDht")
+    : waitOff && pair?.transitionTarget ? "switching" : waitOff ? (textDht ? "dhtWaiting" : "waiting") : textDht ? (justClosed || liveOff ? "dhtPlain" : "onDht")
     : pair?.transitionTarget ? "switching" : ready ? "connected" : pair?.status === "confirm" ? "confirm"
     : stage === "on-dht" ? "onDht" : awaitingJoin ? "noContact"
     : !link?.peerOnline && link?.dataLink === "idle" ? "waitingContact" : "connecting";
@@ -295,6 +299,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
         <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
+      {liveOff && <p data-testid="connection-live-off" className="mt-1 px-1">{t("connection.option.relayOnlyHyperdht")}</p>}
       {progress && (pairingOn || pairingFailed || onDhtWhy) && <div data-testid="connection-pairing" data-stage={stage} className="mt-1 space-y-0.5 px-1">
         {step > 0 && <p data-testid="connection-pairing-step">{t("pairing.stepOf", { n: step, total: steps.length })}{progress.attempt > 1 && ` · ${t("pairing.attempt", { n: progress.attempt })}`}</p>}
         {slow && <p className="text-text-secondary">{slow}</p>}
@@ -308,7 +313,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
-        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined}
+        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}
@@ -318,8 +323,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       <div className="mt-1 border-t border-border pt-1">
         {/* Its own row: beside Details it took a column down the whole open Details, and host names broke mid-word.
             Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
-            Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet. */}
-        {!dht && link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
+            Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet.
+            Nor with no transport this app can run: no dial can connect. */}
+        {!dht && link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
           ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
           onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</button>}
         <details className="text-[11px]" data-testid="connection-details">

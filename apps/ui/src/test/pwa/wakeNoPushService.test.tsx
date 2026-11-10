@@ -80,7 +80,7 @@ describe("a browser with no push service", () => {
     const { user } = settings();
     await user.click(await screen.findByTestId("settings-wake-retry"));
     await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("settings-wake-retry")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("settings-wake-retry")).not.toHaveAttribute("aria-busy"));
     expect(hint()).toHaveTextContent("This browser has no push service");
     expect(wakeSwitch()).toHaveAttribute("aria-disabled", "true");
     expect(localStorage.getItem(NO_PUSH_SERVICE_KEY)).toBe("1");
@@ -160,7 +160,7 @@ describe("New token refused", () => {
     const { user } = settings();
     await user.click(await screen.findByTestId("settings-wake-rotate"));
     await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("settings-wake-rotate")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("settings-wake-rotate")).not.toHaveAttribute("aria-busy"));
     expect(hint()).toHaveTextContent("This browser has no push service");
     expect(wakeSwitch()).toHaveAttribute("aria-checked", "true");
     expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);

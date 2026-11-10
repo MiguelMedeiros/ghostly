@@ -22,12 +22,12 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
 
 /**
  * What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. A
- * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too.
+ * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too, or one waiting for its members' updates.
  */
 export function invitationStatus(group: Pick<GroupView, "invitation" | "profile">, t: Translate): string {
   const invitation = group.invitation!;
   return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
-    : invitation.stage === "full" ? t("group.join.full") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitation.stage === "full" ? t("group.join.full") : invitation.stage === "blocked" ? t("group.join.blocked") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
     : invitationLine(invitation, t);
 }
 

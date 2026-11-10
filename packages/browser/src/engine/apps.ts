@@ -1,6 +1,6 @@
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRefPublisher, appRevocationFor, appStoreDecision,
-  addedAppPermissions, appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
+  addedAppPermissions, appUpdateDecision, canonicalJson, canonicalJsonBytes, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation, readAppRevocationShape,
   pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
@@ -96,6 +96,17 @@ const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes
 const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
+
+/** A bundle's signature statement: `{alg, key, sig}` with its 52-character key and 86-character signature, canonical. */
+const STATEMENT_BYTES = canonicalJsonBytes({ alg: "ed25519", key: "y".repeat(52), sig: "A".repeat(86) }).length;
+
+/**
+ * The length of the whole bundle of a manifest (core's `assembleAppBundle` layout: magic, u32, the canonical manifest,
+ * u32, the statement, the files): what its stored file holds once written. A shorter or longer one is not that bundle.
+ */
+function bundleLength(manifest: AppManifest): number {
+  return utf8Encode(APP_BUNDLE_MAGIC).length + 8 + canonicalJsonBytes(manifest).length + STATEMENT_BYTES + manifest.files.reduce((sum, f) => sum + f.size, 0);
+}
 
 /** One installed app, by reference (`STORES.apps`). */
 export interface InstalledApp {
@@ -322,7 +333,10 @@ export interface AppsHost {
    * build carries none, and no built-in app is offered.
    */
   readBuiltIn?(app: BuiltInApp): Promise<Uint8Array>;
-  /** After every update check (the scheduled one included): the pages read the installed apps again. */
+  /**
+   * After every update check (the scheduled one included), and once an app's damaged files were dropped (it needs its
+   * files now): the pages read the installed apps again.
+   */
   checked?(results: AppCheckResult[]): void;
 }
 
@@ -623,6 +637,16 @@ export class Apps {
   /** Reads of a bundle's URL under way: an install screen opened again waits on the read the closed one began, not on a second. */
   private readonly bundleReads = new Map<string, Promise<{ bundle: AppBundle; bytes: Uint8Array }>>();
   /**
+   * The last write of a bundle under way, by digest: a second write of the same files (Open while the update check
+   * fetches them, two Installs) waits for it and finds them stored, never removing the file the first one is filling.
+   */
+  private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
+  /**
+   * Fetches of an installed app's files under way, by `ref digest`: Open or Get its files while the update check fetches
+   * them waits for that fetch, with no download, hash or read-back of its own.
+   */
+  private readonly filesFetches = new Map<string, Promise<AppRunStatus>>();
+  /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
@@ -687,6 +711,10 @@ export class Apps {
   private stopped = false;
   /** Bundles written by this engine (`writeBundle`), by digest: one whose record is not written yet is not swept (`sweepBundles`). */
   private readonly written = new Set<string>();
+  /** Bundle writes of this engine by digest: how many started, and how many still run (a read meanwhile may see part of one). */
+  private readonly writes = new Map<string, { started: number; running: number }>();
+  /** `bundleLength` of each installed version's manifest, by digest. */
+  private readonly lengths = new Map<string, number>();
   /** The sweep of `start` while it runs: a bundle written meanwhile waits for it. */
   private sweeping: Promise<void> | null = null;
 
@@ -978,10 +1006,27 @@ export class Apps {
   /**
    * Stores a bundle's bytes. A browser that keeps no files fails here: Safari's Private Browsing (and WebKit's in-memory
    * contexts) refuses a Blob in IndexedDB with "Error preparing Blob/File data to be stored in object store". Any such
-   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind.
+   * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind. Writes of one
+   * digest run one after the other (`bundleWrites`): a file store takes a file's pieces only in order.
    */
-  private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+  private writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     this.written.add(digest);
+    const writes = this.writes.get(digest) ?? { started: 0, running: 0 };
+    this.writes.set(digest, writes);
+    writes.started++;
+    writes.running++;
+    const before = this.bundleWrites.get(digest);
+    const write = (before ? before.catch(() => {}).then(() => this.writeBundleBytes(digest, bytes)) : this.writeBundleBytes(digest, bytes))
+      .finally(() => {
+        if (--writes.running === 0 && this.writes.get(digest) === writes) this.writes.delete(digest);
+      });
+    this.bundleWrites.set(digest, write);
+    const done = () => { if (this.bundleWrites.get(digest) === write) this.bundleWrites.delete(digest); };
+    write.then(done, done);
+    return write;
+  }
+
+  private async writeBundleBytes(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     const id = bundleId(digest);
     const expected = toBase64Url(await sha256Paced(bytes));
     let files: FileBytes | undefined;
@@ -1026,15 +1071,24 @@ export class Apps {
     return out;
   }
 
-  private async hasBundle(kind: FileBytesKind, digest: string): Promise<boolean> {
+  /**
+   * Whether an installed version's files are here: a file of its whole length. One cut short (the page, the worker or
+   * the app went away while `writeBundle` appended it) or longer is not, so Open, Get its files, the update check and
+   * an install of the same version write it again. Its size only, no read: a list asks it of every app.
+   */
+  private async hasBundle(kind: FileBytesKind, digest: string, manifest: AppManifest): Promise<boolean> {
     const files = await fileBytesOf(kind);
-    return !!files && (await files.size(bundleId(digest))) !== null;
+    if (!files) return false;
+    let length = this.lengths.get(digest);
+    if (length === undefined) this.lengths.set(digest, length = bundleLength(manifest));
+    return (await files.size(bundleId(digest))) === length;
   }
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
     this.runUsed.delete(digest);
     this.icons.delete(digest);
+    this.lengths.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
 
@@ -1085,10 +1139,20 @@ export class Apps {
     const under = this.verifying.get(app.digest);
     if (under) return under;
     const reading = (async () => {
+      const writes = this.writes.get(app.digest)?.started ?? 0;
       const bytes = await this.readBundleBytes(app.bytes, app.digest);
       if (!bytes) fail("needs-files", "This app's files are not on this device yet");
       const read = await readAppBundleAsync(bytes);
-      if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
+      if (!read.ok || read.bundle.digest !== app.digest) {
+        // Not what was installed: dropped, so it needs its files (Get its files, the next Open) rather than failing at
+        // every Open until an uninstall. Its data is not touched. Never while this engine writes it, or did since the read.
+        const now = this.writes.get(app.digest);
+        if ((now?.started ?? 0) === writes && !now?.running) {
+          await this.removeBundle(app.bytes, app.digest);
+          try { this.host.checked?.([]); } catch { /* a page's listener */ }
+        }
+        fail("damaged", "This app's stored files do not match what was installed");
+      }
       this.verified.set(app.digest, read.bundle);
       this.dropUnusedBundles();
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
@@ -1638,7 +1702,7 @@ export class Apps {
         if (decision === "same" && installed) {
           // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
           // updates to that store (one by URL or card leaves the record as it is).
-          const files = await this.hasBundle(installed.bytes, digest) ? null : (wrote = await this.writeBundle(digest, bytes));
+          const files = await this.hasBundle(installed.bytes, digest, installed.manifest) ? null : (wrote = await this.writeBundle(digest, bytes));
           const pin = fromStore !== undefined && installed.store !== fromStore;
           if (files || pin) {
             const { pending, ...rest } = installed;
@@ -1776,7 +1840,7 @@ export class Apps {
 
   /** One app's part of the update check (`checkNow`); null when it is not installed any more. */
   private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<AppCheckResult | null> {
-    if (!(await this.hasBundle(listed.bytes, listed.digest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
+    if (!(await this.hasBundle(listed.bytes, listed.digest, listed.manifest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
     const first = await this.app(listed.ref);
     if (!first) return null;
     // The record as stored when this check last read or wrote it: what it writes back must still be there.
@@ -1931,8 +1995,17 @@ export class Apps {
    */
   async fetchFiles({ ref }: { ref: string }): Promise<AppRunStatus> {
     const app = await this.installedOrFail(ref);
+    const key = `${app.ref} ${app.digest}`;
+    const under = this.filesFetches.get(key);
+    if (under) return under;
+    const fetching = this.fetchFilesOf(app).finally(() => { this.filesFetches.delete(key); });
+    this.filesFetches.set(key, fetching);
+    return fetching;
+  }
+
+  private async fetchFilesOf(app: InstalledApp): Promise<AppRunStatus> {
     const stores = await this.stores();
-    if (await this.hasBundle(app.bytes, app.digest)) return this.runCheckOf(app, stores);
+    if (await this.hasBundle(app.bytes, app.digest, app.manifest)) return this.runCheckOf(app, stores);
     // The version this build carries (a restored profile's built-in app): its files are here, no source is asked.
     const carried = this.builtIn(app.ref);
     if (carried && carried.digest === app.digest) {
@@ -1972,7 +2045,7 @@ export class Apps {
   // ---------- running ----------
 
   private async runCheckOf(app: InstalledApp, stores: AddedAppStore[]): Promise<AppRunStatus> {
-    if (!(await this.hasBundle(app.bytes, app.digest))) return { status: "needs-files" };
+    if (!(await this.hasBundle(app.bytes, app.digest, app.manifest))) return { status: "needs-files" };
     return this.runStatus(app, this.storeViews(stores), app.revocations);
   }
 

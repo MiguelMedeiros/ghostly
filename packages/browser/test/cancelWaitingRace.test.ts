@@ -98,7 +98,10 @@ async function race(when: "before-mark" | "after-mark" | "handed", fire: (t: Awa
 
 for (const when of ["before-mark", "after-mark"] as const) {
   it(`Cancel sending ${when === "before-mark" ? "as the retry marks the waiting text sending" : "just after the retry marked it sending"}: the contact never gets it`, async () => {
-    const { t, first } = await race(when, (c, id) => c.node.deleteMessage({ linkId: c.linkId, messageId: id }));
+    let answer: { everyone: boolean } | undefined;
+    const { t, first } = await race(when, (c, id) => { answer = c.node.deleteMessage({ linkId: c.linkId, messageId: id }); });
+    // It says it was only forgotten here: the CLI's `message delete` answers `everyone` from it.
+    expect(answer).toEqual({ everyone: false });
     // A little longer: a send that was going to go has gone by now.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(t.got("cancel me")).toBe(false);
@@ -109,7 +112,10 @@ for (const when of ["before-mark", "after-mark"] as const) {
 }
 
 it("Cancel sending once the retry handed the text to the link: it may be out, so it is deleted for everyone", async () => {
-  const { t, first } = await race("handed", (c, id) => c.node.deleteMessage({ linkId: c.linkId, messageId: id }));
+  let answer: { everyone: boolean } | undefined;
+  const { t, first } = await race("handed", (c, id) => { answer = c.node.deleteMessage({ linkId: c.linkId, messageId: id }); });
+  // It says so, where it said nothing and the CLI answered `everyone: false`, "the contact keeps theirs".
+  expect(answer).toEqual({ everyone: true });
   // The relay took it: the contact has it. Its removal is on its way (WISP 400: said once the chat is live, as any
   // Delete for everyone's), where it used to be gone here with nothing left to take it back.
   expect(t.got("cancel me")).toBe(true);

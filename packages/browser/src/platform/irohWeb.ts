@@ -97,6 +97,11 @@ export interface IrohWebOptions {
   connectMs?: number;
   load?: () => Promise<IrohWasm>;
   /**
+   * Dial only through one of `relays` (Hide my IP from contacts, WISP 100 § Relay only): the wasm reaches a peer through
+   * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
+   */
+  ownRelaysOnly?: boolean;
+  /**
    * Whether a contact's relay is at a public address, or at a name whose every address is public now: asked before each
    * dial through a relay that is not one of `relays`, where the host has a resolver (the CLI's `nodePublicRelay`). A page
    * has none; a contact's relay is held there to what its URL says (`dialableIrohRelay`).
@@ -208,6 +213,13 @@ async function startNode(wasm: IrohWasm, homesOfList: Map<string, Homing>, me: o
   }
 }
 
+/** Whether a descriptor (in `BROWSER_SPELLING`) names one of these relays, whichever way its URL is written. */
+function onOwnRelay(descriptor: unknown, relays: readonly string[]): boolean {
+  const relay = (descriptor as { relay?: unknown } | null | undefined)?.relay;
+  if (typeof relay !== "string") return false;
+  try { return relays.some(own => new URL(own).href === new URL(relay).href); } catch { return false; }
+}
+
 /** A NativeEndpoint for `iroh/1`, as the Desktop's is, for one chat's transport seed. */
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
@@ -244,8 +256,9 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
       if (stopped) throw new Error("Iroh endpoint is stopped");
       if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
       const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
+      if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
       const relay = (dialled as { relay?: unknown } | null)?.relay;
-      if (options.publicRelay && typeof relay === "string" && !listed(relays, relay) && !await options.publicRelay(relay))
+      if (options.publicRelay && typeof relay === "string" && !onOwnRelay(dialled, relays) && !await options.publicRelay(relay))
         throw new Error("The contact's Iroh relay is not one this device dials");
       if (stopped) throw new Error("Iroh endpoint is stopped");
       const conn = await node.connect(dialled, options.connectMs ?? 20_000);

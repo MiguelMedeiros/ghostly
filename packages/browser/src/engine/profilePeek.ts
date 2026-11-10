@@ -51,12 +51,13 @@ export interface PeekChat {
 export interface PeekResult { status: "done" | "missing" | "path" | "offline" | "budget" | "rested" | "standby"; reads: number; chats: PeekChat[] }
 
 /**
- * How a profile reads Pkarr records: the DHT itself (Desktop, unless its relays are read too), or these relays.
- * Two profiles with the same path show the network nothing new when one reads the other's records.
+ * How a profile reads Pkarr records: the DHT itself (Desktop, unless its relays are read too), or these relays (a
+ * browser, or a Desktop profile with Hide my IP from contacts on, which keeps off the DHT). Two profiles with the same
+ * path show the network nothing new when one reads the other's records.
  */
-export function readPathOf(settings: Partial<Pick<Settings, "relays" | "readRelays">> | undefined, direct: boolean): string {
+export function readPathOf(settings: Partial<Pick<Settings, "relays" | "readRelays" | "relayOnly">> | undefined, direct: boolean): string {
   const relays = [...new Set(currentRelays(settings?.relays?.length ? settings.relays : DEFAULT_RELAYS).map(normalizeRelayUrl).filter((r): r is string => !!r))].sort();
-  if (direct) return settings?.readRelays === true ? `dht+${relays.join(",")}` : "dht";
+  if (direct && settings?.relayOnly !== true) return settings?.readRelays === true ? `dht+${relays.join(",")}` : "dht";
   return relays.join(",");
 }
 

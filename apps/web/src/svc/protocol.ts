@@ -78,6 +78,8 @@ export interface ServiceRequestMessage {
   path: string;
   headers: [string, string][];
   body: ArrayBuffer | null;
+  /** The request's `destination` ("iframe", "script", …): whether the answer is a page (`guardViewerAnswer`). */
+  destination?: string;
 }
 
 /** What comes back on the request's own port: one `head`, then `chunk`s, then `end`; or `error` at any point. */
@@ -113,12 +115,15 @@ export const BRIDGE_CLEARED = "ghostly-svc-cleared";
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
   if (!data || typeof data !== "object") return null;
-  const { type, method, path, headers, body } = data as Record<string, unknown>;
+  const { type, method, path, headers, body, destination } = data as Record<string, unknown>;
   if (type !== "request" || typeof method !== "string" || !/^[A-Z]{1,16}$/.test(method)) return null;
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.length > 8192) return null;
   if (!Array.isArray(headers) || headers.length > 128 || !headers.every((h) => Array.isArray(h) && h.length === 2 && typeof h[0] === "string" && typeof h[1] === "string")) return null;
   if (body !== null && !(body instanceof ArrayBuffer && body.byteLength <= MAX_REQUEST_BYTES)) return null;
-  return { type, method, path, headers: headers as [string, string][], body: body as ArrayBuffer | null };
+  return {
+    type, method, path, headers: headers as [string, string][], body: body as ArrayBuffer | null,
+    ...(typeof destination === "string" && /^[a-z]{0,32}$/.test(destination) ? { destination } : {}),
+  };
 }
 
 /** Statuses a Response has no body for. */

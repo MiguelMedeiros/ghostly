@@ -125,8 +125,7 @@
   "ms": "{{ms}} ms",
   "option": {
     "automatic": "Automatic",
-    "automaticHint": "The apps choose, WebRTC first",
-    "automaticHintNative": "The apps choose, {{transport}} first: this app has no WebRTC",
+    "automaticFirst": "The apps choose, {{transport}} first",
     "chosenNotInUse": "Chosen · not in use",
     "chosenWaiting": "Chosen · waiting for it",
     "contactLacks": "Your contact's app doesn't support {{transport}}",
@@ -139,6 +138,8 @@
     "inUse": "In use",
     "needsDesktop": "{{transport}} needs Ghostly Desktop",
     "noWebrtc": "This app has no WebRTC",
+    "relayOnlyHyperdht": "With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network",
+    "relayOnlyOff": "Off while Hide my IP is on · Settings, Network",
     "relayUnreached": "{{transport}} couldn't reach its relay · Settings, Network",
     "throughRelay": "Through a relay · used when nothing direct connects",
     "waiting": "Waiting"
@@ -213,6 +214,7 @@
     "automatic": "Automatic: both apps rank {{transport}} first.",
     "automaticNoWebrtc": "Automatic: the apps use {{transport}}, which both have; one of them has no WebRTC.",
     "automaticWebrtc": "Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.",
+    "automaticWebrtcIroh": "Automatic: the apps put Iroh first, which is back almost at once, and move to WebRTC once connected, which is faster.",
     "contactChose": "{{contact}} chose {{transport}} for this chat.",
     "contactChoseUnnamed": "Your contact chose {{transport}} for this chat.",
     "fallback": "You chose {{preferred}} for this chat; it is not available now, so the chat uses {{transport}}.",

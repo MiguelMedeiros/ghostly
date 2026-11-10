@@ -223,8 +223,10 @@ export interface PkarrTransport {
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
+   * `dhtDirect: false` (Hide my IP from contacts, WISP 100 § Relay only): reads and writes go through the relays alone,
+   * and no UDP goes to a DHT node; absent leaves the DHT as it is.
    */
-  configure?(options: { relays: string[]; readRelays: boolean }): void;
+  configure?(options: { relays: string[]; readRelays: boolean; dhtDirect?: boolean }): void;
   /**
    * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
    * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.

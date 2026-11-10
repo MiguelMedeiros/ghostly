@@ -1154,6 +1154,14 @@ html[data-standalone="true"] {
   }
 }
 
+/* In a chat's header (`toast-place-header`, the call buttons' why): just under the header, over the top of the chat's
+   column, near the button pressed. At the bottom it sat over the message field's + and emoji buttons on a desktop. */
+html .toast-place.toast-place-header,
+html[data-keyboard="true"] .toast-place.toast-place-header {
+  top: calc(3.5rem + env(safe-area-inset-top) + 0.75rem);
+  bottom: auto;
+}
+
 /* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
    about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
 html .toast-place[data-at="top"] {
@@ -1261,6 +1269,36 @@ html .toast-place.toast-place-page[data-at="top"] {
 @container message-list (width < 36rem) { .sender-avatar { width: 24px; height: 24px; } }
 @media (width < 22rem) { .sender-avatar { display: none; } }
 @container message-list (width < 22rem) { .sender-avatar { display: none; } }
+
+/*
+ * Settings → Text size (lib/textSize.ts): the chat's words at `--chat-text-scale` times their size, their lines with
+ * them, so a bubble grows with its text and nothing is cut. Each says its old px size over 16 in rem: at the browser's
+ * default text size it is that size, and the browser's own text size reaches it too. Icons, the chat's header, the
+ * tabs and the times beside a message keep their size. The message field is in composer/composer.css.
+ */
+:root { --chat-text-scale: 1; }
+.chat-text-message { font-size: calc(14.2rem / 16 * var(--chat-text-scale)); line-height: calc(19rem / 16 * var(--chat-text-scale)); }
+.chat-text-emoji { font-size: calc(42rem / 16 * var(--chat-text-scale)); line-height: calc(50rem / 16 * var(--chat-text-scale)); }
+.chat-text-link { font-size: calc(14rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+/* A member's name over their message. */
+.chat-text-nick { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); line-height: calc(22rem / 16 * var(--chat-text-scale)); }
+/* "Forwarded", "Not confirmed" over a message; "Translated from…" under one. */
+.chat-text-mark { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+/* A quoted message (chat/ReplyQuote.tsx), in a reply and over the message field. */
+.chat-text-quote-name { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-quote { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-quote-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(15rem / 16 * var(--chat-text-scale)); }
+/* A link's preview card (LinkPreviewBubble.tsx): its lines' height is a share of their size. */
+.chat-text-preview-site { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-preview-title { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-preview-description { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+/* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
+.chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* The chat list's rows (ChatRow.tsx). */
+.chat-text-row-name { font-size: calc(15rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+.chat-text-row-preview { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
 
 /*
  * The list's size comes from the chat's column (it is a flex item that scrolls), never from its rows. Said so, a
@@ -1658,6 +1696,21 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-inline-start:8px;font-size:9px}
+
+/* A picture opened large (AvatarViewer.tsx) is a portal on the body, outside #root's side insets: a phone on its side
+   keeps the picture and its Close clear of the notch and the rounded corners, at the end the page's direction puts it. */
+.picture-viewer-area {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (width < 48rem) {
+  .picture-viewer-area { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+.picture-viewer-close {
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+}
+[dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
 
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {

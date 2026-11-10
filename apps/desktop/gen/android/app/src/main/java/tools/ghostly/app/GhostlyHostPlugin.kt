@@ -83,6 +83,19 @@ class AwakeArgs {
 }
 
 @InvokeArg
+class ConnectionArgs {
+  var on: Boolean = false
+  var links: Boolean = false
+}
+
+@InvokeArg
+class CallArgs {
+  var on: Boolean = false
+  var name: String = ""
+  var video: Boolean = false
+}
+
+@InvokeArg
 class HideArgs {
   var on: Boolean = false
 }
@@ -141,9 +154,29 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       ShareTurns<Handover>(System.currentTimeMillis()) { thread(name = "ghostly-share-clean") { it.folder.deleteRecursively() } }
     /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
     private val sharesSwept = AtomicBoolean(false)
+    /** The plugin once loaded (Rust hears it), for a photo that comes back with no page waiting ([photoBack]). */
+    private var loaded: GhostlyHostPlugin? = null
+    /** Such photos that came before the plugin loaded: it hands them over as it loads. */
+    private val photosBack = mutableListOf<File>()
+
+    // What the page asked to keep up out of sight (`keepAwake`, `connectionService`), for the process: an activity made
+    // again loads a new plugin while the services run on. On the main thread.
+    private var files = false
+    private var connectionWanted = false
+    private var linksUp = false
+    /** Whether this run already said the system ended the last one under the connection service. */
+    private var killedRead = false
+
+    /**
+     * A photo the composer's camera took for a page that is gone (MainActivity `cameraAnswered`): it reaches the page
+     * as a share of it, now or once the plugin loads. On the main thread.
+     */
+    fun photoBack(photo: File) {
+      loaded?.handOver(photo) ?: photosBack.add(photo)
+    }
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility", "call" or "camera". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -158,6 +191,14 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     // was not loaded yet reaches the page too. One already taken is marked handled.
     take(activity.intent)
     watchNetwork()
+    // The call notification's Hang up (CallService.kt): the page ends the call.
+    CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
+    // The composer's Camera refused (CameraCapture.kt): the page says so, and where to allow it.
+    CameraRefusal.told = { blocked -> activity.runOnUiThread { received("camera", if (blocked) "blocked" else "refused") } }
+    activity.runOnUiThread {
+      loaded = this
+      photosBack.toList().also { photosBack.clear() }.forEach(::handOver)
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -344,6 +385,28 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           if (handed != null) received("share", handed.json)
         }
       }
+    }
+  }
+
+  /**
+   * The camera's photo with no page waiting for it ([photoBack]), handed to the page as a share of it: moved into a
+   * share's folder (the same cache, so nothing is copied), which goes as any share's does (`shareDone`). On the main thread.
+   */
+  private fun handOver(photo: File) {
+    val number = shareTurns.arrive()
+    val own = File(sharedRoot(), number.toString())
+    try {
+      val folder = File(own, "0")
+      SharedCopies.makeFolder(folder)
+      val file = File(folder, photo.name)
+      if (!photo.renameTo(file)) throw IOException("Not moved: $photo")
+      val files = JSONArray().put(JSONObject().put("path", file.path).put("mime", "image/jpeg"))
+      val json = JSONObject().put("title", "").put("text", "").put("files", files).toString()
+      shareTurns.ready(number, Handover(own, json))?.let { received("share", it.json) }
+    } catch (e: Exception) {
+      own.deleteRecursively()
+      photo.delete()
+      shareTurns.nothing(number)?.let { received("share", it.json) }
     }
   }
 
@@ -564,6 +627,18 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** The app's own page in Android's settings, where a permission Android no longer asks for is allowed again. */
+  @Command
+  fun openAppSettings(invoke: Invoke) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.packageName, null))
+    try {
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: ActivityNotFoundException) {
+      invoke.reject("No app settings to open")
+    }
+  }
+
   // ---- Saving a file ----
 
   /**
@@ -613,12 +688,61 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * While a file moves (`on`, Rust's `keep_awake` with files as a reason), the transfer service (TransferService.kt)
-   * keeps the app running out of sight; it stops with the last file. `held`: whether it runs now.
+   * keeps the app running out of sight, or the connection service when it runs (ConnectionHolds.kt); it stops with
+   * the last file. `held`: whether one holds the files now.
    */
   @Command
   fun keepAwake(invoke: Invoke) {
-    val on = invoke.parseArgs(AwakeArgs::class.java).on
-    val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    files = invoke.parseArgs(AwakeArgs::class.java).on
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", files && held))
+  }
+
+  // ---- Staying connected out of sight ----
+
+  /**
+   * While the page wants it (`on`, Rust's `connection_service`: "Stay connected in the background" on, the app
+   * unlocked and online, with chats or groups), the connection service (ConnectionService.kt) keeps the app and its
+   * links up out of sight; `links`: whether any link is up now, for its wake lock. Told again every few minutes while
+   * on. `held`: whether it runs now; `killed`: the system ended the app under it last time (said once per run).
+   */
+  @Command
+  fun connectionService(invoke: Invoke) {
+    val args = invoke.parseArgs(ConnectionArgs::class.java)
+    connectionWanted = args.on
+    linksUp = args.links
+    val killed = args.on && !killedRead && ConnectionService.killedLastRun(activity)
+    if (args.on) killedRead = true
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", connectionWanted && held).put("killed", killed))
+  }
+
+  /**
+   * One service at a time keeps the app up out of sight (ConnectionHolds): the connection service while wanted (or
+   * still holding files), else the transfer service while files move. The new one starts before the old one stops,
+   * so the app never leaves the foreground in between. Whether the connection service, or else the transfer service,
+   * holds now.
+   */
+  private fun holdOutOfSight(): Boolean {
+    val connection = ConnectionHolds.connectionHolds(connectionWanted, files, ConnectionService.running)
+    val connectionHeld = if (connection) ConnectionService.start(activity, files, linksUp) else false
+    val transferHeld =
+      if (ConnectionHolds.transferHolds(files, connectionHeld)) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    if (!connection) ConnectionService.stop(activity)
+    return connectionHeld || transferHeld
+  }
+
+  // ---- A call out of sight ----
+
+  /**
+   * While a call is on (`on`, Rust's `call_service`), the call service (CallService.kt) keeps its microphone, and its
+   * camera while it sends the camera's picture, with the app out of sight; it stops with the call. Told again when
+   * the name or the camera changes. `held`: whether this start went through.
+   */
+  @Command
+  fun callService(invoke: Invoke) {
+    val args = invoke.parseArgs(CallArgs::class.java)
+    val held = if (args.on) CallService.start(activity, args.name, args.video) else false.also { CallService.stop(activity) }
     invoke.resolve(JSObject().put("held", held))
   }
 
