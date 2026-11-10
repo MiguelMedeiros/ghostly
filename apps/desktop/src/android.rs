@@ -192,6 +192,15 @@ pub fn keep_awake(on: bool) -> Result<bool, String> {
     Ok(call::<Held>("keepAwake", json!({ "on": on }))?.held)
 }
 
+/// Holds the connection service (`on`) so chats and groups stay connected with the app out of sight, or lets it go;
+/// `links`: whether any link is up now (its wake lock).
+pub fn connection_service(
+    on: bool,
+    links: bool,
+) -> Result<crate::commands::ConnectionHeld, String> {
+    call("connectionService", json!({ "on": on, "links": links }))
+}
+
 /// Holds the call service while a call is on (`call`: who it is with, whether it sends the camera's picture), so it
 /// goes on with the app out of sight, or stops it (`None`): whether this start went through.
 pub fn call_service(on_call: Option<(String, bool)>) -> Result<bool, String> {

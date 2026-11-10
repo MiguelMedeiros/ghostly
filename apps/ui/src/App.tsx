@@ -26,6 +26,7 @@ import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
+import { useStayConnected } from "./lib/stayConnected";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
@@ -223,6 +224,8 @@ export function App() {
   // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
   // file is on its way.
   useComputerAwake();
+  // Android: chats and groups stay connected with the app out of sight, while the person keeps it so.
+  useStayConnected();
   // Hide my IP from contacts turned on: the contacts' apps opened with it off close.
   useServiceWindowsHideIp();
   // Whether the person is here, for the contacts who see it (WISP 401 § Presence and status).
