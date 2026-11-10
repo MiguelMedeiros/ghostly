@@ -14,9 +14,11 @@ describe("the profile's name", { timeout: 120_000 }, () => {
 
   it("is refused past 64 characters or with nothing that shows, by either command, and the name before stays", async () => {
     ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
-    for (const [bad, rule] of [["x".repeat(300), "must be up to 64 characters on one line"], ["\u200b", "needs a character that shows (an empty one is no name)"]]) {
+    for (const [bad, rule] of [["x".repeat(300), "is up to 64 characters as stored (this one is 300)"], ["\u200b", "needs a character that shows (an empty one is no name)"]]) {
       expect(error(await ghostly(["--home", dir, "settings", "set", "nick", JSON.stringify(bad)]), "bad_request", 1).message, JSON.stringify(bad)).toBe(`nick ${rule}`);
     }
+    // The counts, for a bot: as stored, in code points.
+    expect(error(await ghostly(["--home", dir, "settings", "set", "nick", JSON.stringify("x".repeat(300))]), "bad_request", 1)).toMatchObject({ details: { length: 300, max: 64 } });
     expect(await name()).toBe("Bot");
   });
 
