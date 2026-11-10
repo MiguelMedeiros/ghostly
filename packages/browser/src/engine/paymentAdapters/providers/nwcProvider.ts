@@ -43,6 +43,19 @@ export function parseNwcUri(input: string): NwcConnection {
   return { walletPubkey: match[1].toLowerCase(), relays, secret: bytes(secret) };
 }
 
+/** What an NWC wallet that does not say its name is called. */
+export const NWC_UNNAMED = "NWC wallet";
+
+/** The name the NWC client gives its source: the wallet's own name and its relay's host. */
+export const nwcAlias = (wallet: string | undefined, relayHost: string) => `${wallet ?? NWC_UNNAMED} via ${relayHost}`;
+
+/** The wallet's own name in an `nwcAlias` ("" when the wallet did not say one). The host never holds a space. */
+export function nwcWalletName(alias: string): string {
+  const at = alias.lastIndexOf(" via ");
+  const wallet = at > 0 ? alias.slice(0, at) : alias;
+  return wallet === NWC_UNNAMED ? "" : wallet;
+}
+
 export const nwc: LightningProviderDescriptor = {
   id: "nwc",
   label: "Nostr Wallet Connect",
