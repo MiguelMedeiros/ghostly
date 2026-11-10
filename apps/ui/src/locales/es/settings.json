@@ -181,6 +181,8 @@
   "sendTyping": "Enviar indicador de escritura",
   "sendTypingHint": "Tus contactos ven cuando estás escribiendo. Desactivado, sigues viendo el suyo.",
   "setPassword": "Establecer contraseña",
+  "sharePresence": "Compartir cuando estoy en línea",
+  "sharePresenceHint": "Tus contactos ven un punto mientras usas Ghostly. Un estado que pongas se ve igualmente.",
   "shareProfile": "Compartir mi nombre y foto con los contactos",
   "shareProfileHint": "Tus contactos ven el nombre y la foto de este perfil. Desactivado, ven “Contacto” y un patrón en su lugar.",
   "sourceCode": "Código fuente",

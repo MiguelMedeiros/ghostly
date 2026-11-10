@@ -7,6 +7,7 @@ import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
+import { sinceSeq, type Params } from "./apiKit";
 import { CallManager } from "./calls/manager";
 import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
@@ -279,11 +280,13 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     if (request.method === "events.subscribe") {
       // One stream per connection: a second would get every event again, and its replay would pass the bound once more.
       if (unsubscribes.length) { write({ id, error: new CliError("bad_request", "This connection is subscribed already: open another one for a new stream").toJSON() }); return; }
-      const params = (request.params ?? {}) as { since?: unknown };
-      const since = typeof params.since === "number" ? params.since : ctx.hub.lastSeq;
-      // A journal that cannot be replayed is the answer, never a subscription that then says nothing.
+      // A since that is wrong, or a journal that cannot be replayed, is the answer, never a subscription that then says nothing.
+      let since: number;
       let replay: GhostlyEvent[];
-      try { replay = ctx.hub.replay(since); } catch (error) { write({ id, error: asCliError(error).toJSON() }); return; }
+      try {
+        since = sinceSeq((request.params ?? {}) as Params, ctx.hub.lastSeq);
+        replay = ctx.hub.replay(since);
+      } catch (error) { write({ id, error: asCliError(error).toJSON() }); return; }
       // Live events queue while the journal replays, so none falls between the two.
       const queued: GhostlyEvent[] = [];
       let replaying = true;

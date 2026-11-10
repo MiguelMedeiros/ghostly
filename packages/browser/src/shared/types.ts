@@ -1,4 +1,4 @@
-import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, PersonStatus, Presence, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupEditFrame, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, PersonStatus, Presence, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -302,16 +302,16 @@ export interface GroupLive {
 }
 
 /**
-/**
- * What a pin, a deletion for everyone or a change of hubs changes of a private group's record, in a row of its own
- * (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the
- * record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`). `hubs`: the
- * record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count. `large`: the
- * members noted in `StoredGroup.large` since the record was written, which the record's are added to. `of`: what the
- * record held of them when the row was written (a hash); a record that holds something else now was written by an app
- * from before since, and counts. Absent in rows from before it.
+ * What a pin, a deletion for everyone, a change of hubs or a member's edit changes of a private group's record, in a
+ * row of its own (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too:
+ * there while the record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * `hubs`: the record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count.
+ * `large`: the members noted in `StoredGroup.large` since the record was written, which the record's are added to.
+ * `relayEdits`: the state's (`GroupState.relayEdits`); absent in rows from before it was kept here, whose record holds
+ * them. `of`: what the record held of them when the row was written (a hash); a record that holds something else now
+ * was written by an app from before since, and counts. Absent in rows from before it.
  */
-export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; of?: string }
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; relayEdits?: GroupEditFrame[]; of?: string }
 
 export interface GroupMemberView {
   key: string;
