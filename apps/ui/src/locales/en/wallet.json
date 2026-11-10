@@ -137,6 +137,7 @@
       "needsKey": "Needs a key",
       "noFederation": "No federation",
       "noSource": "No source",
+      "shared": "Uses your {{name}} balance",
       "unavailable": "Unavailable"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "EVM local · test token",
       "usdtSepolia": "Sepolia · test token"
     },
+    "sameBalance": "Same balance as your {{name}} card",
     "status": {
       "away": "Elsewhere",
       "checkSettings": "Check settings",
@@ -873,6 +875,22 @@
       "github": "It asks for a GitHub login, so Ghostly does not ask it for you.",
       "login": "It asks for a login, so Ghostly does not ask it for you."
     }
+  },
+  "total": {
+    "away": "On {{device}}, not in the total",
+    "federation": "Ecash held by the federation",
+    "info": "The total adds only the balances Ghostly could read just now. An unread card is left out, and Testnet is never added to Mainnet.",
+    "label": "Balances",
+    "mint": "Ecash held by your mints",
+    "none": "Not set up",
+    "ready": "Ready to spend now",
+    "shared": "Same balance as {{name}}, counted once",
+    "title": "Where it comes from",
+    "total": "Total",
+    "uncounted": "{{count}} cards not counted",
+    "uncounted_one": "{{count}} card not counted",
+    "unknown": "Couldn't read it now, not in the total",
+    "waiting": "{{amount}} {{unit}} not spendable yet"
   },
   "ui": {
     "amountIn": "Amount in {{unit}}",
