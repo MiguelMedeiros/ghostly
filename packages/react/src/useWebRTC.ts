@@ -132,6 +132,22 @@ export const MEDIA_PROBLEM_SHOWN_MS = 8000;
  */
 export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly" | "relayOnlyNow";
 
+/**
+ * Which of them a `MediaProblem` of the microphone or camera was about. A video call whose camera alone cannot be used
+ * goes on as a voice call (`camera`); one whose microphone cannot fails (`mic`, or `both` when the browser says the
+ * camera is refused too).
+ */
+export type MediaProblemOf = "mic" | "camera" | "both";
+
+/** Whether the browser says the camera is refused, without asking anyone (the Permissions API): false where it cannot tell. */
+async function cameraRefused(): Promise<boolean> {
+  try {
+    return (await navigator.permissions?.query({ name: "camera" as PermissionName }))?.state === "denied";
+  } catch {
+    return false;
+  }
+}
+
 /** What a failed call start means for the person, or null when the failure was not the microphone's, camera's or relay's. */
 export function mediaProblem(error: unknown): MediaProblem | null {
   if (error instanceof CallRelayError) return error.problem;
@@ -338,6 +354,8 @@ export function useWebRTC({
   const setMediaProblemShown = useCallback((problem: MediaProblem) => {
     setMediaProblemShownState({ problem, id: ++mediaProblemIdRef.current });
   }, []);
+  /** Whether that was the microphone, the camera or both. */
+  const [mediaProblemOf, setMediaProblemOf] = useState<MediaProblemOf>("both");
   /** Tells the person why a call could not use the microphone or camera, when that is what `error` was. */
   const showMediaProblem = useCallback((error: unknown) => {
     const problem = mediaProblem(error);
@@ -367,6 +385,40 @@ export function useWebRTC({
   const assertKeepsToRelays = useCallback(() => {
     if (relayOnlyRef.current && !mediaRef.current.keepsToRelays) throw new CallRelayError("relayOnly");
   }, []);
+
+  /**
+   * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
+   * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
+   * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
+   * the call, as before, and the note names it.
+   */
+  const captureForCall = useCallback(
+    async (withVideo: boolean, cancelled: () => boolean): Promise<{ stream: MediaStream; cameraError?: unknown }> => {
+      const audio = captureFrom("audio");
+      try {
+        return { stream: await mediaRef.current.getUserMedia({ audio, video: withVideo && captureFrom("video") }) };
+      } catch (error) {
+        if (!withVideo || cancelled() || !mediaProblem(error)) {
+          setMediaProblemOf(withVideo ? "both" : "mic");
+          throw error;
+        }
+        try {
+          return { stream: await mediaRef.current.getUserMedia({ audio, video: false }), cameraError: error };
+        } catch (micError) {
+          const both = mediaProblem(micError) === "denied" && mediaRef.current === browserMedia && (await cameraRefused());
+          setMediaProblemOf(both ? "both" : "mic");
+          throw micError;
+        }
+      }
+    },
+    [captureFrom],
+  );
+
+  /** A video call went on without the camera (`captureForCall`): the person is told why it is off. */
+  const showCameraOff = useCallback((error: unknown) => {
+    setMediaProblemOf("camera");
+    showMediaProblem(error);
+  }, [showMediaProblem]);
 
   /**
    * The system paused our microphone in a call (its track is muted, not by the person): an iPhone or iPad does this
@@ -980,11 +1032,13 @@ export function useWebRTC({
         startedLineRef.current = addCallEventMessage?.("call_started", withVideo) || null;
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
-        const stream = await mediaRef.current.getUserMedia({ audio: captureFrom("audio"), video: withVideo && captureFrom("video") });
+        const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+        const video = withVideo && !cameraError;
+        if (cameraError) showCameraOff(cameraError);
         localStreamRef.current = stream;
         setLocalStream(stream);
-        setPicture(withVideo ? "camera" : null);
+        setPicture(video ? "camera" : null);
 
         const pc = await gathered(async () => {
           const pc = createPeerConnection();
@@ -1011,11 +1065,11 @@ export function useWebRTC({
           t: "o",
           ts: offerTs,
           ...params,
-          v: withVideo ? 1 : 0,
+          v: video ? 1 : 0,
           // This side restarts ICE when the call's path is lost; so does the call, when the answer says it too.
           ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}),
         };
-        if (withVideo) signal.k = "c";
+        if (video) signal.k = "c";
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
@@ -1036,7 +1090,8 @@ export function useWebRTC({
     [
       createPeerConnection,
       gathered,
-      captureFrom,
+      captureForCall,
+      showCameraOff,
       setPicture,
       publishCallSignal,
       setFastPoll,
@@ -1142,17 +1197,16 @@ export function useWebRTC({
         callConnectedEventFiredRef.current = false;
         assertKeepsToRelays();
 
-        const stream = await mediaRef.current.getUserMedia({
-          audio: captureFrom("audio"),
-          video: withVideo && captureFrom("video"),
-        });
+        const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+        const video = withVideo && !cameraError;
+        if (cameraError) showCameraOff(cameraError);
         localStreamRef.current = stream;
         setLocalStream(stream);
-        setPicture(withVideo ? "camera" : null);
+        setPicture(video ? "camera" : null);
 
-        if (!(await answerOffer(offer, stream, withVideo, cancelled))) return;
-        answeredRef.current = { offer, withVideo };
+        if (!(await answerOffer(offer, stream, video, cancelled))) return;
+        answeredRef.current = { offer, withVideo: video };
         // Read again (the check above narrowed it to "incoming"): ICE may have connected while our answer gathered.
         if ((callStateRef.current as CallState) === "answering") updateCallState("connecting");
         pendingOfferRef.current = null;
@@ -1168,7 +1222,8 @@ export function useWebRTC({
     },
     [
       answerOffer,
-      captureFrom,
+      captureForCall,
+      showCameraOff,
       applyRemotePicture,
       setPicture,
       updateCallState,
@@ -1276,9 +1331,9 @@ export function useWebRTC({
       await showPicture(pictureRef.current === "camera" ? null : "camera");
     } catch (error) {
       onErrorRef.current?.(error);
-      showMediaProblem(error);
+      showCameraOff(error);
     }
-  }, [showPicture, showMediaProblem]);
+  }, [showPicture, showCameraOff]);
 
   /** Shares the screen in place of whatever picture is on, or stops and goes back to it. */
   const toggleScreenShare = useCallback(async () => {
@@ -1673,6 +1728,8 @@ export function useWebRTC({
     mediaProblem: mediaProblemShown?.problem ?? null,
     /** New at each `mediaProblem` shown, the same reason again too: the notice is drawn (and said) anew. */
     mediaProblemId: mediaProblemShown?.id,
+    /** Whether `mediaProblem` was the microphone, the camera (the call goes on without it) or both. */
+    mediaProblemOf,
     /** Our last call never connected: ICE found no path to the contact (a VPN or firewall may block calls). */
     noPath,
     dismissNoPath,
