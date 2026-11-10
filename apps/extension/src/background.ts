@@ -220,6 +220,18 @@ async function clearNotices(next?: string): Promise<void> {
   await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
 }
 
+/**
+ * A notification the peer asked for, of a message no tab heard (attentionNotices.ts), with its chat kept as a page keeps
+ * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab.
+ */
+async function showNotice(body: string, chat?: string): Promise<void> {
+  if (!chrome.notifications) return;
+  const kept = chat ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
+  const id = Object.keys(kept).find((key) => key.startsWith("notice:") && kept[key] === chat)?.slice("notice:".length) ?? crypto.randomUUID();
+  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat });
+  await chrome.notifications.create(id, { type: "basic", iconUrl: chrome.runtime.getURL("icons/128.png"), title: "Ghostly", message: body, silent: true });
+}
+
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
 function listenToNotifications(): void {
   const clicks = chrome.notifications?.onClicked;
@@ -266,6 +278,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: String(error) }),
     );
+    return true;
+  }
+  if (message.type === "notify") {
+    if (typeof message.body !== "string" || !message.body || (message.chat !== undefined && typeof message.chat !== "string")) return false;
+    void showNotice(message.body.slice(0, 200), message.chat).catch(() => {}).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "open-payment-link") {
