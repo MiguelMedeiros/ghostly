@@ -888,6 +888,7 @@
     "title": "余额来源",
     "total": "总额",
     "uncounted": "{{count}} 张卡未计入",
+    "uncounted_one": "{{count}} 张卡未计入",
     "unknown": "暂时无法读取，不计入总额",
     "waiting": "{{amount}} {{unit}} 暂不可用"
   },

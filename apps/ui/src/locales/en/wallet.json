@@ -879,7 +879,7 @@
   "total": {
     "away": "On {{device}}, not in the total",
     "federation": "Ecash held by the federation",
-    "info": "The total adds only the balances Ghostly could read just now. A card it couldn't read stays out of it, and Testnet is never added to Mainnet.",
+    "info": "The total adds only the balances Ghostly could read just now. An unread card is left out, and Testnet never counts toward Mainnet.",
     "label": "Balances",
     "mint": "Ecash held by your mints",
     "none": "Not set up",

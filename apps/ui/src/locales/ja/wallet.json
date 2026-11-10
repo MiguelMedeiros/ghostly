@@ -888,6 +888,7 @@
     "title": "残高の内訳",
     "total": "合計",
     "uncounted": "{{count}} 枚のカードは合計に含みません",
+    "uncounted_one": "{{count}} 枚のカードは合計に含みません",
     "unknown": "今は読み取れません。合計に含みません",
     "waiting": "{{amount}} {{unit}} はまだ使えません"
   },
