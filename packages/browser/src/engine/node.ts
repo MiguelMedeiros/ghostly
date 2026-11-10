@@ -3655,10 +3655,11 @@ export class GhostlyNode implements EngineImplementation {
    * chat is not live: at most one per contact per `WAKE_ONLINE_INTERVAL_MS`, counted across restarts, since a restart is
    * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
    * target; a group's edge is never told. `WAKE_ONLINE_BATCH` at a time, the rest a `WAKE_ONLINE_BATCH_MS` later (those
-   * still away then), so a push relay's minute keeps room for the message and call wake-ups.
+   * still away then), so a push relay's minute keeps room for the message and call wake-ups. None while this profile does
+   * not share when it is online (`sharePresence`).
    */
   private sayOnline(now = Date.now()): void {
-    if (!this.networkOn || this.shuttingDown) return;
+    if (!this.networkOn || this.shuttingDown || this.settings.sharePresence === false) return;
     let sent = 0;
     for (const live of this.links.values()) {
       const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
