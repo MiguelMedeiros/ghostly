@@ -69,6 +69,9 @@ const server = new Promise<PeerServer>((resolve, reject) => {
     // (localAllowList.ts: this document has no `chrome.storage` nor `chrome.permissions`).
     void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e"), localFetch: allowedLocalFetch(profile) }).then((peer) => {
       running = peer;
+      // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
+      const engine = engineOf(peer);
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, engine.node.getState().links)).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
       // Heard before any `ping` waits on it, so a ping that comes once it failed knows.
