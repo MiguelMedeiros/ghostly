@@ -3,6 +3,9 @@
     <string name="channel_transfers">نقل الملفات</string>
     <string name="transfer_title">جارٍ إرسال الملفات واستلامها</string>
     <string name="transfer_text">يواصل Ghostly العمل حتى يكتمل نقلها.</string>
+    <string name="channel_connection">الاتصال</string>
+    <string name="connection_title">Ghostly متصل</string>
+    <string name="connection_text">تبقى محادثاتك ومجموعاتك متصلة في الخلفية.</string>
     <string name="channel_calls">المكالمات</string>
     <string name="call_title">مكالمة مع %1$s</string>
     <string name="call_public">مكالمة جارية</string>

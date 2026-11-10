@@ -180,6 +180,42 @@ describe("the app's height and the keyboard", () => {
     }
   });
 
+  describe("back from the background, the keyboard gone with no resize heard", () => {
+    /** The page in the background, or shown again: its visibility, and the window's focus as it comes back. */
+    function visibility(state: "hidden" | "visible") {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        if (state === "visible") window.dispatchEvent(new FocusEvent("focus"));
+      });
+    }
+    afterEach(() => { Reflect.deleteProperty(document, "visibilityState"); vi.useRealTimers(); });
+
+    it("is measured again as the page shows", () => {
+      renderHook(() => useViewportHeight());
+      resize(538);
+      expect(keyboard()).toBe("true");
+      visibility("hidden");
+      viewport.height = 874;
+      visibility("visible");
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+    });
+
+    it("and again while iOS settles: the keyboard's height a moment longer, then the whole one unheard", () => {
+      vi.useFakeTimers();
+      renderHook(() => useViewportHeight());
+      resize(538);
+      visibility("hidden");
+      visibility("visible");
+      expect(keyboard()).toBe("true");
+      viewport.height = 874;
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+    });
+  });
+
   it("starts over when the phone turns", () => {
     renderHook(() => useViewportHeight());
     // Landscape: a much shorter screen, with no keyboard.

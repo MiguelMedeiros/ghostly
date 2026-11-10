@@ -15,15 +15,21 @@ export interface ChatJson {
   /** The contact's key for this chat (z-base-32). */
   peer: string;
   createdAt: number;
-  lastMessageAt: number;
+  /** When its latest message came, or null before the first (the engine keeps 0). */
+  lastMessageAt: number | null;
   /** A live session carries the chat now, in this run (text, files, payments go at once). */
   live: boolean;
   /** The transport of the live session, or null. */
   transport: string | null;
   /** How text goes now: `stream` (live), `dht` (the DHT floor, 256 bytes), `hold`, or `unavailable`. */
   text: string;
-  /** The pairing's state: connecting, waiting, ready, failed. */
+  /** The pairing's state: connecting, negotiating, confirm, waiting, ready, or error (`connectionError` says why). */
   pairing: string | null;
+  /**
+   * Why the chat cannot connect, or its texts cannot go, as the app's connection panel says it: the pairing's failure,
+   * or on a chat whose text goes by the DHT the DHT delivery's (its relays refusing the publish). Null when none.
+   */
+  connectionError: string | null;
   /** How far the first pairing got (publishing, waiting, resolving, on-dht, live, …), while it is under way. */
   stage: string | null;
   verified: boolean;
@@ -49,6 +55,24 @@ export function isLive(link: LinkView): boolean {
   return !link.profile || (link.pairing?.status === "ready" && !!link.pairing.transport);
 }
 
+/**
+ * The app's connection failure (ChatConnection's `connectionFailure`), with the relays' words made plain: the engine's
+ * "Publish failed on every relay: Error: http://… responded 503" reads as the CLI failing, a class name per relay.
+ */
+function connectionError(link: LinkView): string | null {
+  const pair = link.pairing;
+  const dht = link.deliveryMode === "dht" || link.textDelivery === "dht";
+  const detail = pair?.transitionError || (pair?.status === "error" ? pair.error : "") || (dht ? link.dhtDelivery?.error : "");
+  if (!detail) return null;
+  const at = detail.indexOf("Publish failed on every relay:");
+  if (at < 0) return detail;
+  const tail = detail.slice(at);
+  const hosts = [...new Set([...tail.matchAll(/\bhttps?:\/\/[^\s;,]+/g)].map(([url]) => URL.canParse(url) ? new URL(url).host : url))];
+  // A relay that answered with an error status took the request: "did not answer" would not be true of it.
+  const said = / responded \d{3}\b/.test(tail) ? `${at ? "n" : "N"}o relay took it` : `${at ? "n" : "N"}o relay answered`;
+  return `${detail.slice(0, at)}${said}${hosts.length ? ` (${hosts.join(", ")})` : ""}`;
+}
+
 export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
   const label = link.label?.trim() || null;
   const peerName = link.peerNick?.trim() || null;
@@ -60,11 +84,12 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     peerName,
     peer: link.peerPubKeyZ32,
     createdAt: link.createdAt,
-    lastMessageAt: link.lastMessageAt,
+    lastMessageAt: link.lastMessageAt || null,
     live,
     transport: live ? (link.pairing?.transport ?? link.pairingProgress?.transport ?? null) : null,
     text: link.textDelivery ?? (link.profile ? "unavailable" : "dht"),
     pairing: link.pairing?.status ?? null,
+    connectionError: connectionError(link),
     stage: link.pairingProgress?.stage ?? null,
     verified: !!link.peerVerified,
     invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
@@ -243,7 +268,7 @@ export function groupJson(group: GroupView, showSecret = false) {
     me: group.myKey ?? null,
     canSend: group.canSend,
     link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
-    lastMessageAt: group.lastMessageAt,
+    lastMessageAt: group.lastMessageAt || null,
     // Past 16 members with hubs (WISP 902 · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),

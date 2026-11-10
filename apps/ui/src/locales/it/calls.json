@@ -28,6 +28,7 @@
   "incomingAudio": "Chiamata vocale in arrivo...",
   "incomingVideo": "Videochiamata in arrivo...",
   "mediaDenied": "Nessun accesso a microfono o fotocamera",
+  "mediaDeniedAndroid": "Consenti il microfono (e la fotocamera) a Ghostly nelle impostazioni di Android.",
   "mediaDeniedNext": "Consentili nelle impostazioni del browser o del sistema.",
   "mediaUnavailable": "Nessun microfono o fotocamera trovato",
   "mediaUnavailableNext": "Collegane uno, o chiudi l'app che lo usa.",

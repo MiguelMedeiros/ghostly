@@ -145,7 +145,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
             <h2 id="new-wallet-title" className="text-lg font-semibold text-text-primary">{t("wallet.new.title")}</h2>
             <p id="new-wallet-about" className="text-xs text-text-muted mt-1">{t("wallet.new.about.intro")}</p>
           </div>
-          <button type="button" aria-label={t("common.close")} onClick={close} disabled={busy} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={close} disabled={busy} className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">×</button>
         </div>
 
         <div role="radiogroup" aria-label={t("wallet.new.network")} data-testid="new-wallet-network" data-network={network} className="grid grid-cols-2 gap-2">

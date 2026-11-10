@@ -5,12 +5,15 @@ import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, ty
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
 import { androidApp } from "../../lib/touchOnly";
+import { openAppSettings } from "../../desktop/androidCameraRefusal";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   switch (problem) {
-    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where.
-    case "denied": return mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
+    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where. The Android app
+    // has no browser: Android asks again, or (once it no longer asks) only its settings allow it.
+    case "denied": return androidApp() ? t("chat.voice.micDeniedAndroid")
+      : mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
     case "unavailable": return t("chat.voice.micUnavailable");
     case "unsupported": return t("chat.voice.micUnsupported");
   }
@@ -44,7 +47,8 @@ interface Props {
   /** Why a voice message cannot be sent in this chat now; pressing the mic says so. */
   unavailable?: string;
   disabled?: boolean;
-  onError(message: string): void;
+  /** `action`: a way out the line names (Android's settings for a refused microphone). */
+  onError(message: string, action?: { label: string; run: () => void }): void;
   /** Recording or not: the composer hides its pickers meanwhile. */
   onActiveChange?(active: boolean): void;
 }
@@ -226,8 +230,11 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       await recorder.start();
     } catch (error) {
       if (recorderRef.current === recorder) reset();
+      // Refused in the Android app: Android's own page for Ghostly, where a microphone it no longer asks for is allowed.
+      const settings = error instanceof MicrophoneError && error.problem === "denied" && androidApp()
+        ? { label: t("settings.noticesOpenSettings"), run: () => void openAppSettings() } : undefined;
       onError(error instanceof MicrophoneError && error.message === MICROPHONE_MESSAGES[error.problem] ? microphoneText(t, error.problem)
-        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"));
+        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"), settings);
       return;
     }
     if (recorderRef.current !== recorder) return;
@@ -490,19 +497,19 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
               <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>
-              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
-              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
+              <button ref={keepRef} type="button" className="voice-text-button tap-target" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
+              <button type="button" className="voice-text-button voice-text-danger tap-target" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
             </div>
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button tap-target" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
               {paused && preview ? (
                 <>
-                  <button type="button" className="voice-icon-button" data-testid="voice-preview"
+                  <button type="button" className="voice-icon-button tap-target" data-testid="voice-preview"
                     aria-label={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} title={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} onClick={() => void togglePreview()}>
                     {preview.playing ? <PauseIcon /> : <PlayIcon />}
                   </button>
@@ -529,7 +536,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
                 </>
               )}
               {locked && (
-                <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
+                <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
                   disabled={phase === "starting" || sending || micEnded}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}

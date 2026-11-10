@@ -176,6 +176,16 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-card-usdt-testnet").querySelector("[data-testid=wallet-card-network]")).toHaveTextContent("Testnet");
   });
 
+  it("shows a shared balance's number on one card only: Lightning through the mints says it uses Cashu's, its back keeps the amount", async () => {
+    const { user } = open();
+    expect(card("cashu-mainnet")).toHaveTextContent("1,000 sats");
+    expect(card("lightning-mainnet")).toHaveTextContent("Uses your Cashu balance");
+    expect(card("lightning-mainnet")).not.toHaveTextContent("1,000");
+    await user.click(card("lightning-mainnet"));
+    // Turned over, it is the only card shown: what it can spend, as before.
+    expect(within(screen.getByTestId("payment-back")).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+  });
+
   it("starts on the card used last time, on its network's tab", () => {
     rememberRail("peer", "arkade:testnet");
     open();
@@ -763,6 +773,20 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
     tick(45_600);
     expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer" + "They can send you a Request instead.");
     expect(send()).toHaveTextContent("Send");
+    expect(send()).toBeEnabled();
+  });
+
+  it("gives up 45 s after Send asked, though the chat behind redraws the sheet with a new context every few seconds", async () => {
+    // The chat page builds its review context on every draw (a message, a link or wallet change): the 45 s started
+    // again at each, and in a live chat the sheet said "Asking for an address…" for good, Send disabled.
+    const { rerender, onSend, onRequest, onClose } = await ask("arkade:testnet", "3");
+    for (let s = 10; s <= 40; s += 10) {
+      tick(10_000);
+      rerender(<><PaymentComposer balance={1_000} onSend={onSend} onRequest={onRequest} onClose={onClose} reviewContext={reviewContext()} contact="Alice" /><Where /></>);
+      expect(send()).toHaveTextContent("Asking for an address…");
+    }
+    tick(5_600);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app didn't answer");
     expect(send()).toBeEnabled();
   });
 

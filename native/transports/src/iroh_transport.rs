@@ -1,4 +1,5 @@
 use iroh::{
+    dns::DnsResolver,
     endpoint::{presets, Connection, QuicTransportConfig, VarInt},
     Endpoint, EndpointAddr, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
@@ -76,7 +77,12 @@ pub fn default_relays() -> RelayMap {
     relays
 }
 
-pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, String> {
+/// `dns`, when given, is what the endpoint resolves names with (relays among them) instead of the system's.
+pub async fn endpoint(
+    seed: [u8; 32],
+    local_only: bool,
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
     let builder = if local_only {
         Endpoint::builder(presets::Minimal)
             .clear_ip_transports()
@@ -84,6 +90,10 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
             .map_err(|e| e.to_string())?
     } else {
         Endpoint::builder(presets::N0).relay_mode(RelayMode::Custom(default_relays()))
+    };
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
     };
     builder
         .secret_key(SecretKey::from_bytes(&seed))
@@ -96,10 +106,19 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
 
 /// An endpoint homed on the given relays instead of n0's defaults: a
 /// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
-/// native peers still hole-punch; a browser peer reaches it through the relay.
-pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
-    Endpoint::builder(presets::Minimal)
-        .relay_mode(RelayMode::Custom(relay_map(relays)?))
+/// native peers still hole-punch; a browser peer reaches it through the relay. `dns` as in `endpoint`.
+pub async fn endpoint_with_relays(
+    seed: [u8; 32],
+    relays: &[String],
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
+    let builder =
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Custom(relay_map(relays)?));
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
+    };
+    builder
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
         .transport_config(transport())
@@ -228,8 +247,8 @@ mod tests {
     }
     #[tokio::test]
     async fn real_quic_frames_exporter_and_reconnect() {
-        let a = endpoint([1; 32], true).await.unwrap();
-        let b = endpoint([2; 32], true).await.unwrap();
+        let a = endpoint([1; 32], true, None).await.unwrap();
+        let b = endpoint([2; 32], true, None).await.unwrap();
         let mut contexts = Vec::new();
         for _ in 0..2 {
             let addr = address(&b);
@@ -337,8 +356,8 @@ mod limits {
 
     #[tokio::test]
     async fn refuses_an_address_it_cannot_use_before_dialling() {
-        let a = endpoint([21; 32], true).await.unwrap();
-        let good = address(&endpoint([22; 32], true).await.unwrap());
+        let a = endpoint([21; 32], true, None).await.unwrap();
+        let good = address(&endpoint([22; 32], true, None).await.unwrap());
         assert_eq!(good.relay, None, "a local endpoint has no relay");
         assert!(!good.addresses.is_empty() && good.addresses.len() <= 8);
         assert!(good.addresses.iter().all(|a| a.starts_with("127.0.0.1:")));
@@ -408,8 +427,8 @@ mod limits {
     /// 1.25 MB held a file at 5.25 MiB/s on a 150 ms path), and no more than two such windows over all its streams.
     #[tokio::test]
     async fn a_contact_may_have_a_chats_files_in_flight_on_its_stream_and_no_more_in_all() {
-        let a = endpoint([13; 32], true).await.unwrap();
-        let b = endpoint([14; 32], true).await.unwrap();
+        let a = endpoint([13; 32], true, None).await.unwrap();
+        let b = endpoint([14; 32], true, None).await.unwrap();
         let addr = address(&b);
         let (outgoing, incoming) = tokio::time::timeout(Duration::from_secs(25), async {
             tokio::join!(connect(&a, &addr), async {

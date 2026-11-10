@@ -1,12 +1,12 @@
 package tools.ghostly.app
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -17,6 +17,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.os.PersistableBundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -79,6 +80,12 @@ class KeepArgs {
 @InvokeArg
 class AwakeArgs {
   var on: Boolean = false
+}
+
+@InvokeArg
+class ConnectionArgs {
+  var on: Boolean = false
+  var links: Boolean = false
 }
 
 @InvokeArg
@@ -152,6 +159,14 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     /** Such photos that came before the plugin loaded: it hands them over as it loads. */
     private val photosBack = mutableListOf<File>()
 
+    // What the page asked to keep up out of sight (`keepAwake`, `connectionService`), for the process: an activity made
+    // again loads a new plugin while the services run on. On the main thread.
+    private var files = false
+    private var connectionWanted = false
+    private var linksUp = false
+    /** Whether this run already said the system ended the last one under the connection service. */
+    private var killedRead = false
+
     /**
      * A photo the composer's camera took for a page that is gone (MainActivity `cameraAnswered`): it reaches the page
      * as a share of it, now or once the plugin loads. On the main thread.
@@ -161,7 +176,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility" or "call". */
+  /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility", "call" or "camera". */
   private external fun received(kind: String, value: String)
 
   private val pendingSave = SaveSlot<SaveArgs>()
@@ -178,6 +193,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     watchNetwork()
     // The call notification's Hang up (CallService.kt): the page ends the call.
     CallService.hangUp = { activity.runOnUiThread { received("call", "hangUp") } }
+    // The composer's Camera refused (CameraCapture.kt): the page says so, and where to allow it.
+    CameraRefusal.told = { blocked -> activity.runOnUiThread { received("camera", if (blocked) "blocked" else "refused") } }
     activity.runOnUiThread {
       loaded = this
       photosBack.toList().also { photosBack.clear() }.forEach(::handOver)
@@ -490,6 +507,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /**
+   * A secret the person copied (an invite, a device's link, a group's link, ecash), marked sensitive: Android 13 and up
+   * shows dots for it in the copy preview, and keyboards keep it out of their clipboard history. The WebView's own copy
+   * cannot mark it. The key's name is the same before 13 (`ClipDescription.EXTRA_IS_SENSITIVE`), which keyboards read.
+   */
+  @Command
+  fun clipboardWriteSecret(invoke: Invoke) {
+    val text = invoke.parseArgs(TextArgs::class.java).text
+    val clip = ClipData.newPlainText("", text)
+    clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+    (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+    invoke.resolve()
+  }
+
   // ---- Notifications ----
 
   /** "granted", "denied" or "default". With `request`, Android 13 and up asks (once; then only Settings can). */
@@ -596,6 +627,18 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** The app's own page in Android's settings, where a permission Android no longer asks for is allowed again. */
+  @Command
+  fun openAppSettings(invoke: Invoke) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.packageName, null))
+    try {
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: ActivityNotFoundException) {
+      invoke.reject("No app settings to open")
+    }
+  }
+
   // ---- Saving a file ----
 
   /**
@@ -645,13 +688,48 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * While a file moves (`on`, Rust's `keep_awake` with files as a reason), the transfer service (TransferService.kt)
-   * keeps the app running out of sight; it stops with the last file. `held`: whether it runs now.
+   * keeps the app running out of sight, or the connection service when it runs (ConnectionHolds.kt); it stops with
+   * the last file. `held`: whether one holds the files now.
    */
   @Command
   fun keepAwake(invoke: Invoke) {
-    val on = invoke.parseArgs(AwakeArgs::class.java).on
-    val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
-    invoke.resolve(JSObject().put("held", held))
+    files = invoke.parseArgs(AwakeArgs::class.java).on
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", files && held))
+  }
+
+  // ---- Staying connected out of sight ----
+
+  /**
+   * While the page wants it (`on`, Rust's `connection_service`: "Stay connected in the background" on, the app
+   * unlocked and online, with chats or groups), the connection service (ConnectionService.kt) keeps the app and its
+   * links up out of sight; `links`: whether any link is up now, for its wake lock. Told again every few minutes while
+   * on. `held`: whether it runs now; `killed`: the system ended the app under it last time (said once per run).
+   */
+  @Command
+  fun connectionService(invoke: Invoke) {
+    val args = invoke.parseArgs(ConnectionArgs::class.java)
+    connectionWanted = args.on
+    linksUp = args.links
+    val killed = args.on && !killedRead && ConnectionService.killedLastRun(activity)
+    if (args.on) killedRead = true
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", connectionWanted && held).put("killed", killed))
+  }
+
+  /**
+   * One service at a time keeps the app up out of sight (ConnectionHolds): the connection service while wanted (or
+   * still holding files), else the transfer service while files move. The new one starts before the old one stops,
+   * so the app never leaves the foreground in between. Whether the connection service, or else the transfer service,
+   * holds now.
+   */
+  private fun holdOutOfSight(): Boolean {
+    val connection = ConnectionHolds.connectionHolds(connectionWanted, files, ConnectionService.running)
+    val connectionHeld = if (connection) ConnectionService.start(activity, files, linksUp) else false
+    val transferHeld =
+      if (ConnectionHolds.transferHolds(files, connectionHeld)) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    if (!connection) ConnectionService.stop(activity)
+    return connectionHeld || transferHeld
   }
 
   // ---- A call out of sight ----
@@ -695,22 +773,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   // ---- The app switcher ----
 
   /**
-   * While the app lock is on (`on`), the app switcher keeps no picture of the app (SwitcherPicture): Android takes it
-   * before the page hears the app is going, so the lock's cover would come too late for it. The activity's cover goes
-   * over the app's live window there too (MainActivity.lockOn). Off again with the lock.
+   * While the app lock is on (`on`), the app's window is secure (`FLAG_SECURE`), on every Android version: the app
+   * switcher keeps no picture of the app, and no screenshot, screen recording or screen sharing takes its live window
+   * as the switcher opens. Both come before the page or the activity hears the app is going, so a cover alone comes
+   * too late for them (`setRecentsScreenshotEnabled` covers the switcher's picture only). Screenshots and recordings of
+   * the app are black while the lock is on. The phone's own screen still shows the live window for the moment the
+   * switcher opens; the activity's cover goes over the page once it hears (MainActivity.lockOn). Off again with the
+   * lock.
    */
-  // SwitcherPicture takes setRecentsScreenshotEnabled only on Android 13 and up.
-  @SuppressLint("NewApi")
   @Command
   fun hideFromSwitcher(invoke: Invoke) {
     val on = invoke.parseArgs(HideArgs::class.java).on
     activity.runOnUiThread {
-      when (SwitcherPicture.way(Build.VERSION.SDK_INT)) {
-        SwitcherPicture.Way.NO_RECENTS_PICTURE -> activity.setRecentsScreenshotEnabled(!on)
-        SwitcherPicture.Way.SECURE_WINDOW ->
-          if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-          else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-      }
+      if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
       (activity as? MainActivity)?.lockOn = on
       invoke.resolve()
     }

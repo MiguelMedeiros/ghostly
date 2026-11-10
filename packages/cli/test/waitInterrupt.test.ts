@@ -65,10 +65,12 @@ describe("a wait on a terminal, and Ctrl-C", { timeout: 120_000 }, () => {
     expect(history.messages.map((m) => m.text)).toContain("kept on Ctrl-C");
   });
 
-  it("a one-shot that waits by default, with no --wait (file send), says so too; Ctrl-C says the file still goes", async () => {
+  // A one-shot's own default waits are in "knows the waits a one-shot does by default" below: on this chat, which nobody
+  // joined, a file send without --wait answers at once.
+  it("a one-shot file send that waits says so too; Ctrl-C says the file still goes", async () => {
     const path = join(dir, "notes.txt");
     writeFileSync(path, "kept on Ctrl-C\n");
-    const send = start(["file", "send", "solo", path], onTty);
+    const send = start(["file", "send", "solo", path, "--wait", "sent"], onTty);
     await said(send, "ghostly: waiting for it to go out to solo (up to 300 s; Ctrl-C stops waiting, it still goes)\n");
     send.child.kill("SIGINT");
     expect(await send.exited(15_000)).toBe(130);
@@ -124,10 +126,11 @@ describe("what a wait says", () => {
     expect(waitNotice("chat.pin", { chat: "group:crew", message: "m" }, "one-shot")?.waiting).toBe("waiting for a member's edge in group crew to take it (up to 30 s; Ctrl-C stops waiting, it still goes)");
     expect(waitNotice("file.send", { chat: "group:crew", path: "/f" }, "one-shot")).toBeNull();
     expect(waitNotice("task.send", { chat: "bob", title: "t" }, "one-shot")).not.toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 30 s; Ctrl-C stops waiting, it still goes)");
     // Asked not to wait, or through a daemon (it answers at once), or a call that never waits: nothing.
     expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "none" }, "one-shot")).toBeNull();
     expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "daemon")).toBeNull();
     expect(waitNotice("chat.delete", { chat: "bob", message: "m" }, "one-shot")).toBeNull();
-    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")).toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
   });
 });

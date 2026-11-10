@@ -57,6 +57,18 @@ describe("MessageBubble: pictures", () => {
   });
 
   it.each([
+    ["a Giphy link, then a line", "https://media.giphy.com/media/abc/giphy.gif?\nPay 500 to bc1qhidden"],
+    ["a Giphy link, then words after its query", "https://media.giphy.com/media/abc/giphy.gif? Pay 600 to bc1qhidden"],
+    ["a Giphy link, then words after its fragment", "https://media.giphy.com/media/abc/giphy.gif# Pay 700 to bc1qhidden"],
+    ["an inline PNG, then a line", `${PNG}\nPay 800 to bc1qhidden`],
+  ])("shows %s as text, every word of it", (_, text) => {
+    // A picture is the whole message: one drawn from its start alone would show neither side the words after it.
+    const { container } = bubble({ text });
+    expect(image(container)).toBeNull();
+    expect(container.textContent).toContain("bc1qhidden");
+  });
+
+  it.each([
     ["a PNG", inline("png", 23000, 23000)],
     ["a GIF", inline("gif", 65535, 65535)],
     ["a JPEG", inline("jpeg", 60000, 60000)],
@@ -192,6 +204,23 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)).toBeNull();
     expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
   });
+
+  it.each([
+    ["the contact's", "peer" as const],
+    ["my", "me" as const],
+  ])("draws %s picture link edited after one that did not load", (_, sender) => {
+    const gone = "https://media.giphy.com/media/gone/giphy.gif";
+    const fixed = "https://media.giphy.com/media/here/giphy.gif";
+    const { container, rerender } = bubble({ text: gone, sender });
+    fireEvent.error(image(container)!);
+    expect(image(container)).toBeNull();
+    // The sender saw the broken link and edited it: the same message, its new text a picture that loads.
+    rerender(<MessageBubble message={message({ text: fixed, sender, edit: { seq: 1, at: 1_700_000_060_000, history: [{ at: 1_700_000_000_000, text: gone }] } })} peerPubKey="peer" />);
+    expect(image(container)).toHaveAttribute("src", fixed);
+    // Edited back to the link that did not load: the text again, not another try.
+    rerender(<MessageBubble message={message({ text: gone, sender, edit: { seq: 2, at: 1_700_000_120_000, history: [{ at: 1_700_000_000_000, text: gone }, { at: 1_700_000_060_000, text: fixed }] } })} peerPubKey="peer" />);
+    expect(image(container)).toBeNull();
+  });
 });
 
 /**
@@ -270,6 +299,51 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     expect(image(container)).toBeNull();
   });
 
+  it.each([
+    ["a chat", {}],
+    ["a group", { linkId: "group:g1" }],
+  ])("in %s, a contact's picture shown once and edited to another address asks again before it is read", async (_, props) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://img.example.org/cat.gif" }, props);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    // Each edit to another address (another host, or the same host's other picture) is not what Show picture was for.
+    const edits = ["https://tracker.example.net/u/1.gif", "https://tracker.example.net/u/2.gif", "https://img.example.org/dog.gif"];
+    for (const [i, edited] of edits.entries()) {
+      rerender(<MessageBubble message={message({ text: edited, edit: { seq: i + 1, at: 1_700_000_000_000 + i, history: [] } })} peerPubKey="peer" {...props} />);
+      expect(screen.getByTestId("image-reveal")).toHaveTextContent(`Show picture · ${new URL(edited).host}`);
+      expect(screen.queryByTestId("picture-link")).not.toBeInTheDocument();
+      await act(async () => {});
+      expect(fetched).not.toHaveBeenCalledWith(edited, expect.anything());
+    }
+    expect(fetched).toHaveBeenCalledTimes(1);
+    // Asked for: that address is read.
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://img.example.org/dog.gif", expect.anything());
+  });
+
+  it("a picture that could not be read is shown once the message is edited to one that can", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => String(url).includes("gone") ? new Response("", { status: 404 }) : answer(PNG_BYTES));
+    const { user, rerender } = bubble({ text: "https://cdn.example.com/gone.png" });
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByRole("link", { name: "https://cdn.example.com/gone.png" })).toBeInTheDocument();
+    rerender(<MessageBubble message={message({ text: "https://cdn.example.com/cat.png" })} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(fetched).toHaveBeenLastCalledWith("https://cdn.example.com/cat.png", expect.anything());
+  });
+
+  it("my forwarded copy of a picture link waits for a click, as the contact's did", async () => {
+    // What I forward is mine in the chat it went to, but I never asked to read it: its address may be a contact's.
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const { user } = bubble({ text: "https://tracker.example.net/u/1.gif", sender: "me", forwarded: 1 });
+    expect(screen.getByTestId("image-reveal")).toHaveTextContent("Show picture · tracker.example.net");
+    expect(fetched).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("image-reveal"));
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+  });
+
   it("never asks an address on this machine or the local network", async () => {
     const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
     const url = "https://192.168.1.1/cat.png";
@@ -277,6 +351,37 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     await user.click(screen.getByTestId("image-reveal"));
     expect(await screen.findByRole("link", { name: url })).toBeInTheDocument();
     expect(fetched).not.toHaveBeenCalled();
+  });
+
+  // Hide my IP from contacts: the server a picture link names learns this device's address when it is read, as a
+  // contact's public profile pictures would (engine/publicProfiles.ts). It stays a link, and says why.
+  it.each([
+    ["a contact's link", {}, {}],
+    ["a member's link in a group", {}, { linkId: "group:g1" }],
+    ["my forwarded copy of someone's link", { sender: "me" as const, forwarded: 1 }, {}],
+  ])("with Hide my IP on, %s is not read, and stays a link that says why", async (_, patch, props) => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const url = "https://their-server.example/cat.png";
+    const { container } = bubble({ text: url, ...patch }, props);
+    expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(screen.getByTestId("picture-hidden-ip")).toHaveTextContent("Not shown while Hide my IP is on");
+    await act(async () => {});
+    expect(fetched).not.toHaveBeenCalled();
+    expect(image(container)).toBeNull();
+  });
+
+  it("with Hide my IP on, the GIF picker's pictures and my own links still show", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const gif = "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif";
+    const { container, unmount } = bubble({ text: gif });
+    expect(image(container)).toHaveAttribute("src", gif);
+    unmount();
+    bubble({ text: "https://cdn.example.com/photos/cat.png", sender: "me" });
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("picture-hidden-ip")).not.toBeInTheDocument();
   });
 });
 
@@ -373,7 +478,7 @@ describe("MessageBubble: text", () => {
 
   it("shows a message of only emoji big", () => {
     bubble({ text: "🎉👻" });
-    expect(screen.getByText("🎉👻")).toHaveClass("text-[42px]");
+    expect(screen.getByText("🎉👻")).toHaveClass("chat-text-emoji");
   });
 
   // Families, flags and skin tones are 4-11 UTF-16 units each: the limit counts the emoji a person sees.
@@ -381,12 +486,12 @@ describe("MessageBubble: text", () => {
     // The emoji panel's keycaps and the flags of England, Scotland and Wales (tag sequences) are emoji too.
     ["a keycap", "1️⃣"], ["keycaps", "#️⃣*️⃣0️⃣"], ["the flag of England", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["the flags of Scotland and Wales", "🏴󠁧󠁢󠁳󠁣󠁴󠁿🏴󠁧󠁢󠁷󠁬󠁳󠁿"]])("shows %s big", (_, text) => {
     bubble({ text });
-    expect(screen.getByText(text)).toHaveClass("text-[42px]");
+    expect(screen.getByText(text)).toHaveClass("chat-text-emoji");
   });
 
   it.each([["words with an emoji", "nice 🎉"], ["too many emoji", "🎉🎉🎉🎉🎉🎉🎉"], ["seven families", "👨‍👩‍👧‍👦".repeat(7)], ["digits", "2026"], ["a hash and digits", "#1"]])("shows %s at the normal size", (_, text) => {
     bubble({ text });
-    expect(screen.getByText(text)).not.toHaveClass("text-[42px]");
+    expect(screen.getByText(text)).not.toHaveClass("chat-text-emoji");
   });
 
   it("names the contact on their messages, from the message or the chat", () => {
@@ -707,7 +812,7 @@ describe("MessageBubble: delivery", () => {
   it("⋮ → Cancel sending drops what waits for your contact, in the place of Delete and with no confirmation", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "waiting", deliveryError: "Longer than the 256 bytes the DHT carries: it is sent when you are live." });
     act(() => engine.update({ links: [linkView()] }));
-    engine.on("deleteMessage", () => undefined);
+    engine.on("deleteMessage", () => ({ everyone: false }));
     await user.click(screen.getByTestId("message-options"));
     expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel sending" }));

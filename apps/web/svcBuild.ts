@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
+import { VIEWER_GUARD_HASH } from "../../packages/core/src/viewerGuard";
 import { BRIDGE_PAGE, BRIDGE_SCRIPT, CLEAR_COOKIES, WORKER_SCRIPT, parseServicesHost } from "./src/svc/protocol";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./src/svc/worker.ts", import.meta.url));
@@ -7,12 +8,13 @@ const BRIDGE_ENTRY = fileURLToPath(new URL("./src/svc/bridge.ts", import.meta.ur
 
 /**
  * The page a contact's app origin starts from: the bridge's script and a frame for the app, nothing else. Its
- * policy is the server's (nginx.conf's services server); this one holds where none is sent (`vite preview`).
+ * policy is the server's (nginx.conf's services server); this one holds where none is sent (`vite preview`). Both let
+ * the WebRTC guard run inline by its hash (bridge.ts, with Hide my IP from contacts on).
  */
 export function bridgeHtml(): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' ${VIEWER_GUARD_HASH}; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'">
 <meta name="referrer" content="no-referrer">
 <title>Ghostly</title>
 <style>html,body{margin:0;height:100%;background:#fff;font:14px system-ui,sans-serif}iframe{border:0;width:100%;height:100%;display:block}body>p{padding:16px}</style>

@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useSameValue } from "../../hooks/useSameValue";
-import { copyText } from "../../lib/shareLink";
+import { copySecret } from "../../lib/shareLink";
 import { cardQuiet } from "./EntityCardFrame";
 
 /** How long Copy says Copied. */
@@ -22,7 +22,7 @@ function useCopyLink(url: string) {
   const copy = async () => {
     clearTimeout(timer.current); setState("");
     try {
-      await copyText(url);
+      await copySecret(url);
       setState("copied");
       timer.current = setTimeout(() => setState(""), COPIED_MS);
     } catch { setState("failed"); }

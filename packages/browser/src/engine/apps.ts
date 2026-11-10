@@ -302,6 +302,8 @@ export interface AppPreview {
   unknownPublisher: boolean;
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
+  /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
+  stage: string;
 }
 
 export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
@@ -344,6 +346,8 @@ export interface AppsHost {
  * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
  */
 interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number }
+/** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
+const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
 /**
  * `run` on every item, at most `limit` at a time (the next one starts when one ends): one promise per item, in the
@@ -638,6 +642,11 @@ export class Apps {
    */
   private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
   /**
+   * Fetches of an installed app's files under way, by `ref digest`: Open or Get its files while the update check fetches
+   * them waits for that fetch, with no download, hash or read-back of its own.
+   */
+  private readonly filesFetches = new Map<string, Promise<AppRunStatus>>();
+  /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
@@ -659,7 +668,10 @@ export class Apps {
   /** Drops `previewed` past `STAGED.ms`: an index is up to 4 MiB, and a closed Add screen sends no call. */
   private previewedSweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
-  /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
+  /**
+   * Runs the person started with Run anyway (`<ref> <digest>`): a removal does not cut them off. Only that run's: dropped
+   * when the version starts without it, when a call finds it no longer removed, and at Uninstall.
+   */
   private readonly anyway = new Set<string>();
   /** The apps started here (`entry`), for this engine's life: one of them uninstalled since may still have a frame open. */
   private readonly ran = new Set<string>();
@@ -846,6 +858,8 @@ export class Apps {
     const version = this.versionRunning(app, digest);
     const run = this.runStatus(version, await this.heldViews(), app.revocations);
     if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
+    // Its removal went: a later one is one the person never chose to run past.
+    if (run.status === "ok") this.anyway.delete(`${version.ref} ${version.digest}`);
     if (run.status === "removed" && !this.anyway.has(`${version.ref} ${version.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     return app;
   }
@@ -886,15 +900,20 @@ export class Apps {
     if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
   }
+  /** Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them). */
   private async putApp(app: InstalledApp): Promise<void> {
-    try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
+    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    const read = tx.objectStore(STORES.apps).get(app.ref);
+    read.onsuccess = () => { tx.objectStore(STORES.apps).put(withRevocations(app, (read.result as InstalledApp | undefined)?.revocations ?? [])); };
+    try { await done(tx); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
    * transaction: an app uninstalled (or installed again) while the update check was reading is not put back, nor is the
    * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
    * A store removed since the caller read the stores pins nothing: it is judged at the write, as `removeStore` unpins
-   * only the records written before it.
+   * only the records written before it. A revocation the record gained since `was` (`keepStoreRevocations`) is kept:
+   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -902,7 +921,10 @@ export class Apps {
     let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
     read.onsuccess = () => {
-      if (!sameRecord(read.result as InstalledApp | undefined, was)) return;
+      const now = read.result as InstalledApp | undefined;
+      if (!sameRecord(now, was)) return;
+      const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
+      app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -947,9 +969,13 @@ export class Apps {
   private async keepStoreRevocations(record: AddedAppStore): Promise<void> {
     const revoked = record.index?.revoked ?? [];
     if (!revoked.length) return;
-    for (const app of await this.installed()) {
-      const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
-      if ((next.revocations?.length ?? 0) > (app.revocations?.length ?? 0)) await this.putAppIfUnchanged(next, app);
+    const reread = async (ref: string) => wrap<InstalledApp | undefined>((await store(STORES.apps, "readonly")).get(ref));
+    for (const first of await this.installed()) {
+      // A record changed meanwhile (the update check wrote it) is read again: the revocation is not dropped.
+      for (let app: InstalledApp | undefined = first; app; app = await reread(first.ref)) {
+        const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
+        if ((next.revocations?.length ?? 0) <= (app.revocations?.length ?? 0) || await this.putAppIfUnchanged(next, app)) break;
+      }
     }
   }
   /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
@@ -1560,11 +1586,11 @@ export class Apps {
 
     // The install screen opened again on the version it showed (a listing, a card naming its digest): the bundle read and
     // checked from that URL within `STAGED.ms` is taken as it is, and only its revocations are read again.
-    const kept = expect?.digest !== undefined ? this.staged.get(expect.digest) : undefined;
     let last: unknown = null;
     for (const url of urls) {
       try {
-        const { bundle, bytes } = kept && kept.from === url && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
+        const kept = expect?.digest !== undefined ? this.staged.get(stagedKey(expect.digest, url, fromStore)) : undefined;
+        const { bundle, bytes } = kept && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
@@ -1581,7 +1607,7 @@ export class Apps {
   /** Drops the staged bundles past `STAGED.ms`, and comes back when the oldest left is due. */
   private sweepStaged(): void {
     this.sweep = null;
-    for (const [digest, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(digest);
+    for (const [key, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(key);
     const oldest = this.staged.values().next().value;
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
@@ -1608,9 +1634,10 @@ export class Apps {
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
     for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
-    this.staged.delete(digest);
+    const stage = stagedKey(digest, from, fromStore);
+    this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version.ref, stores);
@@ -1621,6 +1648,7 @@ export class Apps {
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
       ...(carried && { carried: true as const }),
+      stage,
     };
   }
 
@@ -1629,11 +1657,15 @@ export class Apps {
    * for (WISP 1200 § Permissions: none is granted by a store or a contact). A revoked or removed version is not
    * installed; neither is a rollback, nor another bundle under an installed `sequence` (marked on the app). `asks` is
    * what the person's screen listed (`AppPreview.asks`; the last screen of this bundle when not given): what this install
-   * adds to the record it writes over must be among it, else the screen is shown again first.
+   * adds to the record it writes over must be among it, else the screen is shown again first. `stage` is the screen's
+   * (`AppPreview.stage`): it installs from that screen's source and store; without it, only while one source of the
+   * bundle waits.
    */
-  async install({ digest, grant, asks }: { digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
-    const staged = this.staged.get(digest);
-    if (!staged || this.now() - staged.at > STAGED.ms) { this.staged.delete(digest); fail("expired", "Fetch the app again"); }
+  async install({ stage, digest, grant, asks }: { stage?: string; digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
+    const live = [...this.staged].filter(([key, s]) => s.bundle.digest === digest && (stage === undefined || key === stage) && this.now() - s.at <= STAGED.ms);
+    if (live.length > 1) fail("screens", "This app was fetched from more than one place; install it from its screen");
+    const [key, staged] = live[0] ?? [stage ?? ""];
+    if (!staged) { this.staged.delete(key); fail("expired", "Fetch the app again"); }
     const { bundle, bytes, from, store: fromStore, revocations } = staged;
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
@@ -1678,7 +1710,7 @@ export class Apps {
             // A newer version found under the other rule does not wait any more.
             if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
           }
-          this.staged.delete(digest);
+          this.staged.delete(key);
           return this.view((await this.app(version.ref))!, stores);
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
@@ -1690,7 +1722,7 @@ export class Apps {
         if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
         if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
         if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
-        this.staged.delete(digest);
+        this.staged.delete(key);
         return this.view(next, stores);
       }
     } catch (error) {
@@ -1723,10 +1755,16 @@ export class Apps {
     };
   }
 
-  /** The person accepted the permissions a waiting update adds: it is installed now. */
-  async acceptUpdate({ ref }: { ref: string }): Promise<InstalledAppView> {
+  /**
+   * The person accepted the permissions a waiting update adds: it is installed now. `sequence` and `added` are the
+   * waiting update its screen listed (`InstalledAppView.pending`): another one waiting now (the check found a newer one
+   * after the screen was drawn), or one that adds more than `added`, is refused with `permissions-changed`.
+   */
+  async acceptUpdate({ ref, sequence, added: shown }: { ref: string; sequence?: number; added?: readonly string[] }): Promise<InstalledAppView> {
+    if (shown !== undefined && !Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const installed = await this.installedOrFail(ref);
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
+    if (sequence !== undefined && pending.sequence !== sequence) fail("permissions-changed", `Another update waits now, which adds ${pending.added.length ? pending.added.join(", ") : "no permission"}; look at it again`);
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
     const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
@@ -1749,6 +1787,7 @@ export class Apps {
       await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } });
       fail("permissions-changed", `This update now adds ${added.length ? added.join(", ") : "no permission"}; look at it again`);
     }
+    if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
     const { pending: _p, ...without } = installed;
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
     // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is
@@ -1956,6 +1995,15 @@ export class Apps {
    */
   async fetchFiles({ ref }: { ref: string }): Promise<AppRunStatus> {
     const app = await this.installedOrFail(ref);
+    const key = `${app.ref} ${app.digest}`;
+    const under = this.filesFetches.get(key);
+    if (under) return under;
+    const fetching = this.fetchFilesOf(app).finally(() => { this.filesFetches.delete(key); });
+    this.filesFetches.set(key, fetching);
+    return fetching;
+  }
+
+  private async fetchFilesOf(app: InstalledApp): Promise<AppRunStatus> {
     const stores = await this.stores();
     if (await this.hasBundle(app.bytes, app.digest, app.manifest)) return this.runCheckOf(app, stores);
     // The version this build carries (a restored profile's built-in app): its files are here, no source is asked.
@@ -2013,12 +2061,19 @@ export class Apps {
   async entry({ ref, runAnyway }: { ref: string; runAnyway?: boolean }): Promise<AppRunEntry> {
     let app = await this.installedOrFail(ref);
     let run = await this.runCheckOf(app, await this.stores());
-    // Opened with its files missing (a restored profile): fetched again by digest first, or not run.
-    if (run.status === "needs-files") { run = await this.fetchFiles({ ref }); app = await this.installedOrFail(ref); }
+    // Opened with its files missing (a restored profile): fetched again by digest first, or not run. Checked again once
+    // they are here, with the record and the stores as they are now: a store added during the fetch counts.
+    if (run.status === "needs-files") {
+      await this.fetchFiles({ ref });
+      app = await this.installedOrFail(ref);
+      run = await this.runCheckOf(app, await this.stores());
+    }
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
+    // Run anyway is this run's alone: one started without it takes the pass from that version.
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
+    else this.anyway.delete(`${app.ref} ${app.digest}`);
     const bundle = await this.verifiedBundle(app, true);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
     this.ran.add(app.ref);
@@ -2118,6 +2173,7 @@ export class Apps {
     try { await done(tx); } finally { this.held.delete(ref); }
     for (const key of [...this.usage.keys()]) if (key.startsWith(`${ref}\0`)) this.usage.delete(key);
     this.started.delete(ref);
+    for (const key of [...this.anyway]) if (key.startsWith(`${ref} `)) this.anyway.delete(key);
     if (!app) return;
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);

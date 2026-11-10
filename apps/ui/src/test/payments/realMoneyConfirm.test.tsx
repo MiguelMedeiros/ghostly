@@ -77,7 +77,7 @@ describe("the Cashu card's Send: a pasted invoice", () => {
     expect(confirmStep()).toHaveTextContent("This sends 2,100 sats (plus a fee of up to 3)");
     expect(engine.callsTo("walletPayQuote")).toEqual([]);
     await user.click(screen.getByTestId("review-confirm-send"));
-    expect(await screen.findByText("Paid.")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-notice")).toHaveTextContent("Paid.");
     expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true }]);
   });
 
@@ -94,7 +94,7 @@ describe("the Cashu card's Send: a pasted invoice", () => {
     const { user, engine } = show("testnet");
     await quoteIt(user);
     expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
-    expect(await screen.findByText("Paid.")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-notice")).toHaveTextContent("Paid.");
     expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT }]);
   });
 });

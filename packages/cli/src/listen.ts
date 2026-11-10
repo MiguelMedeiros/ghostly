@@ -38,6 +38,9 @@ export interface ListenOptions {
    * stderr per event as before.
    */
   cursorFailed?: (error: unknown) => void;
+  /** `EXEC_SLOW_MS` and `EXEC_STOP_MS`, shorter in tests. */
+  execSlowMs?: number;
+  stopMs?: number;
 }
 
 /** The cursor's own write failed, not the event's handling. */
@@ -105,7 +108,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
 
 /**
  * One agent turn (docs/CLI.md § Agent turns): a message a contact sent in a chat, or a group message that mentions
- * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
+ * this profile or presses a button of its question. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
  * is stored under) is under `untrusted` and nowhere else: an agent reads it as data, never as its instructions. `seq` is
  * the source event's, so `--cursor` and `--since` work as for any event; `id` is stable for the message (dedupe on it).
  */
@@ -121,21 +124,31 @@ export interface AgentTurn extends GhostlyEvent {
   timestamp: number;
   /**
    * The message pressed a button of a question this profile sent (WISP 406 · Message Buttons), as this side's engine
-   * matched it: the question's id, the button's id and its label, all this profile's own words.
+   * matched it: the question's id, the button's id and its label, all this profile's own words, and who pressed (`by`:
+   * the chat, or the member's key in a group; null when the group message names none).
    */
-  press?: { messageId: string; button: string; label: string; inferred?: true };
+  press?: { messageId: string; button: string; label: string; inferred?: true; by: string | null };
   /** `translation`: `listen --translate`'s, made of the sender's text, so theirs as much. */
   untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean }; translation?: { from: string; text: string } };
 }
 
-interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: Omit<NonNullable<AgentTurn["press"]>, "by">; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
 
-/** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
+/**
+ * Whether a group message is meant for this profile: it mentions it, or it presses a button of a question this profile
+ * sent (`press` is set only on a press of mine, `buttonPress`). A press on another member's question is theirs to answer.
+ */
+const forMe = (message: TurnMessage): boolean => !!message.mentioned || !!message.press;
+
+/**
+ * The turn an event starts, or null: only a contact's message, and a group message that mentions this profile or
+ * presses a button of its question.
+ */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
   const message = event.message as TurnMessage | undefined;
   if (!message || typeof message.text !== "string") return null;
   if (event.type === "message.received" && typeof event.chat === "string") return turn(event, "message.received", { chat: event.chat }, message);
-  if (event.type === "group.message" && typeof event.group === "string" && message.mentioned) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  if (event.type === "group.message" && typeof event.group === "string" && forMe(message)) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
   if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
@@ -147,7 +160,8 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   const place = where.chat ?? where.group ?? "", messageId = turnRef(place, message.id);
   return {
     seq: event.seq, id: `agent.turn:${source}:${place}:${messageId}`, type: "agent.turn", at: event.at, source, ...where, messageId, timestamp: message.timestamp,
-    ...(message.press ? { press: message.press } : {}),
+    // Who pressed, as `button.pressed` says it: the chat, or the member's key in a group.
+    ...(message.press ? { press: { ...message.press, by: where.chat ?? where.member ?? null } } : {}),
     untrusted: {
       text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
@@ -262,19 +276,59 @@ export function hookEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return childEnv(env);
 }
 
-/** Runs `command` through the shell with the event on stdin (never in its arguments); resolves with its exit code. */
-function runExec(command: string, event: GhostlyEvent): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ["pipe", "inherit", "inherit"],
-      env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
-    });
-    child.on("error", () => resolve(127));
-    child.on("close", (code) => resolve(code ?? 1));
-    child.stdin.on("error", () => {});
-    child.stdin.end(JSON.stringify(event) + "\n");
+/** How a hook ended: its exit code, or the signal that killed it (`code` null then). */
+interface HookEnd { code: number | null; signal: NodeJS.Signals | null }
+
+/** How long a hook's stdout is still waited for once the hook exited: a process it left running may hold it open. */
+const HOOK_OUTPUT_GRACE_MS = 1000;
+/** How long a hook runs before stderr says, once, that the events after it wait for it. */
+export const EXEC_SLOW_MS = 60_000;
+/** A stop gives a running hook this long to end on its own, then as long again after SIGTERM before SIGKILL. */
+export const EXEC_STOP_MS = 5_000;
+
+/** A hook at work: how it ended, and a signal sent to it and what it started. */
+interface Hook { event: GhostlyEvent; ended: Promise<HookEnd>; signal(name: NodeJS.Signals): void; stopped?: boolean }
+
+/**
+ * Runs `command` through the shell with the event on stdin (never in its arguments).
+ * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
+ * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
+ */
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook {
+  // Its own process group (not on Windows, where that opens a console), so a stop ends the hook and what it started.
+  const group = process.platform !== "win32";
+  const child = spawn(command, {
+    shell: true,
+    detached: group,
+    stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
+    env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
   });
+  const signal = (name: NodeJS.Signals) => {
+    try { if (group && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* gone already */ }
+  };
+  // A listen that leaves anyway (a second signal, a stop past its bound, a cursor it cannot write) takes its hook with
+  // it. Before, the hook ran on as an orphan, and the restarted listen ran the same event's hook again alongside it.
+  const orphaned = () => signal("SIGKILL");
+  process.on("exit", orphaned);
+  const ended = new Promise<HookEnd>((resolve) => {
+    let done = false;
+    const finish = (end: HookEnd) => { if (!done) { done = true; resolve(end); } };
+    child.on("error", () => finish({ code: 127, signal: null }));
+    // `exit`, not `close`: a process the hook left running (`… &`) may hold its stdout for long; the hook is done when
+    // it exits. Its output is still waited for a moment, so the stderr note comes after it; whatever comes later is
+    // still streamed.
+    child.on("exit", (code, name) => {
+      const end = { code, signal: name };
+      const output = child.stdout;
+      if (!output || output.readableEnded || output.destroyed) return finish(end);
+      const timer = setTimeout(() => finish(end), HOOK_OUTPUT_GRACE_MS);
+      output.once("close", () => { clearTimeout(timer); finish(end); });
+    });
+  }).finally(() => process.off("exit", orphaned));
+  child.stdout?.pipe(process.stderr, { end: false });
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(JSON.stringify(event) + "\n");
+  return { event, ended, signal };
 }
 
 /** The longest wait between two tries of a webhook that is not answering. */
@@ -319,6 +373,13 @@ export interface EventHandler {
   behind(): number;
   /** Resolves when every event given is handled. */
   idle(): Promise<void>;
+  /**
+   * Takes no more events and resolves once no hook runs: one at work gets `EXEC_STOP_MS` to end on its own (the cursor
+   * then moves past its event), else it and what it started are sent SIGTERM, then SIGKILL, and the cursor stays before
+   * its event, handed again at the next start. Before, a stop left the hook running on its own, and the restarted listen
+   * ran that event's hook a second time alongside it.
+   */
+  stop(): Promise<void>;
 }
 
 /**
@@ -330,6 +391,9 @@ export function eventHandler(options: ListenOptions): EventHandler {
   let chain = Promise.resolve();
   let behind = 0;
   let stopped = false;
+  /** The hook at work, if any. */
+  let running: Hook | null = null;
+  const slowMs = options.execSlowMs ?? EXEC_SLOW_MS, stopMs = options.stopMs ?? EXEC_STOP_MS;
   /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
   let kept = -1, dropped = -1;
   const keep = (seq: number) => {
@@ -339,7 +403,8 @@ export function eventHandler(options: ListenOptions): EventHandler {
   };
   /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
   const keepDropped = () => {
-    if (behind > 0 || dropped <= kept) return;
+    // Once stopped, never past an event whose hook the stop ended.
+    if (stopped || behind > 0 || dropped <= kept) return;
     try { keep(dropped); } catch (failed) {
       if (!(failed instanceof CursorError) || !options.cursorFailed) return;
       stopped = true;
@@ -370,8 +435,15 @@ export function eventHandler(options: ListenOptions): EventHandler {
       }
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
-        const code = await runExec(options.exec, event);
-        if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
+        const hook = running = runExec(options.exec, event, options.print);
+        // Once, as the webhook's "not answering": a hook that never ends held every later event without a word.
+        const slow = setTimeout(() => process.stderr.write(`ghostly: --exec still runs on event ${hook.event.seq} (${hook.event.type}) after ${Math.round(slowMs / 1000)} s: the events after it wait for it\n`), slowMs);
+        const { code, signal } = await hook.ended.finally(() => { clearTimeout(slow); running = null; });
+        // Ended by the stop: the cursor stays before the event.
+        if (hook.stopped) return;
+        // A hook killed by a signal (the OOM killer, a timeout wrapper) is said as such, not as an exit 1.
+        if (signal) process.stderr.write(`ghostly: --exec was killed by ${signal} on event ${event.seq} (${event.type})\n`);
+        else if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code ?? 1} on event ${event.seq} (${event.type})\n`);
       }
       // A refusal passes the event for good: said with what the bridge answered, so a wrong path (404) or a missing
       // token (401) is seen in the log, not only as messages that never came.
@@ -395,7 +467,22 @@ export function eventHandler(options: ListenOptions): EventHandler {
       }
     }).finally(() => { behind--; keepDropped(); });
   };
-  return Object.assign(handle, { behind: () => behind, idle: () => chain });
+  const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms).unref())]);
+  const stop = async () => {
+    stopped = true;
+    const hook = running;
+    if (!hook) return;
+    if (await within(hook.ended, stopMs)) {
+      // It ended on its own: its event's cursor is written in a moment (not waited for past the bound: a webhook down).
+      await within(chain, stopMs);
+      return;
+    }
+    hook.stopped = true;
+    process.stderr.write(`ghostly: stopped while --exec ran on event ${hook.event.seq} (${hook.event.type}): ended it, and the event is handed again at the next start\n`);
+    hook.signal("SIGTERM");
+    if (!(await within(hook.ended, stopMs))) { hook.signal("SIGKILL"); await hook.ended; }
+  };
+  return Object.assign(handle, { behind: () => behind, idle: () => chain, stop });
 }
 
 /** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */

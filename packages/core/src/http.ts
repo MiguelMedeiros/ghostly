@@ -680,6 +680,7 @@ export class HttpClient {
   private nextId = 1;
   private readonly streams = new Map<number, ClientStream>();
   private readonly waiting: (() => void)[] = [];
+  private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
 
@@ -688,7 +689,28 @@ export class HttpClient {
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     if (this.inFlight >= LIMITS.maxClientInFlight) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
+      const bytes = request.body?.length ?? 0;
+      if (this.waiting.length >= LIMITS.maxClientWaiting || this.waitingBytes + bytes > LIMITS.maxClientWaitingBodyBytes) {
+        throw new GhostlyHttpError("busy", "Too many requests waiting");
+      }
+      this.waitingBytes += bytes;
+      // Aborted while it waits: it leaves the queue at once, and lets go of its body.
+      let leave = () => {};
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const wake = () => { request.signal?.removeEventListener("abort", leave); resolve(); };
+          leave = () => {
+            const at = this.waiting.indexOf(wake);
+            if (at >= 0) this.waiting.splice(at, 1);
+            reject(new GhostlyHttpError("aborted", "Request aborted"));
+          };
+          if (request.signal?.aborted) return leave();
+          this.waiting.push(wake);
+          request.signal?.addEventListener("abort", leave, { once: true });
+        });
+      } finally {
+        this.waitingBytes -= bytes;
+      }
       if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     }
     this.inFlight++;

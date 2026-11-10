@@ -15,6 +15,7 @@ import { parseDeviceRecord, type DeviceRecord, type DeviceSlot, type StoredDevic
 import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import type { WakeSubscription } from "../src/shared/types";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
+import { hostOf } from "./helpers/urlHost";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
 // covers: devices.push, devices.push.wake, devices.push.renew
 
@@ -198,7 +199,7 @@ describe("a device wake-up", () => {
   it("through a push relay, only the push service's status the relay reports can say gone: any other answer is a failure", async () => {
     let relay: Response = new Response("");
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://fcm.googleapis.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "fcm.googleapis.com") throw new TypeError("Failed to fetch");
       return relay;
     }));
     try {

@@ -38,7 +38,7 @@ async function install(peer: Peer, store: TestStore): Promise<void> {
 }
 
 /** Ana and Bob, named, paired, with Chess (or a full-screen app) installed on Ana's side. */
-async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string } = {}): Promise<[Peer, Peer]> {
+async function setUp(peer: (name: string) => Promise<Peer>, options: { view?: AppViewMode; title?: string; tagline?: string; entry?: string } = {}): Promise<[Peer, Peer]> {
   const store = await testStore(options);
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   await serveStore(ana.context, store);
@@ -444,4 +444,61 @@ test("an app that says `activity` by itself does not keep the lock away once the
   await ana.page.waitForTimeout(75_000);
   await expect(ana.page.getByText("Ghostly is locked")).toBeVisible({ timeout: 1000 });
   await expect(app).toHaveCount(0);
+});
+
+// The watchdog closed an app that held its thread; Open again is what the person has left. Offline it cannot open: the
+// place says why and stays, and once it opens again in a chat the keyboard focus is still in the app's panel.
+test.describe("Open again after an app stopped responding", () => {
+  // Answers at first, then holds its thread past the watchdog's bound.
+  const HANGS = "<!doctype html><meta charset=utf-8><title>Chess</title><body><h1>Chess</h1><script>setTimeout(() => { const end = Date.now() + 15000; while (Date.now() < end); }, 1500);</script>";
+
+  test("in a chat: offline it says why under Open again and the panel stays; online, the focus stays in the panel", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    const [ana] = await setUp(peer, { entry: HANGS });
+    await ana.page.setViewportSize({ width: 1280, height: 800 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    const again = app.getByTestId("mini-app-open-again");
+    await expect(again).toBeVisible({ timeout: 60_000 });
+
+    await ana.context.setOffline(true);
+    await again.click();
+    await expect(app.getByRole("alert")).toHaveText("You are offline.");
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+    await expect(again).not.toHaveAttribute("aria-busy", "true");
+
+    await ana.context.setOffline(false);
+    await again.focus();
+    await ana.page.keyboard.press("Enter");
+    await expect(again).toHaveCount(0);
+    await expect(app.getByRole("alert")).toHaveCount(0);
+    expect(await app.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+  });
+
+  test("alone: offline the layer stays and says why under Open again", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    const store = await testStore({ view: "full", title: "Chess", entry: HANGS });
+    const ana = await peer("ana");
+    await serveStore(ana.context, store);
+    await install(ana, store);
+    await ana.page.getByTestId("account-apps").click();
+    await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+    const app = ana.page.getByTestId("mini-app");
+    await expect(app).toHaveAttribute("data-place", "alone");
+    const again = app.getByTestId("mini-app-open-again");
+    await expect(again).toBeVisible({ timeout: 60_000 });
+
+    await ana.context.setOffline(true);
+    await again.click();
+    await expect(app.getByRole("alert")).toHaveText("You are offline.");
+    await expect(app).toHaveAttribute("data-place", "alone");
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+
+    // Online, it opens again in a layer of its own, and only one.
+    await ana.context.setOffline(false);
+    await again.click();
+    await expect(ana.page.locator("[data-place=alone]")).toHaveCount(1);
+    await expect(ana.page.getByTestId("mini-app-open-again")).toHaveCount(0);
+    await expect(ana.page.getByTestId("mini-app").getByRole("alert")).toHaveCount(0);
+  });
 });

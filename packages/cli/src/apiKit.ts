@@ -1,4 +1,4 @@
-import { INVITE_TAKEN, isZ32Key, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
+import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -68,6 +68,13 @@ export function num(params: Params, name: string, fallback: number, { min = 0, m
   if (whole && !Number.isSafeInteger(value)) throw new CliError("bad_request", `${name} must be a whole number from ${min} to ${max}`);
   return value;
 }
+/**
+ * The seq `events.replay` and `events.subscribe` start after: whole, from 0; `fallback` when left out. A cursor sent as
+ * text ("412") was a stream from now on the socket with no error, and a negative one a gap of seqs that never were.
+ */
+export function sinceSeq(params: Params, fallback: number): number {
+  return num(params, "since", fallback, { whole: true });
+}
 export function bool(params: Params, name: string): boolean {
   const value = params[name];
   if (value === undefined || value === null) return false;
@@ -93,6 +100,11 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 // ---------- finding things ----------
 
 const KEY_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+/**
+ * A chat's id as the engine makes it (the first 16 characters of a z-base-32 key) and the CLI prints it as `chat`. A ref
+ * so shaped is only ever an id: tested on its `nameKey`, so that a case, a space or an invisible character more is too.
+ */
+const CHAT_ID_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
 /**
  * A contact key as chats show it (`peer`): 52 characters of z-base-32, in its one canonical spelling. The same 52
  * characters with the last one respelled decode to the same bytes but are no key (WISP 02): refused here, so that
@@ -129,6 +141,37 @@ export function cleanName(name: string, max: number): string | undefined {
   return [...clean].length > max ? undefined : clean;
 }
 
+/**
+ * `name` as `cleanName` stores it, or the one refusal every name kind gives (`bad_request`), so a chat's, the profile's
+ * and a group's name read alike. `subject` starts the sentence ("A chat's name", "nick"); `empty` follows "needs a
+ * character that shows" (what an empty name does instead, when it does something). Too long says the count as stored,
+ * in code points as the engine counts, and the largest character of several code points in it (a joined emoji or a
+ * flag counts as several): the person sees what to cut, and a bot reads `details.length` and `details.max`.
+ */
+export function shownName(name: string, max: number, subject: string, empty = ""): string {
+  const clean = cleanName(name, Infinity) ?? "";
+  const length = [...clean].length;
+  if (length > max) {
+    const widest = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(clean)]
+      .map(({ segment }) => segment).reduce((a, b) => ([...b].length > [...a].length ? b : a), "");
+    const several = [...widest].length > 1 ? `: ${widest} counts as ${[...widest].length}` : "";
+    throw new CliError("bad_request", `${subject} is up to ${max} characters as stored (this one is ${length}${several})`, { length, max });
+  }
+  if (!clean) throw new CliError("bad_request", `${subject} needs a character that shows${empty}`);
+  return clean;
+}
+
+/**
+ * The `name` param of `group create` and `group rename`, refused as a chat's or the profile's name is (`shownName`),
+ * then as the engine takes it (`groupName`: the same cleaning, 64 code points, 256 bytes; 64 code points never pass
+ * 256 bytes, so its refusal is only a guard). Said here, before anything is made.
+ */
+export function groupNameOf(params: Params): string {
+  const name = groupName(shownName(str(params, "name", true), MAX_GROUP_NAME_LENGTH, "A group's name"));
+  if (!name) throw new CliError("bad_request", `A group's name is up to ${MAX_GROUP_NAME_BYTES} bytes as stored`);
+  return name;
+}
+
 /** Whether `name` is the one `key` (a ref's `nameKey`) names. */
 const namedAs = (key: string, name: string | null | undefined) => key !== "" && nameKey(name) === key;
 
@@ -136,7 +179,8 @@ const namedAs = (key: string, name: string | null | undefined) => key !== "" && 
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
  * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
  * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
- * that fits one chat's prefix and another's name is refused. `group:<ref>` is taken for a chat only by a label. A ref
+ * that fits one chat's prefix and another's name is refused. A ref shaped as a chat's id is only ever an id, or a label
+ * given here. `group:<ref>` is never a chat (a group, as everywhere). A ref
  * that names no chat but one of `groups` says it is a group (see `noChat`).
  */
 export function findChat(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = []): LinkView {
@@ -149,10 +193,36 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  * as if nothing had that name.
  */
 function noChat(ref: string, groups: readonly GroupView[]): CliError {
-  let group: GroupView | undefined;
-  try { group = findGroup(groups, ref); } catch { /* no group, or more than one */ }
+  const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+}
+
+/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word. */
+const shownRef = (ref: string) => (/^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref));
+
+/** The chat or the group a message or a file was looked for in, as the command was given it (`ref`). */
+export type RefPlace = { group: boolean; ref: string };
+
+/**
+ * No message by `id` in a chat or a group, said one way by every command that takes one, as `noChat` says a chat: the id
+ * quoted as given, and where the ids are. `whose` ("of yours", "from someone else") is what it had to be; `tail` what
+ * else it may have failed for (", or it takes no reaction", ": only your own messages are sent again").
+ */
+export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
+  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place.ref)}`;
+  return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
+}
+
+/** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
+export function noFile(id: string, place?: RefPlace): CliError {
+  const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
+  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place.ref) : "<chat|group>"})`);
+}
+
+/** The one group `ref` names, if any (none, or more than one: undefined). */
+function groupNamed(ref: string, groups: readonly GroupView[]): GroupView | undefined {
+  try { return findGroup(groups, ref); } catch { return undefined; }
 }
 
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
@@ -170,9 +240,17 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   const key = nameKey(ref);
   const named = (name: string | null | undefined) => namedAs(key, name);
   const byLabel = links.filter((link) => named(link.label));
-  // `group:<ref>` names a group (`groupPrefixed`): only a label given here takes it for a chat, never a name its contact
-  // chose (a contact calling itself `group:Crew` took `send group:Crew` and every chat-only command meant for the group).
-  if (!byLabel.length && groupPrefixed(ref) !== null) throw noChat(ref, groups);
+  // `group:<ref>` names a group (`groupPrefixed`), never a chat: not by a name its contact chose, nor by a label given
+  // here (a chat labelled `group:Crew` was that chat for `chat show` and the group Crew for `send`). A chat labelled so
+  // before labels were refused (`chatName`) is named by its id.
+  if (groupPrefixed(ref) !== null) {
+    if (byLabel.length && !groupNamed(ref, groups)) throw new CliError("not_found", `${JSON.stringify(ref)} names a group, never a chat: name the chat labelled so by its id, and give it another name (ghostly chat rename <chat> <name>)`, { matches: byLabel.map((link) => link.id) });
+    throw noChat(ref, groups);
+  }
+  // A chat's id no chat has (one removed since: a bot kept it from an event) is no chat. Its contact and whoever saw its
+  // invite know it, so another contact could call itself that and take every later command sent by it. A label given
+  // here still names the chat: only this side chooses it.
+  if (!byLabel.length && CHAT_ID_SHAPED.test(key)) throw noChat(ref, groups);
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
@@ -243,6 +321,9 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
     chat = chatBy(links, ref);
   } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    // Nor is it a group's name or a prefix of a group's id (its admin and its creator chose those; a group's own id is
+    // longer): `group:<ref>` names a group.
+    if (CHAT_ID_SHAPED.test(nameKey(ref))) throw error;
     try { return { group: findGroup(groups, ref) }; } catch (inner) {
       if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
       if (CONTACT_KEY.test(ref)) throw error;
@@ -274,6 +355,36 @@ export function startNamedChats(ctx: ApiContext, params: Params): void {
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
+/** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
+export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
+
+/** `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. */
+export const nobodyJoinedChat = (ctx: ApiContext, chat: string): boolean => {
+  const link = state(ctx).links.find((l) => l.id === chat);
+  return !!link && nobodyJoined(link);
+};
+
+/**
+ * Whether a one-shot waits by default on what it did in a 1:1 chat: it leaves with its process, so it stays until that
+ * went out or the contact confirmed it. Not on a chat nobody joined yet: there is no one to wait for, and `edit`, `react`,
+ * `pin`, a card or a file sat their whole wait (a file 300 s), then failed `timeout`, exit 4, which a bot retries: one
+ * more card or file each time. What was done is kept and goes once they join; the answer says so (`keptForJoin`).
+ */
+export const oneShotWaits = (ctx: ApiContext, chat: string): boolean => ctx.mode === "one-shot" && !nobodyJoinedChat(ctx, chat);
+
+/** An answer's `note` on a chat nobody joined yet: `what` is kept and goes once they join. Nothing on any other chat. */
+export const keptForJoin = (ctx: ApiContext, chat: string, what: string): { note?: string } => nobodyJoinedChat(ctx, chat)
+  ? { note: `Nobody joined this chat yet: ${what} goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }
+  : {};
+
+/**
+ * A chat whose invite nobody took yet has no session to close either: `chat disconnect` answered done with the chat at
+ * `connecting`, and `--hold` put the waiting invite on DHT only (a one-shot answered `pairing: error`).
+ */
+export function somebodyJoined(link: LinkView): void {
+  if (nobodyJoined(link)) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+}
+
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
  * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`. A chat whose invite someone else used
@@ -281,7 +392,7 @@ export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).l
  * then answered `timeout`, a code a bot retries).
  */
 export function inviteTaken(link: LinkView): void {
-  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+  somebodyJoined(link);
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
@@ -351,20 +462,27 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
  * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
  * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
  * listeners throw, and the wait went on to its timeout.
+ *
+ * `stopping` (a daemon's `ctx.stopping`): the daemon's stop ends it too, as a timeout with `details.reason:
+ * "daemon-stopped"`, for a wait whose command did something (`file send --wait`) and answers with what it knows. A
+ * wait that changes nothing is left to its connection's end, and its client asks it again (main.ts `READ_WAITS`).
  */
-export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
+export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string, stopping?: AbortSignal): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
+    const end = (error: unknown) => { clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); if (error) reject(error); };
+    const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
+    const timer = setTimeout(() => end(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)), ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
-      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
+      try { value = check(next); } catch (error) { end(error); return; }
       if (value === undefined) return;
-      clearTimeout(timer);
-      off();
+      end(null);
       resolve(value);
     });
+    if (stopping?.aborted) stopped();
+    else stopping?.addEventListener("abort", stopped, { once: true });
   });
 }
 

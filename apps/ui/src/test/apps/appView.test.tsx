@@ -300,9 +300,10 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     const app = screen.getByTestId("mini-app");
     expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
     expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
-    // Back as the chat header's Back right under it: 36 px only under 340 px.
+    // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
+    // still 44 × 44 px there (`.tap-target`).
     const back = within(app).getByTestId("mini-app-back");
-    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9");
+    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9", "tap-target");
     expect(back).not.toHaveClass("w-9");
   });
 
@@ -333,6 +334,25 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     unmount();
     expect(started[0]!.stop).toHaveBeenCalled();
     expect(chatApp("link-1")).toBeUndefined();
+  });
+
+  it("an Open in a chat still on its way when the chat closes starts nothing: never alone over the page the person went to", async () => {
+    windowIs(false);
+    const { unmount } = panel();
+    // Its files fetched again first (a restored profile), on a slow link: the person leaves the chat meanwhile.
+    let fetched!: () => void;
+    const slow = new Promise<void>((resolve) => { fetched = resolve; });
+    const entry = host.entry;
+    host.entry = (async (...args: Parameters<AppsPlatform["entry"]>) => { await slow; return entry(...args); }) as AppsPlatform["entry"];
+    try {
+      const opening = open(REF, "link-1");
+      unmount();
+      fetched();
+      await expect(opening).rejects.toThrow();
+      expect(started).toHaveLength(0);
+      expect(document.querySelector("[data-testid=mini-app]")).toBeNull();
+      expect(chatApp("link-1")).toBeUndefined();
+    } finally { host.entry = entry; }
   });
 
   it("starts with the name the contact was told in that chat, none once the profile stops sharing it, and none alone", async () => {
@@ -472,6 +492,32 @@ describe("keys and focus in a mini-app", () => {
     page.remove();
     lock.remove();
   });
+
+  it("alone: Back (Android's back gesture) closes it and leaves the page under it where it was", async () => {
+    /** Waits for a traversal's popstate, or for none. */
+    const settled = () => new Promise<void>((resolve) => { const done = () => { removeEventListener("popstate", done); resolve(); }; addEventListener("popstate", done); setTimeout(done, 200); });
+    history.pushState(null, "", "#/apps");
+    const page = document.createElement("div");
+    page.className = "two-pane";
+    const button = document.createElement("button");
+    page.append(button);
+    document.body.append(page);
+    button.focus();
+    await open(REF, null);
+    // The layer's entry is pushed once the open settles.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const pop = settled();
+    history.back();
+    await pop;
+    // The app is closed, the Apps page still there under it, and the focus back on what opened it.
+    expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
+    expect(started[0]!.stop).toHaveBeenCalled();
+    expect(location.hash).toBe("#/apps");
+    expect(page.inert).toBe(false);
+    expect(button).toHaveFocus();
+    page.remove();
+    await settled();
+  });
 });
 
 describe("opening an app from the Apps page", () => {
@@ -531,6 +577,16 @@ describe("opening an app from the Apps page", () => {
       expect(takeOpenRequest("link-1")).toBeUndefined();
       requestOpenInChat("link-1", { app: installed("chat"), options: { runAnyway: true } });
       expect(takeOpenRequest("link-1")).toMatchObject({ options: { runAnyway: true } });
+      expect(takeOpenRequest("link-1")).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an open request is still dropped after a minute when the device's clock went back", () => {
+    vi.useFakeTimers();
+    try {
+      requestOpenInChat("link-1", { app: installed("chat") });
+      vi.setSystemTime(Date.now() - 60 * 60_000);
+      vi.advanceTimersByTime(2 * 60_000);
       expect(takeOpenRequest("link-1")).toBeUndefined();
     } finally { vi.useRealTimers(); }
   });

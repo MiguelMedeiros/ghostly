@@ -22,6 +22,7 @@ import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, setLinkedFiles, takedownText } from "../../ui/src/lib/apps/open";
+import { appErrorText } from "../../ui/src/lib/apps/errors";
 import { idbPickStore, linkedFilesDatabase, pickSheetText, webLinkedFiles } from "../../ui/src/lib/apps/webFiles";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
@@ -137,6 +138,7 @@ if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
     openAgainLabel: () => profileTranslator()("apps.view.openAgain"),
+    errorText: (error) => appErrorText(error, profileTranslator()),
     // Files the person picks for an app granted `files`: the client's own sheet, links for this page's life.
     linkedFiles,
   }));

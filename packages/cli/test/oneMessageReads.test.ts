@@ -19,7 +19,7 @@ function fake() {
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
-    deleteMessage: vi.fn(async () => {}),
+    deleteMessage: vi.fn(() => ({ everyone: false })),
     removeMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: null as string | null, ...(linkId.startsWith("group:") && { e: 1 }) })),
     removalPending: vi.fn(() => true),
     groupTaken: vi.fn(() => 0),
@@ -39,9 +39,16 @@ describe("delete", () => {
     const { ctx, node, whole } = fake();
     expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1" })).toEqual({ chat: "chat-one", messageId: "peer_1", deleted: "peer_1", everyone: false });
     expect(node.deleteMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "peer_1" });
-    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: "No message k:0:1 in this chat" });
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: 'No message "k:0:1" in this chat (ghostly chat history Alice)' });
     expect(node.deleteMessage).toHaveBeenCalledOnce();
     expect(whole()).toBe(0);
+  });
+
+  it("a waiting text of mine the outbox already handed to the link is deleted for everyone, and the answer says so", async () => {
+    const { ctx, node } = fake();
+    node.deleteMessage.mockReturnValueOnce({ everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 
   it("a group named without --everyone says it is a group and how its message is deleted, not \"No chat\"", async () => {
@@ -67,8 +74,8 @@ describe("message details", () => {
       expect(await callApi(ctx, "chat.details", { chat, message: "k:0:1" })).toEqual({ message: { id: "k:0:1" }, group: { id: "g1" } });
       expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1" });
     }
-    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this group" });
-    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
+    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this group (ghostly group history Crew)' });
+    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
     await expect(callApi(ctx, "chat.details", { chat: "Nobody", message: "x" })).rejects.toMatchObject({ code: "not_found" });
     const { COMMANDS } = await import("../src/commands");
     expect(COMMANDS["message details"]!.usage).toBe("message details <chat|group> <message>");
@@ -161,8 +168,8 @@ describe("forward", () => {
 
   it("one not there is not_found, before anything is forwarded; the secret guard reads the same rows", async () => {
     const { ctx, node } = fake();
-    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1", "nope"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
-    await expect(callApi(ctx, "chat.forward", { chat: "Crew", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: "No message peer_1 in this group" });
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1", "nope"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
+    await expect(callApi(ctx, "chat.forward", { chat: "Crew", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: 'No message "peer_1" in this group (ghostly group history Crew)' });
     node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "peer_1" } });
     expect(node.forwardMessages).not.toHaveBeenCalled();

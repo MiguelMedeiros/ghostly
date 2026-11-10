@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, type GhostlyEvent } from "../src/events";
+import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -623,6 +623,65 @@ describe("the event stream", () => {
       check(again);
     });
 
+    function allocated(work: () => void): number {
+      const alloc = Buffer.alloc;
+      let bytes = 0;
+      const spy = vi.spyOn(Buffer, "alloc").mockImplementation((size: number, ...rest: unknown[]) => { bytes += size; return alloc.call(Buffer, size, ...(rest as [])); });
+      try { work(); } finally { spy.mockRestore(); }
+      return bytes;
+    }
+
+    /**
+     * Each deletion read the journal's whole window from disk (up to 32 MiB) and searched it, a contact's delete for
+     * everyone included: 50 of them cost a daemon with a long journal 1.5 GiB of reads. Now a deletion reads from the
+     * first line that names the message on.
+     */
+    it("a contact deleting recent messages one by one reads the journal from their events on, not whole each time", async () => {
+      const { h, path } = await filled("recent.jsonl", 2_000);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1989"] });
+      const size = statSync(path).size;
+      const read = allocated(() => {
+        for (let i = 1990; i < 2_000; i++) h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: [`m${i}`] });
+      });
+      expect(read).toBeLessThan(size / 10);
+      const journal = readFileSync(path, "utf8");
+      for (let i = 1989; i < 2_000; i++) expect(journal).not.toContain(`${text} ${i}"`);
+      expect(journal).toContain(`${text} 1988"`);
+      expect(h.replay(0).filter((e) => e.type === "message.received")).toHaveLength(1_989);
+    });
+
+    it("still finds a message's lines after the journal was written again, appended to and trimmed", async () => {
+      const { h, path } = await filled("rewritten.jsonl", 600);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m0"] });
+      // Many ids at once: the journal is written again, every line after them moved.
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: Array.from({ length: 100 }, (_, i) => `m${i + 1}`) });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "late", { text: "SECRET-LATE", replyTo: { id: "wire-m300", snippet: "SECRET-QUOTE", from: "peer", messageId: "m300" } })], deleted: [] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m300"] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["late"] });
+      const journal = readFileSync(path, "utf8");
+      expect(journal).not.toContain(`${text} 300"`);
+      expect(journal).not.toContain("SECRET-LATE");
+      expect(journal).not.toContain("SECRET-QUOTE");
+      // A trim moves every line too.
+      for (let i = 0; i < 20_001; i++) h.emit("x", `x:${i}`);
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "after", { text: "SECRET-AFTER" })], deleted: [] });
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["after"] });
+      expect(readFileSync(path, "utf8")).not.toContain("SECRET-AFTER");
+    }, 60_000);
+
+    it("a line cut short inside the journal that names a deleted message still goes", async () => {
+      const path = join(dir, "cut.jsonl");
+      const line = (seq: number, id: string, text: string) => JSON.stringify({ seq, id: `message.received:c1:${id}`, type: "message.received", at: 1, chat: "c1", message: { id, text } });
+      writeFileSync(path, [line(1, "m1", "kept one"), line(2, "m2", "SECRET-CUT").slice(0, 80), line(3, "m3", "kept two")].join("\n") + "\n");
+      const { h } = await hub("cut.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "m1"), message("c1", "m2"), message("c1", "m3")]]]));
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m2"] });
+      const journal = readFileSync(path, "utf8");
+      expect(journal).not.toContain("SECRET-CUT");
+      expect(journal).toContain("kept one");
+      expect(journal).toContain("kept two");
+    });
+
     it("a change that deletes thousands of messages reads each line once", async () => {
       const { h, path } = await filled("many.jsonl", 5_000);
       const ids = Array.from({ length: 4_000 }, (_, i) => `m${i}`);
@@ -688,6 +747,160 @@ describe("the event stream", () => {
       h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-in-w": { state: "failed", transferred: 5, size: 900, direction: "in", error: "Cancelled" } }) });
       expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"], ["file.failed", "c1-in-w", "peer_w"]]);
       expect(whole.mock.calls).toEqual([["c1"]]);
+    });
+
+    /**
+     * A transfer that ends while its daemon stops, or as the next start runs before the hub reads the engine: the next
+     * start reports its end, once. It said nothing: a bot that restarted while a big file came never handled the file.
+     */
+    describe("a transfer that ends while no hub watches", () => {
+      const sent = message("c1", "me_8", { sender: "me", delivery: "sent", file: { id: "c1-out-w", name: "a", size: 9, mime: "text/plain" } });
+      const history = () => new Map([["c1", [message("c1", "peer_v", { file: voice }), sent]]]);
+      async function underWay(journal: string) {
+        const first = await hub(journal);
+        first.h.baseline(state([link("c1")]), history());
+        first.h.sink.post({ kind: "state", state: transfers({
+          "c1-in-v": { state: "transferring", transferred: 400, size: 900, direction: "in", stage: "verifying" },
+          "c1-out-w": { state: "transferring", transferred: 0, size: 9, direction: "out", stage: "asking" },
+        }) });
+        expect(first.events.map((e) => [e.type, e.file])).toEqual([["file.stage", "c1-in-v"], ["file.stage", "c1-out-w"]]);
+        // The seen set is written behind: the next start reads it once it is in.
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      it("ended while it stopped: the next start reads its end in the file's record", async () => {
+        await underWay("ended-stop.jsonl");
+        const { h, events } = await hub("ended-stop.jsonl");
+        // A finished file has no transfer in the engine's state at start: only its record says it is done.
+        h.baseline(state([link("c1")]), history());
+        const records: Record<string, unknown> = {
+          "c1-in-v": { direction: "in", transfer: { state: "done", transferred: 900, size: 900 } },
+          "c1-out-w": { direction: "out", transfer: { state: "failed", transferred: 0, size: 9, error: "Declined" } },
+        };
+        await h.ended(async (id) => records[id] as never);
+        expect(events.map((e) => [e.type, e.file, e.chat, e.messageId, e.direction])).toEqual([
+          ["file.done", "c1-in-v", "c1", "peer_v", "in"],
+          ["file.failed", "c1-out-w", "c1", "me_8", "out"],
+        ]);
+        expect(events[0]).toMatchObject({ id: "file.done:c1-in-v", size: 900, transferred: 900 });
+        expect(events[1]).toMatchObject({ error: "Declined" });
+        // Told once: a start after it says nothing again.
+        await new Promise((r) => setTimeout(r, 50));
+        const again = await hub("ended-stop.jsonl");
+        again.h.baseline(state([link("c1")]), history());
+        await again.h.ended(async (id) => records[id] as never);
+        expect(again.events).toEqual([]);
+      });
+
+      it("ended as the next start ran: the start's state has it done", async () => {
+        await underWay("ended-start.jsonl");
+        const { h, events } = await hub("ended-start.jsonl");
+        h.baseline(transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-out-w": { state: "transferring", transferred: 0, size: 9, direction: "out", stage: "asking" } }), history());
+        expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"]]);
+        await h.ended(async () => undefined);
+        expect(events).toHaveLength(1);
+        // Still under way, the other one is reported when it ends.
+        h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-out-w": { state: "done", transferred: 9, size: 9, direction: "out" } }) });
+        expect(events.map((e) => [e.type, e.file])).toEqual([["file.done", "c1-in-v"], ["file.done", "c1-out-w"]]);
+      });
+
+      it("one never seen under way, or whose record is gone, says nothing", async () => {
+        await underWay("ended-none.jsonl");
+        const { h, events } = await hub("ended-none.jsonl");
+        h.baseline(transfers({ "c1-in-x": { state: "done", transferred: 9, size: 9, direction: "in" } }), history());
+        await h.ended(async () => undefined);
+        expect(events).toEqual([]);
+        await new Promise((r) => setTimeout(r, 50));
+        // The notes of files whose records went are dropped: a record that comes back later is no news either.
+        const again = await hub("ended-none.jsonl");
+        again.h.baseline(state([link("c1")]), history());
+        await again.h.ended(async () => ({ direction: "in", transfer: { state: "done", transferred: 900, size: 900 } }) as never);
+        expect(again.events).toEqual([]);
+      });
+
+      /**
+       * v1.10.1 reading a seen set with the `files:` notes (a downgrade): its whole read and its `sweep` are copied below
+       * from `git show v1.10.1:packages/cli/src/events.ts` (open, lines 144-154; sweep, 197-214; stateIn/timeIn/settled/
+       * splitState, 773-813). Nothing else there reads the set but by a chat's, group's, `reactions:` or `said:` key, and
+       * `files:` is none (as `format:`). A note `yes` has no `@time`: its sweep keeps it, and drops the others as ever.
+       */
+      it("v1.10.1 keeps the under-way notes, reports nothing of them, and sweeps the others as ever", async () => {
+        await underWay("ended-v1101.jsonl");
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open("ended-v1101.jsonl", 1);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const persist = (chat: string, changes: [string, string | null][]) => new Promise<void>((resolve, reject) => {
+          const tx = db.transaction("seen", "readwrite");
+          for (const [id, note] of changes) {
+            if (note === null) tx.objectStore("seen").delete([chat, id]);
+            else tx.objectStore("seen").put(note, [chat, id]);
+          }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        const read = async () => {
+          const store = db.transaction("seen").objectStore("seen");
+          const all = <T>(request: IDBRequest<T[]>) => new Promise<T[]>((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          const [keys, values] = await Promise.all([all(store.getAllKeys()), all(store.getAll() as IDBRequest<string[]>)]);
+          const seen = new Map<string, Map<string, string>>();
+          for (let i = 0; i < keys.length; i++) {
+            const [chat, id] = keys[i] as [string, string];
+            if (!seen.has(chat)) seen.set(chat, new Map());
+            seen.get(chat)!.set(id, values[i]);
+          }
+          return seen;
+        };
+        const seen = await read();
+        expect([...seen.get("files:")!.entries()]).toEqual([["c1-in-v", "yes"], ["c1-out-w", "yes"]]);
+
+        // v1.10.1's sweep, as it is there, a month past every note's time.
+        const now = 1000 + SEEN_KEEP_MS + 1;
+        const stateIn = (note: string) => { const at = note.lastIndexOf("@"); return at === -1 ? note : note.slice(0, at); };
+        const timeIn = (note: string) => { const at = note.lastIndexOf("@"); return at === -1 ? undefined : parseInt(note.slice(at + 1), 36); };
+        const splitState = (state: string): [string, number] => { const at = state.lastIndexOf("#e"); return at === -1 ? [state, 0] : [state.slice(0, at), Number(state.slice(at + 2)) || 0]; };
+        const settled = (state: string) => { const delivery = splitState(state)[0].split("+")[0]; return delivery === "received" || delivery === "delivered"; };
+        const writes: Promise<void>[] = [];
+        const sweep = () => {
+          const cutoff = now - SEEN_KEEP_MS;
+          let dropped = 0;
+          for (const [chat, known] of seen) {
+            if (chat === "format:" || chat.startsWith("said:")) continue;
+            const reactions = chat.startsWith("reactions:");
+            const gone: [string, null][] = [];
+            for (const [id, note] of known) {
+              const at = timeIn(note);
+              if (at === undefined || at >= cutoff || (!reactions && !settled(stateIn(note)))) continue;
+              known.delete(id);
+              gone.push([id, null]);
+            }
+            if (gone.length) { writes.push(persist(chat, gone)); dropped += gone.length; }
+            if (!known.size) seen.delete(chat);
+          }
+          return dropped;
+        };
+        // The message received a month ago goes; mine still `sent` stays; the under-way notes stay, in memory and stored.
+        expect(sweep()).toBe(1);
+        await Promise.all(writes);
+        const after = await read();
+        db.close();
+        for (const kept of [seen, after]) {
+          expect([...kept.get("files:")!.entries()]).toEqual([["c1-in-v", "yes"], ["c1-out-w", "yes"]]);
+          expect([...kept.get("c1")!.keys()]).toEqual(["me_8"]);
+          expect(kept.get("format:")!.get("ages")).toBe("yes");
+        }
+
+        // Back on this version, the ends are still told from the files' records (its clock is not a month on: the swept
+        // message is news to it, which is not what this pins).
+        const { h, events } = await hub("ended-v1101.jsonl");
+        h.baseline(state([link("c1")]), history());
+        await h.ended(async (id) => ({ direction: id.includes("-in-") ? "in" : "out", transfer: { state: "done", transferred: 9, size: 9 } }) as never);
+        expect(events.filter((e) => e.type.startsWith("file.")).map((e) => [e.type, e.file])).toEqual([["file.done", "c1-in-v"], ["file.done", "c1-out-w"]]);
+      });
     });
 
     it("a file event whose message never comes goes after a moment, with messageId null", async () => {

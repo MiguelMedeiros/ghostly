@@ -57,20 +57,36 @@ async function workerStarted(world: FakeWorld, from: number): Promise<void> {
   await new Promise((resolve) => fire(world.chrome.runtime.onMessage, { target: "background", type: "ensure-engine" }, sender, resolve));
 }
 
+/**
+ * Chrome reloads the extension (Update and restart, a reload in chrome://extensions, turned off and on): its pages, its
+ * session storage, its offscreen document and its debugger sessions go, and a new worker starts. Every other tab stays,
+ * a contact's app in one included. `meanwhile` runs before the new worker starts, as a page may do anything then.
+ */
+export async function reloadExtension(world: FakeWorld, meanwhile?: () => void): Promise<void> {
+  const own = world.chrome.runtime.getURL("");
+  for (const tab of [...world.tabs.values()]) if (tab.url.startsWith(own)) world.tabs.delete(tab.id);
+  world.session.clear();
+  world.endOffscreen();
+  resetEngine();
+  meanwhile?.();
+  await restartServiceWorker(world);
+}
+
 export function engine(): FakeEngineServer {
   const servers = engineControl().servers;
   if (servers.length !== 1) throw new Error(`expected one engine, found ${servers.length}`);
   return servers[0];
 }
 
-/** Opens a viewer tab for PEER's service from a page, and returns the tab id. */
-export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG, page?: unknown, relayOnly?: unknown): Promise<number> {
+/** Opens a viewer tab for PEER's service from a page of `profile` (the first one's by default), and returns the tab id. */
+export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG, page?: unknown, relayOnly?: unknown, profile = ""): Promise<number> {
   const reply = (await world.chrome.runtime.sendMessage({
     target: "background",
     type: "open-service",
     peerPubKeyZ32: peer,
     serviceId: service,
     tag,
+    profile,
     page,
     ...(relayOnly !== undefined ? { relayOnly } : {}),
   })) as { ok: boolean; error?: string };
