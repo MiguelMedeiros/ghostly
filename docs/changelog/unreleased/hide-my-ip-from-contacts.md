@@ -1,5 +1,0 @@
----
-section: For users / Everywhere
-release: 1.11
----
-- Hide my IP from contacts, in Settings, Network: calls, chat connections and group links go through your own TURN server only, so contacts see its address and never yours. It needs a TURN server, and the TURN server field says it is required while it is on. If the server does not answer, a call fails with "Your relay did not answer" and a chat waits on the DHT; nothing falls back to a direct connection. While it is on, the Desktop offers contacts no direct Iroh or HyperDHT connection (the chat's Connection menu says Hide my IP is why), contacts' public profiles load no pictures from servers they chose, a contact's shared web app opens in the desktop app only, where it loads pictures, scripts and frames from its own server only (the web app and the browser extension do not open one, and say why: a browser can reach the app's servers before any rule stops it; one already open when it turns on closes).
