@@ -75,14 +75,11 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
       } catch (e) {}
     }
     const open = w.open;
-    w.open = function (url, target) {
+    const opener = function (url, target) {
       apply(open, this, [url === undefined ? "" : url, target === undefined ? "_blank" : target, "noopener"]);
       return null;
     };
-    const reopen = w.Document.prototype.open;
-    w.Document.prototype.open = function () {
-      return arguments.length > 2 ? w.open(arguments[0], arguments[1]) : apply(reopen, this, arguments);
-    };
+    w.open = opener;
     const describe = Object.getOwnPropertyDescriptor;
     const define = Object.defineProperty;
     const shut = (inner) => {
@@ -94,6 +91,42 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     const sweep = () => {
       try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
     };
+    const listen = w.EventTarget.prototype.addEventListener;
+    const home = w.document;
+    const reopen = w.Document.prototype.open;
+    w.Document.prototype.open = function () {
+      if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const got = apply(reopen, this, arguments);
+      if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
+      return got;
+    };
+    const text = String;
+    const lower = String.prototype.toLowerCase;
+    const index = String.prototype.indexOf;
+    const Refused = w.TypeError;
+    const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
+    const refuse = () => { throw new Refused("A declarative shadow root is not allowed here"); };
+    for (const [owner, name] of [[w.Element.prototype, "setHTMLUnsafe"], [w.ShadowRoot && w.ShadowRoot.prototype, "setHTMLUnsafe"], [w.Document, "parseHTMLUnsafe"]]) {
+      const real = owner && owner[name];
+      if (typeof real !== "function") continue;
+      owner[name] = function (html) {
+        const checked = text(html);
+        if (shadowed(checked)) refuse();
+        return apply(real, this, arguments.length > 1 ? [checked, arguments[1]] : [checked]);
+      };
+    }
+    let tail = "";
+    for (const name of ["write", "writeln"]) {
+      const real = w.Document.prototype[name];
+      if (typeof real !== "function") continue;
+      w.Document.prototype[name] = function () {
+        let checked = "";
+        for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
+        if (shadowed(tail + checked)) refuse();
+        tail = apply(slice, tail + checked, [-16]);
+        return apply(real, this, [checked]);
+      };
+    }
     for (const kind of ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"]) {
       const proto = w[kind] && w[kind].prototype;
       for (const name of ["contentWindow", "contentDocument", "getSVGDocument"]) {
@@ -138,8 +171,8 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         return root;
       };
     }
-    w.document.addEventListener("load", sweep, true);
-    watch(w.document, w.Document.prototype.querySelectorAll);
+    apply(listen, home, ["load", sweep, true]);
+    watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)"#;
 

@@ -13,12 +13,16 @@ import type { HeaderList } from "./frames";
  *   `contentDocument`, `getSVGDocument`) is guarded first, in a shadow tree too, and the frames of the document are
  *   gone over as one loads (an empty frame's first load fires as it is put in the page) and as the page changes;
  * - puts itself first in each `srcdoc` frame, in the shadow trees the page makes too, and, with `VIEWER_GUARD_CSP`,
- *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is).
+ *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is);
+ * - refuses a declarative shadow root the page's script would make (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`,
+ *   `document.write`, a write split in two too): its `srcdoc` frames would be out of the guard's sight;
+ * - listens for frames' loads again after `document.open()`, which takes every listener of the document away.
  * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
  * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
  * a frame's window read by its index (`window[0]`, never through the frame element) while the frame's page is still
- * on its way, and a `srcdoc` frame inside a shadow tree written in the page's HTML, run before the guard is there.
+ * on its way, and a `srcdoc` frame inside a shadow tree written in the HTML the page itself sends, run before the
+ * guard is there.
  * No backslash, `${` or backtick in it: Desktop's copy (`SERVICE_GUARD`, apps/desktop/src/viewer.rs) is the same text.
  */
 export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
@@ -39,14 +43,11 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
       } catch (e) {}
     }
     const open = w.open;
-    w.open = function (url, target) {
+    const opener = function (url, target) {
       apply(open, this, [url === undefined ? "" : url, target === undefined ? "_blank" : target, "noopener"]);
       return null;
     };
-    const reopen = w.Document.prototype.open;
-    w.Document.prototype.open = function () {
-      return arguments.length > 2 ? w.open(arguments[0], arguments[1]) : apply(reopen, this, arguments);
-    };
+    w.open = opener;
     const describe = Object.getOwnPropertyDescriptor;
     const define = Object.defineProperty;
     const shut = (inner) => {
@@ -58,6 +59,42 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     const sweep = () => {
       try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
     };
+    const listen = w.EventTarget.prototype.addEventListener;
+    const home = w.document;
+    const reopen = w.Document.prototype.open;
+    w.Document.prototype.open = function () {
+      if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const got = apply(reopen, this, arguments);
+      if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
+      return got;
+    };
+    const text = String;
+    const lower = String.prototype.toLowerCase;
+    const index = String.prototype.indexOf;
+    const Refused = w.TypeError;
+    const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
+    const refuse = () => { throw new Refused("A declarative shadow root is not allowed here"); };
+    for (const [owner, name] of [[w.Element.prototype, "setHTMLUnsafe"], [w.ShadowRoot && w.ShadowRoot.prototype, "setHTMLUnsafe"], [w.Document, "parseHTMLUnsafe"]]) {
+      const real = owner && owner[name];
+      if (typeof real !== "function") continue;
+      owner[name] = function (html) {
+        const checked = text(html);
+        if (shadowed(checked)) refuse();
+        return apply(real, this, arguments.length > 1 ? [checked, arguments[1]] : [checked]);
+      };
+    }
+    let tail = "";
+    for (const name of ["write", "writeln"]) {
+      const real = w.Document.prototype[name];
+      if (typeof real !== "function") continue;
+      w.Document.prototype[name] = function () {
+        let checked = "";
+        for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
+        if (shadowed(tail + checked)) refuse();
+        tail = apply(slice, tail + checked, [-16]);
+        return apply(real, this, [checked]);
+      };
+    }
     for (const kind of ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"]) {
       const proto = w[kind] && w[kind].prototype;
       for (const name of ["contentWindow", "contentDocument", "getSVGDocument"]) {
@@ -102,13 +139,13 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         return root;
       };
     }
-    w.document.addEventListener("load", sweep, true);
-    watch(w.document, w.Document.prototype.querySelectorAll);
+    apply(listen, home, ["load", sweep, true]);
+    watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-JJJNeZ+FjP0YKC8KO9GDCklx4N232i8qFe6XowhxGH4='";
+export const VIEWER_GUARD_HASH = "'sha256-P3jYgJwfoJ/cAS31rQz7Tk99bBwsSeN2wDDqJubDMZw='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own
@@ -215,7 +252,12 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   // One type, said once: of two (two headers, or a list in one) a browser reads the last, which may not be the one read here.
   const types = values("content-type");
   const type = types.length === 1 && !types[0].includes(",") ? types[0] : "";
-  const html = type.split(";")[0].trim() === "text/html" && !/charset\s*=\s*"?utf-16/.test(type);
+  // UTF-16 by any of its names (`unicode`, `ucs-2`, `csunicode`...), resolved as a browser does: the guard's bytes would
+  // not read as a script there. A name no browser knows falls back to an encoding that reads them.
+  const label = /;\s*charset\s*=\s*"?([^";\s]+)/.exec(type)?.[1];
+  let utf16 = false;
+  try { utf16 = label !== undefined && new TextDecoder(label).encoding.startsWith("utf-16"); } catch { /* unknown label */ }
+  const html = type.split(";")[0].trim() === "text/html" && !utf16;
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP] as [string, string]], body });
   if (!html || encoded) return noScripts();
