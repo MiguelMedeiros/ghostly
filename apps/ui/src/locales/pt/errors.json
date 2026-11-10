@@ -641,6 +641,8 @@
   "relayOnly": {
     "appInExtension": "O app de um contato não abre aqui com Ocultar meu IP ligado",
     "appInExtensionNext": "O navegador poderia mostrar seu IP aos servidores do app. Desligue Ocultar meu IP para abri-lo.",
+    "appInWeb": "O app de um contato não abre na web com Ocultar meu IP ligado",
+    "appInWebNext": "O navegador poderia mostrar seu IP aos servidores do app. Abra-o no app desktop, ou desligue Ocultar meu IP.",
     "keepsTurn": "Ocultar meu IP precisa deste servidor TURN",
     "keepsTurnNext": "Desligue primeiro e depois remova o servidor.",
     "needsTurn": "Adicione um servidor TURN antes",
