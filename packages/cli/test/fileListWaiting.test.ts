@@ -30,6 +30,8 @@ describe("file list of a file sent to a contact who is away", () => {
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    // `file list` reads the history's file rows only (the file index): here every message carries one.
+    fileMessages: vi.fn(async () => messages.filter((m) => m.file)),
     getMessage: vi.fn(async () => undefined),
     setTyping: vi.fn(),
     sendFile: vi.fn(async ({ file, timestamp }: { file: MessageFile; timestamp: number }) => { messages.push({ id: `me_${timestamp}`, sender: "me", timestamp, file }); }),
