@@ -60,6 +60,10 @@ const CASES: Record<string, string> = {
   "a page whose UTF-16 charset is spelled with an escape": `twice("/u16-escaped");`,
   "a UTF-16 page framing a page of its origin that says no charset": `twice("/u16-parent");`,
   "a UTF-16 page with a page of its origin as an object": `twice("/u16-parent-object");`,
+  "a UTF-16 page sent as application/unknown, framing one": `twice("/sniffed/application/unknown");`,
+  "a UTF-16 page sent as unknown/unknown, framing one": `twice("/sniffed/unknown/unknown");`,
+  "a UTF-16 page sent as */*, framing one": `twice("/sniffed/*/*");`,
+  "a UTF-16 HTML part of multipart/x-mixed-replace, framing one": `twice("/multipart");`,
   "an ISO-2022-JP page whose escape hides the guard": `twice("/jis");`,
   "a page made ISO-2022-JP by its meta, with an escape before the guard": `twice("/jis-meta");`,
   "a shadow tree made by setHTMLUnsafe": `document.body.appendChild(document.createElement("div")).setHTMLUnsafe(SHADOW);`,
@@ -69,6 +73,8 @@ const CASES: Record<string, string> = {
   "an empty frame by its index after document.open": `setTimeout(() => { document.open(); document.close(); frame(); attempt(() => window[0].RTCPeerConnection); }, 100);`,
 };
 const NAMES = Object.keys(CASES);
+/** Cases only one engine has a way in for (the case leaks there with Hide my IP off): Chromium shows no HTML part. */
+const ENGINE: Record<string, string> = { "a UTF-16 HTML part of multipart/x-mixed-replace, framing one": "webkit" };
 
 /** A page of the contact's. `/go.js` tries with the constructor of the window it runs in; the hidden text is a `srcdoc`. */
 const html = (body: string) => `<!doctype html><title>Atlas</title><body><textarea hidden><script src="/go.js"></script></textarea>${body}`;
@@ -100,6 +106,13 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
     const utf16le = (text: string) => new Uint8Array(Buffer.from(text, "utf16le"));
     if (path === "/u16-parent") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16le(`<!doctype html><iframe src="/u16-child"></iframe>`) };
     if (path === "/u16-parent-object") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16le(`<!doctype html><object data="/u16-child" type="text/html"></object>`) };
+    // Types a browser sniffs as HTML, and an HTML part of a multipart answer: refused pages that could frame the child.
+    // A browser sniffs the bytes, so these start with `<html>` in ASCII (eight bytes: four UTF-16 characters of text).
+    if (path.startsWith("/sniffed/")) return { headers: [["content-type", `${path.slice(9)}; charset=unicode`]], body: new Uint8Array(Buffer.concat([Buffer.from("<html>  "), utf16le(`<iframe src="/u16-child"></iframe>`)])) };
+    if (path === "/multipart") {
+      const part = utf16le(`<!doctype html><iframe src="/u16-child"></iframe>`);
+      return { headers: [["content-type", "multipart/x-mixed-replace; boundary=b"]], body: new Uint8Array(Buffer.concat([Buffer.from("--b\r\ncontent-type: text/html; charset=unicode\r\n\r\n"), part, Buffer.from("\r\n--b--\r\n")])) };
+    }
     if (path === "/u16-child") return { headers: [["content-type", "text/html"]], body: utf16 };
     // ISO-2022-JP: an escape in a leading comment turns the decoder to two-byte text, which the guard after it would
     // be read as; the page turns it back and closes the comment before its own script. By the header, or by a meta.
@@ -142,6 +155,7 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
   const context = await browser.newContext();
   try {
     for (const [index, name] of NAMES.entries()) {
+      if (ENGINE[name] && ENGINE[name] !== browser.browserType().name()) continue;
       for (const on of [false, true]) {
         relayOnly = on;
         packets = 0;

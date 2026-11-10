@@ -158,9 +158,11 @@ export const VIEWER_GUARD_CSP = "frame-src 'self'; object-src 'self'; require-tr
 const NO_SCRIPTS_CSP = "script-src 'none'";
 
 /**
- * The same for a page of markup (HTML, XML, SVG, or a type not known), which can frame others: no frames either. A page
- * of its origin framed with no charset of its own takes the framing page's (UTF-16, ISO-2022-JP), where the guard put
- * first in it would read as text. A PDF or a picture keeps its frames (a browser shows those in one).
+ * The same for any page but a PDF, a picture (not SVG), a video or a sound: no frames either. A browser renders HTML
+ * under more types than say so (`application/unknown`, `unknown/unknown`, `*\/*`, a part of `multipart/x-mixed-replace`),
+ * and such a page can frame a page of its origin sent with no charset of its own, which takes the framing page's
+ * (UTF-16, ISO-2022-JP), where the guard put first in it would read as text. Those few keep their frames (a browser
+ * shows them in one).
  */
 const NO_SCRIPTS_OR_FRAMES_CSP = "script-src 'none'; frame-src 'none'; object-src 'none'";
 
@@ -269,8 +271,8 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   });
   const essence = type.split(";")[0].trim();
   const html = essence === "text/html" && !unreadable && !/["\\]/.test(type);
-  const markup = essence === "" || /html|xml|svg/.test(essence);
-  const refused: [string, string] = ["content-security-policy", markup ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP];
+  const noFrames = !/^(application\/pdf$|image\/(?!svg)|video\/|audio\/)/.test(essence);
+  const refused: [string, string] = ["content-security-policy", noFrames ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP];
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, refused], body });
   if (!html || encoded) return noScripts();

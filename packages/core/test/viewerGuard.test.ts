@@ -90,7 +90,7 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
   });
 
   it("lets a page it cannot be put in run no script, and leaves what is not a page as it was", async () => {
-    // A page of markup runs no frames either: one of its origin with no charset would read in the page's (UTF-16...).
+    // A refused page runs no frames either: one of its origin with no charset would read in the page's (UTF-16...).
     const REFUSED = "script-src 'none'; frame-src 'none'; object-src 'none'";
     const noScripts = async (headers: HeaderList, text: string | Uint8Array, destination: string | null = "iframe") => {
       const answer = await guardViewerAnswer(headers, (async function* () { yield typeof text === "string" ? utf8Encode(text) : text; })(), destination);
@@ -106,8 +106,14 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     for (const charset of ["unicode", "ucs-2", "csunicode", "iso-10646-ucs-2", "unicodefeff", "unicodefffe", "\"UTF-16BE\""]) {
       expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<\0p\0")).policies, charset).toContain(REFUSED);
     }
-    // A PDF or a picture keeps its frames (a browser shows one in a frame), only its scripts are refused.
-    expect((await noScripts([["content-type", "application/pdf"]], "%PDF-1.7")).policies).toEqual([VIEWER_GUARD_CSP, "script-src 'none'"]);
+    // A PDF, a picture, a video or a sound keeps its frames (a browser shows one in a frame), only its scripts are refused.
+    for (const type of ["application/pdf", "image/png", "video/mp4", "audio/ogg"]) {
+      expect((await noScripts([["content-type", type]], "%PDF-1.7")).policies, type).toEqual([VIEWER_GUARD_CSP, "script-src 'none'"]);
+    }
+    // Every other refused type loses its frames: a browser renders HTML under some of them.
+    for (const type of ["application/unknown; charset=unicode", "unknown/unknown; charset=unicode", "*/*; charset=unicode", "multipart/x-mixed-replace; boundary=b", "text/plain"]) {
+      expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toEqual([VIEWER_GUARD_CSP, REFUSED]);
+    }
     // A parameter named otherwise is not a charset (`xcharset=unicode`): the page is read as UTF-8 and guarded.
     expect(await noScripts([["content-type", "text/html; xcharset=unicode"]], "<p>hi")).toMatchObject({ text: `${TAG}<p>hi` });
     // A charset hidden in a quoted string, or spelled with an escape: a browser reads those, so no script runs.
