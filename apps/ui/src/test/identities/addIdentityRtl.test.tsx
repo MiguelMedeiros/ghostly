@@ -3,18 +3,22 @@ import { describe, expect, it } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
+import { localProvider } from "../../lib/providerWords";
+import { translateWith } from "../../locales/translate";
+import { LOCALES } from "../i18n/locales";
 import { renderApp } from "../render";
 
 // covers: proofs.picker, proofs.ssh, app.i18n
 
 /**
  * A provider's name, summary, description, limits, privacy line, signer description and steps come from its module,
- * in English. In Arabic they keep their own direction (a <bdi>), or "(Settings → SSH keys)." showed as
- * ".… (Settings → SSH keys(", and the card follows the dialog's direction: its text at the start, its rounded
- * corners on the outside.
+ * said in the app's language (lib/providerWords.ts), with English names and tokens in them. In Arabic they keep their
+ * own direction (a <bdi>), or "(Settings → SSH keys)." showed as ".… (Settings → SSH keys(", and the card follows
+ * the dialog's direction: its text at the start, its rounded corners on the outside.
  */
-const WITHOUT_OIDC = IDENTITY_PROVIDERS.filter((p) => p.id !== "oidc");
-const SSH = IDENTITY_PROVIDERS.find((p) => p.id === "ssh")!;
+const ar = translateWith(LOCALES.ar, "ar");
+const WITHOUT_OIDC = IDENTITY_PROVIDERS.filter((p) => p.id !== "oidc").map((p) => localProvider(p, ar));
+const SSH = localProvider(IDENTITY_PROVIDERS.find((p) => p.id === "ssh")!, ar);
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 
 const arabic = () => renderApp(<AddIdentityDialog onClose={() => {}} />, { language: "ar" });

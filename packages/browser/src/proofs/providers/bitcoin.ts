@@ -29,7 +29,8 @@ export interface BitcoinEvidence {
 const MAX_SIGNATURE = 8192;
 const SIGNATURE = /^(smp|ful|pof)?[A-Za-z0-9+/]+={0,2}$/;
 
-const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
+/** Each address type's name, said under `scripts.<type>` (exported for the app's drift guard). */
+export const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
   p2wpkh: "native SegWit (bc1q…)", p2tr: "Taproot (bc1p…)", p2sh: "nested SegWit (3…)", p2pkh: "legacy (1…)",
   p2wsh: "script / multisig (P2WSH)", "witness-unknown": "future SegWit version",
 };
