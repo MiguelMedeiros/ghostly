@@ -10,6 +10,7 @@ import { DaySections } from "../components/chat/DaySections";
 import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
+import { useNarrowPhone } from "../hooks/usePhoneHeader";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -495,8 +496,12 @@ export function GroupChat() {
   openGroupId.current = groupId;
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
-  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it.
+  // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it (or
+  // Share is a row of ⋮, on the narrowest phone).
   const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
+  // At 320px the back button, the picture, the connection, Share and ⋮ left the name about 70px ("Clube d…" for every
+  // "Clube de …"): there Share is a row of ⋮, and the name has half again as much room, as a 1:1 chat's has.
+  const narrow = useNarrowPhone();
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
   // The group is a new object on every state of the engine (up to 20 a second): the names, and so the rows, are made
@@ -873,7 +878,7 @@ export function GroupChat() {
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
-          {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
+          {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
             <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
@@ -883,6 +888,7 @@ export function GroupChat() {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
+              {canShare && narrow && <MenuItem testId="group-share" title={t("group.chat.shareHint")} onClick={() => { closeMenu(); void openShare(); }}>{t("group.chat.shareLink")}</MenuItem>}
               {/* Not on a group not joined: it has no member list yet, and nothing comes from it to mute. */}
               {!invited && <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>}
               {!invited && <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />}
