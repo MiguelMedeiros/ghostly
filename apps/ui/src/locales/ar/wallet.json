@@ -647,6 +647,9 @@
     "paste": "لصق",
     "scan": "مسح"
   },
+  "sentEcash": {
+    "title": "أُرسل في محادثة محذوفة"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
