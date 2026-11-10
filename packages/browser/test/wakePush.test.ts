@@ -498,6 +498,19 @@ describe("online notices: a contact whose app is closed hears that this one came
     expect(pushSend).not.toHaveBeenCalled();
   });
 
+  it("none while \"Share when I'm online\" is off; switched back on, the next start says it again", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false, setStatus: vi.fn() }), { peerWake: target });
+    await node.updateSettings({ settings: { sharePresence: false } });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    await node.updateSettings({ settings: { sharePresence: true } });
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+  });
+
   it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });
