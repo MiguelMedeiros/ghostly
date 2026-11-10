@@ -10,13 +10,13 @@ import { replyRef } from "@ghostly/browser/shared/replies";
 import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
-import { bool, chatOf, findChatOrGroup, list, noFile, noMessage, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
-import { goesOn } from "./waitNotice";
+import { goesOn } from "./waits";
 
 /**
  * Files and voice notes in a chat (WISP 1100, phase 3), as the app's composer sends them (packages/browser
@@ -328,8 +328,9 @@ export const FILE_METHODS: Record<string, Method> = {
     await access(path, constants.R_OK);
     // A one-shot leaves once its command is done, and the transfer with it: in a chat it stays until the contact has the
     // whole file, as `send` stays until its message went out. Before, it left in under a second with nothing sent, and
-    // the contact saw the file only with a later command that stayed online long enough. A group's file: none.
-    const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && ctx.mode === "one-shot" ? "sent" : "none");
+    // the contact saw the file only with a later command that stayed online long enough. A group's file, or one to a chat
+    // nobody joined yet: none.
+    const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
@@ -372,9 +373,12 @@ export const FILE_METHODS: Record<string, Method> = {
     // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for.
     if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping).catch((error: unknown) => {
       if (!(error instanceof CliError) || error.code !== "timeout") throw error;
-      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx.mode)}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx, link.id)}`, { ...error.details, chat: link.id, messageId, file: file.id });
     });
-    return { chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+    return {
+      chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
+      ...keptForJoin(ctx, link.id, "the file"),
+    };
   },
 
   async "file.list"(ctx, params) {
