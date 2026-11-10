@@ -150,7 +150,7 @@ describe("one request from the app, over the contact's link", () => {
       ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY],
     ]);
     // A page the guard cannot go into runs no script.
-    expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'"]);
+    expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"]);
     // What is not a page (a fetch, a script) is the contact's as it was; and with it off, every answer is.
     expect((await served("", true)).text).toBe(page);
     expect((await served("script", true, "text/javascript")).text).toBe(page);
