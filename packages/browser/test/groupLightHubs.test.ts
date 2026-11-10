@@ -50,7 +50,7 @@ describe("a private group's hubs, in its GroupLight row", () => {
     // The record as it was; the row holds the new hubs and only the member noted since.
     expect(m.puts).toEqual({ whole: 1, light: 2 });
     expect(m.groups.get("g")!.hubs).toEqual(["h1", "h2"]);
-    expect(m.light.get("g")).toEqual({ removedIds: [], removals: [], hubs: ["h3", "h2"], large: ["c"], of: expect.any(String) });
+    expect(m.light.get("g")).toEqual({ removedIds: [], removals: [], relayEdits: [], hubs: ["h3", "h2"], large: ["c"], of: expect.any(String) });
     const back = await loaded(m);
     expect(back.group.hubs).toEqual(["h3", "h2"]);
     expect(back.group.large).toEqual(["a", "b", "c"]);
