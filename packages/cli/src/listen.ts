@@ -38,6 +38,9 @@ export interface ListenOptions {
    * stderr per event as before.
    */
   cursorFailed?: (error: unknown) => void;
+  /** `EXEC_SLOW_MS` and `EXEC_STOP_MS`, shorter in tests. */
+  execSlowMs?: number;
+  stopMs?: number;
 }
 
 /** The cursor's own write failed, not the event's handling. */
@@ -267,36 +270,54 @@ interface HookEnd { code: number | null; signal: NodeJS.Signals | null }
 
 /** How long a hook's stdout is still waited for once the hook exited: a process it left running may hold it open. */
 const HOOK_OUTPUT_GRACE_MS = 1000;
+/** How long a hook runs before stderr says, once, that the events after it wait for it. */
+export const EXEC_SLOW_MS = 60_000;
+/** A stop gives a running hook this long to end on its own, then as long again after SIGTERM before SIGKILL. */
+export const EXEC_STOP_MS = 5_000;
+
+/** A hook at work: how it ended, and a signal sent to it and what it started. */
+interface Hook { event: GhostlyEvent; ended: Promise<HookEnd>; signal(name: NodeJS.Signals): void; stopped?: boolean }
 
 /**
- * Runs `command` through the shell with the event on stdin (never in its arguments); resolves with how it ended.
+ * Runs `command` through the shell with the event on stdin (never in its arguments).
  * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
  * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
  */
-function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Promise<HookEnd> {
-  return new Promise((resolve) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
-      env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
-    });
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook {
+  // Its own process group (not on Windows, where that opens a console), so a stop ends the hook and what it started.
+  const group = process.platform !== "win32";
+  const child = spawn(command, {
+    shell: true,
+    detached: group,
+    stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
+    env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
+  });
+  const signal = (name: NodeJS.Signals) => {
+    try { if (group && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* gone already */ }
+  };
+  // A listen that leaves anyway (a second signal, a stop past its bound, a cursor it cannot write) takes its hook with
+  // it. Before, the hook ran on as an orphan, and the restarted listen ran the same event's hook again alongside it.
+  const orphaned = () => signal("SIGKILL");
+  process.on("exit", orphaned);
+  const ended = new Promise<HookEnd>((resolve) => {
     let done = false;
     const finish = (end: HookEnd) => { if (!done) { done = true; resolve(end); } };
     child.on("error", () => finish({ code: 127, signal: null }));
     // `exit`, not `close`: a process the hook left running (`… &`) may hold its stdout for long; the hook is done when
     // it exits. Its output is still waited for a moment, so the stderr note comes after it; whatever comes later is
     // still streamed.
-    child.on("exit", (code, signal) => {
-      const end = { code, signal };
+    child.on("exit", (code, name) => {
+      const end = { code, signal: name };
       const output = child.stdout;
       if (!output || output.readableEnded || output.destroyed) return finish(end);
       const timer = setTimeout(() => finish(end), HOOK_OUTPUT_GRACE_MS);
       output.once("close", () => { clearTimeout(timer); finish(end); });
     });
-    child.stdout?.pipe(process.stderr, { end: false });
-    child.stdin?.on("error", () => {});
-    child.stdin?.end(JSON.stringify(event) + "\n");
-  });
+  }).finally(() => process.off("exit", orphaned));
+  child.stdout?.pipe(process.stderr, { end: false });
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(JSON.stringify(event) + "\n");
+  return { event, ended, signal };
 }
 
 /** The longest wait between two tries of a webhook that is not answering. */
@@ -341,6 +362,13 @@ export interface EventHandler {
   behind(): number;
   /** Resolves when every event given is handled. */
   idle(): Promise<void>;
+  /**
+   * Takes no more events and resolves once no hook runs: one at work gets `EXEC_STOP_MS` to end on its own (the cursor
+   * then moves past its event), else it and what it started are sent SIGTERM, then SIGKILL, and the cursor stays before
+   * its event, handed again at the next start. Before, a stop left the hook running on its own, and the restarted listen
+   * ran that event's hook a second time alongside it.
+   */
+  stop(): Promise<void>;
 }
 
 /**
@@ -352,6 +380,9 @@ export function eventHandler(options: ListenOptions): EventHandler {
   let chain = Promise.resolve();
   let behind = 0;
   let stopped = false;
+  /** The hook at work, if any. */
+  let running: Hook | null = null;
+  const slowMs = options.execSlowMs ?? EXEC_SLOW_MS, stopMs = options.stopMs ?? EXEC_STOP_MS;
   /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
   let kept = -1, dropped = -1;
   const keep = (seq: number) => {
@@ -361,7 +392,8 @@ export function eventHandler(options: ListenOptions): EventHandler {
   };
   /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
   const keepDropped = () => {
-    if (behind > 0 || dropped <= kept) return;
+    // Once stopped, never past an event whose hook the stop ended.
+    if (stopped || behind > 0 || dropped <= kept) return;
     try { keep(dropped); } catch (failed) {
       if (!(failed instanceof CursorError) || !options.cursorFailed) return;
       stopped = true;
@@ -392,8 +424,13 @@ export function eventHandler(options: ListenOptions): EventHandler {
       }
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
+        const hook = running = runExec(options.exec, event, options.print);
+        // Once, as the webhook's "not answering": a hook that never ends held every later event without a word.
+        const slow = setTimeout(() => process.stderr.write(`ghostly: --exec still runs on event ${hook.event.seq} (${hook.event.type}) after ${Math.round(slowMs / 1000)} s: the events after it wait for it\n`), slowMs);
+        const { code, signal } = await hook.ended.finally(() => { clearTimeout(slow); running = null; });
+        // Ended by the stop: the cursor stays before the event.
+        if (hook.stopped) return;
         // A hook killed by a signal (the OOM killer, a timeout wrapper) is said as such, not as an exit 1.
-        const { code, signal } = await runExec(options.exec, event, options.print);
         if (signal) process.stderr.write(`ghostly: --exec was killed by ${signal} on event ${event.seq} (${event.type})\n`);
         else if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code ?? 1} on event ${event.seq} (${event.type})\n`);
       }
@@ -419,7 +456,22 @@ export function eventHandler(options: ListenOptions): EventHandler {
       }
     }).finally(() => { behind--; keepDropped(); });
   };
-  return Object.assign(handle, { behind: () => behind, idle: () => chain });
+  const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms).unref())]);
+  const stop = async () => {
+    stopped = true;
+    const hook = running;
+    if (!hook) return;
+    if (await within(hook.ended, stopMs)) {
+      // It ended on its own: its event's cursor is written in a moment (not waited for past the bound: a webhook down).
+      await within(chain, stopMs);
+      return;
+    }
+    hook.stopped = true;
+    process.stderr.write(`ghostly: stopped while --exec ran on event ${hook.event.seq} (${hook.event.type}): ended it, and the event is handed again at the next start\n`);
+    hook.signal("SIGTERM");
+    if (!(await within(hook.ended, stopMs))) { hook.signal("SIGKILL"); await hook.ended; }
+  };
+  return Object.assign(handle, { behind: () => behind, idle: () => chain, stop });
 }
 
 /** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */
