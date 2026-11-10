@@ -1209,6 +1209,9 @@ describe("per chat", () => {
       const { draftId, binding } = p.engines.a.begin({ provider: "ssh-github", subject: "new-contact" });
       const view = await p.engines.a.complete({ draftId, evidence: await sign(identityStatement(binding)) });
 
+      // Making the new contact's proof (`complete`) looked it up on the real clock, and the fake clock starts from that
+      // clock: the lookup can fall in t0's millisecond and count in the first hour. Count only the lookups from here on.
+      const before = lookups.length;
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
       const t0 = Date.now(), at = Math.floor(t0 / 1000);
       // Last checked 25 to 49 hours ago.
@@ -1227,12 +1230,12 @@ describe("per chat", () => {
       // A new contact shares a GitHub SSH proof.
       await p.engines.a.share({ linkId: "chat", id: view.id });
       for (let i = 0; i < 100 && !p.ledgers.b.received.some(r => r.id === view.id); i++) await vi.advanceTimersByTimeAsync(100);
-      const first = lookups.filter(l => l.at >= t0);
+      const first = lookups.slice(before);
       expect(p.ledgers.b.received.find(r => r.id === view.id), `${first.length} GitHub lookups in the first half hour, ${first.filter(l => !l.ok).length} refused`).toMatchObject({ status: "verified" });
       await vi.advanceTimersByTimeAsync(t0 + 48 * 60 * 60_000 - Date.now());
       p.engines.b.stop();
 
-      const hourly = Array.from({ length: 48 }, (_, h) => lookups.filter(l => l.at >= t0 + h * 3_600_000 && l.at < t0 + (h + 1) * 3_600_000).length);
+      const hourly = Array.from({ length: 48 }, (_, h) => lookups.slice(before).filter(l => l.at >= t0 + h * 3_600_000 && l.at < t0 + (h + 1) * 3_600_000).length);
       const seen = `GitHub lookups per hour: ${hourly.join(" ")}`;
       expect(lookups.filter(l => !l.ok), seen).toEqual([]);
       // The re-check's 30 an hour, and the new contact's one.
