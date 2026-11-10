@@ -190,6 +190,29 @@ describe("the chat's header and the contact panel", () => {
     expect(screen.queryByTestId("chat-presence")).toBeNull();
   });
 
+  it("with nothing to see beside the name, the line is out of the row's flow and takes none of the name's room", () => {
+    // Online with no status: the dot's words alone, for a screen reader.
+    setLinks(link(ANA, { peerPresence: "active" }));
+    const { unmount } = renderApp(<PeerPresenceLine peerKey={ANA} testId="chat-presence" emojiOnPhone />);
+    expect(screen.getByTestId("chat-presence-presence")).toHaveTextContent("Online");
+    expect(screen.getByTestId("chat-presence").className.split(" ")).toContain("sr-only");
+    unmount();
+    // A status with no emoji: shown on a wide screen; on a phone, where its text is for a screen reader, out of the flow.
+    setLinks(link(ANA, { peerPresence: "active", peerStatus: { text: "On holiday" } }));
+    const text = renderApp(<PeerPresenceLine peerKey={ANA} testId="chat-presence" emojiOnPhone />);
+    let classes = screen.getByTestId("chat-presence").className.split(" ");
+    expect(classes).not.toContain("sr-only");
+    expect(classes).toContain("max-md:sr-only");
+    text.unmount();
+    // With an emoji, it shows on a phone too.
+    setLinks(link(ANA, { peerPresence: "active", peerStatus: { emoji: "🌴", text: "On holiday" } }));
+    renderApp(<PeerPresenceLine peerKey={ANA} testId="chat-presence" emojiOnPhone />);
+    classes = screen.getByTestId("chat-presence").className.split(" ");
+    expect(classes).not.toContain("sr-only");
+    expect(classes).not.toContain("max-md:sr-only");
+    expect(classes).toContain("max-md:[&_bdi]:sr-only");
+  });
+
   it("no dot without `presence`: other places that draw a contact's picture are left as they were", () => {
     setLinks(link(ANA, { peerPresence: "active" }));
     renderApp(<PeerAvatar peerPubKey={ANA} label="Ana" testId="lock-call-avatar" />);
