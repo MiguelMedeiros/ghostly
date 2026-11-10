@@ -204,6 +204,23 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)).toBeNull();
     expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
   });
+
+  it.each([
+    ["the contact's", "peer" as const],
+    ["my", "me" as const],
+  ])("draws %s picture link edited after one that did not load", (_, sender) => {
+    const gone = "https://media.giphy.com/media/gone/giphy.gif";
+    const fixed = "https://media.giphy.com/media/here/giphy.gif";
+    const { container, rerender } = bubble({ text: gone, sender });
+    fireEvent.error(image(container)!);
+    expect(image(container)).toBeNull();
+    // The sender saw the broken link and edited it: the same message, its new text a picture that loads.
+    rerender(<MessageBubble message={message({ text: fixed, sender, edit: { seq: 1, at: 1_700_000_060_000, history: [{ at: 1_700_000_000_000, text: gone }] } })} peerPubKey="peer" />);
+    expect(image(container)).toHaveAttribute("src", fixed);
+    // Edited back to the link that did not load: the text again, not another try.
+    rerender(<MessageBubble message={message({ text: gone, sender, edit: { seq: 2, at: 1_700_000_120_000, history: [{ at: 1_700_000_000_000, text: gone }, { at: 1_700_000_060_000, text: fixed }] } })} peerPubKey="peer" />);
+    expect(image(container)).toBeNull();
+  });
 });
 
 /**

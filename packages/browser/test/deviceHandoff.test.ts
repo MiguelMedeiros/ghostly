@@ -708,6 +708,26 @@ describe("a giver that went back to active", () => {
     expect(w.taker.view()!.failure).toBe("cancelled");
     expect(w.takerRecords.record.state).toBe("standby");
   });
+
+  it("a list of what the taker holds cut off as a move stopped is not read as part of the next move's list", async () => {
+    const w = world();
+    const file = w.profile.add("f1", bytesOf(1_000));
+    // The taker's own lists are held back: the giver waits in pass 1 for what it holds.
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-have" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.pass === 1);
+    // The first frame of a long list says the file is there; the move stops before the list's last frame.
+    await w.giver.receive(B, { t: "handoff-have", d: [file.sha256], more: true });
+    await w.giver.cancel();
+    await until(() => w.taker.view()?.step === "failed");
+    // The next move: this taker holds nothing, so the file goes in pass 1.
+    w.link.meddle = undefined;
+    const before = w.link.sent.length;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    const manifests = w.link.sent.slice(before).filter((s) => s.frame.t === "handoff-manifest").map((s) => readHandoffManifest(s.frame)!);
+    expect(manifests.flatMap((m) => m.parts.map((p) => p[0]))).toContain(`file/${file.sha256}`);
+  });
 });
 
 describe("storage that refuses a write", () => {
