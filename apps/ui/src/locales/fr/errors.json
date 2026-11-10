@@ -639,10 +639,9 @@
     "usdtRevertedNext": "Aucun jeton n'a été envoyé ; le gas a été dépensé."
   },
   "relayOnly": {
+    "appInBrowserInfo": "Dans un navigateur, cette app pourrait montrer votre IP à ses serveurs. L'app de bureau l'ouvre en toute sécurité. Ou désactivez Masquer mon IP.",
     "appInExtension": "L'app d'un contact ne s'ouvre pas ici quand Masquer mon IP est activé",
-    "appInExtensionNext": "Le navigateur pourrait montrer votre IP aux serveurs de l'app. Désactivez Masquer mon IP pour l'ouvrir.",
     "appInWeb": "L'app d'un contact ne s'ouvre pas sur le web quand Masquer mon IP est activé",
-    "appInWebNext": "Le navigateur pourrait montrer votre IP aux serveurs de l'app. Ouvrez-la dans l'app de bureau, ou désactivez Masquer mon IP.",
     "keepsTurn": "Masquer mon IP a besoin de ce serveur TURN",
     "keepsTurnNext": "Désactivez-le d'abord, puis retirez le serveur.",
     "needsTurn": "Ajoutez d'abord un serveur TURN",
