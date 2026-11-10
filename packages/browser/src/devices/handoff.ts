@@ -1002,6 +1002,8 @@ export class HandoffGiver {
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
     this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null; this.bundleMade = null;
+    // A list cut off as an earlier handoff stopped is not part of this one's.
+    this.haveBuffer = { d: [], p: {} };
     this.offerHellos.clear();
     this.sender = new PartSender(this.now);
   }
@@ -1015,7 +1017,7 @@ export class HandoffGiver {
     this.phase = "idle";
     this.failure = failure;
     this.refused = refused;
-    this.pake = null; this.have = null; this.planned = null; this.secret = null; this.bundleMade = null;
+    this.pake = null; this.have = null; this.haveBuffer = { d: [], p: {} }; this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }
 
