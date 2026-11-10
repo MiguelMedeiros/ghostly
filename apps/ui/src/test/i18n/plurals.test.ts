@@ -55,6 +55,21 @@ describe("a counted string", () => {
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 5 })).toBe("انتظر 5 دقائق، ثم أرسله مرة أخرى.");
   });
 
+  // The chat list says every row's time again every few seconds ("5m", "3h"): each made its language's plural rules anew.
+  it("reads its language's plural rules once, however many counted strings it says", () => {
+    const Real = Intl.PluralRules, intl = Intl as { PluralRules: typeof Intl.PluralRules };
+    let made = 0;
+    intl.PluralRules = class extends Real { constructor(...args: ConstructorParameters<typeof Real>) { super(...args); made++; } } as typeof Intl.PluralRules;
+    try {
+      const pt = translateWith(LOCALES.pt, "pt"), ja = translateWith(LOCALES.ja, "ja");
+      const times = (say: typeof pt) => [0, 1, 2, 5, 59].map((count) => say("chat.listTime.minutes", { count }));
+      const first = [times(pt), times(ja)];
+      made = 0;
+      for (let i = 0; i < 20; i++) expect([times(pt), times(ja)]).toEqual(first);
+      expect(made).toBe(0);
+    } finally { intl.PluralRules = Real; }
+  });
+
   it("with no form for its count, or no count at all, is the key's own text", () => {
     expect(en("pwa.shareFiles", { count: 2 })).toBe(translateWith(LOCALES.en)("pwa.shareFiles", { count: 2 }));
     expect(ar("pwa.shareFiles", { count: "x" })).toBe("x ملفات");

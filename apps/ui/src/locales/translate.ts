@@ -52,10 +52,22 @@ function writtenNumber(value: string | number, language: Language | undefined): 
  * forms only for a word it borrows, and borrowed it with its English number: "1 テスト sat", "2 テスト sats".
  */
 function pluralCategory(count: number, language: Language | undefined): string | undefined {
-  try {
-    const rules = new Intl.PluralRules(language ?? "en");
-    return (rules.resolvedOptions().pluralCategories.length > 1 ? rules : new Intl.PluralRules("en")).select(count);
-  } catch { return undefined; }
+  try { return pluralRules(language ?? "en").select(count); } catch { return undefined; }
+}
+
+/**
+ * The rules `pluralCategory` reads for `language`, made once. Made at each string with a number, they were the page's
+ * busiest code while nobody touched it: the chat list's look every few seconds says every row's time again.
+ */
+const PLURAL_RULES = new Map<string, Intl.PluralRules>();
+function pluralRules(language: string): Intl.PluralRules {
+  let rules = PLURAL_RULES.get(language);
+  if (!rules) {
+    const own = new Intl.PluralRules(language);
+    rules = own.resolvedOptions().pluralCategories.length > 1 ? own : new Intl.PluralRules("en");
+    PLURAL_RULES.set(language, rules);
+  }
+  return rules;
 }
 
 /**
