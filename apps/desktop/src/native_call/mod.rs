@@ -91,6 +91,18 @@ fn logged<T>(what: &str, result: Result<T, String>) -> Result<T, String> {
     result
 }
 
+/// Held by a test (`write`) while it lets a page go: a camera or a meter opening meanwhile waits here, still
+/// opening, however soon its device would have opened.
+#[cfg(all(test, target_os = "linux"))]
+static OPENS_HELD: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Where a camera's or a meter's open starts: in tests, it waits while a test holds opens (`OPENS_HELD`).
+#[cfg(target_os = "linux")]
+fn opening() {
+    #[cfg(test)]
+    drop(OPENS_HELD.read().unwrap_or_else(|e| e.into_inner()));
+}
+
 /// Blocking work (opening or stopping a camera) off the IPC thread.
 #[cfg(target_os = "linux")]
 async fn blocking<T: Send + 'static>(
@@ -155,6 +167,7 @@ pub async fn native_camera_open(
     {
         let page = calls().lock().unwrap().page;
         let open = move || {
+            opening();
             engine::Camera::open(
                 engine::fake_media(),
                 device.as_deref(),
@@ -243,6 +256,7 @@ pub async fn native_microphone_meter(
     {
         let page = calls().lock().unwrap().page;
         let open = move || {
+            opening();
             engine::Meter::open(
                 engine::fake_media(),
                 device.as_deref(),
@@ -569,6 +583,38 @@ pub fn native_call_mute(id: String, muted: bool) -> Result<(), String> {
     }
 }
 
+/// The page draws who is speaking, or no longer does: the call says each side's level only while it does
+/// ([`engine::Call::set_levels`]).
+#[tauri::command]
+pub fn native_call_levels(id: String, on: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        call(&id)?.set_levels(on);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (id, on);
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// The page is in sight, or out of it (`document.hidden`): out of sight, the cameras' previews and the call's
+/// pictures are not made JPEGs for it past the first ([`engine::PAGE_HIDDEN`]).
+#[tauri::command]
+pub fn native_pictures_shown(shown: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        engine::PAGE_HIDDEN.store(!shown, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = shown;
+        Err(ELSEWHERE.into())
+    }
+}
+
 /// Sends this camera's picture in the call, or none (`camera` null).
 #[tauri::command]
 pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String> {
@@ -664,11 +710,12 @@ pub async fn native_call_close(id: String) -> Result<(), String> {
 /// meters and calls here by ids only it knew, and nothing would close them. They close as `native_call_close`,
 /// `native_camera_close` and `native_microphone_meter_close` close them, and its device watch stops being told.
 /// The ids go on counting: an id the page before had is never the next one's. A camera or meter still opening for
-/// the page before is closed as it opens (`page`).
+/// the page before is closed as it opens (`page`). The new page is taken as in sight until it says otherwise.
 pub fn page_started() {
     #[cfg(target_os = "linux")]
     {
         devices::page_started();
+        engine::PAGE_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
         let (cameras, meters, live) = {
             let mut calls = calls().lock().unwrap();
             calls.page += 1;
@@ -756,12 +803,15 @@ mod tests {
         };
         let mut camera = Box::pin(native_camera_open(channel(&frames), None));
         let mut meter = Box::pin(native_microphone_meter(channel(&levels), None));
-        // Each asked, and opening.
+        // Each asked, and opening until the page has gone: the test tone opens in moments, and on a busy machine it
+        // was open before its first poll, kept by the page that was still there (CI, 2026-11-05).
+        let held = OPENS_HELD.write().unwrap_or_else(|e| e.into_inner());
         let mut cx = Context::from_waker(Waker::noop());
         assert!(camera.as_mut().poll(&mut cx).is_pending());
         assert!(meter.as_mut().poll(&mut cx).is_pending());
 
         page_started();
+        drop(held);
 
         let camera = tauri::async_runtime::block_on(camera);
         let meter = tauri::async_runtime::block_on(meter);

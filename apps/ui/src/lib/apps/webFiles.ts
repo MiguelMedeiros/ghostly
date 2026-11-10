@@ -20,6 +20,7 @@ import { yieldThread } from "@ghostly/core";
 import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
+import { openLayer } from "../layerHistory";
 import type { LinkedFilesHost } from "../platform";
 import { PICK_AFTER_CANCEL_MS } from "./broker";
 
@@ -348,9 +349,12 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     const armed = setTimeout(() => { primary.disabled = false; }, SHEET_SETTLE_MS);
     const tab = (e: KeyboardEvent) => keepTabInside(e, box);
     const stopped = () => finish(null);
+    // Back (Android's back gesture) answers it as Cancel does, and the page under it stays where it was.
+    const closed = openLayer(() => finish(null));
     const finish = (value: unknown) => {
       if (done) return;
       done = true;
+      closed();
       clearTimeout(armed);
       document.removeEventListener("keydown", tab);
       parts.signal?.removeEventListener("abort", stopped);

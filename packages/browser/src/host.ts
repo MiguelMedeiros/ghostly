@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { ClientMessage, EngineEvent, RpcResponse } from "./shared/rpc";
+import type { ClientMessage, PostedEvent } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -68,13 +68,25 @@ export interface BrowserHost {
    */
   restartEngine?(): Promise<void>;
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
-  connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect: () => void): Promise<EngineConnection>;
+  connect(onMessage: (message: PostedEvent) => void, onDisconnect: () => void): Promise<EngineConnection>;
   /**
    * Asks the user for access to a local origin, where the platform has such a thing: `originPattern` is the
    * extension's host pattern (`http://localhost/*`), `origin` the exact address with its port (`http://localhost:3400`),
    * which the desktop app has Rust ask about in a native dialog.
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
+  /**
+   * Runs `task` (the share's `addService`, right after `requestLocalAccess` said yes) while no `forgetLocalAccess` or
+   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back. Resolves false without running
+   * it when the access went back between the two: ask again. Left out where nothing gives access back under a share
+   * (Desktop keeps one list per profile, in Rust).
+   */
+  withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
+  /**
+   * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
+   * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.
+   */
+  localAccessAllowed?(origin: string): Promise<boolean>;
   /**
    * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
    * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
@@ -85,8 +97,12 @@ export interface BrowserHost {
    * access no profile on this device still needs. The extension's host permissions are every profile's at once.
    */
   releaseUnusedLocalAccess?(): Promise<void>;
-  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
-  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
+  /**
+   * `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own.
+   * `relayOnly`: Hide my IP from contacts is on, and the app loads nothing but its own origin while open
+   * (`viewerServicePolicy`): a picture or script from a server the contact names would show it this device's address.
+   */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string, relayOnly: boolean): Promise<void>;
   /**
    * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
    * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own
@@ -122,6 +138,12 @@ export interface BrowserHost {
    * sees them in the paste event (a browser, WebKit on macOS).
    */
   readClipboardFiles?(): Promise<ClipboardFile[]>;
+  /**
+   * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
+   * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
+   * The page's own copy cannot mark it. Left out where the page's copy is the way.
+   */
+  copySecret?(text: string): Promise<void>;
   /**
    * Where calls get their media, when not from the page's own WebRTC. Ghostly Desktop on Linux: WebKitGTK has
    * no WebRTC there, and GStreamer runs the calls. Left out where the page has it.

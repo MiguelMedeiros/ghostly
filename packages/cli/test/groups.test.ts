@@ -40,7 +40,7 @@ function fake(messages: StoredMessage[] = []) {
     rotateGroup: vi.fn(async () => undefined),
     renameGroup: vi.fn(async () => undefined),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, groupAuto: { get: () => ({ on: false, from: [] }) }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
 }
 
@@ -166,6 +166,15 @@ describe("group rename", () => {
       await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request" });
     expect(node.renameGroup).toHaveBeenCalledTimes(1);
     expect(COMMANDS["group rename"].params!(parseArgs(["Crew", "Book", "club"], {}), { group: "Crew", name: "Book club" })).toEqual({ group: "Crew", name: "Book club" });
+  });
+});
+
+describe("other groups under the same id", () => {
+  it("are shown beside the group held, a link hidden unless asked for", () => {
+    expect(groupJson(group)).not.toHaveProperty("others");
+    const view = { ...group, others: [{ linkId: "chat-zed", contact: "zed-key", name: "Crew", members: 3 }, { link: LINK }] };
+    expect(groupJson(view).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: "<hidden>" }]);
+    expect(groupJson(view, true).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: LINK }]);
   });
 });
 

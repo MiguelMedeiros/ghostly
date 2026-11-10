@@ -1,6 +1,6 @@
-import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { MESSAGE_CLOCK_SKEW_MS, STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { findSecret } from "./secretGuard";
+import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, asCliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -124,7 +124,7 @@ function guardSecrets(fields: unknown, params: Params, verb: string): void {
   if (bool(params, "force")) return;
   const check = (text: string) => {
     const secret = findSecret(text);
-    if (secret) throw new CliError("confirm", `The card's text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} it with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The card's text looks like ${secretWords(secret)}; ${verb} it with --force if you mean to`, { kind: secret.kind });
   };
   for (const text of cardTexts([fields, params.run])) { check(text); check(cardLine(text, Infinity) ?? ""); }
   if (typeof params.text === "string") check(params.text);
@@ -237,6 +237,22 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null });
 }
 
+/**
+ * A card's own kept times (a task's start, a routine's runs) later than the sender's rule takes: the device's clock
+ * went back since they were set. Said as that, not as a time the person gave in the future; fields the update gives
+ * are checked as given.
+ */
+function clockWentBack(base: Record<string, unknown>, patch: Record<string, unknown>, kind: Kind): void {
+  const latest = Date.now() + MESSAGE_CLOCK_SKEW_MS;
+  const ahead = (value: unknown) => typeof value === "number" && value > latest;
+  const at = (run: unknown) => isObject(run) && ahead(run.at);
+  const field = kind === "task" ? (patch.startedAt === undefined && ahead(base.startedAt) ? "startedAt" : undefined)
+    : kind === "routine" ? (patch.lastRun === undefined && at(base.lastRun) ? "lastRun.at"
+      : patch.runs === undefined && Array.isArray(base.runs) && base.runs.some(at) ? "runs[].at" : undefined)
+    : undefined;
+  if (field) throw new CliError("bad_request", `This device's clock went back since the ${kind} was sent: its ${field} is later than now. Update it once the clock is right, or start a new card with ghostly ${kind} send`, { field, now: Date.now() });
+}
+
 /** Edits the card's message with its merged card, now. */
 async function editCard(ctx: ApiContext, target: Target, messageId: string, card: StatusCard, text: string): Promise<void> {
   const result = await node(ctx).editMessage({ linkId: target.linkId, messageId, text, card });
@@ -259,7 +275,10 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     throw new CliError("refused", `This ${kind}'s message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: start a new card with ghostly ${kind} send (a new --id, or the same one: the newest card of an id stands for it)`, { messageId: message.id, edits: message.edit!.seq });
   const pace = paceOf(ctx, `${target.linkId}\n${message.id}`);
   const base = pace.next ?? (message.card as unknown as Record<string, unknown>);
-  const merged = withRun(mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Date.now() }) }), params);
+  clockWentBack(base, patch, kind);
+  // A clock set back a little leaves the card's start ahead of now: its update is never before it.
+  const startedAt = typeof base.startedAt === "number" && patch.startedAt === undefined ? base.startedAt : 0;
+  const merged = withRun(mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Math.max(Date.now(), startedAt) }) }), params);
   const card = checked(merged);
   if (isObject(patch) && patch.parent !== undefined) await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
@@ -269,7 +288,8 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     : oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const last = Math.max(pace.last, message.edit?.at ?? message.timestamp);
-  const due = last + CARD_UPDATE_GAP_MS - Date.now();
+  // Never more than the gap: a last update ahead of now is the clock gone back, not one to wait the jump out for.
+  const due = Math.min(last + CARD_UPDATE_GAP_MS - Date.now(), CARD_UPDATE_GAP_MS);
   let queued = false;
   if (due > 0 && ctx.mode === "daemon") {
     // Merged into what goes next; the first update in the gap sets the timer, the later ones only change what it sends.

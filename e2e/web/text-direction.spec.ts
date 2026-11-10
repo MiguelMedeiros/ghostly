@@ -35,9 +35,23 @@ test("on a phone: an English message reads left to right in the Arabic app, an A
   await connect(alice, bob);
   await useLanguage(alice.page, "ar");
 
-  // Alice writes Arabic: right to left in Bob's English app, while his own English stays left to right.
+  // The message field reads a draft in its own direction too, as its bubble will; empty, it keeps the app's.
   const field = alice.page.locator(".composer-row textarea");
+  expect(await direction(field)).toBe("rtl");
+  await field.fill("👍 2");
+  expect(await direction(field)).toBe("rtl");
+  await field.fill("draft kept?");
+  expect(await direction(field)).toBe("ltr");
+  const bobField = bob.page.locator(".composer-row textarea");
+  expect(await direction(bobField)).toBe("ltr");
+  await bobField.fill("مرحبا يا صديقي!");
+  expect(await direction(bobField)).toBe("rtl");
+  await bobField.fill("");
+  expect(await direction(bobField)).toBe("ltr");
+
+  // Alice writes Arabic: right to left in Bob's English app, while his own English stays left to right.
   await field.fill("مرحبا يا صديقي!");
+  expect(await direction(field)).toBe("rtl");
   await field.press("Enter");
   const arabic = chat(bob).getByTestId("message-body").filter({ hasText: "مرحبا يا صديقي!" });
   await expect(arabic).toBeVisible();

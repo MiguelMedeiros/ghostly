@@ -1,5 +1,5 @@
 import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationStatus, useInvitationAnswer } from "./GroupInvitation";
@@ -16,14 +16,14 @@ import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
 import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow, othersName } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
 import { sameValue } from "../lib/sameValue";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
-import { paymentLine } from "./paymentWords";
+import { paymentLine, storedPaymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import { refusedRowText } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
@@ -245,12 +245,13 @@ export interface ChatRowProps {
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
 function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate): string {
   if (joiner && joiner !== p.peerPubKey) return t("chat.youJoined");
-  return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
+  return `${p.named ? othersName(p.label, t) : p.keyLabel} ${t("chat.joined")}`;
 }
 
 /**
  * A payment or a request as the list's line (paymentLine: what its bubble says, in the app's language, test sats as
- * test sats), or undefined while the wallet does not know it. Only a change of that line draws the row again.
+ * test sats), or undefined while the wallet does not know it (the row then says the stored line as the bubble does,
+ * `storedPaymentLine`). Only a change of that line draws the row again.
  */
 function usePaymentLine(paymentId: string | undefined, t: Translate): string | undefined {
   const subscribe = useCallback((listener: () => void) => (paymentId && servicesPlatform?.subscribe(listener)) || (() => {}), [paymentId]);
@@ -365,7 +366,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? (p.lastMessage.paymentId ? storedPaymentLine(t, p.lastMessage.text, p.lastMessage.sender === "me")
+                  : appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -397,11 +399,17 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
 }, sameValue);
 
 /**
+ * A group as the chat list reads it (Sidebar): without who is typing, each member's presence and edge, and how a
+ * community is connected. They change all the time, and nothing in the list shows them.
+ */
+export type ListedGroup = Omit<GroupView, "members" | "typing" | "community"> & { members: Pick<GroupMemberView, "key" | "role" | "me" | "nick">[] };
+
+/**
  * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
  * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
  */
 export function GroupRow({ group, active, density, onOpen, drag }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void;
   /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
   drag?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
 }) {
@@ -424,7 +432,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
 }
 
 const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
@@ -435,7 +443,8 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? invitationStatus(group, t)
+  // Another group came under its id: said first, as the person has to pick on its page (`GroupOthers`).
+  const status = group.others?.length ? t("sidebar.group.others") : invitation ? invitationStatus(group, t)
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;

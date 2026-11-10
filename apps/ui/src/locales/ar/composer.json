@@ -1,7 +1,9 @@
 {
   "attach": "إرفاق",
   "camera": "كاميرا",
+  "cameraBlocked": "الكاميرا محظورة. اسمح بالكاميرا لـ Ghostly في إعدادات Android.",
   "cameraFailed": "تعذّر تشغيل الكاميرا.",
+  "cameraRefused": "لا يمكن الوصول إلى الكاميرا. اضغط على الكاميرا مرة أخرى واسمح بها.",
   "caption": "أضف تعليقًا",
   "captionTooLong": "هذا التعليق {{bytes}} بايت UTF-8. تسمح DHT بما يصل إلى {{max}}.",
   "category": {

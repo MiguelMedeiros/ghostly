@@ -26,12 +26,14 @@
     "title": "Waiting for you"
   },
   "notCopied": "Not copied",
+  "quotedName": "“{{name}}”",
   "save": "Save",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "Success",
   "unnamedContact": "Contact · {{key}}",

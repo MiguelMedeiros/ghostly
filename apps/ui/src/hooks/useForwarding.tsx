@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { ForwardDialog } from "../components/chat/ForwardDialog";
+import { modalOpen } from "./useAppCommands";
 import { focusInPlace } from "../lib/focus";
 import { FORWARD_MAX_MESSAGES, canForward } from "../lib/forward";
 import { touchOnly } from "../lib/touchOnly";
@@ -29,10 +30,28 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null);
   // Another chat, or this one left: nothing stays chosen.
   useEffect(() => { setSelected(null); setForwarding(null); }, [from]);
+  // A chosen message that leaves the chat (deleted here, or for everyone) is no longer chosen; the last one gone ends it.
+  // "Forward to…" open on it forwards the rest (the engine refuses a forward with a message it no longer has, for every
+  // chat), or closes when none is left. One edited meanwhile is held as it reads now: the engine forwards its new text,
+  // and the seed/key question must judge that text, not the one it had when Forward was pressed.
+  useEffect(() => {
+    const here = new Map(messages.map(m => [m.id, m]));
+    setSelected(now => {
+      if (!now) return now;
+      const rest = now.filter(id => here.has(id));
+      return rest.length === now.length ? now : rest.length ? rest : null;
+    });
+    setForwarding(now => {
+      if (!now) return now;
+      const rest = now.flatMap(m => here.get(m.id) ?? []);
+      return rest.length === now.length && rest.every((m, i) => m === now[i]) ? now : rest.length ? rest : null;
+    });
+  }, [messages]);
   useEffect(() => {
     if (!selected || forwarding) return;
-    // An Escape a menu or a field answered is not the choice's; the one that ends it is spent.
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); setSelected(null); } };
+    // An Escape a menu or a field answered is not the choice's; the one that ends it is spent. One in a modal dialog over
+    // the chat is the dialog's: a <dialog> closes on the key's default action, which cancelling it here would stop.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !modalOpen()) { e.preventDefault(); setSelected(null); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, forwarding]);

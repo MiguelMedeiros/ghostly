@@ -36,12 +36,14 @@ export function useAppOpener(): AppOpener | null {
  * Why the client stopped a running app (WISP 1200 § Takedowns): its publisher revoked the version, or a store removed it.
  * `failed`: the app stopped on its own (its frame navigated, broke the protocol, or never started; § the runner, step 7).
  * `unresponsive`: it held its thread past the watchdog's bound, and the page stopped it; it may be opened again.
+ * `offline`: it never started, the person being offline (the web runner page never loaded).
  */
-export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" };
+export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" };
 
 /** "Chess was stopped: its maker revoked this version", where the app ran. */
 export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
+  if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
   return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
 }
@@ -71,8 +73,28 @@ export function appsRunning(): boolean {
   return running.size > 0;
 }
 
+/** Why an open that the profile's lock overtook did not start. */
+export const LOCKED = "The profile locked before the app started";
+
+/** Why an open in a chat that closed meanwhile (the person went elsewhere) did not start. */
+export const CHAT_CLOSED = "The chat closed before the app started";
+
+/** How many times the profile locked (`stopRunningApps`): an open still on its way when it locks never starts. */
+let locks = 0;
+
+/**
+ * Read by an opener before its first wait: the returned function says whether the profile locked since. An app is
+ * registered only once its entry is there (and on Desktop its window), so a lock in between stops nothing of it: the
+ * opener asks after every wait, and one that finds it locked stops what it made and does not start the app.
+ */
+export function lockedSince(): () => boolean {
+  const at = locks;
+  return () => locks !== at;
+}
+
 /** Stops every running app and says nothing: the profile locked, and nothing of it answers an app behind the lock. */
 export function stopRunningApps(): void {
+  locks += 1;
   for (const entry of [...running]) entry.stop();
 }
 

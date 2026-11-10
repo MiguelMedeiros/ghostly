@@ -112,6 +112,15 @@ export function sentReply(original: Quotable, group = false): MessageReply | und
   return ref ? replyTo(original, ref) : undefined;
 }
 
+/**
+ * The message a composer answers, as the chat has it now: an edit's new text, or none once it is gone (deleted here or
+ * for everyone), so the bar never shows words the chat no longer holds and Send carries no reply to them.
+ */
+export function heldOriginal<T extends Quotable>(held: T, index: ReplyIndex, group = false): T | undefined {
+  const ref = replyRef(held, group);
+  return (index.byId.get(held.id) ?? (ref ? index.byRef.get(ref) : undefined)) as T | undefined;
+}
+
 /** Who wrote a message or an original, as the page names people: me, the contact, a member. */
 export type NameOf = (from: "me" | "peer" | undefined, member?: string) => string | undefined;
 
@@ -121,8 +130,10 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
-    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons).
-    const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original, t);
+    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons):
+    // only when the engine found the question as the press came (`messageId`), so that line is its own. One that came
+    // before its original kept the wire's line, which is only what the replier said: the original here wins.
+    const snippet = reply.button && reply.messageId && reply.snippet ? reply.snippet : messageSnippet(original, t);
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;

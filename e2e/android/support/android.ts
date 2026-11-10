@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { openPeer, type Peer } from "../../support/fixtures";
 import { LocalRelay } from "../../support/relay";
+import { minWebView, webViewTooOld } from "./webview";
 
 export { expect };
 
@@ -21,7 +22,7 @@ export { expect };
  * Until the debug start takes the network from extras (see `launch`), the Rust side still reaches the public Mainline
  * DHT on its own: nothing a spec checks depends on it.
  *
- *   E2E_ANDROID_APK      the APK to install once per run (otherwise the one installed is used)
+ *   E2E_ANDROID_APK      the APK to install once per run (otherwise the one installed is used: a debug build only)
  *   E2E_ANDROID_SERIAL   which device (`adb devices`), or ANDROID_SERIAL; required outside CI, since every test clears
  *                        the app's data there (on CI, the only device)
  *   E2E_ANDROID_A1=1     run the Android host specs even when the app says it has no such host yet (see `pending`)
@@ -67,8 +68,10 @@ export class Adb {
     this.tryRun("reverse", "--remove", `tcp:${port}`);
   }
 
+  /** The app's process id; "" when it has none (`pidof` fails then, and its failure is no id). */
   pid(): string {
-    return this.tryRun("shell", "pidof", PKG).out.trim();
+    const found = this.tryRun("shell", "pidof", PKG);
+    return found.ok ? found.out.trim() : "";
   }
 }
 
@@ -210,8 +213,19 @@ function install(adb: Adb, apk: string): void {
   throw new Error(`adb install ${apk}: ${first.out}`);
 }
 
+/**
+ * The installed app's version, and whether it is a debug build: only one takes a debug e2e start (`ghostly_e2e`,
+ * MainActivity.kt). A release build left on the device (a probe of a released APK) starts as a person's would: the
+ * name step over every page, the public network, a new profile's default Mainnet wallets.
+ */
+function installedBuild(adb: Adb): { version: string; debug: boolean } {
+  const dump = adb.run("shell", "dumpsys", "package", PKG);
+  const flags = dump.match(/^\s+flags=\[([^\]]*)\]/m)?.[1] ?? "";
+  return { version: dump.match(/versionName=(\S+)/)?.[1] ?? "?", debug: /\bDEBUGGABLE\b/.test(flags) };
+}
+
 /** The WebView of the app's process `pid`, not one of a process that is gone (`pm clear` kills it; the list lags). */
-async function webViewPage(device: AndroidDevice, pid: number): Promise<Page> {
+export async function webViewPage(device: AndroidDevice, pid: number): Promise<Page> {
   const end = Date.now() + 120_000;
   while (Date.now() < end) {
     const view = device.webViews().find((v) => v.pkg() === PKG && v.pid() === pid);
@@ -297,6 +311,11 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     } else if (!adb.tryRun("shell", "pm", "path", PKG).out.includes("package:")) {
       throw new Error(`${PKG} is not installed on ${serial}: set E2E_ANDROID_APK to the debug APK`);
     }
+    const installed = installedBuild(adb);
+    if (!installed.debug) throw new Error(`${PKG} ${installed.version} on ${serial} is a release build, which ignores the e2e start (no name step, the test's network): set E2E_ANDROID_APK to the debug APK`);
+    // A WebView the app refuses: every spec would wait 120 s for a page behind the update screen (support/webview.ts).
+    const tooOld = webViewTooOld(adb.tryRun("shell", "dumpsys", "webviewupdate").out, minWebView());
+    if (tooOld) throw new Error(`${serial}: ${tooOld}`);
     const device = (await _android.devices()).find((d) => d.serial() === serial);
     if (!device) throw new Error(`Playwright sees no device ${serial}`);
     await use({ adb, device });

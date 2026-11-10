@@ -10,6 +10,7 @@
     "storeNewer": "Vous avez déjà cette boutique. Ce lien en contient une copie plus récente.",
     "storeOlder": "C'est une copie plus ancienne d'une boutique que vous avez déjà. La vôtre est plus récente et reste telle quelle.",
     "storeReads": "Ghostly la lit depuis {{host}}, qui apprend votre adresse IP.",
+    "storeRemovedOlder": "Vous avez retiré cette boutique quand sa liste était plus récente que cette copie. Pour l'ajouter à nouveau, utilisez un lien vers sa liste la plus récente.",
     "title": "Ajouter une app ou une boutique",
     "updateStore": "Mettre à jour la boutique"
   },
@@ -18,7 +19,6 @@
     "fetchFiles": "Récupérer ses fichiers",
     "keepStopped": "La laisser arrêtée",
     "needsFiles": "Il lui manque ses fichiers",
-    "remove": "Retirer",
     "runAnyway": "Lancer quand même",
     "stopped": "Arrêtée",
     "uninstall": "Désinstaller",
@@ -62,11 +62,13 @@
     "title": "Apps avec {{name}}"
   },
   "errors": {
+    "damaged": "Ses fichiers sur cet appareil sont endommagés. Récupérez ses fichiers à nouveau.",
     "equivocation": "Ce lien contient une autre copie d'une version que vous avez. Ghostly a gardé la vôtre.",
     "expired": "C'était trop long. Vérifiez l'app à nouveau.",
     "githubLink": "Cette page GitHub n'est pas une app. Collez le lien du dépôt ou celui du fichier de l'app.",
     "host": "Les apps viennent seulement de GitHub (raw.githubusercontent.com) ou de jsDelivr à un commit.",
     "hostProblem": "Le serveur a eu un problème (erreur {{status}}). Réessayez plus tard.",
+    "locked": "Le profil s'est verrouillé avant que l'app ne s'ouvre. Ouvrez-la à nouveau.",
     "needsFiles": "Ses fichiers ne sont pas encore sur cet appareil.",
     "network": "Impossible de joindre le serveur.",
     "notListed": "Cette boutique ne propose plus cette app.",
@@ -80,6 +82,7 @@
     "removed": "Une boutique que vous avez ajoutée a retiré cette app.",
     "revoked": "Son éditeur a révoqué cette version.",
     "rollback": "Le lien contient une version plus ancienne.",
+    "runner": "Ce serveur n'est pas prévu pour exécuter les apps en sécurité : Ghostly ne les ouvre donc pas ici.",
     "slow": "C'était trop long avec cette connexion. Réessayez avec une plus rapide.",
     "status": "Rien à ce lien.",
     "storage": "Ce navigateur ne peut pas garder d'apps ici (navigation privée ?). Essayez une fenêtre normale.",
@@ -100,7 +103,8 @@
     "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
   },
   "install": {
-    "equivocation": "Deux versions {{sequence}} différentes existent. Ghostly a gardé celle que vous avez.",
+    "asksChanged": "Ce que cette app demande a changé. Revoyez-le avant de l'installer.",
+    "equivocation": "Deux copies différentes de cette version existent. Ghostly a gardé celle que vous avez.",
     "fetching": "Vérification de l'app…",
     "foundBy": "Trouvée par {{name}}",
     "inStore": "Dans {{name}}",
@@ -130,7 +134,7 @@
     "same": "Déjà installée.",
     "sentBy": "Envoyée par {{name}}",
     "unknownPublisher": "Éditeur inconnu",
-    "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir qui l'a faite. Comparez la clé avec celle que publie son auteur.",
+    "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir son éditeur. Comparez la clé avec celle que publie l'éditeur.",
     "update": "Mettre à jour",
     "webkit": "Dans ce navigateur, une app peut quand même contacter d'autres serveurs.",
     "webkitInfo": "Safari et tout navigateur sur iPhone ou iPad laissent une app ouvrir des connexions que Ghostly ne peut pas bloquer. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
@@ -140,12 +144,13 @@
     "addHint": "Ajouter une app ou une boutique par son lien",
     "details": "{{title}} : détails",
     "installed": "Installées",
-    "intro": "Des jeux et de petites apps, signés par leurs auteurs et lancés dans un bac à sable.",
+    "intro": "Des jeux et de petites apps, signés par leurs éditeurs et lancés dans un bac à sable.",
     "loading": "Chargement…",
     "noStores": "Aucune boutique. Ajoutez-en une par son lien.",
     "none": "Aucune app pour l'instant.",
     "open": "Ouvrir",
-    "stores": "Boutiques"
+    "stores": "Boutiques",
+    "tryAgain": "Réessayer"
   },
   "pick": {
     "hint": "Elle fonctionne dans une discussion, avec votre contact.",
@@ -153,17 +158,18 @@
     "title": "Ouvrir {{title}} dans une discussion"
   },
   "store": {
+    "clockLate": "La liste de cette boutique est datée après l'horloge de cet appareil. Vérifiez la date et l'heure de cet appareil.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
     "curated": "Choisie",
     "empty": "Cette boutique ne propose aucune app.",
+    "equivocation": "Cette boutique a signé deux listes différentes sous le même numéro (vu le {{date}}). Ghostly a gardé la vôtre.",
     "filter": "Rechercher dans cette boutique",
     "indexed": "Indexée",
     "installed": "Installée",
     "noMatch": "Aucune app de cette boutique ne correspond.",
     "notRead": "Pas encore lue",
-    "problem": "La dernière lecture a échoué.",
     "read": "Lire",
     "readNamed": "Lire {{name}}",
     "refresh": "Actualiser",
@@ -174,8 +180,10 @@
     "removeNamed": "Retirer {{name}}",
     "removeNone": "Pour l'ajouter à nouveau, il vous faudra son lien.",
     "removeTitle": "Retirer {{name}} ?",
+    "rollback": "Le lien de cette boutique contient maintenant une liste plus ancienne que la vôtre. Ghostly a gardé la vôtre.",
     "showMore": "Afficher plus ({{count}})",
-    "stale": "Pas à jour depuis le {{date}}"
+    "stale": "Pas à jour depuis le {{date}}",
+    "tooLarge": "La liste de cette boutique est trop volumineuse pour que Ghostly la lise."
   },
   "title": "Apps",
   "view": {
@@ -186,10 +194,11 @@
     "resume": "Revenir à {{title}}",
     "resumeSharing": "partage un fichier",
     "sharingWith": "partage un fichier avec {{name}}",
-    "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son auteur.",
+    "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son éditeur.",
+    "stoppedOffline": "{{title}} n'a pas pu démarrer : vous êtes hors ligne. Rouvrez-la une fois connecté.",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
-    "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
-    "stoppedUnresponsive": "{{title}} ne répondait plus et a été fermée, pour que vos discussions continuent de fonctionner. Rouvrez-la ou, si cela se reproduit, prévenez son auteur.",
+    "stoppedRevoked": "{{title}} a été arrêtée : son éditeur a révoqué cette version",
+    "stoppedUnresponsive": "{{title}} ne répondait plus et a été fermée, pour que vos discussions continuent de fonctionner. Rouvrez-la ou, si cela se reproduit, prévenez son éditeur.",
     "with": "{{title}} avec {{name}}",
     "withName": "avec {{name}}",
     "withSharing": "{{title}} · partage un fichier avec {{name}}"

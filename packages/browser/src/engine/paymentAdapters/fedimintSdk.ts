@@ -67,6 +67,7 @@ export interface FedimintClient {
   /** The latest state within `waitMs` (it returns early on a final one). Undefined: the client knows no such operation. */
   spendState(operationId: string, waitMs: number): Promise<SpendState | undefined>;
   redeem(notes: string, ghostly: string): Promise<string>;
+  /** Rejects when the client could not say (its error is not the reissue's `Failed`). */
   redeemState(operationId: string, waitMs: number): Promise<RedeemState | undefined>;
   createInvoice(amountMsats: number, description: string, expirySecs: number, ghostly: string): Promise<{ operationId: string; invoice: string }>;
   receiveState(operationId: string, waitMs: number): Promise<ReceiveState | undefined>;
@@ -202,8 +203,12 @@ class RealClient implements FedimintClient {
     return watch<SpendState>((ok, fail) => this.wallet.mint.subscribeSpendNotes(operationId, (s: string) => ok(SPEND[s] ?? "created"), fail), spendFinal, waitMs);
   }
   redeem(notes: string, ghostly: string): Promise<string> { return this.wallet.mint.reissueExternalNotes(notes, { ghostly }); }
-  redeemState(operationId: string, waitMs: number) {
-    return watch<RedeemState>((ok, fail) => this.wallet.mint.subscribeReissueExternalNotes(operationId, (s: unknown) => ok(typeof s === "string" ? REDEEM[s] ?? "created" : s && typeof s === "object" && "Failed" in s ? "failed" : "created"), (error: string) => { ok("failed"); fail(error); }), (s) => s === "done" || s === "failed", waitMs);
+  async redeemState(operationId: string, waitMs: number) {
+    let error: unknown;
+    const state = await watch<RedeemState>((ok, fail) => this.wallet.mint.subscribeReissueExternalNotes(operationId, (s: unknown) => ok(typeof s === "string" ? REDEEM[s] ?? "created" : s && typeof s === "object" && "Failed" in s ? "failed" : "created"), (e: string) => { error ??= e; fail(e); }), (s) => s === "done" || s === "failed", waitMs);
+    // Only the reissue's own `Failed` is failed: an error of the client or its subscription says nothing of the notes.
+    if (error !== undefined && state !== "done" && state !== "failed") throw new Error(`The Fedimint client could not say how the redeem stands: ${errorText(error)}`);
+    return state;
   }
   async createInvoice(amountMsats: number, description: string, expirySecs: number, ghostly: string) {
     const { operation_id, invoice } = await this.wallet.lightning.createInvoice(amountMsats, description, expirySecs, undefined, { ghostly });

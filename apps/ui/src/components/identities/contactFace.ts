@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { hasVisible, stripHidden } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { engine } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
 import { providerLabel, useEngineValue } from "../../lib/identities";
+import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
 
 /*
@@ -64,17 +66,15 @@ export function forgetFaceChoice(peerKey: string): void {
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 
-const subscribeChoices = (listener: () => void) => {
-  // Only a choice's key: a list of contacts redraws for each, and another page writes other keys many times a second.
-  const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}face_`)) listener(); };
-  window.addEventListener(FACE_EVENT, listener);
-  window.addEventListener("storage", stored);
-  return () => { window.removeEventListener(FACE_EVENT, listener); window.removeEventListener("storage", stored); };
-};
+// Every row of the chat list reads its contact's choice: they share one window listener, which calls a contact's own.
+const subscribeChoice = keyedStorage(FACE_EVENT, (key) => key.startsWith(`${getPrefix()}face_`) ? key.slice(`${getPrefix()}face_`.length) : undefined);
+/** Any contact's choice. */
+const subscribeChoices = (listener: () => void) => subscribeChoice(null, listener);
 
 /** The stored choice for one contact, redrawn when it changes. */
 export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefined {
-  return parseChoice(useSyncExternalStore(subscribeChoices, () => rawChoice(peerKey)));
+  const subscribe = useCallback((listener: () => void) => peerKey ? subscribeChoice(peerKey, listener) : () => {}, [peerKey]);
+  return parseChoice(useSyncExternalStore(subscribe, () => rawChoice(peerKey)));
 }
 
 /**
@@ -84,9 +84,9 @@ export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefin
  */
 export function cleanFaceName(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
-  // eslint-disable-next-line no-control-regex
-  const text = value.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
-  return Array.from(text).slice(0, 64).join("").trim() || undefined;
+  const text = stripHidden(value.replace(/\s+/g, " ")).replace(/\s+/g, " ").trim();
+  const name = Array.from(text).slice(0, 64).join("").trim();
+  return name && hasVisible(name) ? name : undefined;
 }
 
 /** How a contact can be shown: one of their verified identities with a public profile that has a name or a photo. */

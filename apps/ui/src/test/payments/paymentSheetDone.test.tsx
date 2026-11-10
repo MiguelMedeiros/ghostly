@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { engineText } from "@ghostly/core";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -12,7 +13,7 @@ import { everyWallet, mint, REAL_MINT, reviewContext, reviewOf, TEST_MINT } from
 
 /**
  * A payment sent or a request made from the chat's sheet ends there: the sheet closes, the chat is back with the
- * keyboard on the message field, and the chat's bubble shows how it goes. A failure keeps the sheet, with its error
+ * keyboard on the message field, and the chat's bubble shows how it goes, even when it came back before Approve answered. A failure keeps the sheet, with its error
  * and the way to try again. Real money still asks once more before anything goes, and closes only once it went.
  */
 
@@ -65,6 +66,22 @@ describe("sent", () => {
     expect(engine.callsTo("approvePayment")).toEqual([{ id: "review-1", confirmedReal: true }]);
     expect(sheet()).not.toBeInTheDocument();
   });
+
+  // The contact refused it and the ecash came back before Approve answered: it went out all the same, and its bubble
+  // says how it ended. The sheet closed only when Approve won that race.
+  it.each([
+    ["taken back", { error: engineText("paymentTakenBack") }],
+    ["refused, its sats back", { error: "Refused: Ecash from 127.0.0.1 is not accepted. All 21 sats came back.", returned: { amount: 21, fee: 0 } }],
+  ])("a payment %s before Approve answers: the sheet closes all the same", async (_, ended) => {
+    rememberRail("peer", "cashu:testnet");
+    const { user, engine } = composer();
+    engine.on("approvePayment", (params) => ({ ...reviewOf({ target: { method: "cashu", network: "cashu-test", provider: TEST_MINT, address: "peer", asset: "BTC", unit: "sat", expiresAt: Date.now() + 60_000 }, amount: 21, feeCap: 10, payee: "peer", linkId: "link-1" }), id: params.id, state: "failed", ...ended }));
+    await start(user, "cashu-testnet");
+    await user.click(screen.getByTestId("payment-send"));
+    await user.click(await screen.findByTestId("review-approve"));
+    expect(sheet()).not.toBeInTheDocument();
+    expect(field()).toHaveFocus();
+  });
 });
 
 describe("requested", () => {
@@ -74,6 +91,35 @@ describe("requested", () => {
     await start(user, "lightning-testnet");
     await user.click(screen.getByTestId("payment-request"));
     expect(request).toHaveBeenCalledWith(21, "", "cashu", "lightning", "testnet");
+    expect(sheet()).not.toBeInTheDocument();
+    expect(field()).toHaveFocus();
+  });
+});
+
+describe("closed", () => {
+  /** A payment the mint left unconfirmed: its review, with Check and Close. */
+  async function unconfirmed() {
+    rememberRail("peer", "cashu:testnet");
+    const { user, engine } = composer();
+    engine.on("approvePayment", (params) => ({ ...reviewOf({ target: { method: "cashu", network: "cashu-test", provider: TEST_MINT, address: "peer", asset: "BTC", unit: "sat", expiresAt: Date.now() + 60_000 }, amount: 21, feeCap: 10, payee: "peer", linkId: "link-1" }), id: params.id, state: "unknown" }));
+    await start(user, "cashu-testnet");
+    await user.click(screen.getByTestId("payment-send"));
+    await user.click(await screen.findByTestId("review-approve"));
+    await within(screen.getByTestId("payment-review")).findByRole("button", { name: "Close" });
+    return user;
+  }
+
+  it("the review's Close gives the keyboard back to the message field, not to the page", async () => {
+    const user = await unconfirmed();
+    await user.click(within(screen.getByTestId("payment-review")).getByRole("button", { name: "Close" }));
+    expect(sheet()).not.toBeInTheDocument();
+    expect(field()).toHaveFocus();
+  });
+
+  it("Escape in the review does the same", async () => {
+    const user = await unconfirmed();
+    expect(sheet()).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
     expect(sheet()).not.toBeInTheDocument();
     expect(field()).toHaveFocus();
   });

@@ -4,12 +4,16 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { androidApp } from "../../lib/touchOnly";
+import { openAppSettings } from "../../desktop/androidCameraRefusal";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   switch (problem) {
-    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where.
-    case "denied": return mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
+    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where. The Android app
+    // has no browser: Android asks again, or (once it no longer asks) only its settings allow it.
+    case "denied": return androidApp() ? t("chat.voice.micDeniedAndroid")
+      : mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
     case "unavailable": return t("chat.voice.micUnavailable");
     case "unsupported": return t("chat.voice.micUnsupported");
   }
@@ -43,7 +47,8 @@ interface Props {
   /** Why a voice message cannot be sent in this chat now; pressing the mic says so. */
   unavailable?: string;
   disabled?: boolean;
-  onError(message: string): void;
+  /** `action`: a way out the line names (Android's settings for a refused microphone). */
+  onError(message: string, action?: { label: string; run: () => void }): void;
   /** Recording or not: the composer hides its pickers meanwhile. */
   onActiveChange?(active: boolean): void;
 }
@@ -90,6 +95,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const [preview, setPreview] = useState<{ peaks: number[]; playing: boolean } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [binned, setBinned] = useState(false);
+  /** The microphone ended under the recording: it waits, paused for good, to be sent or discarded. */
+  const [micEnded, setMicEnded] = useState(false);
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -159,6 +166,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setConfirmingBoth(false);
     setModeBoth("idle");
     setPhase("starting");
+    setMicEnded(false);
     setElapsed(0);
     setLevels([]);
     setDrag({ x: 0, y: 0 });
@@ -173,7 +181,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const send = useCallback(async () => {
     const recorder = recorderRef.current;
     if (!recorder || sendingRef.current) return;
-    if (!recorder.recording && !recorder.paused) {
+    if (!recorder.recording && !recorder.paused && !recorder.ended) {
       // Hands-free, the send button shows before the microphone answers: a press then is kept, not lost.
       if (modeRef.current === "locked") { pendingSendRef.current = true; setPhase("sending"); return; }
       return cancel();
@@ -205,21 +213,35 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     recorderRef.current = recorder;
     recorder.onLevel = () => setLevels(recorder.recentLevels(48));
     recorder.onLimit = () => { showHint(t("chat.voice.limit", { minutes: VOICE_LIMITS.maxDurationMs / 60_000 })); void send(); };
+    // The microphone went: what was recorded shows as a paused recording, to play, send or discard.
+    recorder.onEnded = () => {
+      if (recorderRef.current !== recorder || sendingRef.current) return;
+      // Pause turns disabled under the focus.
+      focusOutOfBar();
+      setMicEnded(true);
+      setPhase("paused");
+      setElapsed(recorder.elapsed());
+      setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
+      showHint(microphoneText(t, "unavailable"));
+    };
     setModeBoth(next);
     setPhase("starting");
     try {
       await recorder.start();
     } catch (error) {
       if (recorderRef.current === recorder) reset();
+      // Refused in the Android app: Android's own page for Ghostly, where a microphone it no longer asks for is allowed.
+      const settings = error instanceof MicrophoneError && error.problem === "denied" && androidApp()
+        ? { label: t("settings.noticesOpenSettings"), run: () => void openAppSettings() } : undefined;
       onError(error instanceof MicrophoneError && error.message === MICROPHONE_MESSAGES[error.problem] ? microphoneText(t, error.problem)
-        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"));
+        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"), settings);
       return;
     }
     if (recorderRef.current !== recorder) return;
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, t]);
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -297,14 +319,32 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (isLocked && recorderRef.current && !sendingRef.current) cancel();
   }, [isLocked, cancel]);
 
+  // Android silences the microphone of an app out of sight (Home, the screen off) a few seconds after it goes, and the
+  // page is never told: the track stays live, the clock runs, and the rest of the recording is silence. Hands-free, it
+  // pauses as the page goes out of sight and comes back paused, with its preview, to resume, listen to or send.
+  useEffect(() => {
+    if (mode !== "locked" || phase !== "recording" || !androidApp()) return;
+    const onHidden = () => { if (document.visibilityState === "hidden") pauseRecording(); };
+    onHidden();
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", pauseRecording);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", pauseRecording);
+    };
+  }, [mode, phase, pauseRecording]);
+
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
-  // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs.
+  // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
+  // panels (Message details, the connection panel) are a `role="dialog"` box, not a `<dialog>`, and a menu (a message's
+  // ⋮) is a group of buttons: Enter there presses its row. The bar's own "discard?" is an alertdialog in the bar, and its
+  // keys stay the bar's.
   useEffect(() => {
     if (mode === "idle") return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (sendingRef.current || lockedRef.current) return;
-      const dialog = event.target instanceof Element ? event.target.closest("dialog") : null;
-      if (dialog && !dialog.contains(buttonRef.current)) return;
+      const dialog = event.target instanceof Element ? event.target.closest("dialog, [role=dialog], [role=alertdialog], [data-menu]") : null;
+      if (dialog && !dialog.contains(buttonRef.current) && !barRef.current?.contains(dialog)) return;
       if (confirmingRef.current) {
         if (event.key === "Escape") { event.preventDefault(); keep(); }
         return;
@@ -404,7 +444,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const togglePreview = async () => {
     const recorder = recorderRef.current;
-    if (!recorder || !recorder.paused) return;
+    const held = () => recorder?.paused || recorder?.ended;
+    if (!recorder || !held()) return;
     const current = previewAudio.current;
     if (current && !current.audio.paused) { current.audio.pause(); return; }
     let audio = current?.audio;
@@ -413,7 +454,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       previewPending.current = true;
       const turn = previewTurn.current;
       // Stopped (sent, resumed, discarded, the chat left) while the recording so far was being read: nothing plays.
-      const gone = () => turn !== previewTurn.current || recorderRef.current !== recorder || !recorder.paused;
+      const gone = () => turn !== previewTurn.current || recorderRef.current !== recorder || !held();
       let blob: Blob;
       try { blob = await recorder.preview(); } finally { previewPending.current = false; }
       if (gone()) return;
@@ -456,19 +497,19 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
               <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>
-              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
-              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
+              <button ref={keepRef} type="button" className="voice-text-button tap-target" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
+              <button type="button" className="voice-text-button voice-text-danger tap-target" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
             </div>
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button tap-target" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
               {paused && preview ? (
                 <>
-                  <button type="button" className="voice-icon-button" data-testid="voice-preview"
+                  <button type="button" className="voice-icon-button tap-target" data-testid="voice-preview"
                     aria-label={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} title={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} onClick={() => void togglePreview()}>
                     {preview.playing ? <PauseIcon /> : <PlayIcon />}
                   </button>
@@ -495,8 +536,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
                 </>
               )}
               {locked && (
-                <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
-                  disabled={phase === "starting" || sending}
+                <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
+                  disabled={phase === "starting" || sending || micEnded}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
                 </button>

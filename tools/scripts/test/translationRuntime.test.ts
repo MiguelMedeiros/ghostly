@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { nativeRuntimeFiles } from "../native-runtime-files.mjs";
+import { packTarGz, sourceDateEpoch } from "../tar-gz.mjs";
 import { MAX_LINE, MAX_MODELS, MAX_TEXTS, createRuntime, lineReader, modelFiles, pairFiles, parsePair } from "../../../native/translation/protocol.mjs";
 
 /**
@@ -245,6 +246,22 @@ const started = Date.now();
 /** Each step's time goes to stderr, so a run that times out still shows how far it got. */
 const step = (what: string) => process.stderr.write(`[translation runtime test] ${what}, ${Date.now() - started} ms in\n`);
 
+/**
+ * Where a hung runtime's threads are, on macOS: `sample`'s call graph of every thread, to the log. darwin-x64 sometimes
+ * answers nothing with nothing on stderr, and only the stacks say whether it is still loading the addon, the model, or
+ * waiting for its input. Elsewhere, and when `sample` fails, nothing.
+ */
+function stacks(pid: number | undefined, dir: string) {
+  if (process.platform !== "darwin" || pid === undefined) return;
+  const file = join(dirname(dir), "runtime.sample.txt");
+  try {
+    execFileSync("sample", [String(pid), "5", "-mayDie", "-file", file], { stdio: "ignore", timeout: 60_000 });
+    process.stderr.write(`[translation runtime test] the runtime's threads, by sample:\n${readFileSync(file, "utf8")}\n`);
+  } catch (error) {
+    step(`no sample of the runtime: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** Starts a runtime and returns `ask(request)`, which resolves to the answer with the request's id. */
 function start(dir: string) {
   const child = spawn(join(dir, process.platform === "win32" ? "bare.exe" : "bare"), [join(dir, "runtime.mjs"), MODELS], { stdio: ["pipe", "pipe", "pipe"] });
@@ -266,6 +283,7 @@ function start(dir: string) {
   const ask = (request: { id: number }) => new Promise((resolve, reject) => {
     const since = Date.now();
     const timer = setTimeout(() => {
+      stacks(child.pid, dir);
       child.kill();
       reject(new Error(`No answer to request ${request.id} in ${ANSWER_MS} ms; the runtime said: ${err}`));
     }, ANSWER_MS);
@@ -283,7 +301,7 @@ function start(dir: string) {
   return { ask, end: () => child.stdin.end(), exited, stderr: () => err };
 }
 
-it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLATFORM}) with the runtime's archive and Mozilla's model`, { timeout: 300_000 }, async () => {
+it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLATFORM}) with the runtime's archive and Mozilla's model`, { timeout: 360_000 }, async () => {
   step("start");
   await modelPtEn();
   step("pt-en model ready");
@@ -308,4 +326,14 @@ it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLAT
   runtime.end();
   expect(await runtime.exited).toBe(0);
   rmSync(dirname(dir), { recursive: true, force: true });
+});
+
+// The SHA-256 the app pins comes back from the same folder and commit: anyone can rebuild a published archive from its
+// tag. A build from an older commit than the one checked out fails here too: build it again.
+it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`packs this host's (${PLATFORM}) runtime into the same bytes again`, { timeout: 120_000 }, async () => {
+  const [pinned] = readFileSync(`${BUILT}.tar.gz.sha256`, "utf8").split(/\s+/);
+  const again = join(mkdtempSync(join(tmpdir(), "ghostly-translation-runtime-")), basename(`${BUILT}.tar.gz`));
+  await packTarGz(BUILT, again, { mtime: sourceDateEpoch(SOURCE) });
+  expect(sha256(readFileSync(again))).toBe(pinned);
+  rmSync(dirname(again), { recursive: true, force: true });
 });

@@ -251,6 +251,24 @@ describe("editing my message", () => {
     await refused(sent.messageId!, "one more");
   });
 
+  it("refuses an edit within 16 KiB whose frame passes the contact's frame limit once encoded, as a send is, and the session stays", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "short" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    // 12,002 UTF-8 bytes of mostly control characters: six characters each in the frame's JSON, ~72 K against 60 K.
+    const controls = `x${"\u0001".repeat(12_000)}x`;
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: controls }))
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+    expect(await t.row(sent.messageId!)).toMatchObject({ text: "short" });
+    expect((await t.row(sent.messageId!)).edit).toBeUndefined();
+    // As many quotes (two characters each) fit, and go; the session that carries them stays.
+    const quotes = "\"".repeat(12_002);
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: quotes })).toEqual({ error: null, messageId: sent.messageId });
+    await vi.waitFor(() => expect(t.contactEdits.map(e => e.m)).toEqual([quotes]));
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).edit?.pending).toBeUndefined());
+    expect(t.view().pairing?.status).toBe("ready");
+  });
+
   it("waits for a contact whose app does not offer edit/1, and nothing is sent to it", async () => {
     const t = await setup({ editSupport: false });
     const sent = await t.node.sendMessage({ linkId: t.id, text: "status: 1" });
@@ -309,6 +327,19 @@ describe("the contact's edits", () => {
     await vi.waitFor(async () => expect((await t.row(original.id)).text).toBe("v4 https://ghostly.tools/"));
     expect((await t.row(original.id)).preview).toEqual({ u: "https://ghostly.tools/", t: "Ghostly" });
     expect((await t.row(original.id)).edit?.history.map(v => v.text)).toEqual(["v0", "v3"]);
+  });
+
+  it("keep when the edit came here beside the time the contact's clock gives it, a month behind", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("v0", Date.now(), WIRE("H"))).toBeNull();
+    const original = await t.peerRow("v0");
+    const behind = Date.now() - 31 * 86_400_000, before = Date.now();
+    expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: behind, m: "v1" })).toBeNull();
+    await vi.waitFor(async () => expect((await t.row(original.id)).text).toBe("v1"));
+    const { edit } = await t.row(original.id);
+    expect(edit?.at).toBe(behind);
+    expect(edit?.heardAt).toBeGreaterThanOrEqual(before);
+    expect(edit?.heardAt).toBeLessThanOrEqual(Date.now());
   });
 
   it("never change one of my messages: an edit naming my wire id waits for a message of the contact's that never comes", async () => {
@@ -769,6 +800,34 @@ describe("EditQueue", () => {
       expect([next.sent.map(e => e.m), next.reads.n]).toEqual([["t3", "t4"], 1]);
     });
 
+    it("given the history as read elsewhere, reads none of it again: what it found and what it is told since go", async () => {
+      for (const n of [1, 2]) rows.set(`me_${n}`, row(n));
+      rows.set("me_9", row(9, { edit: { seq: 1, at: 1_009, history: [] } }));
+      const asked: string[][] = [];
+      const { q, sent, reads } = byId(undefined, asked);
+      q.learn([...rows.values()]);
+      // Settled since that read (by another look): it is let go, not sent.
+      rows.set("me_2", row(2, { edit: { seq: 1, at: 1_002, history: [] } }));
+      // Edited since that read: it is told, and goes too.
+      rows.set("me_3", row(3));
+      q.edited("me_3");
+      await q.flush();
+      expect([reads.n, sent.map(e => e.m), asked]).toEqual([0, ["t1", "t3"], [["me_1", "me_2", "me_3"]]]);
+      // A confirmation finds its row from the wire ids that read gave.
+      asked.length = 0;
+      await q.received(row(1).wireId!, 1);
+      expect([reads.n, asked, rows.get("me_1")!.edit!.pending]).toEqual([0, [["me_1"]], undefined]);
+    });
+
+    it("given nothing (a chat the start never read), reads the history once at its first look", async () => {
+      rows.set("me_1", row(1));
+      const { q, sent, reads } = byId();
+      await q.flush();
+      q.reopened();
+      await q.flush();
+      expect([reads.n, sent.map(e => e.m)]).toEqual([1, ["t1", "t1"]]);
+    });
+
     it("a new session sends again what the last one sent without a confirmation, reading those rows alone", async () => {
       rows.set("me_1", row(1));
       const asked: string[][] = [];
@@ -1024,7 +1083,7 @@ describe("deleting many of my group messages for everyone", () => {
     vi.spyOn(host, "send").mockImplementation(async (_group, edit) => { sent.push(edit); return null; });
     const reads = vi.spyOn(db, "getMessage");
     cleanup.push(async () => { inner.groupEdits.stop(); reads.mockRestore(); });
-    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id });
+    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id, e: 1 });
     expect(reads.mock.calls.filter(([linkId]) => linkId === chat).length).toBeLessThanOrEqual(ids.length);
     expect(await db.getMessages(chat)).toEqual([]);
     // The first window's go now, the rest at the pace; each read as the removal it is.
@@ -1051,7 +1110,7 @@ describe("deleting many of my group messages for everyone", () => {
     vi.spyOn(host, "membership").mockReturnValue({ me, members: new Set([me, bob]), community: false, admin: true });
     vi.spyOn(host, "send").mockImplementation(async () => null);
     cleanup.push(async () => { inner.groupEdits.stop(); });
-    expect(await inner.groupEdits.removeMine(g, myOriginal)).toEqual({ error: null, messageId: myOriginal });
+    expect(await inner.groupEdits.removeMine(g, myOriginal)).toEqual({ error: null, messageId: myOriginal, e: 1 });
     expect(await inner.groupEdits.receive(g, bob, { id: bobsOriginal, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
     expect((await db.getMessages(chat)).map(m => m.id)).toEqual([bobsReply, myReply]);
     // The second within the sweep's time goes when it is up (`QuoteSweeps`).

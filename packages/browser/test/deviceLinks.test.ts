@@ -288,6 +288,27 @@ describe("the device links of a profile on this device", () => {
     expect(liveBetween(phone, computer)).toBe(false);
   }, 120_000);
 
+  // Repeated: which device dials depends on the keys, and the computer's link must offer WebRTC again where it dials.
+  it("go back to WebRTC when the link that went on without it started its Iroh but nothing connects over it", { timeout: 60_000, repeats: 5 }, async () => {
+    // The phone's Iroh starts, the computer's never does (a relay it cannot reach): no session opens over Iroh.
+    rtc.blocked = true;
+    const native = new NativeWorld();
+    native.hexIds = true;
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: { "iroh/1": async () => native.endpoint("iroh/1", "Phone") } });
+    const computer = await makeDevice("Computer", { nativeTransports: { "iroh/1": async () => { throw new Error("The Iroh relay did not answer"); } } });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    // The phone's link went on without WebRTC with its Iroh up; the computer's starts its own for it, and fails.
+    const rtcOff = (device: TestDevice) => [...(device.links as unknown as { running: Map<string, { rtcOff: boolean }> }).running.values()][0]?.rtcOff;
+    expect(await until(() => rtcOff(phone), 120_000)).toBe(true);
+    // WebRTC goes through now: the links take it again rather than wait on an Iroh session that never opens.
+    rtc.blocked = false;
+    expect(await until(() => liveBetween(phone, computer), 600_000)).toBe(true);
+    expect(computer.links.views()[0].transport).toBe("webrtc/1");
+  });
+
   it("offer HyperDHT where only it goes through, and start again a native transport that did not start", async () => {
     // The Linux Desktop has no WebRTC; the page's Iroh is on a relay the Desktop cannot reach (two Iroh worlds), so
     // HyperDHT is the only way through. The page's HyperDHT relay does not answer the first time.
@@ -310,6 +331,25 @@ describe("the device links of a profile on this device", () => {
     expect(page.links.views()[0].transport).toBe("hyperdht/1");
     expect(desktop.links.views()[0].transport).toBe("hyperdht/1");
   });
+
+  it("keep the page's endpoints while the Linux Desktop still says it has no WebRTC, though no session opens over them", async () => {
+    // Two Iroh relays with no path between them: nothing connects, and going back to WebRTC can never help, since the
+    // Desktop has none. Each time it went back, the page closed its link and its Iroh endpoint and made new ones.
+    const linuxIroh = new NativeWorld(), pageIroh = new NativeWorld();
+    for (const world of [linuxIroh, pageIroh]) world.hexIds = true;
+    let made = 0;
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Linux", { createPeerConnection: undefined, nativeTransports: { "iroh/1": async () => linuxIroh.endpoint("iroh/1", "Linux") } });
+    const page = await makeDevice("Page", { nativeTransports: { "iroh/1": async () => { made++; return pageIroh.endpoint("iroh/1", "Page"); } } });
+    await write(page, "active", d, [page, desktop]);
+    await write(desktop, "standby", d, [page, desktop]);
+    await settled(Promise.all([desktop.links.start(), page.links.start()]));
+    expect(await until(() => made > 0, 60_000)).toBe(true);
+    const before = made;
+    await run(20 * 60_000);
+    expect(made - before).toBe(0);
+    expect(liveBetween(desktop, page)).toBe(false);
+  }, 120_000);
 
   it("use a HyperDHT relay set after the links started", async () => {
     const linuxIroh = new NativeWorld(), pageIroh = new NativeWorld(), dht = new NativeWorld();

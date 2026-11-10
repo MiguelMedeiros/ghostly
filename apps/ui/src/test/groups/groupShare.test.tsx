@@ -84,6 +84,28 @@ describe("the group header's Share link", () => {
   });
 });
 
+describe("a link that lets nobody in", () => {
+  it("tells the admin, and New link asks first, replaces it and shows the new one to share", async () => {
+    const NEW = encodeGroupEntryLink({ g: ID, host: createIdentity().pubKeyZ32 });
+    const { user, engine } = openGroup(admin({ entryLink: LINK, entryJammed: true }));
+    engine.on("enableGroupLink", () => { queueMicrotask(() => engine.update({ groups: [admin({ entryLink: NEW })] })); return { link: NEW }; });
+    expect(screen.getByTestId("group-link-jammed")).toHaveTextContent("Nobody can join with this group's link right now");
+    await user.click(screen.getByTestId("group-link-jammed-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: ID, reset: true }]);
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Group link" })).toHaveValue(`${window.location.origin}/#/join/${NEW}`);
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+  });
+
+  it("is not shown to a member who is not the admin, nor while the link works", () => {
+    openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+  });
+});
+
 describe("a group's long one-word name", () => {
   const name = "Donaudampfschifffahrtsgesellschaftskapitaenswitwenrentenkassen";
 

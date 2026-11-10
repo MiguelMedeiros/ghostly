@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
-import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, openServiceServer, ownCookies, SERVICE_METHODS, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
 // covers: headless.services
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
@@ -201,16 +201,65 @@ describe("an opened service's host and link", () => {
     expect(seen[1].headers?.find(([name]) => name === "cookie")?.[1]).toBe("sid=abc; theme=dark");
   });
 
-  it("adds a policy that keeps the page's requests and forms off plain http (this machine, the local network), next to the contact's", async () => {
+  it("adds a policy that keeps the page's requests and forms on its own origin (not this machine, the local network or any https host), next to the contact's", async () => {
     const { service, cookie } = await opened(async (request) => answer(200, request.path === "/own"
       ? [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"], ["content-security-policy", "img-src *"]]
       : [["content-type", "text/html"]], ["<p>hi</p>"]));
-    expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:");
+    expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'");
     const page = await get(service, "/", { cookie });
     expect(page.headers["content-security-policy"]).toBe(OPENED_SERVICE_CSP);
     // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
     const own = await get(service, "/own", { cookie });
     expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("keeps the page on its own origin while Hide my IP from contacts is on: no picture, script or frame from an https server the contact names", async () => {
+    // covers: settings.network.relay-only
+    const send: ServiceSend = async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]);
+    expect(OPENED_SERVICE_CSP_RELAY_ONLY).toBe("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'");
+    const hidden = await openServiceServer(send, 0, { relayOnly: true });
+    servers.push(hidden);
+    const hiddenCookie = String((await get(hidden, new URL(hidden.url).pathname)).headers["set-cookie"]).split(";")[0];
+    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
+    // Off: as before.
+    const { service, cookie } = await opened(send);
+    expect((await get(service, "/", { cookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("`service open` reads Hide my IP from contacts from the profile's settings when it opens the app", async () => {
+    const link = { id: "hidechat", peerPubKeyZ32: "hidepeer", peerServices: [{ id: "app", name: "App" }] };
+    const request = async (): Promise<ClientResponse> => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]);
+    for (const relayOnly of [true, false, undefined]) {
+      const ctx = { mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [], settings: { relayOnly } }), request } } } } as unknown as ApiContext;
+      const params = { chat: link.id, service: "app" };
+      const { url } = (await SERVICE_METHODS["service.open"](ctx, params)) as { url: string };
+      try {
+        const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
+        const cookie = String((await get(service, parsed.pathname)).headers["set-cookie"]).split(";")[0];
+        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP);
+      } finally {
+        await SERVICE_METHODS["service.close"](ctx, params);
+      }
+    }
+  });
+
+  it("passes on no header that makes the browser send reports or early requests elsewhere, and drops report directives from the contact's policy", async () => {
+    const { service, cookie } = await opened(async () => answer(200, [
+      ["content-type", "text/html"],
+      ["Content-Security-Policy", "default-src 'self'; report-uri http://127.0.0.1:9/r; img-src *; Report-To main"],
+      ["content-security-policy", "report-uri https://localhost/r, script-src 'self';report-to main"],
+      ["content-security-policy-report-only", "default-src 'none'; report-uri http://127.0.0.1:9/r"],
+      ["Reporting-Endpoints", "main=\"http://127.0.0.1:9/r\""],
+      ["report-to", "{\"group\":\"main\",\"max_age\":86400,\"endpoints\":[{\"url\":\"http://127.0.0.1:9/r\"}]}"],
+      ["NEL", "{\"report_to\":\"main\",\"max_age\":86400}"],
+      ["link", "<https://127.0.0.1:8443/admin>; rel=preload; as=fetch; crossorigin"],
+      ["Link", "<https://nas.local/>; rel=preconnect, </style.css>; rel=\"dns-prefetch prefetch\""],
+      ["x-served-by", "atlas"],
+    ], ["<p>hi</p>"]));
+    const page = await get(service, "/", { cookie });
+    expect(page.headers["x-served-by"]).toBe("atlas");
+    for (const name of ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"]) expect(page.headers[name], name).toBeUndefined();
+    expect(page.headers["content-security-policy"]).toBe(`default-src 'self'; img-src *, script-src 'self', ${OPENED_SERVICE_CSP}`);
   });
 
   it("the policy keeps pictures, frames and every other load off plain http too, and leaves inline scripts and styles working", () => {
@@ -226,9 +275,12 @@ describe("an opened service's host and link", () => {
     for (const [load, chain] of Object.entries(chains)) {
       const sources = policy.get(chain.find((name) => policy.has(name)) ?? "");
       expect(sources, load).toBeDefined();
-      // Only its own origin, https/wss, inline and local data: no `*`, no http:, no host (127.0.0.1, a LAN address).
-      for (const source of sources!) expect(["'self'", "https:", "wss:", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"], `${load}: ${source}`).toContain(source);
+      // Only its own origin, https, inline and local data: no `*`, no http:, no host (127.0.0.1, a LAN address).
+      for (const source of sources!) expect(["'self'", "https:", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"], `${load}: ${source}`).toContain(source);
     }
+    // What can read an answer or post goes to its own origin only: https: also names this machine and the local network.
+    expect(policy.get("connect-src")).toEqual(["'self'"]);
+    expect(policy.get("form-action")).toEqual(["'self'"]);
     expect(policy.get("default-src")).toEqual(expect.arrayContaining(["'unsafe-inline'", "'unsafe-eval'"]));
   });
 });

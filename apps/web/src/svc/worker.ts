@@ -127,6 +127,8 @@ async function forward(event: FetchEvent): Promise<Response> {
   return new Promise<Response>((resolve) => {
     let answered = false;
     const timer = setTimeout(() => { if (!answered) { answered = true; port.close(); resolve(plain(504, "The app did not answer in time.")); } }, HEAD_TIMEOUT_MS);
+    // The app's page gave up on it before any answer (its own abort): the page lets go of it too, body and all.
+    request.signal.addEventListener("abort", () => { if (!answered) port.postMessage({ type: "cancel" }); }, { once: true });
     port.onmessage = (event: MessageEvent<ServiceReply>) => {
       const reply = event.data;
       if (reply?.type === "head" && !answered) {

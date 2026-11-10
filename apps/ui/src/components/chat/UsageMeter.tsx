@@ -134,7 +134,8 @@ function UsagePanel({ entry, anchorRef, onClose }: { entry: UsageEntry; anchorRe
   const body = <>
     <div className={`flex items-center gap-1.5 ps-3 pe-1.5 ${phone ? "pt-4" : "pt-2"}`}>
       {phone && <div aria-hidden="true" className="absolute inset-x-0 top-1.5 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
-      <h2 id={titleId} className="m-0 min-w-0 flex-1 truncate text-sm font-semibold text-text-primary"><bdi>{nameOf(entry.card, t)}</bdi></h2>
+      {/* The name cuts itself, in its own direction: cut by the title in the page's, a Latin name lost its start in Arabic. */}
+      <h2 id={titleId} className="m-0 min-w-0 flex-1 text-sm font-semibold text-text-primary"><bdi className="block truncate">{nameOf(entry.card, t)}</bdi></h2>
       <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="chat-usage-info" />
       <button type="button" data-testid="chat-usage-close" onClick={onClose} aria-label={t("cards.panel.close")} title={t("cards.panel.close")}
         className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
@@ -168,7 +169,7 @@ export function UsageButton({ entry }: { entry: UsageEntry }) {
   return (
     <span ref={ref} className="inline-flex shrink-0">
       <button ref={button} type="button" data-testid="chat-usage-open" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}
-        className="inline-flex rounded-full cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent">
+        className="relative inline-flex rounded-full cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent">
         <UsagePill entry={entry} testId="chat-usage" reset />
       </button>
       {open && <UsagePanel entry={entry} anchorRef={ref} onClose={close} />}

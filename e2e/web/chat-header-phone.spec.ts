@@ -35,8 +35,8 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
       await page.getByPlaceholder("Set a name...").press("Enter");
       await expect(name).toHaveText(to);
     };
-    /** The name's line against what it holds: cut with an ellipsis when `shown` < `whole`. */
-    const line = () => name.evaluate((el) => ({ shown: el.parentElement!.clientWidth, whole: el.parentElement!.scrollWidth }));
+    /** The name against what it holds: cut with an ellipsis when `shown` < `whole`. */
+    const line = () => name.evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
 
     // The names seen in the wild and an Arabic one, on each phone they fit.
     const names: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["عبد الرحمن الفارسي", 375]];
@@ -60,7 +60,7 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
       el.parentElement!.appendChild(probe);
       const twenty = probe.getBoundingClientRect().width;
       probe.remove();
-      return { shown: el.parentElement!.clientWidth, twenty };
+      return { shown: el.clientWidth, twenty };
     });
     expect(long.shown, JSON.stringify(long)).toBeGreaterThanOrEqual(long.twenty);
 

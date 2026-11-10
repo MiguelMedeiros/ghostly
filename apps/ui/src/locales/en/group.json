@@ -179,6 +179,7 @@
     "full": "The group is full ({{count}} of {{count}}). Nobody joins until someone leaves.",
     "fullShort": "The group is full",
     "hideQr": "Hide QR",
+    "jammed": "Nobody can join with this group's link right now: it keeps getting requests from apps that never connect, and they take the places newcomers wait in. Someone who has the link may be doing it on purpose. Make a new link and share it again.",
     "note": "Anyone who opens this link joins, without being your contact or saying who they are. They get in while your app is open, up to {{count}} members.",
     "noteCommunity": "Anyone who opens this link joins, without being anyone's contact or saying who they are. Any member's app lets them in, so it works while you are away; up to {{count}} members. Removing someone does not stop them from opening the link again: the admin makes a new one for that.",
     "off": "The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.",
@@ -196,7 +197,8 @@
     "showQr": "Show QR",
     "title": "Group link",
     "tooMany": "Too many group links opened",
-    "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join."
+    "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join.",
+    "unanswered": "People opening the link may not be getting in: many who knocked lately never answered. A new link fixes it; share the new one after."
   },
   "makeAdmin": {
     "body": "You will no longer be the admin. Only {{name}} can then rename the group, change its picture and link, invite or remove members, and give the role back.",
@@ -246,6 +248,18 @@
     "leave": "Leave group",
     "members": "Members…",
     "rotate": "Rotate keys"
+  },
+  "others": {
+    "body": "Anyone who knows a group's id can make a group of their own under it, and only one of them can be on this device. Keep this one, or switch to the other: switching leaves this one and deletes it from this device.",
+    "invitedBy": "{{contact}} invited you to {{name}} ({{members}})",
+    "invitedByUnknown": "An invitation to {{name}} ({{members}})",
+    "keep": "Keep this one",
+    "link": "A group link you opened",
+    "switch": "Switch to it",
+    "switchBody": "{{other}}. This group is left and deleted from this device with its history, and that one takes its place.",
+    "switchConfirm": "Switch",
+    "switchTitle": "Switch to the other group?",
+    "title": "Another group has this group's id"
   },
   "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",

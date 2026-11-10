@@ -25,8 +25,9 @@ const ZS: [number, number, number, string][] = [
  * and while the tab is hidden. Its position is written straight to the DOM as
  * a transform (no render and no page layout per frame), the page size is
  * measured on resize instead of every frame, its easing is in time (the same
- * at 60 and 120 Hz), and it stops its clock once it has settled until the
- * pointer moves again or its next mood is due.
+ * at 60 and 120 Hz), its clock starts at the pointer's first move, and it
+ * stops once it has settled until the pointer moves again or its next mood
+ * is due.
  */
 export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
   const [enabled, setEnabled] = useState(false);
@@ -151,8 +152,9 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
       wake();
     };
     window.addEventListener("mousemove", onMove, { passive: true });
+    // It waits asleep where it starts until the pointer first moves: woken now, it glided for about 5 s at every page
+    // load toward a pointer it had never seen.
     place();
-    wake();
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("resize", measure);

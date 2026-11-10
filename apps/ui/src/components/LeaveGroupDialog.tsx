@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
-import { memberName } from "../lib/groups";
+import { memberName, sameNamed } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
@@ -68,9 +68,9 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
-      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}
+      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t, sameNamed(group.members)) })}
         {/* A private group's link works from the admin's app: the one shared so far stops working with the role. */}
-        {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t) })}</>}</p>}
+        {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t, sameNamed(group.members)) })}</>}</p>}
       {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={t(blockedNext)} />}
     </div>

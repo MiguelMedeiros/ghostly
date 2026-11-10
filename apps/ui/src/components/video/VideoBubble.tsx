@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useTabTrap } from "../../hooks/useDismiss";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
+import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
+import { onCallWindowShown, windowFilled } from "../../lib/serviceWindows";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -18,7 +21,7 @@ import { problemLine, saveProblemLine } from "../../lib/problemText";
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
 const OUT_OF_VIEW_MS = 1500;
@@ -65,7 +68,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const rootRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   useFocusKept(bubbleRef);
+  // Filling the window, it is over everything: Tab goes round its own controls, not to the chat under it.
+  useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fullRef = useRef<HTMLButtonElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
@@ -98,9 +104,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // No poster from the sender: one made here from the first frame, once the file is in.
   useEffect(() => {
     if (meta?.poster || !ready || !playable || !visible || !platform) return;
-    let cancelled = false;
-    void localPoster(file.id, () => platform.getFile(file.id)).then((made) => { if (!cancelled && made) setLocal(made); });
-    return () => { cancelled = true; };
+    const left = new AbortController();
+    void localPoster(file.id, () => platform.getFile(file.id), left.signal).then((made) => { if (!left.signal.aborted && made) setLocal(made); });
+    return () => left.abort();
   }, [meta?.poster, ready, playable, visible, platform, file.id]);
 
   const unload = useCallback(() => {
@@ -124,7 +130,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     // Spent: a notice at the top that also answers Escape stays.
     const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setTheater(false); } };
     document.addEventListener("keydown", onKey);
+    // A call that rings or starts is drawn under it: it makes way, as a contact's app drawn over the app does.
+    const stop = onCallWindowShown(() => setTheater(false));
+    // One already in its small window stays over it.
+    const unfill = windowFilled();
     return () => {
+      stop();
+      unfill();
       document.removeEventListener("keydown", onKey);
       void fullscreen(false).catch(() => {});
     };
@@ -188,6 +200,15 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       refusedRef.current();
     });
   }, [phase, src]);
+
+  // Out of the full window with the keyboard on the player: it goes to Full screen. WebKitGTK's player drops the
+  // control that had it as it shrinks back into the chat, and the focus fell to the page.
+  const filled = useRef(false);
+  useLayoutEffect(() => {
+    const left = filled.current && !theater;
+    filled.current = theater;
+    if (left && videoRef.current && document.activeElement === videoRef.current) (fullRef.current ?? rootRef.current)?.focus({ preventScroll: true });
+  }, [theater]);
 
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
@@ -282,7 +303,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         ref={rootRef}
         tabIndex={phase === "playing" ? 0 : -1}
         role="group"
-        aria-label={t("chat.video.label", { length: durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size) })}
+        aria-label={t("chat.video.label", { length: durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size, t) })}
         onKeyDown={onKeyDown}
         className={`${theater ? "fixed inset-0 z-[2147483000] rounded-none" : "relative rounded-[4px] max-w-full"} overflow-hidden bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
         style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, aspectRatio: `${box.width} / ${box.height}` }}
@@ -296,6 +317,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               src={src}
               poster={poster}
               controls
+              // A stop of the frame's own Tab round: its controls are inside it. WebKit reaches it, but says tabIndex -1.
+              tabIndex={theater ? 0 : undefined}
               playsInline
               preload="auto"
               aria-label={file.name}
@@ -312,6 +335,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             />
             {canTheater && (
               <button
+                ref={fullRef}
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
@@ -346,7 +370,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >
                     <DownloadIcon size={18} />
-                    {t("chat.media.downloadSize", { size: statusSize(file.size) })}
+                    {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}
                   </button>
                   {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
                   {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
@@ -370,7 +394,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             </div>
             <span className="absolute bottom-[5px] start-[6px] inline-flex items-center gap-1 bg-[rgba(11,20,26,0.6)] text-white/90 rounded-full px-[7px] py-[2px] text-[11px] tabular-nums" data-testid="video-duration">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z" /></svg>
-              {durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size)}
+              {durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size, t)}
             </span>
             {ready && (
               <button
@@ -389,7 +413,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       </div>
       {offered && typeof transfer.room === "number" && (
         <p className={`text-[11px] m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
-          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
+          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
         </p>
       )}
       {(status || canRetry || stuck) && (!offered || reason) && (

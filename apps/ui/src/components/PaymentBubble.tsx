@@ -13,12 +13,13 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
-import { paymentIsTest, paymentTitle, railLine } from "./paymentWords";
+import { paymentIsTest, paymentTitle, railLine, storedPaymentLine } from "./paymentWords";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
+import { useFocusKept } from "../hooks/useFocusKept";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -37,7 +38,7 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
 }
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
-export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
+export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean }) {
   const { t } = useI18n();
   // Drawn again when the wallets, this payment or the chat's ways of paying change, not on every engine state.
   const wallet = useWalletPlatform();
@@ -70,6 +71,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     shownLn.current = lnOpen;
     if (focusLost()) (lnOpen ? lnLine.current : reviewButton.current)?.focus({ preventScroll: true });
   }, [lnOpen]);
+  // Its review's Close and Take it back go with the bubble's own renders, which its message's row does not see: the keys
+  // go back to Review payment when it is there to press again, else to the bubble.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef, () => (reviewButton.current?.disabled ? null : reviewButton.current));
 
   // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
   const state = payment?.state;
@@ -90,7 +95,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   }, [state]);
   const amountShown = useCountUp(celebrate ? (payment?.amount ?? 0) : 0, 650);
 
-  if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{fallbackText}</span>;
+  // The message's own line, said in the app's language, until the wallet is there (or once its record is gone).
+  if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{storedPaymentLine(t, fallbackText, mine)}</span>;
 
   const run = async (task: () => Promise<void>, key: NonNullable<typeof running>) => {
     if (busy) return;
@@ -169,6 +175,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
 
   return (
     <div
+      ref={rootRef}
       className={`min-w-[210px] max-md:min-w-[min(210px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5 rounded-md ${celebrate ? "animate-sats-shine" : ""} ${
         fresh && isRequest && !outgoing && payment.state === "pending" ? "animate-nudge" : ""
       }`}

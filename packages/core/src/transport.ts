@@ -54,6 +54,11 @@ export interface PkarrRequestOptions {
    */
   departed?: boolean;
   /**
+   * A 1:1 chat's read of an invite this side made, while its joiner is due (`AWAITING_PEER_MS` in link.ts) and has not
+   * shown: the joiner's knock is read there. A few may go over the relay's minute (`AWAITED_READS` in relay.ts).
+   */
+  awaited?: boolean;
+  /**
    * A read of a contact that was live when this app last ran, made before any read of it this run was answered
    * (`LinkSessionOptions.resumed`): the link's offer waits on it. A group edge's goes on the edges' floor
    * (`GROUP_SIGNALING_ALLOWANCE_SHARE` in relay.ts).
@@ -100,6 +105,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
   if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
   if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
+  if (transport.forget) wrapped.forget = (keys) => transport.forget!(keys);
   return wrapped;
 }
 
@@ -120,6 +126,29 @@ export class DiscoveryBudgetError extends Error {
 export function isDiscoveryBudgetError(error: unknown): error is DiscoveryBudgetError {
   return error instanceof DiscoveryBudgetError || (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "discovery-budget"
     && typeof (error as { retryInMs?: unknown }).retryInMs === "number");
+}
+
+/**
+ * A publish no relay took (`RelayTransport`), saying whether one of them may hold the packet all the same. Not
+ * `mayBeStored` only when every relay was not asked now (its budget, its rate limit, its breaker, its network
+ * cooldown), answered that it did not take it (a 4xx), or could not be reached before the request went (a refused
+ * connection or a name that does not resolve, where the runtime says so: Node does, a browser does not), or when there
+ * is no relay at all. A relay that did not answer in time, dropped the connection, or answered with a server error
+ * may have stored it. The message is the publish's usual one.
+ */
+export class PublishFailedError extends Error {
+  readonly code = "publish-failed";
+  constructor(message: string, readonly mayBeStored: boolean) { super(message); }
+}
+
+/**
+ * Whether `error` is a publish that went nowhere (`PublishFailedError` with `mayBeStored` false), also from another
+ * copy of this module. Anything else (a timeout, the DHT's own failure beside the relays', a Desktop's error in
+ * words) may have left this device.
+ */
+export function publishedNowhere(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "publish-failed"
+    && (error as { mayBeStored?: unknown }).mayBeStored === false;
 }
 
 /**
@@ -152,8 +181,11 @@ export interface PkarrTransport {
    * a sequence number in seconds). A transport without it cannot publish one.
    */
   publishPayload?(pubKeyZ32: string, payload: Uint8Array, options?: PkarrRequestOptions): Promise<void>;
-  /** Most recent packet known for this key, or null when nothing is published. */
-  resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null>;
+  /**
+   * Most recent packet known for this key, or null when nothing is published. `keptOnFailure` false: a read nothing
+   * answered throws `RelaysFailedError` with the packet known before, rather than handing it back as the answer.
+   */
+  resolve(pubKeyZ32: string, options?: PkarrRequestOptions, keptOnFailure?: boolean): Promise<SignedPacket | null>;
   describe(): { protocol: string; relays: string[] };
   /** How reads go and how each relay is doing, for the connection panel; absent where nothing is known. */
   discovery?(): DiscoveryStatus;
@@ -191,8 +223,10 @@ export interface PkarrTransport {
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
+   * `dhtDirect: false` (Hide my IP from contacts, WISP 100 § Relay only): reads and writes go through the relays alone,
+   * and no UDP goes to a DHT node; absent leaves the DHT as it is.
    */
-  configure?(options: { relays: string[]; readRelays: boolean }): void;
+  configure?(options: { relays: string[]; readRelays: boolean; dhtDirect?: boolean }): void;
   /**
    * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
    * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.
@@ -207,4 +241,9 @@ export interface PkarrTransport {
   turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
   /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
   turnWarm?(): Promise<void>;
+  /**
+   * Nothing will be put or read under these keys any more (a spare invite replaced unused): what the transport kept
+   * per key for them (the last packet put, its dates, each relay's last put) goes. Absent where nothing is kept.
+   */
+  forget?(keys: Iterable<string>): void;
 }

@@ -124,6 +124,8 @@ jobs:
     # workflow of its own and gets none of it.
     env:
       VITE_TRANSLATE: ${{ needs.guard.outputs.translate == 'true' && '1' || '' }}
+      # Home's version link opens this release's page when the tag is the version the app runs (HomeProjectLinks.tsx).
+      VITE_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -137,8 +139,9 @@ jobs:
             target: x86_64-apple-darwin
             name: macOS-x64
           - platform: ubuntu-22.04
-            # --verbose: linuxdeploy's own output in the log when the AppImage step fails.
-            args: "--verbose"
+            # --verbose: linuxdeploy's own output in the log when the AppImage step fails. Only the .deb and the
+            # AppImage are published on Linux: the .rpm that `targets: "all"` would add was built, signed and dropped.
+            args: "--verbose --bundles deb,appimage"
             target: x86_64-unknown-linux-gnu
             name: Linux-x64
           - platform: windows-latest
@@ -333,6 +336,7 @@ jobs:
     uses: ./.github/workflows/android.yml
     with:
       ref: ${{ inputs.tag || github.ref }}
+      release_tag: ${{ inputs.tag || github.ref_name }}
     secrets: inherit
 
   # ============================================

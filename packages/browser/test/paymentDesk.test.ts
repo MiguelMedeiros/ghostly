@@ -346,9 +346,17 @@ describe("requests we send", () => {
   it("a USDT request carries the payee's address in token units, and needs USDT on both sides", async () => {
     const { desk, link, sent, state, texts } = setup();
     const { paymentId } = await desk.request({ linkId: "l", amount: 1_500_000, timestamp: 1, method: "usdt" });
+    // Asked: a little more than typed (its own amount, under a thousandth), stored and shown as asked.
+    const asked = state(paymentId)!.amount;
+    expect(asked).toBeGreaterThan(1_500_000);
+    expect(asked).toBeLessThan(1_501_000);
     expect(state(paymentId)).toMatchObject({ unit: "testusdt", target: { method: "usdt" }, state: "pending" });
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1500000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
-    expect(texts()).toEqual(["Requested 1.5 TEST-USDT"]);
+    expect(sent[0].frame).toMatchObject({ amount: { value: String(asked), asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
+    expect(texts()).toHaveLength(1);
+    expect(texts()[0]).toMatch(/^Requested 1\.50[0-9]*[1-9] TEST-USDT$/);
+    // Every open request asks its own amount.
+    const others = await Promise.all([2, 3, 4].map((timestamp) => desk.request({ linkId: "l", amount: 1_500_000, timestamp, method: "usdt" })));
+    expect(new Set([asked, ...others.map((o) => state(o.paymentId)!.amount)]).size).toBe(4);
     link.supportsUsdtPayments = false;
     await expect(desk.request({ linkId: "l", amount: 1, timestamp: 2, method: "usdt" })).rejects.toThrow("Both peers need USDT");
     link.supportsArkPayments = false;
@@ -548,6 +556,45 @@ describe("ecash arriving", () => {
     expect(host.storeMessage.mock.calls.map(([m]) => m.id)).toEqual(["peer_1_refused", "peer_2_refused"]);
   });
 
+  it("a flood of made-up ecash from one chat asks the mint a bounded number of times and stores a bounded number of lines", async () => {
+    const { desk, wallet, sent, host } = setup();
+    wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+    expect(wallet.receiveToken.mock.calls.length, "each one a swap and a state check at the mint, under its lock").toBeLessThanOrEqual(10);
+    expect(host.storeMessage.mock.calls.length, "the chat is not filled with refusals").toBeLessThanOrEqual(5);
+    const results = sent.filter((s) => s.kind === "res").map((s) => s.frame);
+    expect(results, "every frame is answered, none redeemed").toHaveLength(200);
+    expect(results.every((r) => r.ok === false)).toBe(true);
+    expect(results.at(-1)!.error).toMatch(/too many/i);
+  });
+
+  it("another chat's payment still lands at once while one chat is flooding, and the flooding chat's later ones once its minute is over", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { desk, wallet, sent, texts } = setup();
+      wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+      for (let i = 0; i < 50; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+      wallet.receiveToken.mockResolvedValue({ amount: 100, mint: MINT, fee: 0 });
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      // A retransmission of a payment already answered is answered again, not counted.
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      vi.setSystemTime(Date.now() + 61_000);
+      await desk.onPayment("l", cashuPayment("later", { timestamp: 6_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "later", ok: true, credited: "100" });
+      expect(texts().filter((t) => t.startsWith("⚡"))).toEqual(["⚡ 100 sats", "⚡ 100 sats"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a flood of Fedimint payments the app refuses on the spot stores a bounded number of lines", async () => {
+    const { desk, allowed, sent, host } = setup();
+    allowed.fedimint = true;
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", { id: `f${i}`, timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `notes${i}`] });
+    expect(host.storeMessage.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(sent.filter((s) => s.kind === "res")).toHaveLength(200);
+  });
+
   it("settles our request only in full, from a mint it named, and only when it came through this chat", async () => {
     const { desk, wallet, state } = setup([record({ id: "r", direction: "out", mints: [MINT] })]);
     await desk.start();
@@ -627,7 +674,9 @@ describe("asks to pay without a request", () => {
     await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "1000000", asset: "sat" }, method: "usdt" });
     await desk.onPaymentAsk("l2", { id: "ask_000002", timestamp: 1, amount: { value: "1000000", asset: "usdtbase" }, method: "usdt" });
     expect(sent.map((s) => s.frame.ask)).toEqual(["ask_000002"]);
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1000000", asset: "testusdt" } });
+    expect(sent[0].frame).toMatchObject({ amount: { asset: "testusdt" } });
+    expect(Number(sent[0].frame.amount.value) - 1_000_000, "the answer asks its own amount, under a thousandth more").toBeGreaterThan(0);
+    expect(Number(sent[0].frame.amount.value) - 1_000_000).toBeLessThan(1000);
     net.online = false;
     await desk.onPaymentAsk("l3", { id: "ask_000003", timestamp: 1, amount: { value: "10", asset: "sat" }, method: "arkade" });
     expect(sent).toHaveLength(1);
@@ -640,6 +689,12 @@ describe("asks to pay without a request", () => {
     expect(sent[0].frame.amount).toEqual({ value: "2000000", asset: "usdtbase" });
     await desk.onPaymentRequest("l", { id: "u1", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: usdtAsk });
     expect(desk.payment("u1")?.ask).toBe(usdtAsk);
+    // A newer app's answer asks a little more (its own amount): still the ask's; a thousandth more is not.
+    const { askId: tagged } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1, network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "u2", timestamp: 2, amount: { value: "2001000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u2")?.ask).toBeUndefined();
+    await desk.onPaymentRequest("l", { id: "u3", timestamp: 2, amount: { value: "2000347", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u3")?.ask).toBe(tagged);
 
     const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "b1", timestamp: 2, amount: { value: "700", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(btc())]], ask: askId });
@@ -967,6 +1022,7 @@ describe("the reviewed Cashu adapter", () => {
       executeReviewedCashu: vi.fn(async () => "cashuBfresh"),
       reviewedCashuSpent: vi.fn(async () => false),
       reviewedCashuTakenBack: vi.fn(async () => false),
+      cashuTakingBack: vi.fn(async () => false),
       recoverReviewedCashu: vi.fn(async (): Promise<string | undefined> => "cashuBrecovered"),
       // The mint has not proved the swap never happened: reconcile keeps waiting.
       reviewedCashuNeverSwapped: vi.fn(async () => false),
@@ -1222,6 +1278,22 @@ describe("the line kept with a payment message (the CLI and older apps show it)"
     await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "1234", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
     await desk.onPaymentRequest("l", { id: "rm", timestamp: 4, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([MINT])]], network: "mainnet" });
     expect(texts()).toEqual(["⚡ Requested 1,234 test sats", "⚡ Requested 50 sats"]);
+  });
+
+  it("writes the amount in English on a device whose own numbers use other digits", async () => {
+    const real = Number.prototype.toLocaleString;
+    const bengali = vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return real.call(this, locales ?? "bn-BD", options);
+    });
+    try {
+      const { desk, wallet, texts } = setup();
+      await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "21000", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+      wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
+      await desk.send({ linkId: "l", amount: 21000, timestamp: 4, network: "testnet" });
+      expect(texts()).toEqual(["⚡ Requested 21,000 test sats", "⚡ 21,000 test sats"]);
+    } finally {
+      bengali.mockRestore();
+    }
   });
 
   it("ecash sent from a test mint says test sats", async () => {

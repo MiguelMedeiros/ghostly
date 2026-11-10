@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
@@ -71,6 +71,33 @@ describe("spoilers", () => {
     expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
   });
 
+  it.each([["Enter", "{Enter}"], ["Space", " "]])("keep the focus on the text they uncover (%s)", async (_, keys) => {
+    const { user } = bubble("the ending: ||the ghost was the narrator||");
+    await user.tab();
+    const spoiler = screen.getByTestId("rich-spoiler");
+    expect(spoiler).toHaveFocus();
+    await user.keyboard(keys);
+    expect(spoiler).toHaveAttribute("data-shown");
+    // The same node holds the focus (not the page's body), still focusable but out of the Tab order.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(spoiler);
+    expect(screen.getByTestId("rich-spoiler")).toBe(spoiler);
+    expect(spoiler).toHaveAttribute("tabindex", "-1");
+    expect(spoiler).not.toHaveAttribute("role");
+    expect(spoiler).toHaveTextContent("the ghost was the narrator");
+  });
+
+  it("take no focus when tapped while it is elsewhere", async () => {
+    bubble("||secret||");
+    const outside = document.body.appendChild(document.createElement("button"));
+    try {
+      outside.focus();
+      fireEvent.click(screen.getByTestId("rich-spoiler"));
+      expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
   it("keep a link inside unreachable until shown", async () => {
     const { user } = bubble("||https://x.example/secret||");
     expect(screen.getByTestId("rich-spoiler").querySelector("[inert]")).not.toBeNull();
@@ -113,6 +140,56 @@ describe("code blocks", () => {
     await user.click(screen.getByTestId("rich-codeblock-copy"));
     expect(writeText).toHaveBeenCalledWith("print('hi')");
     expect(screen.getByTestId("rich-codeblock-copy")).toHaveTextContent("Copied");
+  });
+
+  // Direction controls and invisible characters: drawn as what they are, so the block reads in the order Copy writes.
+  const RAW = /[\u200b\u202a-\u202e\u2066-\u2069]/;
+  const TRICKY = "echo one; \u2067\u2066echo two \u2069\u2066# note\u2069\u2069\nls \u202etxt.exe\u200b";
+
+  it("draw a direction control or an invisible character as a marker, warn, and copy what was sent", async () => {
+    const { user } = bubble("```sh\n" + TRICKY + "\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    await waitFor(() => expect(block).toHaveAttribute("data-highlighted"));
+    const pre = block.querySelector("pre")!;
+    expect(pre.textContent).not.toMatch(RAW);
+    expect(pre.textContent).toBe("echo one; <U+2067><U+2066>echo two <U+2069><U+2066># note<U+2069><U+2069>\nls <U+202E>txt.exe<U+200B>");
+    expect(pre.querySelectorAll(".rich-hidden-char")).toHaveLength(8);
+    expect(within(block).getByTestId("rich-codeblock-hidden")).toHaveTextContent("This code holds hidden or direction-changing characters");
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(screen.getByTestId("rich-codeblock-copy"));
+    expect(writeText).toHaveBeenCalledWith(TRICKY);
+  });
+
+  // In Arabic a bare <U+…> in the sentence had its < and > mirrored around the U: drawn as <…+U>.
+  it.each(["en", "pt", "es", "fr", "it", "ja", "zh", "ar"] as const)("name the marker left to right in the warning (%s)", (language) => {
+    renderApp(<MessageBubble message={message("```\nls ‮txt.exe\n```")} peerPubKey="peer" />, { language });
+    const note = screen.getByTestId("rich-codeblock-hidden");
+    const marker = note.querySelector("[dir=ltr]");
+    expect(marker).toHaveTextContent(/^<U\+…>$/);
+    expect(note.textContent!.split("<U+…>")).toHaveLength(2);
+  });
+
+  it("draw the markers in a block that is not highlighted too", () => {
+    bubble("```\nls \u202etxt.exe\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    expect(block.querySelector("pre")!.textContent).toBe("ls <U+202E>txt.exe");
+    expect(within(block).getByTestId("rich-codeblock-hidden")).toBeInTheDocument();
+  });
+
+  it("draw the markers in inline code", () => {
+    bubble("run `rm \u202efdp.txt` now");
+    const code = text().querySelector("code")!;
+    expect(code.textContent).toBe("rm <U+202E>fdp.txt");
+    expect(code.querySelector(".rich-hidden-char")).toHaveTextContent("<U+202E>");
+  });
+
+  it("show a block without any as before, with no warning", async () => {
+    bubble("```py\nprint('hi')\n```");
+    const block = screen.getByTestId("rich-codeblock");
+    await waitFor(() => expect(block).toHaveAttribute("data-highlighted"));
+    expect(block.querySelector("pre")!.textContent).toBe("print('hi')");
+    expect(block.querySelector(".rich-hidden-char")).toBeNull();
+    expect(within(block).queryByTestId("rich-codeblock-hidden")).toBeNull();
   });
 
   it("pretty-print a message that is JSON", () => {

@@ -34,12 +34,61 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Added to every answer a contact's app gets served, after the contact's own
 /// policies: a WebView enforces every policy it is sent, so the contact's own
-/// cannot widen it. Its scripts, forms, pictures, frames and the rest reach its
-/// own origin and public https sites (and inline, data: and blob: content),
-/// never plain http, so not a service on this machine or the local network,
-/// which WebKitGTK has no guard of its own against. The same value as
-/// `OPENED_SERVICE_CSP` in `packages/cli/src/services.ts` (`service open`).
-const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
+/// cannot widen it. Its requests and forms reach only its own origin, the
+/// contact's server; its scripts, pictures, frames and the rest its own origin
+/// and https sites (and inline, data: and blob: content), never plain http. A
+/// policy cannot tell a public https site from a service on this machine or the
+/// local network with a trusted certificate, which WebKitGTK has no guard of its
+/// own against. The same value as `OPENED_SERVICE_CSP` in
+/// `packages/cli/src/services.ts` (`service open`).
+const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/// The policy while Hide my IP from contacts is on (`relayOnly`, WISP 100 § Relay only) when the window opens:
+/// `SERVICE_CSP` without `https:`, so the app loads nothing but its own origin. A picture, script or frame from a
+/// server the contact names would show that server this device's address. The same value as
+/// `OPENED_SERVICE_CSP_RELAY_ONLY` in `packages/cli/src/services.ts`.
+const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/// The contact's headers that are not passed on: each makes the WebView send
+/// something to a place it names, outside `connect-src` (violation and
+/// network-error reports, and the endpoints they go to; `Link` preloads,
+/// prefetches and early connections). The same list as
+/// `OPENED_SERVICE_DROPPED_HEADERS` in `packages/cli/src/services.ts`.
+const DROPPED_HEADERS: [&str; 5] = [
+    "content-security-policy-report-only",
+    "reporting-endpoints",
+    "report-to",
+    "nel",
+    "link",
+];
+
+/// The directives of a contact's policy that send reports to a URL it names,
+/// dropped from it. The same list as `OPENED_SERVICE_DROPPED_DIRECTIVES`.
+const DROPPED_DIRECTIVES: [&str; 2] = ["report-uri", "report-to"];
+
+/// A contact's `Content-Security-Policy` value (one policy or several joined by
+/// commas) without its report directives: `withoutReports` in the CLI.
+fn without_reports(value: &str) -> String {
+    value
+        .split(',')
+        .map(|policy| {
+            policy
+                .split(';')
+                .filter(|directive| {
+                    let name = directive.split_whitespace().next().unwrap_or("");
+                    !DROPPED_DIRECTIVES
+                        .iter()
+                        .any(|dropped| dropped.eq_ignore_ascii_case(name))
+                })
+                .collect::<Vec<_>>()
+                .join(";")
+                .trim()
+                .to_string()
+        })
+        .filter(|policy| !policy.replace(';', "").trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 #[derive(Default)]
 pub struct ViewerState {
@@ -59,6 +108,8 @@ struct Bound {
     site: String,
     /// What a request with no answer says.
     unreachable: String,
+    /// Hide my IP from contacts was on when it opened: `SERVICE_CSP_RELAY_ONLY` goes with every answer.
+    relay_only: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -217,6 +268,14 @@ pub fn may_download(event: &tauri::webview::DownloadEvent<'_>) -> bool {
     !matches!(event, tauri::webview::DownloadEvent::Requested { .. })
 }
 
+/// The window's `WebKitSettings` on Linux. Never element full screen: it would take the title bar, and with it the
+/// "— Ghostly" that says whose page this is, and WebKitGTK 2.50 aborts the whole app on it (`fullscreen.rs`).
+#[cfg(target_os = "linux")]
+fn viewer_settings(settings: &webkit2gtk::Settings) {
+    use webkit2gtk::SettingsExt;
+    settings.set_enable_fullscreen(false);
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -224,6 +283,7 @@ pub fn open<R: tauri::Runtime>(
     tag: String,
     title: String,
     unreachable: Option<String>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
     if !is_label_safe(&peer) || !is_label_safe(&service) || !is_tag(&tag) {
         return Err("Invalid service".into());
@@ -242,6 +302,7 @@ pub fn open<R: tauri::Runtime>(
                 service: service.clone(),
                 site: site.clone(),
                 unreachable: unreachable_text(unreachable),
+                relay_only: relay_only.unwrap_or(false),
             },
         );
 
@@ -258,7 +319,7 @@ pub fn open<R: tauri::Runtime>(
     if let Some(folder) = crate::forget_origins::app_folder(app, &format!("{service}.{site}")) {
         builder = builder.data_directory(folder);
     }
-    builder
+    let window = builder
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.
@@ -280,7 +341,33 @@ pub fn open<R: tauri::Runtime>(
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
+    if let Err(e) = no_element_fullscreen(&window) {
+        let _ = window.close();
+        return Err(format!("Window: {}", e));
+    }
     Ok(())
+}
+
+/// No element full screen, before the page has a click to ask for it. On macOS wry turns it on as it builds the
+/// webview, so it goes off again here, as in an app window. WebView2's only fills the webview: the title stays.
+fn no_element_fullscreen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    #[cfg(target_os = "linux")]
+    let done = window.with_webview(|platform| {
+        use webkit2gtk::WebViewExt;
+        if let Some(settings) = WebViewExt::settings(&platform.inner()) {
+            viewer_settings(&settings);
+        }
+    });
+    #[cfg(target_os = "macos")]
+    let done = window.with_webview(|platform| {
+        crate::app_sandbox::webkit::no_element_fullscreen(platform.inner())
+    });
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let done = {
+        let _ = window;
+        Ok(())
+    };
+    done
 }
 
 pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: ServiceResponse) {
@@ -315,6 +402,7 @@ pub async fn handle<R: tauri::Runtime>(
         service,
         site,
         unreachable,
+        relay_only,
     }) = state
         .windows
         .lock()
@@ -380,13 +468,29 @@ pub async fn handle<R: tauri::Runtime>(
     // last of two headers with the same name.
     let mut policies = Vec::new();
     for (name, value) in &answer.headers {
+        if DROPPED_HEADERS
+            .iter()
+            .any(|dropped| dropped.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
         if name.eq_ignore_ascii_case("content-security-policy") {
-            policies.push(value.as_str());
+            let policy = without_reports(value);
+            if !policy.is_empty() {
+                policies.push(policy);
+            }
         } else {
             response = response.header(name.as_str(), value.as_str());
         }
     }
-    policies.push(SERVICE_CSP);
+    policies.push(
+        if relay_only {
+            SERVICE_CSP_RELAY_ONLY
+        } else {
+            SERVICE_CSP
+        }
+        .to_string(),
+    );
     response = response.header("content-security-policy", policies.join(", "));
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
@@ -497,6 +601,7 @@ mod tests {
                 service: "atlas".into(),
                 site: SITE.into(),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             },
         );
         let request = Request::builder()
@@ -738,6 +843,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             },
         );
     }
@@ -787,6 +893,7 @@ mod routing_tests {
                     service.into(),
                     tag.into(),
                     "t".into(),
+                    None,
                     None
                 )
                 .unwrap_err(),
@@ -803,6 +910,7 @@ mod routing_tests {
             TAG.into(),
             "Atlas".into(),
             None,
+            None,
         )
         .unwrap();
         open(
@@ -812,6 +920,7 @@ mod routing_tests {
             TAG.into(),
             "Notes".into(),
             Some("Este serviço não está acessível.".into()),
+            None,
         )
         .unwrap();
         let windows = app.webview_windows();
@@ -830,6 +939,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: UNREACHABLE.into(),
+                relay_only: false,
             }
         );
         assert_eq!(
@@ -839,6 +949,7 @@ mod routing_tests {
                 service: "notes".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: "Este serviço não está acessível.".into(),
+                relay_only: false,
             }
         );
     }
@@ -853,6 +964,7 @@ mod routing_tests {
                 service: "atlas".into(),
                 site: format!("{PEER}.{TAG}"),
                 unreachable: unreachable_text(Some("Este serviço não está acessível.".into())),
+                relay_only: false,
             },
         );
         let response = tauri::async_runtime::block_on(handle(
@@ -944,10 +1056,184 @@ mod routing_tests {
     }
 
     #[test]
+    fn no_header_sends_reports_or_early_requests_elsewhere_and_requests_stay_on_the_contact() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+        let headers = [
+            (
+                "Content-Security-Policy",
+                "default-src 'self'; report-uri http://127.0.0.1:9/r; img-src *; Report-To main",
+            ),
+            (
+                "content-security-policy",
+                "report-uri https://localhost/r, script-src 'self';report-to main",
+            ),
+            (
+                "content-security-policy-report-only",
+                "default-src 'none'; report-uri http://127.0.0.1:9/r",
+            ),
+            ("Reporting-Endpoints", "main=\"http://127.0.0.1:9/r\""),
+            (
+                "report-to",
+                "{\"group\":\"main\",\"endpoints\":[{\"url\":\"http://127.0.0.1:9/r\"}]}",
+            ),
+            ("NEL", "{\"report_to\":\"main\",\"max_age\":86400}"),
+            (
+                "link",
+                "<https://127.0.0.1:8443/admin>; rel=preload; as=fetch; crossorigin",
+            ),
+            (
+                "Link",
+                "<https://nas.local/>; rel=preconnect, </s.css>; rel=\"dns-prefetch prefetch\"",
+            ),
+            ("x-served-by", "atlas"),
+        ];
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: headers
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                body_b64: STANDARD.encode(b"hi"),
+            },
+        );
+        let response = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(response.headers()["x-served-by"], "atlas");
+        for name in [
+            "content-security-policy-report-only",
+            "reporting-endpoints",
+            "report-to",
+            "nel",
+            "link",
+        ] {
+            assert!(response.headers().get(name).is_none(), "{name}");
+        }
+        assert_eq!(
+            response.headers()["content-security-policy"],
+            format!("default-src 'self'; img-src *, script-src 'self', {SERVICE_CSP}").as_str()
+        );
+        // What can read an answer or post goes to the contact's own origin only: https: also names
+        // this machine and the local network.
+        assert!(SERVICE_CSP.ends_with("; connect-src 'self'; form-action 'self'"));
+    }
+
+    /// With Hide my IP from contacts on when the window opened, its pages load nothing but their own origin: a
+    /// picture, script or frame from a server the contact names would show it this device's address.
+    #[test]
+    fn with_hide_my_ip_on_the_app_keeps_to_its_own_origin() {
+        // covers: settings.network.relay-only
+        for relay_only in [true, false] {
+            let app = app();
+            app.state::<ViewerState>().windows.lock().unwrap().insert(
+                "svc-1".into(),
+                Bound {
+                    peer: PEER.into(),
+                    service: "atlas".into(),
+                    site: format!("{PEER}.{TAG}"),
+                    unreachable: UNREACHABLE.into(),
+                    relay_only,
+                },
+            );
+            let asked = requests(&app);
+            let pending = tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                "svc-1".into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+            ));
+            let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+            respond(
+                app.handle(),
+                carried["id"].as_u64().unwrap(),
+                ServiceResponse {
+                    status: 200,
+                    headers: vec![("content-security-policy".into(), "img-src *".into())],
+                    body_b64: STANDARD.encode(b"<img src=\"https://contact.example/p.png\">"),
+                },
+            );
+            let response = tauri::async_runtime::block_on(pending).unwrap();
+            let ours = if relay_only {
+                SERVICE_CSP_RELAY_ONLY
+            } else {
+                SERVICE_CSP
+            };
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                format!("img-src *, {ours}").as_str(),
+                "{relay_only}"
+            );
+        }
+        assert_eq!(
+            SERVICE_CSP_RELAY_ONLY,
+            "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'"
+        );
+    }
+
+    #[test]
+    fn the_window_keeps_the_setting_it_was_opened_with() {
+        let app = app();
+        for (service, relay_only) in [
+            ("atlas", Some(true)),
+            ("notes", Some(false)),
+            ("maps", None),
+        ] {
+            open(
+                app.handle(),
+                PEER.into(),
+                service.into(),
+                TAG.into(),
+                "t".into(),
+                None,
+                relay_only,
+            )
+            .unwrap();
+        }
+        let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
+        let relay_only = |service: &str| {
+            bound
+                .values()
+                .find(|b| b.service == service)
+                .unwrap()
+                .relay_only
+        };
+        assert!(relay_only("atlas"));
+        assert!(!relay_only("notes"));
+        // An older page that sends no setting: as before.
+        assert!(!relay_only("maps"));
+    }
+
+    #[test]
     fn the_policy_is_the_one_service_open_adds() {
         let cli = include_str!("../../../packages/cli/src/services.ts");
         assert!(cli.contains(&format!(
             "export const OPENED_SERVICE_CSP = \"{SERVICE_CSP}\";"
+        )));
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_CSP_RELAY_ONLY = \"{SERVICE_CSP_RELAY_ONLY}\";"
+        )));
+        let list = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_DROPPED_HEADERS = [{}];",
+            list(&DROPPED_HEADERS)
+        )));
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_DROPPED_DIRECTIVES = [{}];",
+            list(&DROPPED_DIRECTIVES)
         )));
     }
 
@@ -1061,6 +1347,7 @@ mod routing_tests {
                 TAG.into(),
                 "t".into(),
                 None,
+                None,
             )
             .unwrap();
         }
@@ -1088,6 +1375,7 @@ mod routing_tests {
             "atlas".into(),
             TAG.into(),
             "Atlas".into(),
+            None,
             None,
         )
         .unwrap();
@@ -1132,7 +1420,7 @@ mod routing_tests {
     }
 }
 
-/// The real window on WebKitGTK: what a contact's page can leave on disk.
+/// The real window on WebKitGTK: what a contact's page can leave on disk, or take of the screen.
 #[cfg(all(test, target_os = "linux"))]
 mod download_tests {
     use super::*;
@@ -1154,10 +1442,30 @@ mod download_tests {
                     "ybndrfg8ejkmcpqx".into(),
                     "Atlas".into(),
                     None,
+                    None,
                 )
                 .unwrap()
             },
         );
         assert_eq!(saved, Vec::<String>::new());
+    }
+
+    /// The window never goes full screen on its own (WebKitGTK has `enable-fullscreen` on by default): its title
+    /// bar, with "— Ghostly", stays.
+    #[test]
+    fn a_contacts_page_has_no_element_full_screen() {
+        use webkit2gtk::glib::translate::from_glib_full;
+        use webkit2gtk::SettingsExt;
+        // A WebKitSettings reads GTK's own settings, and GTK stops the process without a display (CI's runners).
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("a_contacts_page_has_no_element_full_screen: no display, not run");
+            return;
+        }
+        // A plain GObject: no display, so not `Settings::new`, which wants GTK started.
+        let settings: webkit2gtk::Settings =
+            unsafe { from_glib_full(webkit2gtk::ffi::webkit_settings_new()) };
+        assert!(settings.enables_fullscreen(), "WebKitGTK's default");
+        viewer_settings(&settings);
+        assert!(!settings.enables_fullscreen());
     }
 }

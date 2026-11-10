@@ -28,6 +28,7 @@
   "incomingAudio": "音声通話の着信...",
   "incomingVideo": "ビデオ通話の着信...",
   "mediaDenied": "マイクやカメラにアクセスできません",
+  "mediaDeniedAndroid": "Android の設定で Ghostly にマイク(とカメラ)を許可してください。",
   "mediaDeniedNext": "ブラウザーかシステムの設定で許可してください。",
   "mediaUnavailable": "マイクやカメラが見つかりません",
   "mediaUnavailableNext": "接続するか、使用中のアプリを閉じてください。",

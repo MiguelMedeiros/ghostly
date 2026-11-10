@@ -12,9 +12,11 @@ import type {
   Wallet,
 } from "@cashu/cashu-ts";
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
-import { openRow, openRows, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
+import { hasDataKey } from "./dataKey";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
+import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
+import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
@@ -54,6 +56,12 @@ function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
   const moved = info.nuts[5].methods.map((method) => (saysAmountlessBeside(method) ? { ...method, options: { ...method.options, amountless: true } } : method));
   return { ...info, nuts: { ...info.nuts, 5: { ...info.nuts[5], methods: moved } } };
 }
+/**
+ * An invoice from the mint, with `label` as its description when the mint says it takes one. NUT-04's `description` is
+ * optional: cashu-ts refuses to ask a mint that leaves it out for an invoice with one, and the label is only a label.
+ */
+const mintInvoice = (wallet: Wallet, amount: number, label: string) =>
+  wallet.createMintQuoteBolt11(amount, wallet.getMintInfo().supportsNut04Description?.("bolt11", UNIT) === false ? undefined : label);
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
 /** Once its request can no longer land, a payment still pending is asked twice as late each time, up to this. */
@@ -64,6 +72,8 @@ const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
 /** How long before a mint that could not say which restored ecash is spent is asked again. */
 const RESTORED_POLL_MS = 60_000;
+/** Asked twice as late each time it still cannot say, up to this. */
+const RESTORED_SLOW_POLL_MS = 1_800_000;
 /** How long before a mint that could not say where a swap stands is asked again. */
 const SWAP_POLL_MS = 30_000;
 /** The same, for a swap that holds nothing any more or whose mint cannot give signatures back: asked now and then. */
@@ -83,8 +93,15 @@ export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:st
   /** The mint answered that it signed none of the outputs while an input read spent: something else spent that ecash. */
   spentElsewhere?:boolean}
 
-/** Cashu's library (174 KiB) loads with the wallet's first use of a mint or a token, not with the app's start. */
-const loadCashu = () => import("@cashu/cashu-ts");
+/**
+ * Cashu's library (174 KiB) loads with the wallet's first use of a mint or a token, not with the app's start. A mint's
+ * redirect is refused on every request, not only on those with a body as the library does: `normalizeMintUrl` alone
+ * says where the wallet's requests go.
+ */
+const loadCashu = () => import("@cashu/cashu-ts").then((cashu) => {
+  cashu.setGlobalRequestOptions({ redirect: "error" });
+  return cashu;
+});
 
 // SDK 4.x preview.fees covers input swap fees, despite its declaration saying
 // it includes the recipient fee. includeFees(true) also tops up send outputs.
@@ -113,6 +130,12 @@ export class SwapUnsettledError extends Error {
 }
 
 /**
+ * A redeem the mint refused again after its outputs were made anew on its keyset: the wallet's own words for it, as a
+ * contact is told when the mint never made a redeem (`PaymentDesk.onSwapSettled`). The token stays unspent.
+ */
+const MINT_DID_NOT_CONFIRM = "The mint did not confirm the ecash";
+
+/**
  * Where a written-down swap stands at its mint. `never`: the mint signed none of its outputs. `gone`: the inputs it
  * reads spent all the same. `final`: nothing can change that (a refusal, or inputs spent by something else); without
  * it the swap is only overdue, and stays watched after its inputs are given back. `open`: not known yet; `slow`, a
@@ -124,10 +147,8 @@ type SwapOutcome =
   | { state: "never"; gone: Set<string>; final: boolean }
   | { state: "open"; slow?: boolean; idle?: boolean; pending?: boolean };
 
-/** When a swap with no answer can no longer reach the mint: a request's longest life, and a margin after its last try. */
-const swapOverdueAt = (swap: PendingSwap) => Math.max(swap.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS, (swap.attemptEndedAt ?? Number.POSITIVE_INFINITY) + SWAP_SETTLED_MS);
-/** When a melt with no answer can no longer reach the mint: its one request is sent right after it is written down. */
-const meltOverdueAt = (melt: PendingMelt) => melt.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+/** How many of the times melts and swaps wrote down a wallet keeps on the monotonic clock (`CashuWallet.passed`). */
+const WRITTEN_KEPT = 1_000;
 
 const swapOf = (swap: PendingSwap) => swap.swap as SerializedSwapPreview;
 
@@ -145,7 +166,8 @@ export function normalizeMintUrl(input: string): string {
 
 export function assertAmount(amount: number): void {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
-  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString()} sats are not supported`);
+  // Written the English way whatever the browser's own (errorText.ts reads the amount back to say it in the app's language).
+  if (amount > MAX_AMOUNT) throw new Error(`Amounts above ${MAX_AMOUNT.toLocaleString("en-US")} sats are not supported`);
 }
 
 /** Stored proofs are plain objects (amounts as numbers), which is what the library calls ProofLike. */
@@ -309,8 +331,16 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * How long a mint that could not be loaded stays so for the payment poll's reads: the payments of one round at a gone
+ * mint share its failure, instead of each loading it again (three requests each).
+ */
+export const MINT_FAILED_MS = 5_000;
+
 export class CashuWallet {
   private readonly wallets = new Map<string, Promise<Wallet>>();
+  /** When the load in `wallets` of a mint failed: it is tried again once `MINT_FAILED_MS` passed. */
+  private readonly failedLoads = new Map<string, number>();
   private readonly names = new Map<string, string>();
   private readonly infos = new Map<string, MintInfoView>();
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -321,12 +351,18 @@ export class CashuWallet {
   private readonly quoteAsked = new Map<string, number>();
   /** Per quote the screen shows: until when (`watch`). */
   private readonly quoteWatched = new Map<string, number>();
+  /** Per open quote whose mint did not answer, or answered with an error: as `meltAsk`, on top of its own pace. */
+  private readonly quoteAsk = new AskBackoff(INVOICE_PACE.missedMs, INVOICE_PACE.missedCapMs);
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
   /** Per pending melt: when it is asked about next and the wait before that, in this run (a restart asks at once). */
-  private readonly meltAsk = new Map<string, { at: number; wait: number }>();
+  private readonly meltAsk = new AskBackoff(MELT_POLL_MS, MELT_SLOW_POLL_MS);
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimerAt = 0;
+  /** Per open swap whose mint did not answer past its overdue time: as `meltAsk`, in this run (a restart asks at once). */
+  private readonly swapAsk = new AskBackoff(SWAP_POLL_MS, SWAP_SLOW_POLL_MS);
+  /** Per mint that could not say which restored ecash is spent, or holds some pending: as `meltAsk`. */
+  private readonly restoredAsk = new AskBackoff(RESTORED_POLL_MS, RESTORED_SLOW_POLL_MS);
   /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
   private readonly failedFees = new Map<string, number>();
   /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
@@ -339,6 +375,12 @@ export class CashuWallet {
   /** Per melt quote shown to the person: the invoice, its amount and the most it was said to cost in fees
    * (the mint's reserve and the coins' own fees). Only these are paid, for no more. */
   private readonly shownQuotes = new Map<string, { request: string; amount: number; feeReserve: number }>();
+  /**
+   * Per time a melt or swap wrote down (`createdAt`, `attemptEndedAt`): where it stands on the monotonic clock. Whether a
+   * request of it can still reach the mint is measured from there (`passed`): read by the wall clock, a clock stepped an
+   * hour forward booked a melt whose answer was lost unpaid within seconds, its sats back, and then the mint paid it.
+   */
+  private readonly writtenAt = new Map<number, number>();
 
   /**
    * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
@@ -380,6 +422,45 @@ export class CashuWallet {
   }
   /** How long `stop` waits for a swap in a per-mint lock. */
   static STOP_WAIT_MS = 30_000;
+
+  /** The wall-clock time a melt or swap writes down, its place on the monotonic clock kept for `passed`. */
+  private stamp(): number {
+    const now = Date.now();
+    this.keepWritten(now, performance.now());
+    return now;
+  }
+
+  private keepWritten(at: number, monotonic: number): void {
+    this.writtenAt.set(at, monotonic);
+    if (this.writtenAt.size > WRITTEN_KEPT) this.writtenAt.delete(this.writtenAt.keys().next().value!);
+  }
+
+  /**
+   * How long really passed since `at`, a time a melt or swap wrote down, while this wallet ran. One written by an earlier
+   * run counts by the wall clock up to the first time this run asks, never below nothing: written by a clock ahead of
+   * this one, its window starts again rather than waiting for the clock to get there.
+   */
+  private passed(at: number): number {
+    let since = this.writtenAt.get(at);
+    if (since === undefined) this.keepWritten(at, since = performance.now() - Math.max(0, Date.now() - at));
+    return performance.now() - since;
+  }
+
+  /** Whether no request of this melt can reach the mint any more: its one request is sent right after it is written down. */
+  private meltOverdue(melt: PendingMelt): boolean {
+    return this.passed(melt.createdAt) >= CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+  }
+
+  /** Whether no request of this swap can reach the mint any more: a request's longest life, and a margin after its last try. */
+  private swapOverdue(swap: PendingSwap): boolean {
+    return swap.attemptEndedAt !== undefined && this.passed(swap.createdAt) >= CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS
+      && this.passed(swap.attemptEndedAt) >= SWAP_SETTLED_MS;
+  }
+
+  /** Whether a swap is past the hour it is watched for (`SWAP_WATCH_MS`). */
+  private pastWatch(swap: PendingSwap): boolean {
+    return this.passed(swap.createdAt) >= SWAP_WATCH_MS;
+  }
 
   /**
    * The Cashu wallet of one network: its mints, their balance, and the network's newest movements (every network's when
@@ -425,15 +506,21 @@ export class CashuWallet {
    * (by the profile it was copied from, or by this one before it was restored) still counted in the balance, for good,
    * and every payment that picked one of those proofs failed with the mint's "Token already spent". Each mint is asked
    * once which of them it still reads unspent: a spent proof is dropped, an unspent one is checked for good, and one
-   * the mint holds pending, or a mint that cannot be asked, is asked again later.
+   * the mint holds pending, or a mint that cannot be asked, is asked again later: after RESTORED_POLL_MS, then twice
+   * as late each time up to RESTORED_SLOW_POLL_MS (`restoredAsk`). `paced`: only the mints whose time came (the timer);
+   * a start or a restore asks every one now.
    */
-  private async checkRestored(): Promise<void> {
+  private async checkRestored(paced = false): Promise<void> {
     if (this.restoredTimer) clearTimeout(this.restoredTimer);
     this.restoredTimer = null;
     if (this.stopped) return;
     const waiting = (p: StoredProof) => !!p.unchecked && !p.reserved;
-    let again = false, changed = false;
-    for (const mint of new Set((await this.allProofs()).filter(waiting).map((p) => p.mint))) {
+    let changed = false, next = Infinity;
+    const mints = new Set((await this.allProofs()).filter(waiting).map((p) => p.mint));
+    this.restoredAsk.keepOnly(mints);
+    for (const mint of mints) {
+      if (paced && !this.restoredAsk.due(mint, Date.now())) { next = Math.min(next, this.restoredAsk.at(mint, Date.now())); continue; }
+      let again = false;
       try {
         await this.locked(mint, async () => {
           const proofs = (await this.allProofs()).filter((p) => p.mint === mint && waiting(p));
@@ -453,9 +540,11 @@ export class CashuWallet {
       } catch {
         again = true;
       }
+      if (again) next = Math.min(next, Date.now() + this.restoredAsk.missed(mint, Date.now()));
+      else this.restoredAsk.forget(mint);
     }
     if (changed) this.events.onChange();
-    if (again && !this.stopped) this.restoredTimer = setTimeout(() => void this.checkRestored(), RESTORED_POLL_MS);
+    if (next < Infinity && !this.stopped) this.restoredTimer = setTimeout(() => void this.checkRestored(true), Math.max(0, next - Date.now()));
   }
 
   /** Talks to the mint before it is added: a typo should not become a place to keep money. */
@@ -506,7 +595,7 @@ export class CashuWallet {
     let lastError: unknown = new Error("No mint configured");
     for (const candidate of this.getMints(network)) {
       try {
-        created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, (await this.wallet(candidate)).createMintQuoteBolt11(amount, "Ghostly"), candidate) };
+        created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(candidate), amount, "Ghostly"), candidate) };
         break;
       } catch (error) {
         lastError = error;
@@ -525,7 +614,7 @@ export class CashuWallet {
       // A test mint says "paid" to every invoice: that is not someone paying this one.
       ...(paysItsOwnInvoices(mint) ? { held: true } : {}),
     };
-    await committed((await store(STORES.quotes, "readwrite")).put(quote));
+    await this.putQuote(quote);
     // Nobody paid it yet: it is first asked about after the fast pace's gap.
     this.quoteAsked.set(quote.quote, Date.now());
     void this.pollQuotes();
@@ -541,6 +630,8 @@ export class CashuWallet {
     const quote = (await this.quotes()).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
     this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    // Its mint may be back: the screen asks whatever wait its silence earned.
+    this.quoteAsk.forget(quote.quote);
     await this.pollQuotes();
     return true;
   }
@@ -553,11 +644,11 @@ export class CashuWallet {
    */
   async vouch(invoice: string, said = true): Promise<boolean> {
     const wanted = invoice.trim().toLowerCase();
-    let quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
+    let quote = (await this.quotes()).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
     if (quote.held && said) {
       quote = { ...quote, held: undefined } satisfies StoredQuote;
-      await committed((await store(STORES.quotes, "readwrite")).put(quote));
+      await this.putQuote(quote);
     }
     // The payment may take a moment to settle at the mint: the invoice is asked about at the fast pace meanwhile.
     this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
@@ -579,7 +670,13 @@ export class CashuWallet {
     assertAmount(amount);
     const mint = this.getMints(network).find(paysItsOwnInvoices);
     if (!mint) throw new Error("This wallet has no test mint to ask for test coins");
-    const response = await within(MINT_TIMEOUT_MS, (await this.wallet(mint)).createMintQuoteBolt11(amount, "Ghostly test coins"), mint);
+    let response: Awaited<ReturnType<typeof mintInvoice>>;
+    try {
+      response = await within(MINT_TIMEOUT_MS, mintInvoice(await this.wallet(mint), amount, "Ghostly test coins"), mint);
+    } catch (error) {
+      // A test mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+      throw mintFailed(error) ? Object.assign(engineError("mintFailedFaucet", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
+    }
     const quote: StoredQuote = {
       quote: response.quote,
       mint,
@@ -589,7 +686,7 @@ export class CashuWallet {
       expiresAt: response.expiry ? response.expiry * 1000 : null,
       testCoins: true,
     };
-    await committed((await store(STORES.quotes, "readwrite")).put(quote));
+    await this.putQuote(quote);
     const deadline = Date.now() + TEST_COINS_WAIT_MS;
     for (;;) {
       const minted = await this.locked(mint, () => this.settleQuote(quote.quote));
@@ -617,7 +714,13 @@ export class CashuWallet {
 
   /** Every invoice of ours the mints have not settled yet, held, paid-unclaimed and issued-unclaimed ones included. */
   async quotes(): Promise<StoredQuote[]> {
-    return wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
+    return openRows(STORES.quotes, await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll()));
+  }
+
+  /** Sealed before its transaction opens, when the profile is encrypted: a paid quote's outputs can be minted from. */
+  private async putQuote(quote: StoredQuote): Promise<void> {
+    const row = await sealRow(STORES.quotes, quote);
+    await committed((await store(STORES.quotes, "readwrite")).put(row));
   }
 
   /**
@@ -641,6 +744,7 @@ export class CashuWallet {
     // What this run knows of quotes that are no longer stored goes with them.
     const stored = new Set(quotes.map((q) => q.quote));
     for (const pace of [this.quoteAsked, this.quoteWatched]) for (const id of pace.keys()) if (!stored.has(id)) pace.delete(id);
+    this.quoteAsk.keepOnly(stored);
 
     const open = quotes.filter((q) => !q.issuedUnclaimed && !q.held);
     const at = Date.now();
@@ -650,15 +754,15 @@ export class CashuWallet {
     if (next.length) this.scheduleQuotes(Math.min(...next));
   }
 
-  /** When the mint is next asked about this quote. */
+  /** When the mint is next asked about this quote: at its pace, and not before the wait its mint's silence earned. */
   private nextAsk(quote: StoredQuote, now: number): number {
-    return nextInvoiceAsk({
+    return Math.max(this.quoteAsk.at(quote.quote, 0), nextInvoiceAsk({
       createdAt: quote.createdAt,
       expiresAt: quote.expiresAt,
       watchedUntil: this.quoteWatched.get(quote.quote),
       closed: !!quote.paymentId && !!this.events.requestClosed?.(quote.paymentId),
       paid: !!quote.paid,
-    }, this.quoteAsked.get(quote.quote), now);
+    }, this.quoteAsked.get(quote.quote), now));
   }
 
   /** The next round at `at`, unless one is due sooner. */
@@ -670,13 +774,23 @@ export class CashuWallet {
     this.quoteTimer = setTimeout(() => { this.quoteTimer = null; void this.pollQuotes(); }, Math.max(0, at - Date.now()));
   }
 
-  /** Asks the mints about these quotes. Returns the ones minted. */
+  /**
+   * Asks the mints about these quotes. Returns the ones minted. A quote whose mint does not answer, or answers with an
+   * error, waits longer each time (`quoteAsk`); a mint that could not be loaded is not loaded again in this call for its
+   * other quotes, which wait as that one does. The load runs outside the mint's lock, so a failed one does not hold it.
+   */
   private async settleQuotes(quotes: readonly StoredQuote[]): Promise<string[]> {
     const minted: string[] = [];
+    const down = new Set<string>();
     for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
       this.quoteAsked.set(quote, Date.now());
+      // Its mint could not be loaded for another quote just now: this one waits as that one does.
+      if (down.has(mint)) { this.quoteAsk.missed(quote, Date.now()); continue; }
       try {
+        try { await this.wallet(mint); }
+        catch (error) { down.add(mint); throw error; }
         const paid = await this.locked(mint, () => this.settleQuote(quote));
+        this.quoteAsk.forget(quote);
         if (paid) {
           minted.push(quote);
           // Test coins are no invoice anyone else knows of.
@@ -684,7 +798,8 @@ export class CashuWallet {
           this.events.onChange();
         }
       } catch {
-        // mint unreachable: try again on the next round
+        // The mint did not answer, or answered with an error: asked again later, and later each time.
+        this.quoteAsk.missed(quote, Date.now());
       }
     }
     return minted;
@@ -693,7 +808,7 @@ export class CashuWallet {
   /** Runs under the mint's lock, so two rounds never mint one quote twice. Returns the quote once its ecash is in. */
   private async settleQuote(id: string): Promise<StoredQuote | null> {
     // Another round may have settled it while this one waited for the lock.
-    const quote = await wrap<StoredQuote | undefined>((await store(STORES.quotes, "readonly")).get(id));
+    const quote = await openRow(STORES.quotes, await wrap<StoredQuote | undefined>((await store(STORES.quotes, "readonly")).get(id)));
     if (!quote || quote.issuedUnclaimed || quote.held) return null;
     const wallet = await this.wallet(quote.mint);
     const { OutputData } = await loadCashu();
@@ -715,7 +830,7 @@ export class CashuWallet {
       // The ecash is stored in the same transaction that drops the quote, so a quote still here was never
       // credited to this wallet. It is the only trace of those sats: keep it, stop asking.
       console.warn(`[wallet] ${quote.mint} issued quote ${quote.quote} (${quote.amount} sats) but this wallet holds no ecash for it`);
-      await committed((await store(STORES.quotes, "readwrite")).put({ ...quote, issuedUnclaimed: true } satisfies StoredQuote));
+      await this.putQuote({ ...quote, issuedUnclaimed: true } satisfies StoredQuote);
       return null;
     }
 
@@ -727,7 +842,7 @@ export class CashuWallet {
     // These quotes are not locked to a key (NUT-20), so no signature over the outputs has to be made again.
     if (saved) preview.outputData = saved;
     const written: StoredQuote = { ...quote, paid: true, outputs: saved ? quote.outputs : preview.outputData.map((o) => OutputData.serialize(o as OutputData)) };
-    if (!quote.paid || !saved) await committed((await store(STORES.quotes, "readwrite")).put(written));
+    if (!quote.paid || !saved) await this.putQuote(written);
     let proofs: Proof[];
     try {
       proofs = await wallet.completeMint(preview);
@@ -736,7 +851,7 @@ export class CashuWallet {
       // every round: the next one makes new ones. Nothing was issued for these.
       if (mintRefused(error) &&(await wallet.checkMintQuoteBolt11(quote.quote).catch(() => null))?.state === "PAID") {
         const { outputs: _refused, ...fresh } = written;
-        await committed((await store(STORES.quotes, "readwrite")).put(fresh satisfies StoredQuote));
+        await this.putQuote(fresh satisfies StoredQuote);
       }
       throw error;
     }
@@ -748,10 +863,12 @@ export class CashuWallet {
     const minted = sats(proofs);
     const tx: WalletTx = { ...walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined), quote: quote.quote };
     await this.sealedTransact([STORES.proofs, STORES.walletTx, STORES.quotes], { [STORES.proofs]: proofs }, (stores) => {
-      for (const p of proofs) stores[STORES.proofs].put(toStored(quote.mint, p));
+      // From a restored copy, the profile it came from may have minted this invoice and spent its ecash since.
+      for (const p of proofs) stores[STORES.proofs].put({ ...toStored(quote.mint, p), ...(quote.restored ? { unchecked: true } : {}) } satisfies StoredProof);
       stores[STORES.walletTx].put(tx);
       stores[STORES.quotes].delete(quote.quote);
     });
+    if (quote.restored) void this.checkRestored();
     return quote;
   }
 
@@ -812,7 +929,7 @@ export class CashuWallet {
         const spent = total(inputs) - sats(keep);
         const tx = walletTx(mint, "ecash-out", amount, spent - amount, note);
         const kept = outbox?.(token, mint);
-        await this.sealedTransact([STORES.proofs, STORES.walletTx, STORES.swaps, ...(kept ? [STORES.payments] : [])], { [STORES.proofs]: keep }, (stores) => {
+        await this.sealedTransact([STORES.proofs, STORES.walletTx, STORES.swaps, ...(kept ? [STORES.payments] : [])], { [STORES.proofs]: keep, [STORES.payments]: kept ? [kept] : [] }, (stores) => {
           this.queueReplace(stores[STORES.proofs], mint, inputs, keep);
           stores[STORES.walletTx].put(tx);
           if (swap) stores[STORES.swaps].delete(swap.id);
@@ -866,9 +983,9 @@ export class CashuWallet {
 
   /** NUT-09 retrieves signatures for the exact saved outputs; it never creates another swap. */
   async recoverReviewedCashu(review:PaymentReview,prepared:CashuPrepared):Promise<string|undefined> {
-    const stored=await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id));
+    const stored=await openRow(STORES.payments,await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(review.id)));
     if(stored?.token)return stored.token;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const {OutputData}=await loadCashu();
     const keep=(prepared.swap.keepOutputs??[]).map(OutputData.deserialize);
     const send=(prepared.swap.sendOutputs??[]).map(OutputData.deserialize);
@@ -918,7 +1035,7 @@ export class CashuWallet {
     const token=getEncodedToken({mint:prepared.mint,proofs:send,unit:UNIT});
     const preview=deserializeSwapPreview(prepared.swap);
     const record:StoredPayment={id:review.id,linkId:review.linkId!,kind:"payment",direction:"out",amount:review.amount,unit:UNIT,memo:review.memo,state:"pending",createdAt:review.createdAt,mint:prepared.mint,token,requestId:review.requestId,target:review};
-    await this.sealedTransact([STORES.proofs,STORES.payments,STORES.walletTx], {[STORES.proofs]:keep}, stores=>{
+    await this.sealedTransact([STORES.proofs,STORES.payments,STORES.walletTx], {[STORES.proofs]:keep,[STORES.payments]:[record]}, stores=>{
       this.queueReplace(stores[STORES.proofs],prepared.mint,preview.inputs.map(p=>toStored(prepared.mint,p)),keep);
       stores[STORES.payments].put(record);
       stores[STORES.walletTx].put({...walletTx(prepared.mint,"ecash-out",review.amount,review.fee),id:review.id});
@@ -934,7 +1051,7 @@ export class CashuWallet {
     const {OutputData,deserializeSwapPreview}=await loadCashu();
     const preview=deserializeSwapPreview(prepared.swap);
     if(!preview.inputs.length)return false;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
     if(states.length!==preview.inputs.length || !states.every(s=>s.state==="UNSPENT"))return false;
     const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
@@ -951,7 +1068,7 @@ export class CashuWallet {
     const {OutputData,deserializeSwapPreview}=await loadCashu();
     const preview=deserializeSwapPreview(prepared.swap);
     if(!preview.inputs.length)return false;
-    const wallet=await this.wallet(prepared.mint);
+    const wallet=await this.wallet(prepared.mint,true);
     const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
     if(await this.signedOutputs(wallet,outputs)!=="none")return false;
     const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
@@ -1026,9 +1143,17 @@ export class CashuWallet {
     return (await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(id)))?.state==="reclaimed";
   }
 
+  /**
+   * Whether a Take it back of this payment of ours is still written down: its redeem reached the mint, whose answer was
+   * lost (`SwapUnsettledError`), and `pollSwaps` settles it. Its ecash reads SPENT meanwhile, by this wallet.
+   */
+  async cashuTakingBack(id:string):Promise<boolean> {
+    return (await this.readSwaps()).some((s)=>s.kind==="receive" && !s.released && s.payment?.id===id && s.payment.direction==="out");
+  }
+
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
     const outputs=(prepared.swap.sendOutputs??[]).map((await loadCashu()).OutputData.deserialize);
-    const states=await (await this.wallet(prepared.mint)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
+    const states=await (await this.wallet(prepared.mint,true)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
     return states.length>0 && states.length===outputs.length && states.every(s=>s.state==="SPENT");
   }
 
@@ -1118,10 +1243,18 @@ export class CashuWallet {
         // mint is asked, so the token stays unspent and its sender can still take it back.
         if (preview.amount.toNumber() <= 0) throw engineError("ecashFeeTakesAll", { amount: String(faceValue) });
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
-        swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
+        swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: this.stamp(), token, ...records(preview.amount.toNumber()) };
         await this.putSwap(swap);
+      } else if (payment && !this.swapAsk.due(swap.id, Date.now())) {
+        // A contact's payment sent already, and the mint did not take it: asked again at the wallet's own pace
+        // (`pollSwaps`), not each time its payer sends the same token again.
+        throw new SwapUnsettledError(swap);
       }
-      const { keep } = await this.completeSwap(swap);
+      const sent = swap;
+      const { keep } = await this.completeSwap(sent).catch((error: unknown) => {
+        if (error instanceof SwapUnsettledError) this.swapAsk.missed(sent.id, Date.now());
+        throw error;
+      });
       const credited = sats(keep);
       // What the mint signed is what is credited.
       if (swap.tx && credited !== swap.tx.amount) swap = { ...swap, ...records(credited), tx: { ...records(credited).tx, id: swap.tx.id, timestamp: swap.tx.timestamp } };
@@ -1155,7 +1288,7 @@ export class CashuWallet {
     const preview = coins
       ? await wallet.prepareSwapToSend(coins.reduce((sum, coin) => sum + coin, 0), asProofLike(proofs), {}, { send: { type: "random", denominations: coins } })
       : await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
-    const swap: PendingSwap = { id: swapId(), mint, kind: "send", swap: serializeSwapPreview(preview), createdAt: Date.now() };
+    const swap: PendingSwap = { id: swapId(), mint, kind: "send", swap: serializeSwapPreview(preview), createdAt: this.stamp() };
     const inputs = among(preview.inputs);
     // Written down before the mint sees the proofs: from here on they may be spent, and only these outputs replace them.
     await this.sealedTransact([STORES.proofs, STORES.swaps], { [STORES.proofs]: inputs, [STORES.swaps]: [swap] }, (stores) => {
@@ -1171,30 +1304,80 @@ export class CashuWallet {
    * answer is missed the mint is asked what it did, and its word decides: the outputs it signed are the result, as the
    * answer would have been; a swap it says it never made is undone and the failure is thrown; and for as long as the
    * swap stays written down nothing is known to have failed, whatever the mint's words were (`SwapUnsettledError`):
-   * `pollSwaps` settles it. Runs under the mint's lock.
+   * `pollSwaps` settles it. A redeem refused for the keyset of its outputs is made again on the mint's keyset now and
+   * sent once more (`renewedReceive`); `renew` false: it already was. Runs under the mint's lock.
    */
-  private async completeSwap(swap: PendingSwap): Promise<{ keep: Proof[]; send: Proof[] }> {
+  private async completeSwap(swap: PendingSwap, renew = true): Promise<{ keep: Proof[]; send: Proof[] }> {
     const { deserializeSwapPreview } = await loadCashu();
     try {
       // The saved preview carries only the swap's own outputs: what comes back is exactly what the mint signed.
       return await (await this.wallet(swap.mint)).completeSwap(deserializeSwapPreview(swapOf(swap)));
     } catch (error) {
+      const renewed = renew ? await this.renewedReceive(swap, error).catch(() => undefined) : undefined;
+      if (renewed) return this.completeSwap(renewed, false);
       // A refusal of the first request ever made for this swap: no other request of it can be on its way.
       const refused = mintRefused(error) && swap.attemptEndedAt === undefined;
-      const ended: PendingSwap = { ...swap, attemptEndedAt: Date.now() };
+      const ended: PendingSwap = { ...swap, attemptEndedAt: this.stamp() };
       await this.putSwap(ended).catch(() => {});
       const outcome = await this.swapOutcome(ended, refused).catch((): SwapOutcome => ({ state: "open" }));
       if (outcome.state === "done") return outcome;
       if (outcome.state === "never" && outcome.final) {
         await this.dropSwap(ended, outcome.gone);
         if (swap.kind === "receive") this.rememberSpent(swap.mint, outcome.gone);
-        // Said as what it is: the mint's own words for it vary from mint to mint.
-        throw outcome.gone.size > 0 ? Object.assign(engineError("ecashAlreadySpent"), { cause: error }) : error;
+        // Said as what it is: the mint's own words for it vary from mint to mint, and cashu-ts' for a keyset are its own.
+        if (outcome.gone.size > 0) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
+        throw swap.kind === "receive" && keysetRefused(error) ? Object.assign(new Error(MINT_DID_NOT_CONFIRM), { cause: error }) : error;
       }
       this.swapsAgainIn(SWAP_POLL_MS);
       // What it holds and that it is open show at once.
       this.events.onChange();
       throw new SwapUnsettledError(ended, error);
+    }
+  }
+
+  /**
+   * A redeem the mint refused for the keyset of its outputs (one it retired, or does not know, since they were made):
+   * no request with those outputs is ever signed. While the mint reads every coin of its token unspent, nothing of it
+   * happened, and it is written down again with new outputs on the keyset the mint signs with now (cashu-ts reloaded
+   * the mint's keysets with the refusal), as `settleQuote` does for an invoice. Undefined when it is not that case.
+   * Only asks: the caller sends it. Runs under the mint's lock.
+   */
+  private async renewedReceive(swap: PendingSwap, error: unknown): Promise<PendingSwap | undefined> {
+    if (swap.kind !== "receive" || swap.released || !keysetRefused(error)) return undefined;
+    // The keysets could not be reloaded with the refusal: loaded anew, so the new outputs are on the mint's keyset now.
+    if ((error as { repaired?: boolean }).repaired === false) this.wallets.delete(swap.mint);
+    const wallet = await this.wallet(swap.mint);
+    const { deserializeSwapPreview, serializeSwapPreview } = await loadCashu();
+    const { inputs } = deserializeSwapPreview(swapOf(swap));
+    const states = await wallet.checkProofsStates(inputs.map((p) => ({ secret: p.secret, id: p.id })));
+    if (states.length !== inputs.length || states.some((s) => s.state !== "UNSPENT")) return undefined;
+    // The same coins, so the same fee: what was written down to credit stays right.
+    const preview = await wallet.prepareSwapToReceive(swap.token ?? inputs);
+    const { attemptEndedAt: _ended, askAt: _ask, stuck: _stuck, ...rest } = swap;
+    // Written down before the mint is asked, in place of the outputs it refused: the only request of these is the next.
+    const renewed: PendingSwap = { ...rest, swap: serializeSwapPreview(preview) };
+    await this.putSwap(renewed);
+    return renewed;
+  }
+
+  /**
+   * Sends a redeem `renewedReceive` wrote down again, after the call that made it was over (`pollSwaps`): stored and its
+   * chat told as any redeem settled late; let go by `completeSwap` on the mint's word (spent, refused once more), and
+   * its chat told that; still written down with no answer, asked about again.
+   */
+  private async sendRenewed(swap: PendingSwap, later: (ms: number) => void): Promise<void> {
+    try {
+      const { keep } = await this.completeSwap(swap, false);
+      if (await this.finishSwap(swap, keep, [], true)) {
+        const told = await this.tellSwap(swap, true);
+        if (swap.payment && told) await committed((await store(STORES.swaps, "readwrite")).delete(swap.id));
+        else if (swap.payment) later(SWAP_POLL_MS);
+        this.events.onChange();
+      }
+    } catch {
+      if ((await this.swapsAt(swap.mint)).some((s) => s.id === swap.id)) { later(SWAP_POLL_MS); return; }
+      await this.tellSwap(swap, false);
+      this.events.onChange();
     }
   }
 
@@ -1234,7 +1417,7 @@ export class CashuWallet {
     }
     // Unspent and unsigned: it never happened. For good after a refusal; otherwise once no request can still arrive.
     if (refused) return { state: "never", gone, final: true };
-    if (Date.now() >= swapOverdueAt(swap)) return { state: "never", gone, final: false };
+    if (this.swapOverdue(swap)) return { state: "never", gone, final: false };
     return { state: "open", idle: !!first };
   }
 
@@ -1246,11 +1429,11 @@ export class CashuWallet {
    * payment then stays, marked `finished`, until the chat has been told (`tellSwap`). Returns whether it stored.
    */
   private async finishSwap(swap: PendingSwap, keep: Proof[], send: Proof[], late: boolean): Promise<boolean> {
-    const secrets = new Set(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : []);
-    const inputs = (await this.allProofs()).filter((p) => p.mint === swap.mint && secrets.has(p.secret));
+    // A redeem's inputs were never the wallet's: only a split looks its own up.
+    const inputs = (await this.proofsOf(swap.kind === "send" ? swapOf(swap).inputs.map((p) => p.secret) : [])).filter((p) => p.mint === swap.mint);
     const lost = swap.kind === "send" ? swapOf(swap).inputs.reduce((sum, p) => sum + Number(p.amount), 0) - sats(keep) - sats(send) : 0;
     let stored = false;
-    await this.sealedTransact([STORES.proofs, STORES.swaps, STORES.walletTx, ...(swap.payment ? [STORES.payments] : [])], { [STORES.proofs]: [...keep, ...send] }, (stores) => {
+    await this.sealedTransact([STORES.proofs, STORES.swaps, STORES.walletTx, ...(swap.payment ? [STORES.payments] : [])], { [STORES.proofs]: [...keep, ...send], [STORES.payments]: swap.payment ? [swap.payment] : [] }, (stores) => {
       const current = stores[STORES.swaps].get(swap.id);
       current.onsuccess = () => {
         const kept: PendingSwap | undefined = current.result;
@@ -1305,8 +1488,7 @@ export class CashuWallet {
 
   /** The proofs a split reserved, as they are stored now. */
   private async storedInputs(swap: PendingSwap): Promise<StoredProof[]> {
-    const secrets = new Set(swapOf(swap).inputs.map((p) => p.secret));
-    return (await this.allProofs()).filter((p) => p.mint === swap.mint && p.reserved && secrets.has(p.secret));
+    return (await this.proofsOf(swapOf(swap).inputs.map((p) => p.secret))).filter((p) => p.mint === swap.mint && p.reserved);
   }
 
   private async swapsAt(mint: string): Promise<PendingSwap[]> {
@@ -1346,7 +1528,7 @@ export class CashuWallet {
   async redeemingFor(requestId: string): Promise<boolean> {
     const open = await this.readSwaps();
     return open.some((s) => s.kind === "receive" && !s.released && s.payment?.requestId === requestId
-      && !(s.stuck && Date.now() >= s.createdAt + SWAP_WATCH_MS));
+      && !(s.stuck && this.pastWatch(s)));
   }
 
   private async pollSwaps(mints?: readonly string[]): Promise<void> {
@@ -1356,10 +1538,13 @@ export class CashuWallet {
       if (this.stopped) return;
     }
     const open = (await this.readSwaps()).filter((s) => !mints || mints.includes(s.mint));
+    if (!mints) this.swapAsk.keepOnly(new Set(open.map((s) => s.id)));
     let again = 0;
     const later = (ms: number) => { again = again ? Math.min(again, ms) : ms; };
     // One swap at a time under its mint's lock, read again inside it: the user's own payments there go in between.
     for (const { id, mint } of open) {
+      // A mint that has not answered for a while is asked less and less often; a wallet's removal asks it now.
+      if (!mints && !this.swapAsk.due(id, Date.now())) { later(this.swapAsk.at(id, Date.now()) - Date.now()); continue; }
       await this.locked(mint, async () => {
         let swap = await openRow(STORES.swaps, await wrap<PendingSwap | undefined>((await store(STORES.swaps, "readonly")).get(id)));
         if (!swap) return;
@@ -1375,13 +1560,19 @@ export class CashuWallet {
           if (swap.askAt && Date.now() < swap.askAt && !mints) { later(swap.askAt - Date.now()); return; }
           // Found written down with no answer on record: whatever sent it is gone. The mint gets time to finish.
           if (swap.attemptEndedAt === undefined) {
-            swap = { ...swap, attemptEndedAt: Date.now() };
+            swap = { ...swap, attemptEndedAt: this.stamp() };
             await this.putSwap(swap);
           }
-          const outcome = await this.swapOutcome(swap);
+          let outcome = await this.swapOutcome(swap);
+          // A redeem whose token the mint reads unspent, with nothing signed, never happened however long the app was
+          // closed, and still can: sent again below, never let go while the token is good (only the mint's word ends it).
+          if (outcome.state === "never" && !outcome.final && swap.kind === "receive" && !swap.released) outcome = { state: "open", idle: true };
+          // The mint answered. A redeem sent again below keeps its pace until the mint takes it: a mint that reads the
+          // token but never takes the swap is not sent it every 30 s for as long as the token is good.
+          if (!(outcome.state === "open" && outcome.idle && swap.kind === "receive" && !swap.released)) this.swapAsk.forget(id);
           if (outcome.state === "open") {
             // Its inputs went back, and an hour on the mint still cannot say more: nothing of it is held here.
-            if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) { await this.dropSwap(swap, new Set()); return; }
+            if (swap.released && this.pastWatch(swap)) { await this.dropSwap(swap, new Set()); return; }
             if (outcome.slow) {
               // No way of knowing what the mint signed: kept, and asked about less and less often.
               const stuck = (swap.stuck ?? 0) + 1;
@@ -1395,6 +1586,7 @@ export class CashuWallet {
               const { deserializeSwapPreview } = await loadCashu();
               try {
                 const { keep } = await (await this.wallet(mint)).completeSwap(deserializeSwapPreview(swapOf(swap)));
+                this.swapAsk.forget(id);
                 if (await this.finishSwap(swap, keep, [], true)) {
                   const told = await this.tellSwap(swap, true);
                   if (swap.payment && told) await committed((await store(STORES.swaps, "readwrite")).delete(swap.id));
@@ -1402,7 +1594,10 @@ export class CashuWallet {
                   this.events.onChange();
                 }
               } catch (error) {
-                swap = { ...swap, attemptEndedAt: Date.now() };
+                // Refused for the keyset of its outputs, the token unspent: made again on the mint's keyset now.
+                const renewed = await this.renewedReceive(swap, error).catch(() => undefined);
+                if (renewed) { await this.sendRenewed(renewed, later); return; }
+                swap = { ...swap, attemptEndedAt: this.stamp() };
                 await this.putSwap(swap);
                 // Refused: the mint's word on it, asked once more, ends it. Anything else is tried again.
                 const refusal = mintRefused(error) ?await this.swapOutcome(swap, true).catch(() => undefined) : undefined;
@@ -1416,12 +1611,15 @@ export class CashuWallet {
                   await this.dropSwap(swap, refusal.gone);
                   await this.tellSwap(swap, false);
                   this.events.onChange();
-                } else later(SWAP_POLL_MS);
+                }
+                // Not taken, and the mint did not refuse it: from 30 s, twice as late each time (each send moves when
+                // it is overdue, so that cannot pace it).
+                else later(this.swapAsk.missed(id, Date.now()));
               }
-            } else if (outcome.pending && swap.kind === "receive" && !swap.released && Date.now() >= swapOverdueAt(swap)) {
+            } else if (outcome.pending && swap.kind === "receive" && !swap.released && this.swapOverdue(swap)) {
               // No request of it can reach the mint any more, and its sender's ecash is still held by a payment of
               // theirs: asked now and then, and let go after its hour.
-              if (Date.now() < swap.createdAt + SWAP_WATCH_MS) {
+              if (!this.pastWatch(swap)) {
                 await this.putSwap({ ...swap, askAt: Date.now() + SWAP_SLOW_POLL_MS } satisfies PendingSwap);
                 later(SWAP_SLOW_POLL_MS);
               } else {
@@ -1441,7 +1639,7 @@ export class CashuWallet {
             }
           } else if (swap.released) {
             // Its inputs went back long ago. Watched until they are spent by something else, or for an hour.
-            if (outcome.final || Date.now() >= swap.createdAt + SWAP_WATCH_MS) await this.dropSwap(swap, outcome.gone);
+            if (outcome.final || this.pastWatch(swap)) await this.dropSwap(swap, outcome.gone);
             else later(SWAP_SLOW_POLL_MS);
             return;
           } else {
@@ -1453,8 +1651,12 @@ export class CashuWallet {
         } catch {
           // Mint unreachable, or its answer was an error: asked again on the next round. One that holds nothing
           // any more is not asked about past its hour.
-          if (swap.released && Date.now() >= swap.createdAt + SWAP_WATCH_MS) await this.dropSwap(swap, new Set()).catch(() => {});
-          else later(swap.released ? SWAP_SLOW_POLL_MS : SWAP_POLL_MS);
+          if (swap.released && this.pastWatch(swap)) await this.dropSwap(swap, new Set()).catch(() => {});
+          else if (swap.released) later(SWAP_SLOW_POLL_MS);
+          else {
+            // Every 30 s while a request may still reach the mint, then less and less often, as melts are.
+            later(this.swapAsk.missed(id, Date.now(), !this.swapOverdue(swap)));
+          }
         }
       }).catch(() => { later(SWAP_POLL_MS); });
     }
@@ -1508,7 +1710,8 @@ export class CashuWallet {
         this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve: fee });
         return { quote: quote.quote, mint, amount, feeReserve: fee };
       } catch (error) {
-        lastError = error;
+        // A mint that failed ("internal error", a closed connection) is named, with what to do; its words kept last.
+        lastError = mintFailed(error) ? Object.assign(engineError("mintFailedQuote", { host: new URL(mint).host, reason: mintReason(error) }), { cause: error }) : error;
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -1574,7 +1777,7 @@ export class CashuWallet {
       outputs: preview.outputData.map((o) => OutputData.serialize(o)),
       note: note?.slice(0, 140),
       paymentId,
-      createdAt: Date.now(),
+      createdAt: this.stamp(),
     };
     // Written down before the mint sees the proofs: from here on they may be spent, or come back.
     await this.sealedTransact([STORES.proofs, STORES.melts, STORES.swaps], { [STORES.proofs]: [...keep, ...send], [STORES.melts]: [melt] }, (stores) => {
@@ -1584,6 +1787,9 @@ export class CashuWallet {
       if (swap) stores[STORES.swaps].delete(swap.id);
     });
     this.shownQuotes.delete(quoteId);
+    // Not paid: the review that showed it is still the invoice and amount shown, and Pay on it again pays (the refusal
+    // says it is safe to try again), checked against the mint's quote as the first time.
+    const unpaid = () => { this.shownQuotes.set(quoteId, shown); };
 
     let result: MeltProofsResponse<MeltQuoteBolt11Response>;
     try {
@@ -1594,6 +1800,7 @@ export class CashuWallet {
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
+        unpaid();
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
         if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
@@ -1609,7 +1816,9 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    return this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
+    if (outcome === "unpaid") unpaid();
+    return outcome;
   }
 
   /**
@@ -1632,8 +1841,7 @@ export class CashuWallet {
     const melts = await this.readMelts();
 
     for (const melt of melts) {
-      const pace = this.meltAsk.get(melt.quote);
-      if (pace && Date.now() < pace.at) continue;
+      if (!this.meltAsk.due(melt.quote, Date.now())) continue;
       try {
         const outcome = await this.locked(melt.mint, async () => {
           // It may have been settled while this waited for the lock.
@@ -1649,15 +1857,14 @@ export class CashuWallet {
       } catch {
         // mint unreachable: try again on the next round
       }
-      const wait = Date.now() < meltOverdueAt(melt) ? MELT_POLL_MS : Math.min((pace?.wait ?? MELT_POLL_MS) * 2, MELT_SLOW_POLL_MS);
-      this.meltAsk.set(melt.quote, { at: Date.now() + wait, wait });
+      this.meltAsk.missed(melt.quote, Date.now(), !this.meltOverdue(melt));
     }
 
     const remaining = new Set((await this.readMelts()).map((m) => m.quote));
-    for (const quote of this.meltAsk.keys()) if (!remaining.has(quote)) this.meltAsk.delete(quote);
+    this.meltAsk.keepOnly(remaining);
     if (remaining.size === 0 || this.stopped) return;
     // A melt written down since this round began has no pace yet: it is asked at once.
-    const next = Math.min(...[...remaining].map((quote) => this.meltAsk.get(quote)?.at ?? 0));
+    const next = Math.min(...[...remaining].map((quote) => this.meltAsk.at(quote, 0)));
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = setTimeout(() => void this.pollMelts(), Math.max(0, next - Date.now()));
   }
@@ -1694,7 +1901,7 @@ export class CashuWallet {
     if (quote.state === "PENDING") return "pending";
     // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
     // until no request of this melt can land any more.
-    if (!answered && Date.now() < meltOverdueAt(melt)) return "pending";
+    if (!answered && !this.meltOverdue(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);
@@ -1732,10 +1939,12 @@ export class CashuWallet {
     const tx = walletTx(melt.mint, "lightning-out", melt.amount, melt.outlay - sats(change) - melt.amount, melt.note);
     await this.sealedTransact([STORES.proofs, STORES.melts, STORES.walletTx], { [STORES.proofs]: change }, (stores) => {
       for (const secret of melt.secrets) stores[STORES.proofs].delete(secret);
-      for (const p of change) stores[STORES.proofs].put(toStored(melt.mint, p));
+      // From a restored copy, the profile it came from may have settled this payment and spent its change since.
+      for (const p of change) stores[STORES.proofs].put({ ...toStored(melt.mint, p), ...(melt.restored ? { unchecked: true } : {}) } satisfies StoredProof);
       stores[STORES.melts].delete(melt.quote);
       stores[STORES.walletTx].put(tx);
     });
+    if (melt.restored && change.length > 0) void this.checkRestored();
   }
 
   /**
@@ -1776,8 +1985,7 @@ export class CashuWallet {
   }
 
   private async reservedProofs(melt: PendingMelt): Promise<StoredProof[]> {
-    const secrets = new Set(melt.secrets);
-    return (await this.allProofs()).filter((p) => secrets.has(p.secret));
+    return this.proofsOf(melt.secrets);
   }
 
   /** Everything held, as one token per mint; `mints`: only these mints' (one network's wallet). */
@@ -1798,18 +2006,26 @@ export class CashuWallet {
 
   // -- storage -----------------------------------------------------------------
 
-  private wallet(mint: string): Promise<Wallet> {
+  /**
+   * A mint's loaded wallet. A failed load is tried again by the next caller, unless that one takes `recentFailure`
+   * (a payment's reads in the poll): a load failed within `MINT_FAILED_MS` is its answer too.
+   */
+  private wallet(mint: string, recentFailure = false): Promise<Wallet> {
+    const failed = this.failedLoads.get(mint);
     let wallet = this.wallets.get(mint);
+    if (failed !== undefined && !(recentFailure && Date.now() - failed < MINT_FAILED_MS)) wallet = undefined;
     if (!wallet) {
-      wallet = (async () => {
+      const loading = (async () => {
         const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
         const info = instance.getMintInfo();
         if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
         return instance;
       })();
-      this.wallets.set(mint, wallet);
-      wallet.catch(() => this.wallets.delete(mint));
+      wallet = loading;
+      this.failedLoads.delete(mint);
+      this.wallets.set(mint, loading);
+      loading.catch(() => { if (this.wallets.get(mint) === loading) this.failedLoads.set(mint, Date.now()); });
     }
     return wallet;
   }
@@ -1840,6 +2056,22 @@ export class CashuWallet {
     return openRows(STORES.proofs, await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll()));
   }
 
+  /**
+   * The stored proofs of these secrets, each read by its key: a swap's inputs cost what the swap holds, not the wallet.
+   * With the data key, a proof is under the hash of its secret, or under the secret itself until the migration reseals it.
+   */
+  private async proofsOf(secrets: Iterable<string>): Promise<StoredProof[]> {
+    const wanted = [...new Set(secrets)];
+    if (wanted.length === 0) return [];
+    const proofs = await store(STORES.proofs, "readonly");
+    const sealed = hasDataKey();
+    const found = await Promise.all(wanted.map(async (secret) => {
+      const [hashed, plain] = await Promise.all([sealed ? wrap<StoredProof | undefined>(proofs.get(proofKey(secret))) : undefined, wrap<StoredProof | undefined>(proofs.get(secret))]);
+      return hashed ?? plain;
+    }));
+    return openRows(STORES.proofs, found.filter((p): p is StoredProof => p !== undefined));
+  }
+
   private async readSwaps(): Promise<PendingSwap[]> {
     return openRows(STORES.swaps, await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll()));
   }
@@ -1856,8 +2088,8 @@ export class CashuWallet {
 
   /**
    * `transact`, with the wallet's secrets sealed as they are written when the profile is encrypted (WISP 04): `rows`,
-   * the proofs, swaps and melts the work may put, are sealed before the transaction opens, and the work finds a proof
-   * by its secret. Without the data key, `transact` itself.
+   * the proofs, swaps, melts and payments the work may put, are sealed before the transaction opens, and the work finds
+   * a proof by its secret. Without the data key, `transact` itself.
    */
   private async sealedTransact(names: string[], rows: Partial<Record<string, readonly object[]>>, work: (stores: Record<string, IDBObjectStore>) => void): Promise<void> {
     const seals = new RowSeals();

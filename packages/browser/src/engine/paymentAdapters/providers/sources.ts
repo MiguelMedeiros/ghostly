@@ -3,6 +3,7 @@ import type { WalletMode } from "../../../shared/mints";
 import { ModeChanged, ModeGate } from "../modeGate";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persistence";
 import { requireTurn } from "../away";
+import { AskBackoff } from "../../askBackoff";
 import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings, type SourceProblem } from "./types";
 
 /**
@@ -77,7 +78,10 @@ export interface SourcesOptions<P> {
   key?: string;
   /** Asked before the source of a mode changes: a refusal (money in flight through it) stops the change. */
   refuseReplacing?: (providerId: string, mode: WalletMode) => Promise<string | undefined>;
-  /** Balance and the like, read after connecting and then every `refreshMs`. */
+  /**
+   * Balance and the like, read after connecting and then every `refreshMs` while it answers; a read with no answer
+   * is tried again twice as late each time, up to `REFRESH_SLOW_MS`.
+   */
   refresh?: (provider: P) => Promise<Partial<Pick<SourceView, "balance" | "unconfirmed">>>;
   refreshMs?: number;
   /** How long to wait before the next attempt after `failures` failed ones (tests shorten it). */
@@ -103,6 +107,14 @@ export function retryDelay(failures: number, random = Math.random): number {
  */
 export const SUSTAINED_FAILURES = 3;
 export const SUSTAINED_MS = 30_000;
+/**
+ * A connected source whose balance read gets no answer (its node went off, the relay is down) is read again twice as
+ * late after each failed read, from `refreshMs` up to this (`AskBackoff`, as a Lightning card's pending payment): at
+ * the fixed 15 s it was 240 failed requests an hour, for good. A read that answers, waking up and Retry read at once
+ * and go back to `refreshMs`.
+ */
+export const REFRESH_SLOW_MS = 30 * 60_000;
+const REFRESH_MS = 15_000;
 
 /**
  * Gives up on a connection when its signal aborts (a change of settings interrupts an attempt), even if the
@@ -142,9 +154,20 @@ export class ProviderSources<P extends Connectable> {
   private failingSince?: number;
   private seen?: SeenBalance;
   private stopped = false;
+  /** When the balance is read next, while reads get no answer (one key: this source). */
+  private readonly reads: AskBackoff<"balance">;
+  /** Balance reads under way, and whether another call to the source got its answer meanwhile (`answered`). */
+  private reading = 0;
+  private answeredMeanwhile = false;
+  /** An answer to another call already brought a read since the last read that answered: the next ones wait their turn. */
+  private answerRead = false;
   view: SourceView = { mode: "mainnet", status: "none", offered: [] };
 
-  constructor(private readonly options: SourcesOptions<P>) { this.mode = options.network; this.view = { mode: options.network, status: "none", offered: [] }; }
+  constructor(private readonly options: SourcesOptions<P>) {
+    this.mode = options.network; this.view = { mode: options.network, status: "none", offered: [] };
+    const every = options.refreshMs ?? REFRESH_MS;
+    this.reads = new AskBackoff(every, Math.max(every, REFRESH_SLOW_MS));
+  }
 
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private find(id: string) { return this.options.descriptors().find((d) => d.id === id); }
@@ -194,9 +217,13 @@ export class ProviderSources<P extends Connectable> {
     return this.connecting ??= this.serial(() => this.connect(eager)).finally(() => { this.connecting = undefined; });
   }
 
-  /** Retry, now: the wait before the next attempt is skipped. Resolves when the attempt ends. */
+  /**
+   * Retry, now: the wait before the next attempt is skipped (a connected source reads its balance now, whatever
+   * the wait its failed reads earned). Resolves when the attempt ends.
+   */
   retryNow(): Promise<void> {
-    if (this.provider || this.stopped) return Promise.resolve();
+    if (this.stopped) return Promise.resolve();
+    if (this.provider) { this.reads.forget("balance"); return this.refresh(); }
     clearTimeout(this.retry);
     return this.ensureReady(true);
   }
@@ -207,8 +234,23 @@ export class ProviderSources<P extends Connectable> {
    */
   wake() {
     if (this.stopped) return;
-    if (this.provider) { void this.refresh(); return; }
+    if (this.provider) { this.reads.forget("balance"); void this.refresh(); return; }
     if (this.failures && !this.connecting) void this.retryNow();
+  }
+
+  /**
+   * The connected source answered another call (a payment, a fee estimate, an invoice made or looked up): it is back.
+   * While its balance reads get no answer, the balance is read now rather than when the wait they earned ends; a
+   * read that answers forgets that wait, as any does. A read already under way is left to say it (if it gets no
+   * answer, the next one is `refreshMs` later). Once per stretch of failed reads, and one that fails keeps doubling
+   * the wait: a source that answers everything but its balance keeps the slow pace. A source whose reads answer:
+   * nothing changes.
+   */
+  answered(provider: P) {
+    if (this.stopped || provider !== this.provider || !this.options.refresh || !this.view.error || this.answerRead) return;
+    this.answerRead = true;
+    if (this.reading) { this.answeredMeanwhile = true; return; }
+    void this.refresh();
   }
 
   private async connect(eager = false) {
@@ -433,20 +475,32 @@ export class ProviderSources<P extends Connectable> {
     // A kind of source with nothing to read shows no balance: what it shows is read.
     if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
     const before = this.view;
+    let wait = this.options.refreshMs ?? REFRESH_MS;
+    this.reading++;
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
       this.view = { ...this.view, ...details, read: true, balanceAt: undefined, error: undefined };
       this.remember(details);
+      this.reads.forget("balance");
+      this.answerRead = false;
     } catch (error) {
       if (provider !== this.provider) return;
+      // Its error stays shown until a read answers.
       this.view = { ...this.view, error: `Could not read the balance: ${redact(error, this.secrets)}` };
+      wait = this.reads.missed("balance", Date.now());
+      // The source answered another call while this read was under way (it may have started before the source was
+      // back): the next read comes soon, once, and the wait goes on doubling from where it was.
+      if (this.answeredMeanwhile) wait = this.options.refreshMs ?? REFRESH_MS;
+    } finally {
+      this.reading--;
+      if (!this.reading) this.answeredMeanwhile = false;
     }
     // A read that says what the view already did (the same balance, or none) changes nothing: every 15 s it made a
     // whole wallet view and engine state, with no wallet at all.
     const after = this.view as unknown as Record<string, unknown>, was = before as unknown as Record<string, unknown>;
     if (Object.keys({ ...was, ...after }).some(key => was[key] !== after[key])) this.options.changed();
-    if (this.provider) this.timer = setTimeout(() => void this.refresh(), this.options.refreshMs ?? 15_000);
+    if (this.provider) { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), wait); }
   }
 
   /** Keeps the balance read, for the next start: written only when it changed. */
@@ -463,7 +517,7 @@ export class ProviderSources<P extends Connectable> {
 
   /** `forget`: the source is removed, so what it keeps on this device goes too (a provider's own `forget`). */
   private async disconnect(forget = false) {
-    clearTimeout(this.timer); clearTimeout(this.retry);
+    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance"); this.answerRead = false;
     this.controller.abort(); this.controller = new AbortController();
     const provider = this.provider as (P & { forget?: () => Promise<void> }) | undefined;
     this.provider = undefined; this.descriptor = undefined; this.secrets = {};

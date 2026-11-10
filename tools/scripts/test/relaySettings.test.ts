@@ -28,6 +28,28 @@ describe("the relays' settings", () => {
     expect(Object.keys(DEFAULT_LIMITS)).toContain("clientsPerAddress");
   });
 
+  // Behind a proxy or Cloudflare, a client that reaches the port past it could write the header it is counted by.
+  it.each([
+    [{}, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_PROXIES: "0" }, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_PROXIES: "2" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_PROXIES: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
+    [{ HOST: "192.0.2.1" }, "192.0.2.1"],
+  ])("both listen where %j says: %s", (env, host) => {
+    expect(pushSettings(env).host).toBe(host);
+    expect(hyperdhtSettings(env).host).toBe(host);
+  });
+
+  it.each([
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "0" }, "0.0.0.0"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
+  ])("the HyperDHT relay listens where %j says: %s", (env, host) => {
+    expect(hyperdhtSettings(env).host).toBe(host);
+  });
+
   it.each([
     ["PORT", "", "a port from 1 to 65535"],
     ["PORT", "abc", "a port from 1 to 65535"],
@@ -53,6 +75,49 @@ describe("the relays' settings", () => {
   ])("the HyperDHT relay refuses %s=%j", (name, value, expected) => {
     expect(() => hyperdhtSettings({ [name]: value })).toThrow(`${name}=${JSON.stringify(value)}: expected ${expected}`);
   });
+
+  // Node runs a timer past 2147483647 ms after 1 ms: "about 35 days" would drop every client as it connects.
+  it.each([
+    ["GHOSTLY_RELAY_IDLE_MS", "3000000000"],
+    ["GHOSTLY_RELAY_PING_MS", "2592000000"],
+    ["GHOSTLY_RELAY_HANDSHAKE_MS", "2147483648"],
+    ["GHOSTLY_RELAY_REQUEST_MS", "9007199254740991"],
+  ])("the HyperDHT relay refuses %s=%j, longer than a timer can wait", (name, value) => {
+    expect(() => hyperdhtSettings({ [name]: value })).toThrow(`${name}=${JSON.stringify(value)}: expected a whole number above 0, at most 2147483647 (about 24 days)`);
+  });
+
+  it("the HyperDHT relay takes a time limit of 2147483647 ms, and a count past it", () => {
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_IDLE_MS: "2147483647", GHOSTLY_RELAY_QUEUED_TOTAL_BYTES: "3000000000" }).limits)
+      .toEqual({ idleMs: 2_147_483_647, queuedTotalBytes: 3_000_000_000 });
+  });
+
+  it("stop the HyperDHT relay's start on a time limit past 2147483647 ms, in one line", () => {
+    const env = { ...process.env, HOST: "127.0.0.1", PORT: "47998", GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_RELAY_IDLE_MS: "3000000000" };
+    const run = spawnSync(process.execPath, ["server.mjs"], { cwd: resolve(SERVICES, "hyperdht-relay"), env, encoding: "utf8", timeout: 20_000 });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr.trim()).toMatch(/^\S+ Ghostly HyperDHT relay not started: GHOSTLY_RELAY_IDLE_MS="3000000000": expected a whole number above 0, at most 2147483647 \(about 24 days\)$/);
+  });
+
+  it("the HyperDHT relay keeps a client with the longest idle and ping limits a timer takes", async () => {
+    const port = await freePort();
+    const env = { ...process.env, HOST: "127.0.0.1", PORT: String(port), GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_RELAY_IDLE_MS: "2147483647", GHOSTLY_RELAY_PING_MS: "2147483647" };
+    const child = spawn(process.execPath, ["server.mjs"], { cwd: resolve(SERVICES, "hyperdht-relay"), env, stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      await new Promise<void>((done, fail) => {
+        let out = "";
+        child.stdout.on("data", (chunk) => { out += chunk; if (out.includes(" relay on port ")) done(); });
+        child.once("exit", (code) => fail(new Error(`exited ${code}`)));
+      });
+      const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+      const closed = new Promise<number>((done) => socket.addEventListener("close", (event) => done(event.code)));
+      await new Promise((done) => socket.addEventListener("open", done));
+      expect(await Promise.race([closed, new Promise((done) => setTimeout(() => done("open"), 1500))])).toBe("open");
+      socket.close();
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 30_000);
 
   it("the HyperDHT relay takes host:port bootstrap nodes, HyperDHT's ip@host:port ones too", () => {
     expect(hyperdhtSettings({ GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:49737, 88.99.3.86@node1.hyperdht.org:49737" }).bootstrap)
@@ -154,3 +219,14 @@ function startLine(service: string, env: Record<string, string | undefined>): Pr
     child.once("exit", (code) => { clearTimeout(timer); fail(new Error(`exited ${code}: ${err}`)); });
   }).finally(() => { child.kill("SIGTERM"); });
 }
+
+describe("the HyperDHT relay's container", () => {
+  it("listens on every interface of the container, so the published port and a Cloudflare tunnel still reach it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const dockerfile = readFileSync(resolve(__dirname, "../../../infra/services/hyperdht-relay/Dockerfile"), "utf8");
+    const env = dockerfile.split("\n").filter((line) => /^ENV\s/.test(line)).join(" ");
+    expect(env).toMatch(/\bHOST=0\.0\.0\.0\b/);
+    // The compose file turns the Cloudflare setting on by default; the Dockerfile's HOST must still win over it.
+    expect(hyperdhtSettings({ HOST: "0.0.0.0", GHOSTLY_RELAY_CLOUDFLARE: "1" }).host).toBe("0.0.0.0");
+  });
+});

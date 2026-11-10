@@ -2,8 +2,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, NO_PICTURE_METADATA, groupName, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, cleanName, findOwnNamedChat, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
 
 /**
@@ -55,7 +56,10 @@ export async function pictureFrom(path: string): Promise<string> {
   }
   const url = `data:image/jpeg;base64,${(parts ? Buffer.concat(parts) : bytes).toString("base64")}`;
   const checked = sanitizeAvatar(url);
-  if (!checked) throw new CliError("bad_request", `A picture is a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends): resize it first`);
+  const bounds = `a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends)`;
+  // A PNG, even 1×1, is not too big: resizing it would not help.
+  if (!checked && !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) throw new CliError("bad_request", `${path} is not a JPEG: convert it to ${bounds}`);
+  if (!checked) throw new CliError("bad_request", `A picture is ${bounds}: resize it first`);
   return checked;
 }
 
@@ -72,7 +76,8 @@ const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ct
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = groupOf(ctx, params);
-    const link = chatOf(ctx, params);
+    // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
@@ -95,8 +100,11 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.rename"(ctx, params) {
     const group = groupOf(ctx, params, "chat rename <chat> <name...>");
-    const name = groupName(str(params, "name", true));
+    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
+    const name = clean && groupName(clean);
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
+    guardText(name, bool(params, "force"), "group's name", "rename it");
     await node(ctx).renameGroup({ groupId: group.id, name });
     return view(ctx, group.id, params);
   },

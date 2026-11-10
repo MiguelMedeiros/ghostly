@@ -106,14 +106,40 @@ export interface OpenedService {
 
 /**
  * Added to every answer of a contact's app, next to any policy the contact sends (a browser enforces both): its
- * scripts, forms, pictures, frames, fonts, media, styles and workers reach its own origin and public https sites
- * (and inline, data: and blob: content), never plain http. The page is served from `<random>.localhost`, which Chrome
- * counts as this machine, so its own guard for requests to local addresses (Local Network Access) would not ask
- * before the page reached another service on 127.0.0.1 or the local network. Inline scripts and styles stay allowed:
- * this policy bounds where the page reaches, not how the app is written. A top-level navigation is not covered: no
- * browser lets a policy bound it.
+ * requests (fetch, XHR, beacons, WebSockets, EventSource) and forms reach only its own origin, the contact's server;
+ * its scripts, pictures, frames, fonts, media, styles and workers its own origin and https sites (and inline, data:
+ * and blob: content), never plain http. The page is served from `<random>.localhost`, which Chrome counts as this
+ * machine, so its own guard for requests to local addresses (Local Network Access) would not ask before the page
+ * reached another service on 127.0.0.1 or the local network, and a policy cannot tell a public https site from one
+ * here or on the local network with a trusted certificate: requests that can read an answer or post go nowhere else.
+ * Inline scripts and styles stay allowed: this policy bounds where the page reaches, not how the app is written. A
+ * top-level navigation is not covered: no browser lets a policy bound it.
  */
-export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
+export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
+ * The policy while Hide my IP from contacts is on (`relayOnly`): no `https:`, so the page loads nothing but its own
+ * origin. A picture or script from a server the contact names would show that server this machine's address.
+ */
+export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
+ * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
+ * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
+ * early connections). Only the contact's server is reached.
+ */
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+
+/** The directives of a contact's policy that send reports to a URL it names, dropped from it. */
+export const OPENED_SERVICE_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
+
+/** A contact's `Content-Security-Policy` value (one policy or several joined by commas) without its report directives. */
+export function withoutReports(value: string): string {
+  return value.split(",")
+    .map((policy) => policy.split(";").filter((directive) => !OPENED_SERVICE_DROPPED_DIRECTIVES.includes(directive.trim().split(/\s+/)[0].toLowerCase())).join(";").trim())
+    .filter((policy) => policy.replaceAll(";", "").trim())
+    .join(", ");
+}
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
@@ -125,8 +151,10 @@ function plain(response: ServerResponse, status: number, text: string, headers: 
  * cookies and storage are its own, apart from any other app on 127.0.0.1 or localhost, and a name that merely
  * resolves here (DNS rebinding) is not it. Only a browser given the link (which sets `OPEN_COOKIE`) is served; anyone
  * else on this machine who finds the port gets 404. The body streams through, bounded by `MAX_RESPONSE_BYTES`.
+ * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`).
  */
-export async function openServiceServer(send: ServiceSend, port = 0): Promise<OpenedService> {
+export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly = false }: { relayOnly?: boolean } = {}): Promise<OpenedService> {
+  const policy = relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP;
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
@@ -152,14 +180,14 @@ export async function openServiceServer(send: ServiceSend, port = 0): Promise<Op
       }
       chunks.push(chunk);
     });
-    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies); });
+    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
   host = `${name}:${(server.address() as AddressInfo).port}`;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
-async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>): Promise<void> {
+async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>, policy: string): Promise<void> {
   // A browser that goes away stops the contact's answer too.
   const stop = new AbortController();
   response.on("close", () => { if (!response.writableFinished) stop.abort(); });
@@ -174,16 +202,18 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
-      if (lower === "transfer-encoding" || lower === "connection") continue;
+      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
         if (cookies.size < MAX_COOKIE_NAMES) cookies.add(setCookieName(cookie)!);
         out[lower] = [...((out[lower] as string[] | undefined) ?? []), cookie];
-      } else if (lower === "content-security-policy") out[lower] = [...((out[lower] as string[] | undefined) ?? []), value];
-      else out[lower] = value;
+      } else if (lower === "content-security-policy") {
+        const policy = withoutReports(value);
+        if (policy) out[lower] = [...((out[lower] as string[] | undefined) ?? []), policy];
+      } else out[lower] = value;
     }
-    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), OPENED_SERVICE_CSP];
+    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -251,7 +281,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true));
+    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     const shared = !bool(params, "off");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
@@ -281,7 +311,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const peer = link.peerPubKeyZ32;
     // Another open began while this one waited: it answers that one.
     if (open.has(key)) return SERVICE_METHODS["service.open"](ctx, params);
-    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => {
+    // Hide my IP from contacts as it is now: the app keeps to its own origin while it is on.
+    const relayOnly = state(ctx).settings?.relayOnly === true;
+    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port, { relayOnly }).catch((error: unknown) => {
       if (open.get(key) === opening) open.delete(key);
       throw portError(error, port);
     });

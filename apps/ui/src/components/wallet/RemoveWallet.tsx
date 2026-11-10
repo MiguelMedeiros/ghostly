@@ -4,6 +4,7 @@ import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/b
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
+import { copySecret } from "../../lib/shareLink";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
 import { BackupRows } from "./BackupRows";
@@ -144,7 +145,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
           ) : removal.backup === "tokens" ? (
             <Block>
               <p className="text-xs text-text-secondary">{t("wallet.remove.tokensHint")}</p>
-              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setNotice(tokens.length ? t("wallet.remove.tokensCopied") : t("wallet.remove.noTokens")); })}>{t("wallet.remove.copyTokens")}</Button>
+              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await copySecret(tokens.map((token) => token.token).join("\n")); setNotice(tokens.length ? t("wallet.remove.tokensCopied") : t("wallet.remove.noTokens")); })}>{t("wallet.remove.copyTokens")}</Button>
             </Block>
           ) : (
             <Notice testId="wallet-remove-no-backup">{t("wallet.remove.noBackup")}</Notice>

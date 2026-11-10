@@ -133,6 +133,21 @@ class CallChannel {
 /** How long a picture's decode may take before the next picture is drawn without it. */
 const DECODE_MS = 1000;
 
+let followingSight = false;
+
+/**
+ * Tells Rust each time the window goes out of sight and back (`native_pictures_shown`), from the first picture on:
+ * out of sight it makes no JPEG past each picture's first, rather than make 15 a second of each for a page that
+ * draws none of them (`Picture.show`). Rust takes a new page as in sight.
+ */
+function followSight(): void {
+  if (followingSight) return;
+  followingSight = true;
+  const tell = () => void invoke("native_pictures_shown", { shown: !document.hidden }).catch(() => {});
+  document.addEventListener("visibilitychange", tell);
+  if (document.hidden) tell();
+}
+
 /** A canvas showing the last JPEG that came, and the video track that films it. */
 class Picture {
   private readonly canvas = document.createElement("canvas");
@@ -148,18 +163,29 @@ class Picture {
     this.canvas.width = 640;
     this.canvas.height = 480;
     this.track = this.canvas.captureStream(15).getVideoTracks()[0];
+    followSight();
   }
 
   /**
    * Frames that come while one is being decoded replace each other: only the newest is drawn. A decode that has
-   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does.
+   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does. While the window is
+   * out of sight, once a first frame is drawn, nothing is decoded: each frame replaces the one before, and the newest
+   * is drawn when the window is back (two pictures took a fifth of a core of WebKitGTK's, hidden, for nobody).
    */
   show(jpeg: Uint8Array): void {
     if (this.drawing) {
       this.waiting = jpeg;
       return;
     }
+    if (this.drawn && document.hidden) {
+      if (!this.waiting) document.addEventListener("visibilitychange", this.back);
+      this.waiting = jpeg;
+      return;
+    }
     this.drawing = true;
+    // Shown again before the window said so: what it held is older than this one.
+    document.removeEventListener("visibilitychange", this.back);
+    this.waiting = null;
     let over = false;
     const next = () => {
       if (over) return;
@@ -191,6 +217,15 @@ class Picture {
       .catch(() => {})
       .finally(next);
   }
+
+  /** The window is in sight again: the newest frame that came while it was not is drawn, unless the picture ended. */
+  private readonly back = () => {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", this.back);
+    const waiting = this.waiting;
+    this.waiting = null;
+    if (waiting && this.track.readyState !== "ended") this.show(waiting);
+  };
 }
 
 /** The camera behind each camera track this file made. */
@@ -385,6 +420,8 @@ export class NativePeerConnection extends EventTarget {
   /** How loud each side is, as Rust last said: our microphone (silence while muted) and the peer's sound. */
   private readonly levels = { mic: 0, peer: 0 };
   private readonly listeners = { mic: new Set<(level: number) => void>(), peer: new Set<(level: number) => void>() };
+  /** Rust was asked to say the levels (`wantLevels`). */
+  private levelsAsked = false;
 
   constructor(private readonly config: RTCConfiguration) {
     super();
@@ -455,12 +492,14 @@ export class NativePeerConnection extends EventTarget {
   private async catchUp(sent: Devices): Promise<void> {
     this.described = true;
     if (this.closed) return;
+    this.wantLevels();
     const now = this.devices();
     const track = this.audio.sender.track;
-    // Each as its own command would have done it: one that fails leaves the call as Rust started it.
+    // Each as its own command would have done it: one that fails leaves the call as Rust started it. A device picked
+    // again during these awaits went to Rust on its own (`described`): the older pick does not follow it there.
     if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
-    if (now.speaker !== sent.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
-    if (now.microphone !== sent.microphone) {
+    if (now.speaker !== sent.speaker && this.devices().speaker === now.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
+    if (now.microphone !== sent.microphone && this.audio.sender.track === track) {
       await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(track, used), () => {});
     }
   }
@@ -605,7 +644,22 @@ export class NativePeerConnection extends EventTarget {
   listen(side: "mic" | "peer", heard: (level: number) => void): () => void {
     this.listeners[side].add(heard);
     heard(this.levels[side]);
-    return () => { this.listeners[side].delete(heard); };
+    this.wantLevels();
+    return () => {
+      this.listeners[side].delete(heard);
+      this.wantLevels();
+    };
+  }
+
+  /**
+   * Asks Rust for the levels while a ring listens, once it has the call, and lets them go when none does. A video
+   * call draws no ring, and Rust said a level at nearly every reading all the same: 20 evals a second for nobody.
+   */
+  private wantLevels(): void {
+    const want = this.listeners.mic.size + this.listeners.peer.size > 0;
+    if (want === this.levelsAsked || !this.described || this.closed) return;
+    this.levelsAsked = want;
+    void invoke("native_call_levels", { id: this.id, on: want }).catch(() => {});
   }
 
   private heard(bytes: Uint8Array): void {

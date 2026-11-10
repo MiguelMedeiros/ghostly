@@ -7,6 +7,7 @@ import { providerIcon } from "./ProviderIcons";
 import { categoryLabel, date, daysLeft, expiringSoon, providerLabel, providerOf, receivedStatus, shortSubject } from "../../lib/identities";
 import { english } from "../../lib/english";
 import { ago, badgeState } from "./contactBadges";
+import { cleanFaceName } from "./contactFace";
 import { initial } from "../../lib/initial";
 
 /**
@@ -57,10 +58,10 @@ export interface IdCardContent {
   lookup?: ProfileLookup;
 }
 
-/** The profile's picture and name, when its network has them; else what the evidence carried. */
+/** The profile's picture and name (one line, as the chat list shows it), when its network has them; else what the evidence carried. */
 const face = (profile: PublicProfileView | undefined, name: string | undefined, avatar: string | undefined) => {
   const picture = profile?.found && profile.avatar?.startsWith("data:image/") ? profile.avatar : avatar?.startsWith("data:image/") ? avatar : undefined;
-  return { name: (profile?.found ? profile.name : undefined) ?? name, photo: picture };
+  return { name: (profile?.found ? cleanFaceName(profile.name) : undefined) ?? cleanFaceName(name), photo: picture };
 };
 /**
  * The profile and its lookup, for a provider with public profiles and only while the proof is current and verified:
@@ -138,7 +139,8 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
-    ...face(pp.profile, r.display?.name ?? r.verified.display?.name, avatar),
+    // A looked-up name stored before it was cleaned, with nothing visible left, gives way to the proof's own.
+    ...face(pp.profile, cleanFaceName(r.display?.name) ?? r.verified.display?.name, avatar),
     category: categoryLabel(r.provider, r.verified.attester, t),
     attested,
     status,

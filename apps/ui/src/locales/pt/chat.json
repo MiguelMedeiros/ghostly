@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
+    "notSent": "Sua mensagem “{{text}}” não foi enviada",
+    "notSentCount": "{{count}} mensagens não enviadas",
     "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
-    "rowMoved": "Agora na posição {{place}} de {{count}}"
+    "rowMoved": "Agora na posição {{place}} de {{count}}",
+    "waiting": "Sua mensagem “{{text}}” está aguardando seu contato ficar online",
+    "waitingCount": "{{count}} mensagens aguardando seu contato ficar online"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
@@ -315,6 +319,7 @@
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
   },
+  "pictureHiddenIp": "Não mostrada com Ocultar meu IP ligado",
   "pinned": {
     "bar": "Mensagem fixada",
     "info": "Uma mensagem fixada por conversa, vista por todos nela. Uma nova fixação substitui a anterior. Numa comunidade, só o admin fixa.",
@@ -372,6 +377,7 @@
     "copied": "Copiado",
     "copy": "Copiar",
     "copyCode": "Copiar código",
+    "hiddenChars": "Este código tem caracteres ocultos ou que mudam a direção do texto, mostrados como {{marker}}. Copiar código copia eles também.",
     "localTime": "{{time}} no seu horário",
     "showAll": "Mostrar tudo",
     "showLess": "Mostrar menos",
@@ -466,6 +472,10 @@
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",
+  "unconfirmed": {
+    "hint": "Enviada com um pedido de contato. O app da pessoa ainda não confirmou que enviou isto.",
+    "label": "Não confirmada"
+  },
   "video": {
     "arriving": "Chegando",
     "cantPlay": "Este aparelho não reproduz este vídeo ({{format}}). Baixe para assistir.",
@@ -489,6 +499,7 @@
     "limit": "Mensagens de voz têm no máximo {{minutes}} minutos",
     "message": "Mensagem de voz",
     "micDenied": "Sem acesso ao microfone. Permita nos ajustes do navegador ou do sistema.",
+    "micDeniedAndroid": "Sem acesso ao microfone. Permita quando o Android pedir, ou nos ajustes do Android para o Ghostly.",
     "micUnavailable": "Nenhum microfone encontrado. Conecte um, ou feche o app que o usa.",
     "micUnsupported": "Este navegador não grava mensagens de voz.",
     "pause": "Pausar mensagem de voz",

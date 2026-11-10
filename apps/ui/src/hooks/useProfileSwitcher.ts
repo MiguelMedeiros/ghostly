@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { changesGlance, profileGlance, recounted, type ProfileGlance } from "../lib/profileData";
-import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
+import { currentProfile, listProfiles, onOwnThemeSaved, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
 import { modalOpen } from "./useAppCommands";
 
@@ -54,13 +54,16 @@ export function useProfileGlances(): { current: ProfileEntry; others: OtherProfi
       if (ids.size) setState((old) => ({ ...old, others: old.others.map((o) => (ids.has(o.entry.id) && o.glance ? { ...o, glance: recounted(o.entry.id, o.glance) } : o)) }));
     };
     load();
-    const events = ["profiles-updated", "settings-updated", PEEK_EVENT];
+    const events = ["profiles-updated", PEEK_EVENT];
     for (const name of events) window.addEventListener(name, load);
     window.addEventListener("storage", onStorage);
+    // This profile's own settings change no other profile's glance: only a new colour of its own is drawn.
+    const stopTheme = onOwnThemeSaved(() => setState((old) => ({ ...old, current: currentProfile() })));
     return () => {
       alive = false;
       for (const name of events) window.removeEventListener(name, load);
       window.removeEventListener("storage", onStorage);
+      stopTheme();
     };
   }, []);
   const othersUnread = state.others.reduce((sum, o) => sum + (o.glance?.unread ?? 0), 0);

@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Apps } from "../src/engine/apps";
-import { FakeNet, NOW_MS, apps, bundle, emptyProfile, iconPng } from "./appsSupport";
+import { fileBytesOf } from "../src/shared/fileBytes";
+import { BUNDLE_URL, FakeNet, NOW_MS, apps, bundle, emptyProfile, iconPng } from "./appsSupport";
 // covers: apps.engine.installed
 
 /*
@@ -31,22 +32,23 @@ async function installMany(count: number, data?: Uint8Array): Promise<{ ref: str
   return out;
 }
 
-/** A fresh engine (a page reloaded), and how many times it reads a bundle back from file storage. */
-function freshEngine(now?: () => number): { store: Apps; reads: () => number } {
+/** A fresh engine (a page reloaded), and how many times it reads a bundle back from file storage, whole or only its icon. */
+function freshEngine(now?: () => number): { store: Apps; reads: () => number; iconReads: () => number } {
   const store = apps(net, now && { now });
   const spy = vi.spyOn(store as unknown as { readBundleBytes: (...args: unknown[]) => Promise<Uint8Array | null> }, "readBundleBytes");
-  return { store, reads: () => spy.mock.calls.length };
+  const icons = vi.spyOn(store as unknown as { storedIcon: (...args: unknown[]) => Promise<Uint8Array | null> }, "storedIcon");
+  return { store, reads: () => spy.mock.calls.length, iconReads: () => icons.mock.calls.length };
 }
 
 describe("installed bundles read back", () => {
-  it("the Apps page with three apps, opened three times, reads each bundle once", async () => {
+  it("the Apps page with three apps, opened three times, reads each icon once and no bundle whole", async () => {
     const installed = await installMany(3);
-    const { store, reads } = freshEngine();
+    const { store, reads, iconReads } = freshEngine();
     for (let visit = 0; visit < 3; visit++) {
       const icons = await Promise.all(installed.map(({ ref }) => store.file({ ref, path: "icon.png" })));
       expect(icons).toEqual(installed.map(({ icon }) => icon));
     }
-    expect(reads()).toBe(3);
+    expect([iconReads(), reads()]).toEqual([3, 0]);
   });
 
   it("three apps running at once, reading their files in turn, read each bundle once", async () => {
@@ -113,11 +115,15 @@ describe("installed bundles read back", () => {
     expect(reads()).toBe(4);
   });
 
-  it("four cards of one app drawn at once read its bundle once", async () => {
+  it("four cards of one app drawn at once read its icon once", async () => {
     const [{ ref, icon }] = await installMany(1);
-    const { store, reads } = freshEngine();
+    const { store, iconReads } = freshEngine();
+    const files = (await fileBytesOf("idb"))!;
+    const read = vi.spyOn(files, "read");
     expect(await Promise.all([1, 2, 3, 4].map(() => store.file({ ref, path: "icon.png" })))).toEqual([icon, icon, icon, icon]);
-    expect(reads()).toBe(1);
+    // Four calls, one read from file storage: the head with the manifest, then the icon.
+    expect([iconReads(), read.mock.calls.length]).toEqual([4, 2]);
+    read.mockRestore();
   });
 
   it("the icons kept in memory hold the icons, not the whole bundles they were read from", async () => {
@@ -146,6 +152,36 @@ describe("installed bundles read back", () => {
     for (const { ref } of installed) await store.file({ ref, path: "icon.png" });
     const kept = [...(store as unknown as { icons: Map<string, Uint8Array | null> }).icons.values()];
     expect(kept.map((icon) => icon?.buffer.byteLength)).toEqual(installed.map(({ icon }) => icon.length));
+  });
+
+  it("twenty apps' icons drawn at once after a start read and hash about the icons' bytes, not every bundle whole", async () => {
+    const installed = await installMany(20, new Uint8Array(1024 * 1024).fill(7));
+    const { store, reads } = freshEngine();
+    const files = (await fileBytesOf("idb"))!;
+    let read = 0, hashed = 0;
+    const realRead = files.read.bind(files);
+    vi.spyOn(files, "read").mockImplementation(async (...args) => { const out = await realRead(...args); read += out.length; return out; });
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => { hashed += (data as Uint8Array).byteLength; return realDigest(algorithm, data); });
+    try {
+      expect(await Promise.all(installed.map(({ ref }) => store.file({ ref, path: "icon.png" })))).toEqual(installed.map(({ icon }) => icon));
+    } finally { vi.restoreAllMocks(); }
+    // Before: every bundle read back whole and hashed (20 reads in flight, 20 MiB read, 20 MiB hashed) for 20 icons of 64 bytes.
+    expect({ whole: reads(), small: read <= 20 * (4 * 1024 + 64), read, hashed }).toEqual({ whole: 0, small: true, read, hashed: 0 });
+  });
+
+  it("an icon whose stored bytes changed since the install is refused, not handed out", async () => {
+    const built = await bundle({ icon: iconPng() });
+    net.put(BUNDLE_URL, built.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: built.digest, grant: ["chat"] });
+    // The icon's last byte (its zero padding), which the entry follows in the bundle, flipped in file storage.
+    const changed = built.bytes.slice();
+    changed[changed.length - new TextEncoder().encode("<!doctype html><title>Chess</title><p>v1").length - 1] ^= 1;
+    const files = (await fileBytesOf("idb"))!;
+    await files.stage(`app-${built.digest}`, new Blob([changed]));
+    await expect(apps(net).file({ ref: built.ref, path: "icon.png" })).rejects.toThrow(/^damaged/);
   });
 
   it("an uninstalled app's icon is not handed out any more", async () => {

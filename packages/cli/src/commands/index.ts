@@ -80,6 +80,17 @@ export function idSlot(command: { args?: string[] }): (index: number) => boolean
   return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
 }
 
+/** Positionals that take a number (`<sats>`): there `-5` is that number, refused as one, not an unknown option. */
+const NUMBER_ARGS = new Set(["amount"]);
+
+/** Which of a command's positionals take a number, by index; a leading `name?` shifts them as it does in `idSlot`. */
+export function numberSlot(command: { args?: string[] }): (index: number) => boolean {
+  const names = (command.args ?? []).map((name) => name.replace(/\?$/, ""));
+  const shift = leadingOptionals(command.args ?? []).length;
+  const at = (index: number) => NUMBER_ARGS.has(names[index] ?? "");
+  return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
+}
+
 /** Whether a command's last positional takes the rest of the line as words, not ids: a text, a name, a path, emoji. */
 export function takesText(command: { args?: string[] }): boolean {
   const last = command.args?.at(-1)?.replace(/\?$/, "");

@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, createLink, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
@@ -660,16 +660,24 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
 
       describe("groups take listeners least recently used first, as chats do (WISP 902 § Transports)", () => {
         /** A group's edges toward these many members, each reached only natively (an app with no WebRTC, or a VPN). */
-        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean } = {}) {
+        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean; admin?: number; order?: (keys: string[], me: string) => string[] } = {}) {
           const { groupId } = await node.createGroup({ name: "Plaza" });
           const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
           const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
-          // A member the group's beacon names as a hub.
-          if (options.hub !== undefined) {
+          // A member the group's beacon names as a hub, and one that is the group's admin.
+          if (options.hub !== undefined || options.admin !== undefined) {
             const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
-            const view = groups.view.bind(groups);
-            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
-              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
+            // Over a spy an earlier group of the test left: that one's answer, not the spy again.
+            const view = vi.isMockFunction(groups.view) ? groups.view.getMockImplementation()! : groups.view.bind(groups);
+            const added = [...(options.hub !== undefined ? [{ key: keys[options.hub], role: "member", me: false, online: false, missing: 0, hub: true }] : []),
+              ...(options.admin !== undefined ? [{ key: keys[options.admin], role: "admin", me: false, online: false, missing: 0 }] : [])];
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g : { ...g, members: [...g.members, ...added] }; });
+          }
+          // A private group's roster in admission order (`meshOrder`), with that admin.
+          if (options.order) {
+            const me = createIdentity().pubKeyZ32, order = options.order(keys, me), groups = node["groups"];
+            const meshOrder = vi.isMockFunction(groups.meshOrder) ? groups.meshOrder.getMockImplementation()! : groups.meshOrder.bind(groups);
+            vi.spyOn(groups, "meshOrder").mockImplementation((id) => id === groupId ? { order, admin: options.admin !== undefined ? keys[options.admin] : order[0], me } : meshOrder(id));
           }
           // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
           if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
@@ -866,6 +874,32 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             await node["nativeQueues"].get("iroh/1");
             expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
             expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+
+          it("in a private group, the edge kept goes to the member admitted just before, not to the admin; a community keeps the admin's (ghostly-agents#1509)", async () => {
+            // Without WebRTC, every member kept its edge to the admin: an admin with five chats live and four groups of six
+            // had twenty to answer within its eight listeners, and members of the fourth group were left with no edge at all.
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            // Admitted in this order: the admin (keys[0]), keys[1], keys[2], me, keys[3].
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], me, keys[3]] });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[2]]));
+            expect(node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id)[0]).toBe(edgeIds[2]);
+            // The newest keeps the admin's: it admitted it, and knows it at once.
+            const newest = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], keys[2], keys[3], me] });
+            expect(node["groupEdgesByRank"](newest.groupId, node["groups"].view(newest.groupId))[0].stored.id).toBe(newest.edgeIds[0]);
+            // A community: the admin's edge first, as before.
+            const community = await groupOf(node, 4, { admin: 0, used: true });
+            expect(node["groupEdgesByRank"](community.groupId, node["groups"].view(community.groupId))[0].stored.id).toBe(community.edgeIds[0]);
+          });
+
+          it("in a private group whose kept edge goes unanswered, the next is the edge a member keeps to it, then the admin's", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { groupId, edgeIds } = await groupOf(node, 4, { admin: 0, used: true, order: (keys, me) => [keys[0], keys[1], me, keys[2], keys[3]] });
+            const ranked = () => node["groupEdgesByRank"](groupId, node["groups"].view(groupId)).map((live: { stored: { id: string } }) => live.stored.id);
+            // Kept: the one admitted before (keys[1]); then keys[2], which keeps its edge to me by the rule; then the admin.
+            expect(ranked().slice(0, 3)).toEqual([edgeIds[1], edgeIds[2], edgeIds[0]]);
+            await vi.waitFor(() => expect(edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"))).toEqual([edgeIds[1]]));
           });
 
           it("every member away past twenty seconds: no edge is passed over, and each has its listener when they come back", async () => {
@@ -1418,6 +1452,97 @@ describe("text in a chat", () => {
     expect(history).not.toHaveBeenCalled();
   });
 
+  // covers: chat.dht.files
+  /**
+   * A waiting file's offer goes on the DHT floor while the chat is not live (WISP 403 § Files), and Cancel sending comes
+   * while it is being said there (a relay publication: hundreds of ms or more). The delete read a row that did not say
+   * `fileOnFloor` yet and withdrew nothing: no `pf-abort` ever went, and the contact's bubble waited a week for the file
+   * instead of saying it was cancelled. `back`: when the publication ends, after the cancel.
+   */
+  async function cancelOnFloor(back: "once the row is gone" | "at once" | "a moment later" | "said before the cancel") {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id), wireId = `floor${crypto.randomUUID().slice(0, 8)}`, messageId = "me_7";
+    const gone = async () => !(await db.getMessage(chat.id, messageId));
+    const cancel = () => node.deleteMessage({ linkId: chat.id, messageId });
+    const announceFile = vi.fn(async (offer: { wireId: string }) => {
+      if (back !== "said before the cancel") {
+        cancel();
+        if (back === "once the row is gone") await vi.waitFor(async () => expect(await gone()).toBe(true));
+        if (back === "a moment later") await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      Object.assign(link, { dhtPendingId: dhtFileId(offer.wireId) });
+      return null;
+    });
+    const settleDht = vi.fn(async () => {}), sendFilesFrame = vi.fn(() => true);
+    // Away: the file waits for the live link, and its offer goes on the floor meanwhile.
+    Object.assign(link, { isDataLinkOpen: false, supportsFiles: false, fileAnnounceError: () => null, announceFile, settleDht, sendFilesFrame });
+    node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-${wireId}`, name: "a.txt", size: 1, mime: "text/plain" }, timestamp: 7 });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.delivery).toBe("waiting"));
+    // A text written after it: the outbox looks at what waits, and the file's offer goes on the floor first (`sendWaitingFile`).
+    void node.sendMessage({ linkId: chat.id, text: "after it", timestamp: 8 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).filter((m) => m.delivery === "waiting")).toHaveLength(2));
+    // A read of the mailbox (the contact is away): the outbox looks at what waits.
+    link.options.events.onDhtDelivery({ peerMode: "dht" } as never);
+    await vi.waitFor(() => expect(announceFile).toHaveBeenCalledOnce());
+    if (back === "said before the cancel") {
+      await vi.waitFor(async () => expect((await db.getMessage(chat.id, messageId))?.fileOnFloor).toBe("sent"));
+      cancel();
+    }
+    await vi.waitFor(async () => expect(await gone()).toBe(true));
+    // Whatever was going to happen to it has happened by now.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Withdrawn: the floor stops saying it, and the chat keeps its id for the next session.
+    expect(settleDht).toHaveBeenCalledWith(dhtFileId(wireId));
+    expect((await saved(chat.id))?.withdrawnFiles).toEqual([wireId]);
+    expect(await gone()).toBe(true);
+    expect((await saved(chat.id))?.deletedIds).toContain(messageId);
+    // The next session that carries files tells the contact's bubble it was cancelled ("Cancelled by the sender").
+    link.isDataLinkOpen = true;
+    link.options.events.onFilesSession(true);
+    expect(sendFilesFrame).toHaveBeenCalledWith({ t: "pf-abort", id: wireId });
+    await vi.waitFor(async () => expect((await saved(chat.id))?.withdrawnFiles).toBeUndefined());
+    expect(link.sendFile).not.toHaveBeenCalled();
+  }
+
+  for (const [run, back] of (["once the row is gone", "at once", "a moment later"] as const).entries()) {
+    it(`Cancel sending while a waiting file's offer is being said on the DHT floor withdraws it, as one cancelled after (run ${run + 1}: it ends ${back})`, async () => {
+      await cancelOnFloor(back);
+    });
+  }
+
+  it("Cancel sending once a waiting file's offer was said on the DHT floor withdraws it", async () => {
+    await cancelOnFloor("said before the cancel");
+  });
+
+  // covers: groups.files
+  it("a group edge's waiting file deleted while the session waits for the member's capabilities stays gone and never goes", async () => {
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Friends", profile: "mesh" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
+    const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+    const edge = links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    const file = { id: `${edgeId}-out-e1`, name: "a.txt", size: 1, mime: "text/plain" };
+    await db.addMessage({ linkId: edgeId, id: "me_9", text: "📎 a.txt", sender: "me", timestamp: 9, via: "datalink", file, delivery: "waiting", deliveryError: "Sent when you are live." });
+    Object.assign(edge, { isDataLinkOpen: true });
+    const engine = GhostlyNode as unknown as { takesFiles: (link: unknown) => boolean; largeFilesAgreed: (link: unknown) => Promise<boolean> };
+    // Deleted here while the session asks the member's capabilities; it takes files once they come.
+    let asked = false;
+    vi.spyOn(engine, "takesFiles").mockImplementation(() => asked);
+    const agreed = vi.spyOn(engine, "largeFilesAgreed").mockImplementation(async () => {
+      if (!asked) await db.deleteMessage(edgeId, "me_9");
+      asked = true;
+      return true;
+    });
+    await node["sendWaiting"](edgeId);
+    expect(agreed).toHaveBeenCalled();
+    // Never written back as sent, and its transfer never began.
+    expect(await db.getMessage(edgeId, "me_9")).toBeUndefined();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+    expect(edge.sendFile).not.toHaveBeenCalled();
+  });
+
   // covers: chat.link-preview.wire
   it("a link preview is kept with the message and goes with it; one of a link the text lacks is dropped", async () => {
     const chat = row();
@@ -1693,14 +1818,93 @@ describe("a 1:1 session that opens (agents#2468)", () => {
     const again = await hosted();
     const back = again.linkOf(chat.id);
     const sendEdit = wire(back, false);
-    // The new run reads the chat's history once for the edit queue (it starts with nothing known); the outbox has what
-    // the start read.
-    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBeLessThanOrEqual(1);
+    // The edit queue and the outbox both have what the start read: the first open reads no history.
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBe(0);
     await vi.waitFor(() => expect(wires(back)).toEqual([unconfirmedWire, awayWire]));
     await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
     closes(back);
     await settle();
     expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the next open").toBe(0);
+  });
+
+  it("from the start to its first session open, the chat's history is read whole once: by the start", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { linkOf } = await hosted(chat);
+      opens(linkOf(chat.id));
+      await settle();
+      // The start's read seeds what a session open needs: what waits to go, cards due, and my edits on their way.
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("after a restart, my edit and my removal on their way go when the session opens, found from the start's read", async () => {
+    const chat = await chatWithHistory();
+    const WIRE_GONE = "g".repeat(22);
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_GONE}`, wireId: WIRE_GONE, text: "to delete", sender: "me", timestamp: 950, via: "datalink", delivery: "delivered" });
+    const first = await hosted(chat);
+    closes(first.linkOf(chat.id));
+    expect(await first.node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    expect(await first.node.removeMessage({ linkId: chat.id, messageId: `me_${WIRE_GONE}` })).toMatchObject({ error: null });
+    await settle();
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const again = await hosted();
+      const back = again.linkOf(chat.id);
+      const sendEdit = wire(back, false);
+      opens(back);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_GONE, rm: true }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id), "whole-history reads from the start to the session open").toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("an edit made after the start, before the session opens, goes when it opens", async () => {
+    const chat = await chatWithHistory();
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      const { node, linkOf } = await hosted(chat);
+      const link = linkOf(chat.id);
+      const sendEdit = wire(link, false);
+      expect(await node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "edited before the session" })).toMatchObject({ error: null });
+      await settle();
+      expect(sendEdit).not.toHaveBeenCalled();
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited before the session" }), expect.anything()));
+      await settle();
+      expect(whole.mock.calls.filter(([id]) => id === chat.id)).toHaveLength(1);
+    } finally { whole.mockRestore(); }
+  });
+
+  it("a chat added during the run, which the start never read, learns its edits on their way from one read of its history", async () => {
+    const { node, linkOf } = await hosted();
+    const { linkId } = await node.ensureLink({ ...createLink().mine, profile: "paired-chat/1" });
+    const link = linkOf(linkId);
+    const sendEdit = wire(link, false);
+    // An edit on its way the queue was never told of (written by another run of the profile): the history has it.
+    await db.putMessage({ linkId, id: `me_${WIRE_OLD}`, wireId: WIRE_OLD, text: "edited elsewhere", sender: "me", timestamp: 900, via: "datalink", delivery: "delivered",
+      edit: { seq: 1, at: Date.now(), history: [], pending: true } });
+    // Its other lookups read it lazily too (what waits to go, cards due); the edit queue's is one read.
+    const read = db.getMessages.bind(db), byQueue: string[] = [];
+    const whole = vi.spyOn(db, "getMessages").mockImplementation((...args) => {
+      if (args[0] === linkId && /EditQueue/.test(new Error().stack ?? "")) byQueue.push(args[0]);
+      return read(...args);
+    });
+    try {
+      opens(link);
+      await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "edited elsewhere" }), expect.anything()));
+      closes(link);
+      await settle();
+      opens(link);
+      await settle();
+      expect(byQueue, "the edit queue's whole-history reads in the run").toHaveLength(1);
+    } finally { whole.mockRestore(); }
   });
 });
 

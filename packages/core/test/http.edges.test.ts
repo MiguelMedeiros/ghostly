@@ -691,4 +691,48 @@ describe("HttpClient and a signal that fires before the request goes out", () =>
     c.client.close();
     await Promise.allSettled([...first, after]);
   });
+
+  it("leaves the queue as soon as its signal aborts, with no slot freeing: its body is let go, and it never goes out", async () => {
+    const c = client();
+    const first = Array.from({ length: LIMITS.maxClientInFlight }, () => c.client.request("atlas", { method: "GET", path: "/" }));
+    const controller = new AbortController();
+    const cancelled = c.client.request("atlas", { method: "POST", path: "/cancelled", body: new Uint8Array(1024), signal: controller.signal });
+    await flush();
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: "aborted" });
+    // Its place in the queue is gone too: the next slot that frees goes to the one after it.
+    const after = c.client.request("atlas", { method: "GET", path: "/after" });
+    c.client.handleResponse({ t: "res", id: 1, st: 204, h: [], b: false });
+    await first[0];
+    await flush();
+    expect(requests(c.controls()).map((f) => f.p)).not.toContain("/cancelled");
+    expect(requests(c.controls()).at(-1)?.p).toBe("/after");
+    c.client.close();
+    await Promise.allSettled([...first, after]);
+  });
+
+  it("keeps a bounded queue: past its count or its bodies' bytes, a request is refused at once as busy, and never goes out", async () => {
+    const c = client();
+    const first = Array.from({ length: LIMITS.maxClientInFlight }, () => c.client.request("atlas", { method: "GET", path: "/" }));
+    const queued = Array.from({ length: LIMITS.maxClientWaiting }, (_, i) => c.client.request("atlas", { method: "GET", path: `/q${i}` }));
+    await expect(c.client.request("atlas", { method: "GET", path: "/over" })).rejects.toMatchObject({ code: "busy" });
+    c.client.close();
+    await Promise.allSettled([...first, ...queued]);
+
+    const b = client();
+    const busy = Array.from({ length: LIMITS.maxClientInFlight }, () => b.client.request("atlas", { method: "GET", path: "/" }));
+    // One shared buffer stands for every body: what counts is what the queue would hold.
+    const body = new Uint8Array(LIMITS.maxRequestBodyBytes);
+    const fits = Math.floor(LIMITS.maxClientWaitingBodyBytes / body.length);
+    const held = Array.from({ length: fits }, (_, i) => b.client.request("atlas", { method: "POST", path: `/up${i}`, body }));
+    await expect(b.client.request("atlas", { method: "POST", path: "/up-over", body })).rejects.toMatchObject({ code: "busy" });
+    // A bodiless one still has room.
+    const small = b.client.request("atlas", { method: "GET", path: "/small" });
+    b.client.handleResponse({ t: "res", id: 1, st: 204, h: [], b: false });
+    await busy[0];
+    await flush();
+    expect(requests(b.controls()).map((f) => f.p)).not.toContain("/up-over");
+    b.client.close();
+    await Promise.allSettled([...busy, ...held, small]);
+  });
 });

@@ -4,8 +4,11 @@ import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
+import { useOpenedHeading } from "../hooks/useOpenedHeading";
+import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
+import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
@@ -35,7 +38,7 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { memo, useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
 import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -47,11 +50,13 @@ import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
-import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
+import { preferredDevice } from "../lib/mediaDevices";
+import { CallMediaProblem } from "../components/CallMediaProblem";
 import { useSettings } from "../contexts/SettingsContext";
-import { MessageBubble } from "../components/MessageBubble";
+import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -60,9 +65,10 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
-import { handOverCall, takeHandedCall } from "../lib/lockedRing";
+import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callLineId, callsBlockedText } from "../lib/callLines";
+import { othersName } from "../lib/groups";
+import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -83,7 +89,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { servicesPlatform, type WalletNetwork } from "../lib/platform";
@@ -98,6 +104,8 @@ import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useSameValue } from "../hooks/useSameValue";
+import { useHandler } from "../hooks/useHandler";
+import { useEngineValue } from "../lib/engineState";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
@@ -125,6 +133,7 @@ import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
@@ -133,14 +142,10 @@ import { problemText, type Problem, problemLine } from "../lib/problemText";
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
 
-/** Why a call did not start or could not use the microphone or camera (`useWebRTC`'s `mediaProblem`): its title and next step. */
-const MEDIA_PROBLEM_TEXT = {
-  denied: ["calls.mediaDenied", "calls.mediaDeniedNext"],
-  unavailable: ["calls.mediaUnavailable", "calls.mediaUnavailableNext"],
-  relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
-  relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
-  relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
-} as const;
+/** The lines a call ends with that are said as it ends (`callEndSaid`); "no answer" has its own notice. */
+const CALL_END_LINES: ReadonlySet<CallEventType> = new Set(["call_ended", "call_missed", "call_cancelled", "call_rejected", "call_failed"]);
+/** How long a call's end stays in its region, so the same words after the next call are a change again. */
+const CALL_END_SAID_MS = 5000;
 
 /** Tech Info's Status (the engine's word for the link) in the reader's language. A word not here stays as it is. */
 const STATUS_TEXT = {
@@ -182,6 +187,14 @@ function removableForEveryone(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
+/**
+ * A message row, drawn again only when what it shows changes: the page is drawn again for much that changes no row (a
+ * message arriving, a pin, the composer), and each of the 100 to 150 rows it draws was drawn with it. Its callbacks count
+ * only by whether they are there: the page's own are one function each for its life (`useHandler`), and the rest close
+ * over the row's message and setters.
+ */
+const MessageRow = memo(MessageBubble, sameMessageRow);
+
 export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnlock = false }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
@@ -209,7 +222,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const {
     messages,
     status,
-    lastSync,
     sendMessage,
     techInfo,
     peerAck,
@@ -225,7 +237,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick,
   } = useChat(params);
   // The composer's Translate, in a chat that translates and has a language of its own.
-  const composerTranslation = useComposerTranslation(sessionId);
+  const { translation: composerTranslation, question: translateQuestion } = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -236,8 +248,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const countedOnRef = useRef(new Map<string, string>());
   // The chat is on screen: a missed line the person already read may still count the next call (they see it change).
   const seenRef = useRef(false);
+  /** The chat's last call line, said as its call ends (`callEndSaid`). */
+  const lastCallLineRef = useRef<{ type: CallEventType; hasVideo: boolean } | null>(null);
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
+      lastCallLineRef.current = { type, hasVideo };
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
       const textMap: Record<CallEventType, string> = {
         call_started: hasVideo ? "Video call started" : "Audio call started",
@@ -307,14 +322,32 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
+    // A burst of the contact's calls rings once though this chat, off screen, is let go between them (App's loaded chats).
+    chatId: sessionId,
   });
   const callDevices = useCallDevices(webrtc);
 
   const callState = webrtc.callState;
   const previousCallState = useRef(callState);
+  // A call's window and its ring say "Calling..." and "Connected" to a screen reader, and go as the call ends: the
+  // line the call left ("Audio call declined", "Missed audio call") is said then, once, since the chat's call lines
+  // are not read out (MessageAnnouncer). Not what a notice of its own says: No answer, the no-path note, a media problem.
+  const [callEndSaid, setCallEndSaid] = useState("");
+  const callEnd = useRef({ t, notice: false });
+  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || !!webrtc.mediaProblem };
+  useEffect(() => {
+    if (!callEndSaid) return;
+    const timer = setTimeout(() => setCallEndSaid(""), CALL_END_SAID_MS);
+    return () => clearTimeout(timer);
+  }, [callEndSaid]);
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
+    if (callState !== "idle") setCallEndSaid("");
+    else if (before !== "idle" && lastCallLineRef.current && !callEnd.current.notice) {
+      const { type, hasVideo } = lastCallLineRef.current;
+      if (CALL_END_LINES.has(type)) setCallEndSaid(callEventText(callEnd.current.t, type, hasVideo) ?? "");
+    }
     // A call starting (placed, or answered) pauses a voice message or audio file that plays, here or held by the app.
     const quiet = (state: string) => state === "idle" || state === "incoming" || state === "ended";
     if (!quiet(callState) && quiet(before)) pauseForCall();
@@ -324,8 +357,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
-  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
+  const ringing = ringingCall(webrtc.ringingOffer);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), ringing.ts);
   // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
   // when closed, or when the chat's next call starts.
   useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
@@ -334,18 +368,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
-  const incomingHasVideo = (() => {
-    if (!incomingCallSignal) return false;
-    return signalHasVideo(parseCallSignal(incomingCallSignal));
-  })();
+  const incomingHasVideo = ringing.video;
 
   const paired = session?.profile === "paired-chat/1";
   // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
   const compat = !!session && !paired;
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
-  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
+  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot. With Hide my IP on,
+  // media that cannot keep to the relay (the Linux Desktop's) makes no call at all, live or not: that first.
+  const callsBlocked = webrtc.relayOnlyCallsOff ? t("calls.relayOnlyOff")
+    : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
@@ -367,8 +400,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
   const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
-  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
+  /**
+   * The message the composer answers (WISP 400 § Replies): a paired chat's only. Read as the chat has it now: the
+   * contact's edit shows in the bar, and a message deleted (here, or for everyone) lets the bar go, its words with it.
+   */
+  const [chosenReply, setReplyingTo] = useState<ChatMessage | null>(null);
+  const replyingTo = useMemo(() => (chosenReply && heldOriginal(chosenReply, quoteIndex)) ?? null, [chosenReply, quoteIndex]);
+  useEffect(() => { if (chosenReply && !replyingTo) setReplyingTo(null); }, [chosenReply, replyingTo]);
   /**
    * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
    * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
@@ -376,10 +417,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    */
   const replyingRef = useRef(replyingTo);
   replyingRef.current = replyingTo;
-  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile (an edit is the same one). */
   const replied = useCallback((answering: ChatMessage) => {
-    if (replyingRef.current === answering) replyingRef.current = null;
-    setReplyingTo(current => current === answering ? null : current);
+    if (replyingRef.current?.id === answering.id) replyingRef.current = null;
+    setReplyingTo(current => current?.id === answering.id ? null : current);
   }, [setReplyingTo]);
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -387,7 +428,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       // The platform says it in English, as sendFile throws it: the same words in the app's language.
       const refused = platform.fileTooLarge?.(peerKey, source.size);
       const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
-        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
+        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes, t) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
       const answering = paired ? replyingRef.current : null;
@@ -414,30 +455,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    *
    * A message of mine still waiting to be sent (Cancel sending) is the engine's to send: it goes from the chat only
    * once the engine took the delete. One refused (limited mode) stays, and the rejection says why under it.
+   *
+   * This and the other actions of a message row are one function each for the page's life, doing what the page says when
+   * pressed: a row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an earlier draw.
    */
-  const forgetMessage = useCallback(
-    async (messageId: string, waiting = false): Promise<void> => {
-      if (waiting) {
-        if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
-        deleteMessage(messageId);
-        return;
-      }
+  const forgetMessage = useHandler(async (messageId: string, waiting = false): Promise<void> => {
+    if (waiting) {
+      if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
-      if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
-    },
-    [deleteMessage, platform, peerKey],
-  );
-
-  /**
-   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
-   * refused (limited mode) rejects, and the bubble says why under it.
-   */
-  const removeForEveryone = async (messageId: string): Promise<void> => {
-    if (!chatLink) return;
-    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
-    if (result.error) throw new Error(result.error);
+      return;
+    }
     deleteMessage(messageId);
-  };
+    if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
+  });
 
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
@@ -449,8 +479,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       const card = lightningCard ? onNetwork.forLightning(lightningCard) : onNetwork;
       try {
         const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
-        const sats = network === "testnet" ? "test sats" : "sats";
-        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
+        // The engine's English line (payments.ts), its digits too: the bubble reads it back in the app's language.
+        const sats = `${amount.toLocaleString("en-US")} ${network === "testnet" ? "test sats" : "sats"}`;
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${sats}` : `⚡ Requested ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         return null;
       } catch (e) {
@@ -482,6 +513,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // (the extension's pages), the rest is asked for while the chat is open.
   const chatLinkId = chatLink?.id;
   useEffect(() => (chatLinkId ? engine.keepWhole(chatLinkId) : undefined), [chatLinkId]);
+
+  /**
+   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
+   * refused (limited mode) rejects, and the bubble says why under it.
+   */
+  const removeForEveryone = useHandler(async (messageId: string): Promise<void> => {
+    if (!chatLink) return;
+    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
+    if (result.error) throw new Error(result.error);
+    deleteMessage(messageId);
+  });
+
   // Saved messages: kept on this device, never sent; the Saved view lists them.
   const savedHere = useSavedIn(chatLink?.id);
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
@@ -524,13 +567,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!request) return;
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
   }, [visible, appHere, openRequested, t]);
-  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
-  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /**
+   * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
+   * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   * Kept while this page is away (the Share to… picker, another chat: lib/keptEdits.ts), so it is open again on return,
+   * also before the chat's messages are read again (none yet): it is looked for in them once they are.
+   */
+  const [chosenEdit, setEditing] = useKeptEdit<ChatMessage>(sessionId);
+  const editing = chosenEdit && (!messages.length || heldOriginal(chosenEdit, quoteIndex)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const [readReplies] = useState(() => replyIndexer());
-  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   // Both read only the questions with buttons and the replies, found in the rows that changed.
   const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
@@ -545,6 +592,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Off screen (another chat opened while this one stays loaded), its Tech info closes, as a message's details do (`ChatOnScreen`).
   useEffect(() => { if (!visible) setShowTechInfo(false); }, [visible]);
   const labelInputRef = useRef<HTMLInputElement>(null), nameRef = useRef<HTMLButtonElement>(null);
+  // On a touch screen the focus goes to the chat's name as it opens, not to the page (hooks/useOpenedHeading.ts).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useOpenedHeading(headingRef, visible ? sessionId : null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -598,7 +648,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCodeCopied(false);
     setMenuOpen(false);
     setReplyingTo(null);
-    setEditing(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
@@ -635,28 +684,38 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
   }, [sceneOn, messages.length, pairingSceneId]);
 
-  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
+  // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown),
+  // nor one under the lock screen: the app stays mounted there (LockGate), and only the lock screen is seen. Unlocked
+  // with the chat in front, it is read then.
   const pageShown = usePageShown();
+  // (Under the lock a ringing call would only hold the keys here too: the lock screen shows the call instead.)
+  const locked = useIsLocked();
+  const seen = visible && pageShown && !locked;
   useEffect(() => {
-    seenRef.current = visible && pageShown;
-    if (!visible || !pageShown) return;
+    seenRef.current = seen;
+    if (!seen) return;
     markSessionAsRead(sessionId);
-  }, [visible, pageShown, sessionId, messages.length]);
+  }, [seen, sessionId, messages.length]);
   // Its notification goes once the window has the focus too: one on screen behind another app's has just been told of
   // the message (AttentionFeedback), and taking it back then would take it back before anyone saw it. The window is
   // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
   const away = useWindowAway();
+  // Under the lock they stay: nothing of the chat has been seen.
   useEffect(() => {
-    if (visible && !windowAway()) clearChatNotification(sessionId);
-  }, [visible, away, sessionId, messages.length]);
+    if (!visible || locked || windowAway()) return;
+    clearChatNotification(sessionId);
+    // The installed web app: this chat's wake-up notices too (a ringing call's stays).
+    closeWakeNotices(chatPath(sessionId));
+  }, [visible, locked, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
-  useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
+  useEffect(() => (seen ? showChatOnScreen(sessionId) : undefined), [seen, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
   // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
+  // Nor with calls off under Hide my IP: the contact would be shown "Incoming call" for a call that never starts.
   const deviceOnline = useOnline();
-  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
-    && deviceOnline && engine.state?.settings.online !== false;
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
+    && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
@@ -676,27 +735,35 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // The name in the lines that have a twin of mine ("You reacted…", a reply's "You", "You chose WebRTC"): a contact
+  // named as the app calls me is quoted there (`othersName`).
+  const lineName = useMemo(() => othersName(shownName, t), [shownName, t]);
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
-  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
+  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: lineName, contact: true }), [sessionId, lineName]);
+  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts): no
+  // name in it while the app lock is on.
+  useCallService(
+    callHoldsService(callState, webrtc.localStream) ? { name: shownName, video: !webrtc.isVideoOff && !webrtc.isScreenSharing } : null,
+    webrtc.hangUp,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash,
+  );
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId, incomingCallSignal);
+    const video = takeHandedCall(sessionId, ringing.signal);
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
-  // Under the lock it would only hold the keys: the lock screen shows the call instead.
-  const locked = useIsLocked();
   // A bot's usage card (WISP 405 § Usage): the meter in the header.
   const usage = useUsageOf(params?.peerPubKeyB64);
   // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
@@ -711,6 +778,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
   const goingCards = useMemo(() => goingCardCount(cardEntries(cardRows)), [cardRows]);
   useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
+  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
+  const react = useHandler((messageId: string, emoji: string) => {
+    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
+  });
+  const reactionName = useCallback((by: string) => by === "peer" ? lineName : by.slice(0, 8), [lineName]);
+  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
+  const pin = paired ? chatLink?.pin : undefined;
+  const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
+    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
+  });
+  const pinRow = useHandler((message: ChatMessage) => pinMessage(message.id, replyTarget(message) === pin?.id));
+  const saveRow = useHandler((messageId: string) => {
+    if (chatLink?.id) void setSaved(chatLink.id, messageId, savedHere.has(messageId)).catch(() => {});
+  });
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -738,17 +819,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
-  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
-  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
-  const react = (messageId: string, emoji: string) => {
-    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
-  };
-  const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
-  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
-  const pin = paired ? chatLink?.pin : undefined;
-  const pinMessage = (messageId: string | undefined, remove = false) => {
-    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
-  };
+  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? lineName : undefined;
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -805,19 +876,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       )}
       {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
-          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it. */}
-      {webrtc.mediaProblem && (
-        <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
-          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
-          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
-        </div>
-      )}
-      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
-          is set, and the guide. */}
-      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
-        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
-      )}
+          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
+          A call refused again while it shows is a new alert, said again. */}
+      {webrtc.mediaProblem && <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} />}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -830,12 +891,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
           in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
-          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons. */}
+          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
+          44 × 44 px (`.tap-target`). */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
+            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -866,6 +928,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 ref={labelInputRef}
                 type="text"
                 value={labelDraft}
+                dir={draftDirection(labelDraft)}
                 onChange={(e) => setLabelDraft(e.target.value)}
                 {...labelComposition.inputProps}
                 onKeyDown={(e) => {
@@ -884,18 +947,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               {/* The one way to rename the chat: a button, so the keyboard reaches it too. Inside the screen's heading,
-                  as a menu page's title is (layout/Page.tsx). */}
-              <h1 className="m-0 flex min-w-0 text-[15px] font-normal leading-tight">
+                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
+              <h1 ref={headingRef} tabIndex={-1} className="m-0 flex min-w-0 text-[15px] font-normal leading-tight outline-none">
               <button
                 type="button"
                 ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name relative flex items-center min-w-0 max-md:before:absolute max-md:before:inset-x-0 max-md:before:-top-3 max-md:before:-bottom-5 max-md:before:content-[''] text-start text-[15px] font-normal m-0 leading-tight cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
-                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
-                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. Cut in its own direction,
+                    as the group header's name is: in Arabic a Latin name cut by the page's direction lost its start. */}
+                <span data-testid="chat-name" dir="auto" className="min-w-0 truncate">{isAnonymous ? t("common.unnamedContactShort") : shownName}</span>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -907,7 +971,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
+                    className="shrink-0 ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -1055,6 +1119,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
+          is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
+      {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
+        <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
+      )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
@@ -1102,22 +1171,22 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {(() => {
             const drawn = timeline.slice(rowWindow.from, rowWindow.to);
             const draw = (row: (typeof drawn)[number]) => row.kind === "transport"
-              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={lineName} />
               : row.kind === "identity"
-              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={lineName}
                 onOpen={e => {
                   // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
                   if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
                   setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
                 }} />
               : (
-              <MessageBubble
+              <MessageRow
                 key={row.message.id}
                 message={row.message}
                 peerAck={peerAck}
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
-                contactName={isAnonymous ? "" : shownName}
+                contactName={isAnonymous ? "" : lineName}
                 onDelete={() => forgetMessage(row.message.id, row.message.sender === "me" && row.message.delivery === "waiting")}
                 onDeleteForEveryone={paired && chatLink && removableForEveryone(row.message) ? () => removeForEveryone(row.message.id) : undefined}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
@@ -1130,9 +1199,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 linkId={paired ? chatLink?.id : undefined}
                 // The same: a compatibility chat has no room for a reaction.
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
-                onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+                onPin={paired && replyTarget(row.message) ? () => pinRow(row.message) : undefined}
                 pinned={!!pin && replyTarget(row.message) === pin.id}
-                onSave={chatLink?.id ? () => void setSaved(chatLink.id, row.message.id, savedHere.has(row.message.id)).catch(() => {}) : undefined}
+                onSave={chatLink?.id ? () => saveRow(row.message.id) : undefined}
                 saved={savedHere.has(row.message.id)}
                 reactionName={reactionName}
                 highlight={search.highlight(row.message.id)}
@@ -1218,6 +1287,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         apps={appsOn && paired && chatLink ? { onOpen: () => setShowApps(true), hint: appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t) ?? undefined } : undefined}
       />
       </div>
+      {/* Translate's question for a model that is not here yet. */}
+      {translateQuestion}
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
@@ -1235,6 +1306,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
+
+      {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
+      {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}
 
       {/* Active call overlay */}
       {(webrtc.callState === "offering" ||
@@ -1303,7 +1377,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <TechInfoSection title={t("chat.tech.sync")}>
             <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
             <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
-            <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
+            <LastSyncRow peerKey={params.peerPubKeyB64} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
@@ -1396,6 +1470,13 @@ function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported"
       {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
     </div>
   );
+}
+
+/** The tech panel's last sync, read where it shows: each poll of the open chat draws this row, not the page. */
+function LastSyncRow({ peerKey }: { peerKey: string }) {
+  const { t, language } = useI18n();
+  const lastSync = useEngineValue((state) => state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.lastSyncAt || null);
+  return <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />;
 }
 
 function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {

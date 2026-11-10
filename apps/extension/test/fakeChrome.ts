@@ -13,11 +13,18 @@
  *   offscreen module in the `offscreen` context; `offscreen.closeDocument` fires
  *   its `pagehide`, drops its listeners, disconnects the ports it answered and
  *   releases the Web Locks it held, as a closed page does.
+ * - `storage.session.onChanged` fires for every change, in the listeners of every context, as Chrome's.
  * - `localStorage` and `navigator.locks` are the origin's: every context shares
  *   them, as the extension's pages and its offscreen document do.
+ * - The offscreen document sees `chrome.runtime` and nothing else of `chrome`,
+ *   as in Chrome: `chrome.storage`, `chrome.permissions`… are undefined there.
+ *   The context follows what a listener or a loaded module goes on to do,
+ *   across `await`s and timers.
  *
  * Everything the extension asks of the browser is recorded in `calls`.
  */
+
+import { AsyncLocalStorage } from "node:async_hooks";
 
 export type Context = "background" | "offscreen" | "page";
 
@@ -39,17 +46,9 @@ export class FakeEvent<L extends Listener = Listener> {
   hasListeners(): boolean {
     return this.listeners.length > 0;
   }
-  /** Calls every listener in its own context (what it registers belongs there), and returns what each returned. */
+  /** Calls every listener in its own context (what it registers, and what it goes on to do, belongs there), and returns what each returned. */
   dispatch(...args: Parameters<L>): unknown[] {
-    return [...this.listeners].map((l) => {
-      const previous = this.world.context;
-      this.world.context = l.context;
-      try {
-        return l.fn(...args);
-      } finally {
-        this.world.context = previous;
-      }
-    });
+    return [...this.listeners].map((l) => this.world.within(l.context, () => l.fn(...args)));
   }
   dropContext(context: Context): void {
     for (let i = this.listeners.length - 1; i >= 0; i--) if (this.listeners[i].context === context) this.listeners.splice(i, 1);
@@ -74,10 +73,16 @@ export interface Tab {
   url: string;
   windowId: number;
   active?: boolean;
+  /** Its DevTools target (`debugger.getTargets`): the same while the tab lives, whatever it shows; a new one each browser run. */
+  targetId?: string;
 }
 
 export interface FakeWorld {
-  context: Context;
+  /** The context running now: kept across `await`s, timers and microtasks of what it started. */
+  readonly context: Context;
+  /** Runs `act` as `context`, with everything it goes on to do. */
+  within<T>(context: Context, act: () => T): T;
+  /** Every API, whatever the context: the global `chrome` is what the calling context has. */
   chrome: typeof chrome;
   calls: { api: string; args: unknown[] }[];
   session: Map<string, unknown>;
@@ -120,6 +125,11 @@ export interface FakeWorld {
    * `permissions.onAdded` fires. Until then it is undefined, as in Chrome.
    */
   grantNotifications(): void;
+  /**
+   * The person turns off the extension's site access to a host (`chrome://extensions` → Site access, or the puzzle
+   * menu): Chrome drops the pattern and fires `permissions.onRemoved`, as it does for the extension's own `remove`.
+   */
+  revokeHostAccess(pattern: string): void;
   /** The origin's localStorage, shared by every context. */
   storage: Map<string, string>;
   /** Web Locks held now, by name, with the context holding each. */
@@ -137,8 +147,12 @@ export interface FakeWorld {
 
 export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld {
   let nextTabId = 100;
+  const running = new AsyncLocalStorage<Context>();
   const world = {
-    context: "page" as Context,
+    get context(): Context {
+      return running.getStore() ?? "page";
+    },
+    within: <T>(context: Context, act: () => T): T => running.run(context, act),
     calls: [] as FakeWorld["calls"],
     session: new Map<string, unknown>(),
     local: new Map<string, unknown>(),
@@ -161,17 +175,28 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     return e;
   };
   const record = (api: string, ...args: unknown[]) => world.calls.push({ api, args });
-  const area = (items: Map<string, unknown>) => ({
+  const area = (items: Map<string, unknown>, onChanged = event<(changes: Record<string, chrome.storage.StorageChange>) => void>()) => ({
+    onChanged,
     /** One key, or every item (`null`), as Chrome's. */
     async get(key: string | null) {
       if (key === null) return Object.fromEntries([...items].map(([k, value]) => [k, structuredClone(value)]));
       return items.has(key) ? { [key]: structuredClone(items.get(key)) } : {};
     },
     async set(values: Record<string, unknown>) {
-      for (const [key, value] of Object.entries(values)) items.set(key, structuredClone(value));
+      const changes: Record<string, chrome.storage.StorageChange> = {};
+      for (const [key, value] of Object.entries(values)) {
+        changes[key] = { oldValue: items.get(key), newValue: structuredClone(value) };
+        items.set(key, structuredClone(value));
+      }
+      onChanged.dispatch(changes as never);
     },
     async remove(keys: string | string[]) {
-      for (const key of typeof keys === "string" ? [keys] : keys) items.delete(key);
+      const changes: Record<string, chrome.storage.StorageChange> = {};
+      for (const key of typeof keys === "string" ? [keys] : keys) {
+        if (items.has(key)) changes[key] = { oldValue: items.get(key) };
+        items.delete(key);
+      }
+      if (Object.keys(changes).length) onChanged.dispatch(changes as never);
     },
   });
 
@@ -316,12 +341,24 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         record("debugger.sendCommand", target, method, params);
         return {};
       },
+      /** Every tab's page, at its URL: the `debugger` permission sees them all, `tabs` or not. */
+      async getTargets() {
+        return [...world.tabs.values()].map((tab) => ({
+          type: "page",
+          id: (tab.targetId ??= crypto.randomUUID()),
+          tabId: tab.id,
+          url: tab.url,
+          title: "",
+          attached: false,
+        }));
+      },
     },
     notifications: undefined as unknown,
     permissions: {
       onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),
-      async contains({ permissions }: chrome.permissions.Permissions) {
-        return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined);
+      onRemoved: event<(permissions: chrome.permissions.Permissions) => void>(),
+      async contains({ permissions, origins }: chrome.permissions.Permissions) {
+        return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined) && (origins ?? []).every((o) => world.hostAccess.has(o));
       },
       async request(request: chrome.permissions.Permissions) {
         record("permissions.request", request);
@@ -331,7 +368,8 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       async remove(request: chrome.permissions.Permissions) {
         record("permissions.remove", request);
         const held = (request.origins ?? []).every((origin) => world.hostAccess.has(origin));
-        for (const origin of request.origins ?? []) world.hostAccess.delete(origin);
+        const gone = (request.origins ?? []).filter((origin) => world.hostAccess.delete(origin));
+        if (gone.length) chromeApi.permissions.onRemoved.dispatch({ permissions: [], origins: gone } as never);
         return held;
       },
       async getAll() {
@@ -366,21 +404,17 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     };
     chromeApi.permissions.onAdded.dispatch({ permissions: ["notifications"] } as never);
   };
+  world.revokeHostAccess = (pattern) => {
+    if (!world.hostAccess.delete(pattern)) return;
+    chromeApi.permissions.onRemoved.dispatch({ permissions: [], origins: [pattern] } as never);
+  };
 
   world.chrome = chromeApi as unknown as typeof chrome;
   // One load at a time: the worker starts the peer as it loads, and the document's script loading inside the worker's
   // load would take the worker's context back as its own when it ends.
   let loading: Promise<unknown> = Promise.resolve();
   world.load = (context, importer) => {
-    const run = loading.then(async () => {
-      const previous = world.context;
-      world.context = context;
-      try {
-        return await importer();
-      } finally {
-        world.context = previous;
-      }
-    });
+    const run = loading.then(() => world.within(context, importer));
     loading = run.catch(() => {});
     return run;
   };
@@ -452,7 +486,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       return new Promise((resolve, reject) => {
         const grant = () => {
           world.locks.set(name, context);
-          Promise.resolve(callback()).then(resolve, reject).finally(() => { if (world.locks.get(name) === context) release(name); });
+          Promise.resolve(world.within(context, callback)).then(resolve, reject).finally(() => { if (world.locks.get(name) === context) release(name); });
         };
         if (world.locks.has(name)) waiting.push({ name, context, grant });
         else grant();
@@ -481,8 +515,13 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     world.offscreenDocument = false;
   }
 
+  // The offscreen document has `chrome.runtime` alone (Chrome's offscreen API: "the only extension API it can use").
+  const chromeAsSeen = new Proxy(chromeApi, {
+    get: (api, key) => (world.context === "offscreen" && key !== "runtime" ? undefined : Reflect.get(api, key)),
+    has: (api, key) => (world.context === "offscreen" ? key === "runtime" : Reflect.has(api, key)),
+  });
   Object.assign(globalThis, {
-    chrome: world.chrome,
+    chrome: chromeAsSeen,
     localStorage,
     addEventListener(type: string, fn: EventListenerOrEventListenerObject) {
       windowListeners.push({ context: world.context, type, fn });

@@ -156,6 +156,7 @@ describe("AddIdentityDialog", () => {
     it("says a built-in provider's words in the app's language, on its card, its details and its form", async () => {
       // The words a language has for the SSH key provider (identities.providers.ssh); the ones it lacks stay English.
       const area = en.identities as Record<string, unknown>;
+      const providers = area.providers;
       area.providers = { ssh: { label: "SSH-Schlüssel", summary: "Einmal mit ssh-keygen signieren", description: "Beweist, dass du einen SSH-Schlüssel hältst.", subject: { help: "Dein öffentlicher Schlüssel." } } };
       try {
         const { user } = dialog();
@@ -166,7 +167,7 @@ describe("AddIdentityDialog", () => {
         expect(screen.getByTestId("add-identity-about")).toHaveTextContent("Beweist, dass du einen SSH-Schlüssel hältst.");
         expect(screen.getByText("Dein öffentlicher Schlüssel.")).toBeInTheDocument();
         expect(screen.getByText(provider("ssh").privacy, { exact: false })).toBeInTheDocument();
-      } finally { delete area.providers; }
+      } finally { area.providers = providers; }
     });
 
     it("offers the validity periods up to the provider's maximum, starting on its default", async () => {

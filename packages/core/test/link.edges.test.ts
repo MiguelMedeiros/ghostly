@@ -14,6 +14,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_DUE_READS,
   SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
@@ -599,6 +600,47 @@ describe("LinkSession presence and signals", () => {
     await a.s.stop(false);
   });
 
+  it("marks as signaling the first fast reads once the contact's offer is due, not one the budget held back, until one finds it", async () => {
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastRead = () => (a.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
+    // The peer expected: fast reads, not signaling.
+    a.s.expectPeer();
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Its offer due now (the chat left DHT only on both sides): the first reads are.
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    // One the relays' budget held back asked them nothing: it is not counted.
+    a.transport.failResolve = new DiscoveryBudgetError(5_000);
+    a.s.pollNow();
+    await settle();
+    a.transport.failResolve = null;
+    for (let i = 1; i < SIGNAL_DUE_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    // Due again, and the first read finds the offer: what follows reads as its answer's, not as more of these.
+    await b.s.setRtcSignal('{"t":"o"}');
+    a.s.expectPeer(false, true);
+    await settle();
+    expect(lastRead()).toMatchObject({ signal: true });
+    expect(a.ev.onRtcSignal).toHaveBeenCalledOnce();
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).not.toHaveProperty("signal");
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
   it("does not publish the RTC signal or services in its departure packet", async () => {
     const { a, b } = pair({ getServices: () => [] });
     a.s.start();
@@ -711,7 +753,7 @@ describe("LinkSession poll pacing", () => {
     const old = pair({ awaitingSince: NOW - 30 * 86_400_000 });
     old.a.s.start();
     await settle();
-    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false });
+    expect(old.a.transport.resolve).toHaveBeenLastCalledWith(old.params.mine.peerPubKeyZ32, { background: true, urgent: false }, false);
     expect(lastPoll(old.a.ev)).toBe(I.background);
     await old.a.s.stop(false);
     // Made three minutes ago, and the app opened again: the invite is awaited for the seven minutes left.
@@ -895,6 +937,35 @@ describe("LinkSession poll pacing", () => {
     expect(last()?.departed).toBeUndefined();
     await a.s.stop(false);
     await b.s.stop(false);
+  });
+
+  it("says its reads of an invite it just made are awaited, until the joiner shows (the relays' budget lets a few go over)", async () => {
+    // An invite this side made: its reads say so while its joiner is due.
+    const { a, b } = pair({ ownInvite: () => true, awaitingSince: NOW }, { getServices: () => [] });
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { awaited?: boolean } | undefined;
+    a.s.start();
+    await settle();
+    expect(last()?.awaited).toBe(true);
+    // The joiner's packet read: the next reads are the contact's like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.lastPacketAt).toBeGreaterThan(0);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.awaited).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+    // Not one this side joined, nor an invite no longer awaited.
+    for (const options of [{ awaitingSince: NOW }, { ownInvite: () => true, awaitingSince: NOW - AWAITING_PEER_MS }]) {
+      const other = pair(options);
+      other.a.s.start();
+      await settle();
+      expect(other.a.transport.resolve).toHaveBeenCalled();
+      expect(((other.a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { awaited?: boolean } | undefined)?.awaited).toBeUndefined();
+      await other.a.s.stop(false);
+    }
   });
 
   it("says its reads are a resume's back after a restart, until one is answered (a group edge's go on the relays' floor)", async () => {

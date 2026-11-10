@@ -28,6 +28,11 @@ describe("a push on a device that is not the active one", () => {
     expect(call).toMatchObject({ body: "Call for you. Active on MacBook.", call: false, quiet: true });
   });
 
+  it("an online notice shows nothing there: the person is on the active device", () => {
+    expect(pushNotice({ token: TOKEN, kind: "online" }, chat, standby, options)).toBeNull();
+    expect(pushNotice({ token: TOKEN, kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: chat.text }, active, options)).toMatchObject({ body: "Ana is online" });
+  });
+
   it("in the app's language when a page wrote its words, and without a name when the record names no other device", () => {
     const text = { title: "Ghostly", standby: "Nova mensagem. Ativo em {device}.", standbyCallUnnamed: "Chamada para você. Abra o Ghostly no seu dispositivo ativo." };
     expect(pushNotice({ token: TOKEN, kind: "message" }, chat, standby, { ...options, text })!.body).toBe("Nova mensagem. Ativo em MacBook.");

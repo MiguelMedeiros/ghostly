@@ -570,6 +570,17 @@ export function decodeFileData(message: Uint8Array): { id: string; offset: numbe
   return { id, offset: high * 2 ** 32 + view.getUint32(head + 4), data: message.subarray(body) };
 }
 
+/**
+ * Why a received file could not be stored, as its record says it. A storage with no room left is told by the error's
+ * name, `QuotaExceededError` (IndexedDB's, the OPFS worker's, the CLI's), never by its words: each storage words it
+ * its own way, and Chromium's own has no message at all. The app reads that name as "no room here" (errorText.ts).
+ */
+function storeFailure(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).trim();
+  const quota = (error as { name?: unknown } | null)?.name === "QuotaExceededError" && !message.startsWith("QuotaExceededError");
+  return `Could not store the file: ${quota ? `QuotaExceededError${message ? `: ${message}` : ""}` : message}`;
+}
+
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
   switch (why) {
@@ -941,7 +952,7 @@ export class ChatFiles {
       this.armNudge(entry);
     }, (error) => {
       incoming.starting = false;
-      this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.end(entry, "failed", storeFailure(error));
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
       this.startNext();
     });
@@ -1093,7 +1104,7 @@ export class ChatFiles {
       if (incoming.stored - incoming.checkpointed >= FILE_LIMITS.checkpointBytes) await this.checkpointNow(entry);
     }).catch((error) => {
       if (transferEnded(record)) return;
-      this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.end(entry, "failed", storeFailure(error));
       void target.then((t) => t.discard()).catch(() => {});
       this.send({ t: "pf-refuse", id: record.id, why: "no-room" });
       this.startNext();
@@ -1333,6 +1344,25 @@ export class ChatFiles {
     void this.discardStored(entry);
     this.end(entry, "declined", "You declined it");
     this.send({ t: "pf-refuse", id, why: "declined" });
+    this.startNext();
+  }
+
+  /**
+   * An offer taken here whose record or message the host could not store: refused, so its sender does not count it
+   * delivered and keeps its Retry, and forgotten, so that retry is a new offer here. Nothing of it is reported changed
+   * (there is nothing to write it to); what was stored of it is removed.
+   */
+  refuse(id: string, why: RefuseReason): void {
+    const entry = this.entries.get(key("in", id));
+    if (!entry || transferEnded(entry.record)) return;
+    this.entries.delete(key("in", id));
+    const incoming = entry.in!;
+    entry.record.state = "failed";
+    clearTimeout(incoming.timer);
+    clearTimeout(incoming.ackTimer);
+    incoming.dropped = true;
+    void incoming.writing.then(() => incoming.target?.then((t) => t.discard())).catch(() => {});
+    this.send({ t: "pf-refuse", id, why });
     this.startNext();
   }
 

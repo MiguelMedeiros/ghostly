@@ -29,6 +29,8 @@ beforeEach(async () => {
 const bootOn = async (id: string) => (world = await bootExtension(undefined, (w) => useProfile(w, id)));
 const ensure = () => world.chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" });
 const log = () => engineControl().log;
+/** `useProfile`, for a switch made in a loop or a callback (no React hook, whatever its name says). */
+const switchTo = useProfile;
 
 describe("an install from before profiles", () => {
   it("runs the first profile on the original database and lock, with no registry written", async () => {
@@ -203,6 +205,71 @@ describe("switching", () => {
     expect(engineControl().servers.at(-1)!.database).toBe(`ghostly_${HOME}`);
     expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${HOME}`]);
   });
+
+  it("switches made one after another while each next peer starts: the page of the last profile gets that profile's peer", async () => {
+    const reload = vi.fn();
+    Object.assign(globalThis, { location: { reload }, history: { replaceState: vi.fn() } });
+    try {
+      await ensure();
+      /** The next peer to start takes a moment to open its database, until let go. */
+      const hold = () => {
+        let release!: () => void;
+        engineControl().ready = new Promise<void>((resolve) => (release = resolve));
+        return release;
+      };
+      let release = hold();
+      useProfile(world, WORK);
+      const first = ensure();
+      // Personal, Work, Personal again: each clicked in another tab while the peer before it still starts.
+      for (const next of ["", WORK, ""]) {
+        const started = engineControl().servers.length;
+        while (engineControl().servers.length === started) await settle(1);
+        switchTo(world, next, [WORK]);
+        if (engineControl().servers.length === 4) break;
+        const previous = release;
+        release = hold();
+        previous();
+      }
+      // The page of the profile clicked last opens, and connects while Work's peer still starts.
+      const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
+      const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+      expect(openPageProfile()).toBe("");
+      const connected = extensionHost.connect(() => {}, () => {}).then(() => "connected", (error) => String(error));
+      await settle();
+      engineControl().ready = Promise.resolve();
+      release();
+
+      expect(await first).toEqual({ ok: true });
+      expect(await connected).toBe("connected");
+      await settle(5);
+      const servers = engineControl().servers;
+      expect(servers.at(-1)!.database).toBe("ghostly");
+      // Whatever port the page holds is the Personal peer's: never Work's.
+      expect(servers.filter((s) => s.attached.length).map((s) => s.database)).not.toContain(`ghostly_${WORK}`);
+      expect(world.locks).toEqual(new Map([["ghostly-peer", "offscreen"]]));
+    } finally {
+      delete (globalThis as { location?: unknown }).location;
+      delete (globalThis as { history?: unknown }).history;
+    }
+  });
+
+  it("a registry that never settles while peers start: the page is told to retry, never that the peer runs", async () => {
+    await ensure();
+    // Each new peer finds the registry moved on as soon as its document loads.
+    const createDocument = world.onCreateDocument;
+    let active = WORK;
+    world.onCreateDocument = async () => {
+      await createDocument();
+      active = active ? "" : WORK;
+      switchTo(world, active, [WORK]);
+    };
+    useProfile(world, WORK);
+    expect(await ensure()).toEqual({ ok: false, error: "Error: Switching profiles…" });
+    // Once the clicks stop, the next page gets the profile in use.
+    world.onCreateDocument = createDocument;
+    expect(await ensure()).toEqual({ ok: true });
+    expect(engineControl().servers.at(-1)!.database).toBe(active ? `ghostly_${active}` : "ghostly");
+  }, 10_000);
 
   it("does not wait for ever on a peer that hangs while stopping", async () => {
     await ensure();
@@ -388,6 +455,69 @@ describe("a contact's app open as the profile before", () => {
     expect(world.callsTo("debugger.sendCommand").filter(([, method]) => method === "Fetch.fulfillRequest")).toEqual([]);
   });
 
+  describe("still opening when another tab switches", () => {
+    // A page of the first profile.
+    const open = () => world.chrome.runtime.sendMessage({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle(5);
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when the switch comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = open();
+      await settle();
+      useProfile(world, WORK);
+      const switched = ensure();
+      ready();
+      expect(await switched).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`]);
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the peer it waited on read the switch as it loaded, and started as the other profile", async () => {
+      endBootPeer(world);
+      const opened = open();
+      // Before the new document reads the registry, as Chrome makes one slower than a page writes it.
+      useProfile(world, WORK);
+      expect(await opened).toEqual({ ok: true });
+      expect(log()).toEqual([`start ghostly_${WORK}`]);
+      await expectNoViewer();
+    });
+
+    it("still opens once its own profile's peer came back", async () => {
+      endBootPeer(world);
+      expect(await open()).toEqual({ ok: true });
+      expect(log()).toEqual(["start ghostly"]);
+      expect([...world.tabs.values()].map((tab) => tab.url)).toEqual([`https://${SERVICE}.${PEER}.${TAG}.invalid/`]);
+    });
+
+    it("refuses an open that does not say its page's profile", async () => {
+      const reply = await world.chrome.runtime.sendMessage({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+      expect(reply).toEqual({ ok: false, error: "Invalid service" });
+      expect(world.callsTo("tabs.create")).toEqual([]);
+    });
+
+    it("opens nothing when the switch lands between the open's peer check and its tab", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        useProfile(world, WORK);
+        expect(await ensure()).toEqual({ ok: true });
+        return create(props);
+      }) as typeof world.chrome.tabs.create;
+      expect(await open()).toEqual({ ok: true });
+      expect(servers().at(-1)!.database).toBe(`ghostly_${WORK}`);
+      await expectNoViewer();
+    });
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     const tabId = await openViewer(world);
     await world.load("page", () => import("../src/host.ts"));
@@ -406,7 +536,7 @@ describe("a contact's app open as the profile before", () => {
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       openPageProfile();
       useProfile(world, WORK);
-      await expect(extensionHost.openService!(PEER, SERVICE, TAG)).rejects.toThrow("Switching profiles");
+      await expect(extensionHost.openService!(PEER, SERVICE, TAG, false)).rejects.toThrow("Switching profiles");
       expect(reload).toHaveBeenCalledTimes(1);
       expect(world.callsTo("tabs.create")).toEqual([]);
     } finally {

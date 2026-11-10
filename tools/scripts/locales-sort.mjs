@@ -16,8 +16,16 @@ export function sortKeys(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
 }
 
+/**
+ * The characters that change the direction text is drawn in (Arabic letter mark, left-to-right and right-to-left
+ * marks, embeddings, overrides and isolates). Invisible, so they are written escaped (`\u2066`), never raw: a reviewer
+ * then sees where a string's direction changes.
+ */
+const DIRECTION_MARKS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const escaped = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+
 /** A locale file's text as it must be written. */
-export const formatLocale = (text) => `${JSON.stringify(sortKeys(JSON.parse(text)), null, 2)}\n`;
+export const formatLocale = (text) => `${JSON.stringify(sortKeys(JSON.parse(text)), null, 2).replace(DIRECTION_MARKS, escaped)}\n`;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let changed = 0;

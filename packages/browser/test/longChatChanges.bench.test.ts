@@ -19,6 +19,7 @@ const fake = vi.hoisted(() => ({
     stateListeners: [] as (() => void)[],
     messageListeners: [] as ((linkId: string, messages: StoredMessage[]) => void)[],
     connect: async () => {},
+    start() {},
     // No change tick here: every list comes whole.
     changing: () => false,
     whole: () => true,

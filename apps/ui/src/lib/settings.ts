@@ -196,6 +196,60 @@ export function saveSettings(settings: AppSettings): void {
   }
 }
 
+/** The extension runs the app in several tabs: whether a stored change of the settings comes from one of the others. */
+export function isSettingsStorageEvent(event: StorageEvent): boolean {
+  return event.key === settingsKey() && event.newValue !== null;
+}
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** `base` with what changed from `before` to `after`, and nothing else; the keys of an object one level down too. */
+function withChanges(base: Record<string, unknown>, before: Record<string, unknown>, after: Record<string, unknown>, depth: number) {
+  const out = { ...base };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const was = before[key];
+    const now = after[key];
+    if (JSON.stringify(was) === JSON.stringify(now)) continue;
+    if (depth > 0 && isPlainObject(was) && isPlainObject(now) && isPlainObject(base[key])) out[key] = withChanges(base[key], was, now, depth - 1);
+    else if (now === undefined) delete out[key];
+    else out[key] = now;
+  }
+  return out;
+}
+
+const sameValue = (a: unknown, b: unknown): boolean =>
+  isPlainObject(a) && isPlainObject(b)
+    ? [...new Set([...Object.keys(a), ...Object.keys(b)])].every((key) => sameValue(a[key], b[key]))
+    : JSON.stringify(a) === JSON.stringify(b);
+
+/** Whether two copies of the settings hold the same values, whatever the order of their keys. */
+export function sameSettings(a: AppSettings, b: AppSettings): boolean {
+  return a === b || sameValue(a, b);
+}
+
+/** The settings `stored` with what a page changed from `before` to `after`: its copy of the rest is not taken. */
+export function settingsWithChanges(stored: AppSettings, before: AppSettings, after: AppSettings): AppSettings {
+  return withChanges({ ...stored }, { ...before }, { ...after }, 1) as unknown as AppSettings;
+}
+
+/**
+ * Saves what a page changed from `before` to `after` over the settings as stored now, and returns what is stored then.
+ * The extension runs the app in several tabs: another may have changed them since this page read them (a lock
+ * password set, changed or removed there), and this page's copy of what it did not change is never written back.
+ */
+export function saveSettingsChanges(before: AppSettings, after: AppSettings): AppSettings {
+  let stored: AppSettings | null = null;
+  try {
+    if (localStorage.getItem(settingsKey())) stored = loadSettings();
+  } catch {
+    // storage unavailable
+  }
+  const saved = stored ? settingsWithChanges(stored, before, after) : after;
+  saveSettings(saved);
+  return saved;
+}
+
 /** OWASP's 2023 figure for PBKDF2-HMAC-SHA256. */
 const PBKDF2_ITERATIONS = 600_000;
 /** Hashes stored as `salt:hash` before the iteration count was part of the format. */

@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY, namedByThem } from "./apiKit";
+import { CONTACT_KEY, nameKey, namedByThem } from "./apiKit";
+import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -80,12 +81,26 @@ export async function allowlist(from: readonly string[], groups: readonly string
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
     if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
-    const chat = (await call("chat.get", { chat: ref })) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
     chats.add(chat.id);
   }
-  for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
+  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/**
+ * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
+ * `ghostly group show` (or `chat show`), which lists nothing.
+ */
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+  try { return await lookup; } catch (error) {
+    const other = flag === "--from" ? "group" : "chat";
+    if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
+  }
 }
 
 /**
@@ -244,23 +259,43 @@ export function checkTypes(types: readonly string[], warn: (line: string) => voi
 
 /** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */
 export function hookEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const rest = { ...env };
-  delete rest.GHOSTLY_BACKUP_PASSPHRASE;
-  return rest;
+  return childEnv(env);
 }
 
-/** Runs `command` through the shell with the event on stdin (never in its arguments); resolves with its exit code. */
-function runExec(command: string, event: GhostlyEvent): Promise<number> {
+/** How a hook ended: its exit code, or the signal that killed it (`code` null then). */
+interface HookEnd { code: number | null; signal: NodeJS.Signals | null }
+
+/** How long a hook's stdout is still waited for once the hook exited: a process it left running may hold it open. */
+const HOOK_OUTPUT_GRACE_MS = 1000;
+
+/**
+ * Runs `command` through the shell with the event on stdin (never in its arguments); resolves with how it ended.
+ * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
+ * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
+ */
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Promise<HookEnd> {
   return new Promise((resolve) => {
     const child = spawn(command, {
       shell: true,
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
       env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
     });
-    child.on("error", () => resolve(127));
-    child.on("close", (code) => resolve(code ?? 1));
-    child.stdin.on("error", () => {});
-    child.stdin.end(JSON.stringify(event) + "\n");
+    let done = false;
+    const finish = (end: HookEnd) => { if (!done) { done = true; resolve(end); } };
+    child.on("error", () => finish({ code: 127, signal: null }));
+    // `exit`, not `close`: a process the hook left running (`… &`) may hold its stdout for long; the hook is done when
+    // it exits. Its output is still waited for a moment, so the stderr note comes after it; whatever comes later is
+    // still streamed.
+    child.on("exit", (code, signal) => {
+      const end = { code, signal };
+      const output = child.stdout;
+      if (!output || output.readableEnded || output.destroyed) return finish(end);
+      const timer = setTimeout(() => finish(end), HOOK_OUTPUT_GRACE_MS);
+      output.once("close", () => { clearTimeout(timer); finish(end); });
+    });
+    child.stdout?.pipe(process.stderr, { end: false });
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(JSON.stringify(event) + "\n");
   });
 }
 
@@ -340,23 +375,27 @@ export function eventHandler(options: ListenOptions): EventHandler {
     // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
     // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
     // (agents#1597). The cursor passes it once the events before it are handled.
-    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
+    // `events.gap` passes every `--type` and `--turns`, as it passes the allowlist: a bot on `message.received` is told
+    // that messages were lost across a crash or a trim. Before, it was dropped and the cursor moved past it.
+    const gap = type === "events.gap";
+    if (!gap && !matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;
       const skip = () => keep(event.seq);
-      if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
       if (options.translate) event = await options.translate(event);
-      if (options.turns) {
+      if (options.turns && !gap) {
         const next = toTurn(event);
         if (!next) return skip();
         event = next;
       }
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
-        const code = await runExec(options.exec, event);
-        if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
+        // A hook killed by a signal (the OOM killer, a timeout wrapper) is said as such, not as an exit 1.
+        const { code, signal } = await runExec(options.exec, event, options.print);
+        if (signal) process.stderr.write(`ghostly: --exec was killed by ${signal} on event ${event.seq} (${event.type})\n`);
+        else if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code ?? 1} on event ${event.seq} (${event.type})\n`);
       }
       // A refusal passes the event for good: said with what the bridge answered, so a wrong path (404) or a missing
       // token (401) is seen in the log, not only as messages that never came.

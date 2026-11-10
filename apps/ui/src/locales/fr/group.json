@@ -179,6 +179,7 @@
     "full": "Le groupe est plein ({{count}} sur {{count}}). Personne n'entre avant qu'un membre parte.",
     "fullShort": "Le groupe est complet",
     "hideQr": "Masquer le QR",
+    "jammed": "Personne ne peut rejoindre le groupe avec ce lien pour l'instant : il reçoit sans arrêt des demandes d'apps qui ne se connectent jamais, et elles prennent les places où attendent les nouveaux venus. Quelqu'un qui a le lien le fait peut-être exprès. Créez un nouveau lien et partagez-le à nouveau.",
     "note": "Quiconque ouvre ce lien rejoint le groupe, sans être votre contact ni dire qui il est. Il entre tant que votre app est ouverte, jusqu'à {{count}} membres.",
     "noteCommunity": "Quiconque ouvre ce lien rejoint le groupe, sans être le contact de personne ni dire qui il est. L'app de n'importe quel membre le fait entrer, donc cela marche en votre absence ; jusqu'à {{count}} membres. Retirer quelqu'un ne l'empêche pas de rouvrir le lien : l'admin en crée un nouveau pour cela.",
     "off": "Le lien est désactivé : personne ne peut rejoindre avec, et le lien partagé avant ne fonctionnera plus. L'activer crée un nouveau lien à partager.",
@@ -196,7 +197,8 @@
     "showQr": "Afficher le QR",
     "title": "Lien du groupe",
     "tooMany": "Trop de liens de groupe ouverts",
-    "tooManyNext": "Supprimez un groupe qui attend encore d'être admis, ou collez le lien dans Rejoindre."
+    "tooManyNext": "Supprimez un groupe qui attend encore d'être admis, ou collez le lien dans Rejoindre.",
+    "unanswered": "Ceux qui ouvrent le lien n'entrent peut-être pas : beaucoup de ceux qui ont frappé récemment n'ont jamais répondu. Un nouveau lien règle cela ; partagez le nouveau ensuite."
   },
   "makeAdmin": {
     "body": "Vous ne serez plus l'admin. Seule la personne {{name}} pourra renommer le groupe, changer sa photo et son lien, inviter ou retirer des membres, et vous rendre le rôle.",
@@ -246,6 +248,18 @@
     "leave": "Quitter le groupe",
     "members": "Membres…",
     "rotate": "Renouveler les clés"
+  },
+  "others": {
+    "body": "Qui connaît l'identifiant d'un groupe peut créer son propre groupe avec, et un seul d'entre eux peut être sur cet appareil. Gardez celui-ci ou passez à l'autre : changer quitte celui-ci et le supprime de cet appareil.",
+    "invitedBy": "{{contact}} vous a invité à {{name}} ({{members}})",
+    "invitedByUnknown": "Une invitation à {{name}} ({{members}})",
+    "keep": "Garder celui-ci",
+    "link": "Un lien de groupe que vous avez ouvert",
+    "switch": "Passer à celui-ci",
+    "switchBody": "{{other}}. Vous quittez ce groupe, il est supprimé de cet appareil avec son historique, et l'autre prend sa place.",
+    "switchConfirm": "Changer",
+    "switchTitle": "Passer à l'autre groupe ?",
+    "title": "Un autre groupe a l'identifiant de ce groupe"
   },
   "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",

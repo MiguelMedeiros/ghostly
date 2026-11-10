@@ -46,6 +46,10 @@ worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The largest IPC message an app window may post: its largest request with room for Tauri's envelope. Tauri
+/// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
+/// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
+const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
@@ -84,6 +88,35 @@ const RUNNER: &str = r#"<!doctype html>
   for (const name of Object.getOwnPropertyNames(window)) {
     if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) {} }
   }
+  // WebKit lets `execCommand("copy")` write the system clipboard while a tap in the window is handled, whatever
+  // `javascript-can-access-clipboard` says (off here). An app has no clipboard permission (WISP 1200), so its
+  // clipboard commands answer false; editing commands work on. The web runner's wrapper (app-frame.html), the same
+  // text: it asks nothing the app can change, which may have changed every prototype by the time it calls.
+  const execCommand = Document.prototype.execCommand;
+  let commands = execCommand;
+  if (typeof execCommand === "function") {
+    const apply = Reflect.apply;
+    const lower = String.prototype.toLowerCase;
+    commands = function (command, showUI, value) {
+      if (arguments.length === 0) return apply(execCommand, this, []);
+      const name = typeof command === "string" ? command : "" + command;
+      const named = apply(lower, name, []);
+      if (named === "copy" || named === "cut" || named === "paste") return false;
+      return apply(execCommand, this, arguments.length > 2 ? [name, showUI, value] : arguments.length > 1 ? [name, showUI] : [name]);
+    };
+    Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: commands });
+  }
+  // Nor the async Clipboard API: WebKit and Firefox let `navigator.clipboard` write the system clipboard whatever the
+  // window's settings or the frame's `allow=""` say (only Chromium refuses it). The app finds no `navigator.clipboard`,
+  // no `ClipboardItem` and no method on `Clipboard.prototype`. Both runners, the same text.
+  const CLIPBOARD = ["read", "readText", "write", "writeText"];
+  try { delete Navigator.prototype.clipboard; } catch (e) { /* stays: refused below */ }
+  try { delete window.ClipboardItem; } catch (e) { /* stays: refused below */ }
+  if (typeof Clipboard === "function") {
+    for (const name of CLIPBOARD) { try { delete Clipboard.prototype[name]; } catch (e) { /* stays: refused below */ } }
+  }
+  const clipboardLeft = () => "clipboard" in navigator || "ClipboardItem" in window
+    || (typeof Clipboard === "function" && CLIPBOARD.some((name) => name in Clipboard.prototype));
   const stop = (why) => {
     document.documentElement.textContent = "This app cannot run here.";
     document.documentElement.setAttribute("data-ghostly-refused", why);
@@ -92,13 +125,20 @@ const RUNNER: &str = r#"<!doctype html>
   const label = internals && internals.metadata && internals.metadata.currentWindow && internals.metadata.currentWindow.label;
   if (self.origin !== "null" || !internals || typeof label !== "string" || !/^app-[A-Za-z0-9]+$/.test(label)) return stop("origin");
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
+  if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");
 
   const invoke = internals.invoke.bind(internals);
   const clockNow = Date.now;
+  const reflectApply = Reflect.apply;
+  const listen = EventTarget.prototype.addEventListener;
+  const stopImmediately = Event.prototype.stopImmediatePropagation;
   // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
   const parse = JSON.parse;
+  const stringify = JSON.stringify;
+  const encoder = new TextEncoder();
+  const utf8 = encoder.encode.bind(encoder);
   const jsonOf = (text) => {
     if (typeof text !== "string") return undefined;
     try { return parse(text); } catch (error) { return undefined; }
@@ -140,7 +180,10 @@ const RUNNER: &str = r#"<!doctype html>
   const send = (type, args) => {
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
-    return broker({ id, type, args }).then((answer) => {
+    const request = { id, type, args };
+    // Over the broker's 64 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
+    if (utf8(stringify(request)).length > 65536) return Promise.reject(refusal("too-large"));
+    return broker(request).then((answer) => {
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
@@ -185,7 +228,8 @@ const RUNNER: &str = r#"<!doctype html>
     document.open();
     // The person's taps and keys in this window never reach the Ghostly window, whose lock screen would lock them out
     // of a game longer than its time: the runner says `activity` for a trusted one, at most every 5 seconds, which the
-    // broker counts while this window has the focus. Added before the app's code, which cannot name it to remove it.
+    // broker counts while this window has the focus. Added before the app's code, which cannot name it to remove it;
+    // the app can say `activity` too, which counts only just after the system's own input here (`admit`).
     let said = -Infinity;
     const heard = (event) => {
       if (event.isTrusted !== true) return;
@@ -194,8 +238,33 @@ const RUNNER: &str = r#"<!doctype html>
       said = at;
       try { send("activity", []).catch(() => {}); } catch (error) {}
     };
-    addEventListener("pointerdown", heard, true);
-    addEventListener("keydown", heard, true);
+    // The runner's own listeners on the window, put on now and again whenever the document is opened again.
+    const keepRunnerListeners = () => {
+      reflectApply(listen, window, ["pointerdown", heard, true]);
+      reflectApply(listen, window, ["keydown", heard, true]);
+    };
+    // The person's copy or cut in the app puts on the clipboard what they selected, never what the app says in its
+    // place: an app has no clipboard permission (WISP 1200), so none of its listeners hears one (a listener could set
+    // the event's clipboardData and cancel it). This capture listener on the window runs before any of the app's and
+    // stops the event there, so nothing cancels it and the browser copies the selection. One the app makes writes nothing.
+    const selectionOnly = (event) => { if (event.isTrusted === true) reflectApply(stopImmediately, event, []); };
+    // A document opened again (`document.open` with no close, or a write once the page is parsed) erases the window's
+    // listeners, and the app runs on: every one of the runner's goes back on as it opens, before any the app adds after,
+    // through what the runner took before the app's code ran.
+    const keepListeners = () => {
+      keepRunnerListeners();
+      reflectApply(listen, window, ["copy", selectionOnly, true]);
+      reflectApply(listen, window, ["cut", selectionOnly, true]);
+    };
+    keepListeners();
+    for (const name of ["open", "write", "writeln"]) {
+      const opens = Document.prototype[name];
+      Object.defineProperty(Document.prototype, name, { configurable: true, writable: true, value: function () {
+        const result = reflectApply(opens, this, arguments);
+        keepListeners();
+        return result;
+      } });
+    }
     document.write(entry);
     document.close();
   }, () => stop("broker")), (error) => {
@@ -360,6 +429,8 @@ struct AppWindow {
     recent: VecDeque<Instant>,
     /// Requests the Ghostly window's broker has not answered yet, by the app's id.
     pending: HashMap<u64, oneshot::Sender<Value>>,
+    /// When the system last gave the window's webview a tap or key (`heard_input`), which no script can make.
+    input: Option<Instant>,
     /// What the window was refused (navigations and new windows), for the spike's measurements: the last
     /// `MAX_REFUSED`, each at most `MAX_REFUSED_BYTES` of its URL.
     refused: VecDeque<String>,
@@ -379,6 +450,7 @@ impl AppWindow {
             brokered,
             recent: VecDeque::new(),
             pending: HashMap::new(),
+            input: None,
             refused: VecDeque::new(),
             view: AppView::Chat,
         }
@@ -409,6 +481,22 @@ impl AppSandboxState {
     }
 }
 
+/// How long after the system's own tap or key in an app window its runner's `activity` still counts: the runner
+/// says it for that same input, so it comes within milliseconds; this leaves room for a busy main thread.
+const INPUT_FRESH: Duration = Duration::from_secs(2);
+
+/// The system gave the app window `label`'s webview a tap or key (GTK's or AppKit's own event, on the main thread),
+/// which a script in the page cannot make: its runner's `activity` counts for a moment (`admit`).
+#[cfg_attr(
+    any(test, not(any(target_os = "linux", target_os = "macos"))),
+    allow(dead_code)
+)]
+fn heard_input<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if let Some(state) = app.try_state::<AppSandboxState>() {
+        state.with(label, |window| window.input = Some(Instant::now()));
+    }
+}
+
 /// Whether `label` names an app window. Exactly the prefix and something after it.
 pub fn is_app_label(label: &str) -> bool {
     label.len() > LABEL_PREFIX.len()
@@ -416,6 +504,12 @@ pub fn is_app_label(label: &str) -> bool {
         && label[LABEL_PREFIX.len()..]
             .chars()
             .all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: an app
+/// window's is bounded, the Ghostly window's is not.
+pub fn message_limit(label: &str) -> Option<usize> {
+    is_app_label(label).then_some(MAX_MESSAGE_BYTES)
 }
 
 /// Whether `url` is the runner, in either spelling: `ghostly-app://localhost/` on macOS and Linux, and
@@ -646,6 +740,8 @@ fn build_window<R: Runtime>(
     window
         .with_webview(move |platform| {
             let webview = platform.inner();
+            let (heard_app, heard_label) = (handle.clone(), label.clone());
+            webkitgtk::watch_input(&webview, move || heard_input(&heard_app, &heard_label));
             webkitgtk::harden(&webview, guard, internet, &store, move |result| {
                 let state = handle.state::<AppSandboxState>();
                 match result {
@@ -697,6 +793,14 @@ fn build_window<R: Runtime>(
                 .map_err(|e| format!("Window: {e}"))?;
             // Mouse look: WKWebView gives the pointer lock only when asked (webkit::allow_pointer_lock).
             let _ = window.with_webview(|platform| webkit::allow_pointer_lock(platform.inner()));
+            let (heard_app, heard_label) = (handle.clone(), label.clone());
+            window
+                .with_webview(move |platform| {
+                    webkit::watch_input(platform.inner(), move || {
+                        heard_input(&heard_app, &heard_label)
+                    })
+                })
+                .map_err(|e| format!("Window: {e}"))?;
             Ok(())
         })();
         let _ = tx.send(built);
@@ -886,6 +990,16 @@ pub fn admit(
                             }
                             _ => Err("No broker".into()),
                         };
+                    }
+                    // The runner says `activity` for the person's trusted taps and keys, but the app shares its realm
+                    // and can call `app_broker` with it too. It reaches the lock screen only just after the system's
+                    // own input in this window (`heard_input`); otherwise it is answered here, and goes no further.
+                    if kind == Some("activity")
+                        && window
+                            .input
+                            .is_none_or(|at| now.saturating_duration_since(at) >= INPUT_FRESH)
+                    {
+                        return Ok(Admitted::Answer(json!({ "id": id, "ok": true })));
                     }
                     if window.pending.contains_key(&id) {
                         return Err("bad-request".into());
@@ -1178,7 +1292,7 @@ const OFF: &[&str] = &[
 ///   window opens anyway.
 #[cfg(target_os = "macos")]
 #[cfg_attr(test, allow(dead_code))]
-mod webkit {
+pub(crate) mod webkit {
     use super::Guard;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, Bool};
@@ -1281,6 +1395,62 @@ mod webkit {
             }
         }
         let _: () = unsafe { msg_send![webview, setUIDelegate: &*delegate] };
+    }
+
+    /// An app window `watch_input` hears, by its `NSWindow`'s address, and what it calls on that window's input.
+    type Heard = (usize, Box<dyn Fn()>);
+
+    thread_local! {
+        /// The app windows `watch_input` hears, by their `NSWindow` (main thread only): a later window at the same
+        /// address takes its place, and one whose state is gone hears nothing (`heard_input`).
+        static WATCHED: RefCell<Vec<Heard>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// `heard` on every mouse-down or key-down AppKit is about to hand the web view's window, before the page gets
+    /// it: the system's input, which no script in the page can make (`heard_input`). One local monitor for the whole
+    /// app, added once; every event goes on as it came.
+    pub fn watch_input(webview: *mut std::ffi::c_void, heard: impl Fn() + 'static) {
+        let Some(webview) = (unsafe { (webview as *mut AnyObject).as_ref() }) else {
+            return;
+        };
+        let window: *mut AnyObject = unsafe { msg_send![webview, window] };
+        if window.is_null() {
+            crate::diagnostics::log("app window: no NSWindow, its input not heard");
+            return;
+        }
+        let first = WATCHED.with(|watched| {
+            let mut watched = watched.borrow_mut();
+            let first = watched.is_empty();
+            watched.retain(|(at, _)| *at != window as usize);
+            watched.push((window as usize, Box::new(heard)));
+            first
+        });
+        if !first {
+            return;
+        }
+        let Some(class) = AnyClass::get(c"NSEvent") else {
+            return;
+        };
+        // NSEventMask: left, right and other mouse down, key down.
+        let mask: u64 = (1 << 1) | (1 << 3) | (1 << 10) | (1 << 25);
+        let handler = block2::RcBlock::new(|event: *mut AnyObject| -> *mut AnyObject {
+            if let Some(event) = unsafe { event.as_ref() } {
+                let window: *mut AnyObject = unsafe { msg_send![event, window] };
+                WATCHED.with(|watched| {
+                    for (at, heard) in watched.borrow().iter() {
+                        if *at == window as usize {
+                            heard();
+                        }
+                    }
+                });
+            }
+            event
+        });
+        let monitor: Option<Retained<AnyObject>> = unsafe {
+            msg_send![class, addLocalMonitorForEventsMatchingMask: mask, handler: &*handler]
+        };
+        // AppKit keeps the monitor for as long as the app runs; it is never removed.
+        std::mem::forget(monitor);
     }
 
     /// Element full screen off in an app window: its title bar, with "(Ghostly)", stays. wry turns it on for every
@@ -1442,6 +1612,29 @@ mod webkitgtk {
             .ok_or("no user content manager")?;
         unsafe { ffi::webkit_user_content_manager_add_filter(manager.to_glib_none().0, filter) };
         Ok(())
+    }
+
+    /// `heard` on every tap, click or key GTK hands the webview itself, before the page gets it: the system's input,
+    /// which no script in the page can make (`heard_input`). The page still gets each one.
+    pub fn watch_input(webview: &webkit2gtk::WebView, heard: impl Fn() + 'static) {
+        use gtk::prelude::WidgetExt;
+        let heard = std::rc::Rc::new(heard);
+        let pressed = heard.clone();
+        webview.connect_button_press_event(move |_, _| {
+            pressed();
+            glib::Propagation::Proceed
+        });
+        let typed = heard.clone();
+        webview.connect_key_press_event(move |_, _| {
+            typed();
+            glib::Propagation::Proceed
+        });
+        webview.connect_touch_event(move |_, event| {
+            if event.event_type() == gtk::gdk::EventType::TouchBegin {
+                heard();
+            }
+            glib::Propagation::Proceed
+        });
     }
 
     /// Settings now, the filter now or once it is made; then `done`.
@@ -1939,6 +2132,25 @@ mod tests {
         );
     }
 
+    /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
+    /// in Tauri's envelope; the Ghostly window's is not. `run()` sets the bound before any window opens.
+    #[test]
+    fn an_app_windows_message_is_bounded_before_tauri_parses_it() {
+        let request = json!({"id": MAX_ID, "type": "storage.set", "args": ["k", "x".repeat(MAX_REQUEST_BYTES)]});
+        let message = json!({
+            "cmd": "app_broker", "callback": u32::MAX, "error": u32::MAX, "payload": {"request": request},
+            "options": {"headers": {}, "customProtocolIpcBlocked": true}, "__TAURI_INVOKE_KEY__": "k".repeat(64),
+        });
+        let limit = message_limit("app-0123456789abcdef").unwrap();
+        assert!(serde_json::to_vec(&message).unwrap().len() <= limit);
+        assert!(limit <= 256 * 1024, "parsed in a few milliseconds");
+        for label in ["main", "svc-1", "app-", "App-1", "xapp-1"] {
+            assert_eq!(message_limit(label), None, "{label}");
+        }
+        assert!(include_str!("lib.rs")
+            .contains("tauri::ipc::set_post_message_limit(app_sandbox::message_limit);"));
+    }
+
     /// WISP 1200: 50 requests a second per app, every call counted, refused ones too; the 51st inside the
     /// second is refused, and the window's next second is new. Another window has its own count.
     #[test]
@@ -1991,6 +2203,55 @@ mod tests {
             .unwrap_err(),
             "too-fast"
         );
+    }
+
+    /// The app can call `app_broker` itself and say `activity` with no one there: the Ghostly window hears it only
+    /// just after the window's webview had a tap or key from the system, which no script can make.
+    #[test]
+    fn activity_reaches_the_broker_only_after_the_systems_own_input() {
+        let state = state(&[("app-1", "ana/chess")]);
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert!(admit(&state, "app-1", &json!({"type": "start"}), at(0)).is_ok());
+        let activity = |id: u64| json!({"id": id, "type": "activity", "args": []});
+        // Said by the app alone: answered here, and the broker never hears it.
+        let unheard = |id: u64, ms: u64, label: &str| {
+            let admitted = admit(&state, label, &activity(id), at(ms)).unwrap();
+            match admitted {
+                Admitted::Answer(answer) => assert_eq!(answer, json!({"id": id, "ok": true})),
+                other => panic!("{other:?}"),
+            }
+        };
+        unheard(1, 10, "app-1");
+        assert!(state.with("app-1", |w| w.pending.is_empty()).unwrap());
+        // Just after the system's own tap or key in the window, the runner's `activity` goes to the broker.
+        state.with("app-1", |w| w.input = Some(at(1_000)));
+        assert!(matches!(
+            admit(&state, "app-1", &activity(2), at(1_005)),
+            Ok(Admitted::Relay(2, _))
+        ));
+        // Long after it, the app's own does not, nor does input in another window count for this one.
+        unheard(3, 1_000 + INPUT_FRESH.as_millis() as u64, "app-1");
+        state.with("app-1", |w| w.input = None);
+        let other = state
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-2".into(), window("bob/snake", true, true));
+        assert!(other.is_none());
+        assert!(admit(&state, "app-2", &json!({"type": "start"}), at(3_000)).is_ok());
+        state.with("app-2", |w| w.input = Some(at(3_000)));
+        unheard(4, 3_010, "app-1");
+        // Any other request goes on as before.
+        assert!(matches!(
+            admit(
+                &state,
+                "app-1",
+                &json!({"id": 5, "type": "context", "args": []}),
+                at(3_020)
+            ),
+            Ok(Admitted::Relay(5, _))
+        ));
     }
 
     #[test]
@@ -2221,6 +2482,161 @@ mod tests {
             assert!(web.contains(call), "web: {call}");
         }
         assert!(RUNNER.contains("delete window[name]"));
+    }
+
+    /// Both runners answer false to an app's clipboard commands (`execCommand` copy, cut, paste) with the very same
+    /// wrapper and delete the async Clipboard API with the very same code, before the app's code is written, and
+    /// refuse to run when either is not in place.
+    #[test]
+    fn the_runners_refuse_the_clipboard_commands_alike() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let begin = "const execCommand = Document.prototype.execCommand;";
+        let finish = "value: commands });\n  }\n";
+        let wrapper = |runner: &'static str| {
+            let start = runner.find(begin).unwrap();
+            let end = start + runner[start..].find(finish).unwrap();
+            (start, &runner[start..end])
+        };
+        let (at, desktop) = wrapper(RUNNER);
+        assert_eq!(desktop, wrapper(web).1);
+        let refused =
+            r#"if (named === "copy" || named === "cut" || named === "paste") return false;"#;
+        assert!(desktop.contains(refused));
+        let check = r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#;
+        let check = RUNNER.find(check).unwrap();
+        assert!(at < check);
+        assert!(web.contains(
+            r#"if (document.execCommand !== commands || clipboardLeft()) return stop("clipboard");"#
+        ));
+        // The async Clipboard API is deleted with the very same text, before the check.
+        let api = |runner: &'static str| {
+            let start = runner.find("const CLIPBOARD = [").unwrap();
+            let end = start + runner[start..].find("const stop = ").unwrap();
+            (start, &runner[start..end])
+        };
+        let (deleted, desktop) = api(RUNNER);
+        assert_eq!(desktop, api(web).1);
+        for line in [
+            r#"const CLIPBOARD = ["read", "readText", "write", "writeText"];"#,
+            "delete Navigator.prototype.clipboard;",
+            "delete window.ClipboardItem;",
+            "delete Clipboard.prototype[name];",
+            r#""clipboard" in navigator || "ClipboardItem" in window"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(deleted < check);
+        for later in [
+            "const invoke = ",
+            "document.open()",
+            "document.write(entry)",
+        ] {
+            assert!(check < RUNNER.find(later).unwrap(), "{later}");
+        }
+    }
+
+    /// The person's copy or cut in an app puts what they selected on the clipboard: both runners stop it before any of
+    /// the app's listeners with the very same text, added after `document.open` (which drops a window's listeners) and
+    /// before the entry is written, through what each took before the app's code runs, and put back whenever the
+    /// document is opened again.
+    #[test]
+    fn the_runners_keep_the_persons_copy_alike() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let begin = "    // The person's copy or cut in the app";
+        let finish = "        keepListeners();\n        return result;\n      } });\n    }\n";
+        let guard = |runner: &'static str| {
+            let start = runner.find(begin).unwrap();
+            let end = start + runner[start..].find(finish).unwrap() + finish.len();
+            (start, &runner[start..end])
+        };
+        let (at, desktop) = guard(RUNNER);
+        let (web_at, web_guard) = guard(web);
+        assert_eq!(desktop, web_guard);
+        for line in [
+            r#"if (event.isTrusted === true) reflectApply(stopImmediately, event, []);"#,
+            r#"reflectApply(listen, window, ["copy", selectionOnly, true]);"#,
+            r#"reflectApply(listen, window, ["cut", selectionOnly, true]);"#,
+            r#"for (const name of ["open", "write", "writeln"]) {"#,
+        ] {
+            assert!(desktop.contains(line), "{line}");
+        }
+        assert!(RUNNER.find("document.open()").unwrap() < at);
+        assert!(at < RUNNER.find("document.write(entry)").unwrap());
+        assert!(web.find("    document.open();").unwrap() < web_at);
+        assert!(
+            web_at
+                < web
+                    .find("reflectApply(documentWrite, document, [html]);")
+                    .unwrap()
+        );
+        for (runner, written) in [(RUNNER, at), (web, web_at)] {
+            for taken in [
+                "const reflectApply = Reflect.apply;",
+                "const listen = EventTarget.prototype.addEventListener;",
+                "const stopImmediately = Event.prototype.stopImmediatePropagation;",
+            ] {
+                assert!(runner.find(taken).unwrap() < written, "{taken}");
+            }
+        }
+    }
+
+    /// An app that opens its document again (`document.open` with no close, or a write once the page is parsed) erases
+    /// the window's listeners and runs on: each runner puts every listener it adds after its own `document.open` back on
+    /// as the document opens, not only the copy guard. On the web: the one that keeps other frames' messages out and the
+    /// one that makes a "#" link a reload; on both: the one that says `activity` for the person's taps and keys.
+    #[test]
+    fn the_runners_put_every_listener_back_when_the_document_opens_again() {
+        let web = include_str!("../../web/public/app-frame.html");
+        let wrapper = "        const result = reflectApply(opens, this, arguments);\n        keepListeners();\n";
+        let keep = "    const keepListeners = () => {\n      keepRunnerListeners();\n";
+        for (name, runner, opened, written, listeners) in [
+            (
+                "desktop",
+                RUNNER,
+                "document.open();",
+                "document.write(entry);",
+                &[
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+            (
+                "web",
+                web,
+                "    document.open();",
+                "reflectApply(documentWrite, document, [html]);",
+                &[
+                    r#"["message", deaf, true]"#,
+                    r#"["messageerror", deaf, true]"#,
+                    r#"["hashchange", fragment, true]"#,
+                    r#"["pointerdown", heard, true]"#,
+                    r#"["keydown", heard, true]"#,
+                ][..],
+            ),
+        ] {
+            let start = runner.find(opened).unwrap();
+            let end = runner.find(written).unwrap();
+            let section = &runner[start..end];
+            assert!(section.contains(wrapper), "{name}");
+            assert!(section.contains(keep), "{name}");
+            let begin = "    const keepRunnerListeners = () => {\n";
+            let own = section.find(begin).unwrap_or_else(|| panic!("{name}"));
+            let own = &section[own + begin.len()..];
+            let own = &own[..own.find("    };\n").unwrap()];
+            let added: Vec<&str> = own.lines().map(str::trim).collect();
+            let expected: Vec<String> = listeners
+                .iter()
+                .map(|args| format!("reflectApply(listen, window, {args});"))
+                .collect();
+            assert_eq!(added, expected, "{name}");
+            // Every listener the runner adds on the window from its `document.open` on is one of those it puts back.
+            assert_eq!(
+                section.matches("reflectApply(listen, window, [").count(),
+                listeners.len() + 2,
+                "{name}"
+            );
+            assert!(!section.contains("addEventListener("), "{name}");
+        }
     }
 
     /// Both runners say `activity` for the person's trusted taps and keys, so the lock screen counts input in an app,

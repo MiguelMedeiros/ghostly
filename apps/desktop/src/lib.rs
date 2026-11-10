@@ -37,6 +37,7 @@ mod file_stream;
 mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -79,6 +80,8 @@ mod types;
 mod unread_count;
 #[cfg(desktop)]
 mod viewer;
+#[cfg(any(target_os = "macos", test))]
+mod web_process;
 
 use commands::AppState;
 #[cfg(mobile)]
@@ -130,12 +133,14 @@ macro_rules! commands {
             app_sandbox::app_open,
             app_sandbox::app_post,
             app_sandbox::app_title,
+            clipboard::copy_secret,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::call_service,
             commands::close_service_windows,
             commands::create_keypair,
             commands::decrypt_text,
@@ -145,11 +150,13 @@ macro_rules! commands {
             commands::get_profile,
             commands::get_public_key,
             commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
             commands::local_service_allow,
             commands::local_service_forget,
+            commands::open_app_settings,
             commands::open_payment_link,
             commands::open_project_link,
             commands::open_pubky_passport,
@@ -213,6 +220,7 @@ macro_rules! commands {
             native_call::native_call_close,
             native_call::native_call_devices,
             native_call::native_call_devices_watch,
+            native_call::native_call_levels,
             native_call::native_call_microphone,
             native_call::native_call_mute,
             native_call::native_call_offer,
@@ -224,6 +232,7 @@ macro_rules! commands {
             native_call::native_camera_open,
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
+            native_call::native_pictures_shown,
             native_call::native_speaker_test,
             notifications::native_clear_notification,
             notifications::native_clear_notifications,
@@ -286,6 +295,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
@@ -293,6 +305,10 @@ pub fn run() {
     // On a Mac, the app menu with New Chat (Cmd+N) and Settings… (Cmd+,); Linux and Windows keep no menu bar.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_window::menu);
+    // The Ghostly window's page whose process WebKit ended: loaded again a few times, waiting longer each time, then the
+    // person is asked instead of a window that reloads forever (`web_process`).
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(web_process::ended);
 
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -357,6 +373,7 @@ pub fn run() {
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
+        .manage(clipboard::SecretSink::system())
         .manage(clipboard::PasteShelf::default())
         .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
@@ -364,6 +381,10 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // The DHT node, unless the last run kept to the relays (Hide my IP from contacts).
+            app.state::<AppState>()
+                .pkarr
+                .start(app.path().app_data_dir().ok());
             notifications::install(app.handle());
             #[cfg(target_os = "linux")]
             {
@@ -1145,6 +1166,7 @@ mod tests {
             "atlas".into(),
             "ybndrfg8ejkmcpqx".into(),
             "Atlas".into(),
+            None,
             None,
         )
         .unwrap();

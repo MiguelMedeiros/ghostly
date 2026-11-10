@@ -8,6 +8,14 @@ export interface IntentRepository {
   claim(id: string): Promise<SavedIntent>;
   cancel(id: string): Promise<SavedIntent>;
 }
+/** A saved intent as text, to tell whether a reconcile changed it: amounts in bigints and bytes count too. */
+function snapshot(saved: SavedIntent): string {
+  return JSON.stringify(saved, (_key, value: unknown) =>
+    typeof value === "bigint" ? `${value}n`
+      : ArrayBuffer.isView(value) ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+      : value instanceof ArrayBuffer ? Array.from(new Uint8Array(value))
+      : value);
+}
 /** Persist-before-spend; a submitted/unknown operation can only be reconciled, never re-executed. */
 export class PaymentCoordinator {
   private active = new Map<string, Promise<PaymentReview>>();
@@ -58,10 +66,18 @@ export class PaymentCoordinator {
     if (!["submitted","unknown"].includes(saved.review.state)) return saved.review;
     // Parked by a copy started from older state: its signed bytes are never sent again, and nothing is asked here.
     if (saved.review.parked) return saved.review;
+    const before = snapshot(saved);
     try {
       const result = await this.adapter(saved.review.method).reconcile(saved.review,saved.prepared,()=>this.repository.put(saved));
       saved.review = {...saved.review,...result,state:result.failed ? "failed" : result.settled ? "settled" : result.pending ? "submitted" : "unknown",error:result.failed ? result.error : result.settled ? undefined : engineText("notYetConfirmed")};
     } catch { saved.review = {...saved.review,state:"unknown",error:engineText("couldNotVerify")}; }
+    // Ended meanwhile by a write outside this lock (Take it back, a contact's refusal): that stands, and this round's
+    // older copy does not overwrite it.
+    const latest = await this.repository.get(id);
+    if (latest && !["submitted","unknown"].includes(latest.review.state)) return latest.review;
+    // Still on its way, nothing new learned (same state, error and fields, and nothing the adapter keeps): no write, and
+    // no wallet rebuild for it.
+    if (snapshot(saved) === before) return saved.review;
     await this.repository.put(saved); this.changed(saved.review); return saved.review;
   }); }
   cancel(id: string): Promise<PaymentReview> { return this.once(id,async () => {

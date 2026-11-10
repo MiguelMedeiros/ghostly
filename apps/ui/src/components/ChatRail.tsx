@@ -1,5 +1,5 @@
 import { forwardRef, memo, useCallback, useRef, type ReactNode } from "react";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { ListedGroup } from "./ChatRow";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { invitationStatus, invitationWaitsForMe } from "./GroupInvitation";
@@ -112,7 +112,7 @@ const SameRailChat = memo(function SameRailChat({ chatId, name, named, peerPubKe
 }, sameValue);
 
 /** A group on the rail, drawn again only when what it shows changes (`GroupRow`): when it was read is taken here, at each draw of the rail. */
-export function RailGroup({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
+export function RailGroup({ group, active, onOpen }: { group: ListedGroup; active: boolean; onOpen(): void }) {
   return <SameRailGroup group={group} active={active} readAt={groupReadAt(group.id)} onOpen={useLatestOpen(onOpen)} />;
 }
 
@@ -121,7 +121,7 @@ export function RailGroup({ group, active, onOpen }: { group: GroupView; active:
  * a muted group only when the mute keeps mentions quiet too (`GroupRow`). An invitation has its own mark, in the accent
  * while its row waits for my answer, and its label says what it waits for, as the row's line does.
  */
-const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: GroupView; active: boolean; readAt: number; onOpen(): void }) {
+const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: ListedGroup; active: boolean; readAt: number; onOpen(): void }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const name = group.name || t("group.chat.unnamed");

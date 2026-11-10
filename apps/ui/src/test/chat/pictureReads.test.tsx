@@ -120,6 +120,7 @@ describe("a chat's pictures are read as they come on screen, a few at a time, on
     renderApp(<div data-testid="list" data-message-list>{pictures(2).map((file) => <FileBubble key={file.id} file={file} peerName="Ana" />)}</div>);
     // Measured against the window, the margin would stop at the list's edge: the list scrolls inside it.
     expect(inits).toHaveLength(2);
-    for (const init of inits) expect(init).toMatchObject({ root: screen.getByTestId("list"), rootMargin: "400px 0px" });
+    // The root by reference: `toMatchObject` walked the whole happy-dom element to compare it, about 5 s.
+    for (const init of inits) expect({ root: init?.root === screen.getByTestId("list"), rootMargin: init?.rootMargin }).toEqual({ root: true, rootMargin: "400px 0px" });
   });
 });

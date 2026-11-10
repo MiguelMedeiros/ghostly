@@ -12,6 +12,7 @@ import { satsIn } from "../NetworkTag";
 import { useAmountText } from "../../hooks/useAmountText";
 import { problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
+import { shownUrl } from "../../lib/parse/links";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -73,7 +74,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <div className="space-y-1.5" data-testid="lnurl-done">
         <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
-        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine", { what: invoice.successAction.description || t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }) }), { link: <a className="underline" {...externalLinkProps(invoice.successAction.url)}>{invoice.successAction.url}</a> })}</p>}
+        {/* The service's link reads as the address it opens, as a chat's does, and its words cannot reorder it. */}
+        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine"), { what: invoice.successAction.description ? <bdi>{invoice.successAction.description}</bdi> : t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }), link: <a className="underline" dir="ltr" {...externalLinkProps(invoice.successAction.url)}>{shownUrl(invoice.successAction.url)}</a> })}</p>}
         {onDone && <button type="button" className={quiet} onClick={onDone}>{t("wallet.lightning.done")}</button>}
       </div>
     );

@@ -1,7 +1,9 @@
 {
   "attach": "附件",
   "camera": "相机",
+  "cameraBlocked": "相机已被阻止。请在 Android 设置中允许 Ghostly 使用相机。",
   "cameraFailed": "无法启动相机。",
+  "cameraRefused": "无法使用相机。请再次点按“相机”并允许。",
   "caption": "添加说明",
   "captionTooLong": "此说明为 {{bytes}} 字节（UTF-8）。DHT 最多允许 {{max}} 字节。",
   "category": {

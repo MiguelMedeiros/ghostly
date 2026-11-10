@@ -236,6 +236,72 @@ describe("the RTCPeerConnection stand-in", () => {
     await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
   });
 
+  it("decodes no picture while the window is out of sight, and draws the newest one as soon as it is back", async () => {
+    // A JPEG's decode and draw is 8-15 ms of WebKitGTK's work at 15 a second, for each picture; hidden, nobody sees it.
+    const hidden = { on: false };
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden.on ? "hidden" : "visible"));
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const show = (on: boolean) => { hidden.on = !on; document.dispatchEvent(new Event("visibilitychange")); };
+    const seen: number[] = [];
+    const decoded = vi.fn(async (blob: Blob) => {
+      seen.push(new Uint8Array(await blob.arrayBuffer())[4]);
+      return { width: 640, height: 480, close() {} };
+    });
+    vi.stubGlobal("createImageBitmap", decoded);
+    try {
+      const pc = new NativePeerConnection({});
+      const ontrack = vi.fn();
+      pc.ontrack = ontrack;
+      await pc.createOffer();
+      await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+      const jpeg = (n: number) => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, n]).buffer;
+      // Hidden from the start: the first picture is still drawn, the call needs it to show the peer's picture at all.
+      show(false);
+      tauri.channels[0].onmessage(jpeg(1));
+      await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
+      for (let n = 2; n <= 30; n++) tauri.channels[0].onmessage(jpeg(n));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(decoded).toHaveBeenCalledTimes(1);
+
+      show(true);
+      await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(2));
+      expect(seen).toEqual([1, 30]);
+      tauri.channels[0].onmessage(jpeg(31));
+      await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3));
+      expect(seen).toEqual([1, 30, 31]);
+      pc.close();
+    } finally {
+      visibility.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
+  it("tells Rust when the window goes out of sight and back: meanwhile it makes no picture past the first for it", async () => {
+    // The page draws none out of sight, and Rust's JPEGs of two pictures were 6% of a core and 1 MB a second through Tauri's channel.
+    const hidden = { on: false };
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden.on ? "hidden" : "visible"));
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const show = (on: boolean) => { hidden.on = !on; document.dispatchEvent(new Event("visibilitychange")); };
+    const told = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_pictures_shown").map(([, args]) => args);
+    try {
+      const pc = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }]));
+      show(true);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }]));
+      // One window, one word for it: a second call (or a camera) does not say it twice.
+      const second = new NativePeerConnection({});
+      show(false);
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }, { shown: false }]));
+      pc.close();
+      second.close();
+    } finally {
+      show(true);
+      visibility.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
     const pc = new NativePeerConnection({});
     await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
@@ -358,6 +424,36 @@ describe("the RTCPeerConnection stand-in", () => {
     const late: number[] = [];
     levels.own((level) => late.push(level));
     expect(late).toEqual([0.1]);
+  });
+
+  it("asks Rust for the levels only while a ring listens: a video call, which draws none, is told none", async () => {
+    // Rust says a level at nearly every reading while someone speaks, an eval each: 20 a second for no ring.
+    const levelCommands = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_call_levels").map(([, args]) => args);
+    const pc = new NativePeerConnection({});
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    // A ring that listens before Rust has the call waits for it.
+    const stopEarly = levels.peer(() => {});
+    expect(levelCommands()).toEqual([]);
+    await pc.createOffer();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }]);
+    stopEarly();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+    // Both rings back (the camera off again): asked once, and let go once the last stops.
+    const stopPeer = levels.peer(() => {});
+    const stopOwn = levels.own(() => {});
+    stopPeer();
+    expect(levelCommands()).toHaveLength(3);
+    stopOwn();
+    expect(levelCommands().slice(2)).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+
+    // A video call: no ring ever listens, and Rust starts with none to say.
+    tauri.invoke.mockClear();
+    const video = new NativePeerConnection({});
+    video.addTrack((await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks()[0]);
+    await video.createOffer();
+    expect(levelCommands()).toEqual([]);
   });
 
   it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {
@@ -603,6 +699,39 @@ describe("the devices, which are GStreamer's and known by name", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", { id: pc.id, device: "Headset" });
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_speaker", { id: pc.id, device: "Headphones" });
     expect(headset.getSettings().deviceId).toBe("Headset");
+    pc.close();
+  });
+
+  it("a microphone picked while the call catches up on earlier picks stays the one sent, not the earlier pick", async () => {
+    let described!: () => void;
+    let spoken!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
+      // Rust relaunches the call's sound on the new speaker: the person picks another microphone meanwhile.
+      if (command === "native_call_speaker") { await new Promise<void>((done) => { spoken = done; }); return undefined; }
+      if (command === "native_call_microphone") return args?.device ?? null;
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio] = pc.getTransceivers();
+    pc.addTrack((await media.getUserMedia({ audio: true })).getAudioTracks()[0]);
+    const describing = pc.createOffer();
+    await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+    // While Rust gathers: a headset, both ways.
+    await audio.sender.replaceTrack((await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0]);
+    nativeDevices.playCallOn("Headphones");
+    described();
+    await vi.waitFor(() => expect(spoken).toBeTypeOf("function"));
+    // The call has started in Rust: this one goes at once.
+    const usb = (await media.getUserMedia({ audio: { deviceId: { exact: "USB Mic" } } })).getAudioTracks()[0];
+    await audio.sender.replaceTrack(usb);
+    spoken();
+    await describing;
+
+    const microphones = tauri.invoke.mock.calls.filter(([command]) => command === "native_call_microphone").map(([, args]) => args?.device);
+    expect(microphones[microphones.length - 1], "the last microphone Rust was told").toBe("USB Mic");
+    expect(usb.getSettings().deviceId).toBe("USB Mic");
     pc.close();
   });
 

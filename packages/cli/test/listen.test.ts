@@ -60,7 +60,7 @@ describe("--type", () => {
         // An event's id starts with its type (`chat.held:${…}`); `type: "events.gap"` is written whole.
         for (const m of line.matchAll(/`([a-z]+(?:\.[a-z]+)+):\$\{|type: "([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1] ?? m[2]);
         // A type chosen on the line that emits it, or held in a `type` first (`group.sent`, `message.received`).
-        if (/\.emit\(|const type = /.test(line)) for (const m of line.matchAll(/"([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1]);
+        if (/\.emit(?:Live)?\(|const type = /.test(line)) for (const m of line.matchAll(/"([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1]);
       }
     }
     // `${kind}.pinned`, kind "chat" or "group" (events.ts `pinned`).
@@ -87,6 +87,22 @@ describe("--type", () => {
       "ghostly: no event is of type message.recieved; the message family has message.deleted, message.delivery, message.edited, message.reaction, message.received, message.sent",
       expect.stringMatching(/^ghostly: no event is of type group\.typing; the group family has group\.created, .*group\.typing\.stopped$/),
     ]);
+  });
+
+  it("events.gap passes every --type and --turns: printed, handed to the hook, and the cursor stops at it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-gap-"));
+    for (const [types, turns] of [[["message.received"], false], [["daemon", "group", "chat"], false], [[], true]] as Array<[string[], boolean]>) {
+      const lines: string[] = [], cursor = join(dir, `${turns}-${types.length}.cursor`), got = join(dir, `${turns}-${types.length}.got`);
+      const handle = eventHandler({ types, turns, cursor, print: true, write: (line) => { lines.push(line); }, exec: `cat >> '${got}'` });
+      const gap = other("events.gap", { from: 3, to: 9 });
+      handle(gap);
+      await handle.idle();
+      // Before, every one of these dropped it and moved the cursor past it: a bot on message.received never learned that
+      // messages were lost across a crash or a trim.
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).type), JSON.stringify({ types, turns })).toEqual(["events.gap"]);
+      expect(JSON.parse(readFileSync(got, "utf8"))).toMatchObject({ seq: gap.seq, type: "events.gap", from: 3, to: 9 });
+      expect(readFileSync(cursor, "utf8")).toBe(`${gap.seq}\n`);
+    }
   });
 
   it("listen --type bogus stops at once with a usage error, and opens no profile", async () => {
@@ -231,6 +247,83 @@ describe("hooks", () => {
       bridge.close();
     }
   }, 10_000);
+
+  it("with --print, a hook's stdout goes to stderr as it comes: listen's stdout carries the events only, in order", async () => {
+    const said: string[] = [], out: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    const lines: string[] = [];
+    try {
+      // A hook that echoes for debugging, and one line of 300,000 bytes: before, both went into the JSON stream.
+      const handle = eventHandler({ types: [], print: true, write: (line) => { lines.push(line); },
+        exec: `printf 'hook saw %s\\n' "$GHOSTLY_EVENT_SEQ"; head -c 300000 /dev/zero | tr '\\0' H; echo` });
+      const events = [received("c1", "a", "one"), received("c1", "b", "two")];
+      for (const event of events) handle(event);
+      await handle.idle();
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).seq)).toEqual(events.map((event) => event.seq));
+      expect(out.join("")).toBe("");
+      const text = said.join("");
+      expect(text.indexOf(`hook saw ${events[0].seq}\n`)).toBeGreaterThanOrEqual(0);
+      expect(text.indexOf(`hook saw ${events[1].seq}\n`)).toBeGreaterThan(text.indexOf(`hook saw ${events[0].seq}\n`));
+      expect(text.match(/H{300000}\n/g)).toHaveLength(2);
+      expect(text).not.toMatch("--exec");
+    } finally {
+      stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  }, 10_000);
+
+  it("a hook killed by a signal is said as killed, not as an exit 1; an exit code as before; the cursor moves past both", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-"));
+    for (const print of [false, true]) {
+      const cursor = join(dir, `${print}.cursor`), ran = join(dir, `${print}.ran`);
+      const events = [received("c1", "a", "one"), other("chat.created", { chat: "c2" }), received("c1", "c", "three")];
+      const said: string[] = [];
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+      try {
+        const handle = eventHandler({ types: [], print, write: () => {}, cursor,
+          exec: `printf '%s\\n' "$GHOSTLY_EVENT_SEQ" >> '${ran}'; case "$GHOSTLY_EVENT_SEQ" in ${events[0].seq}) exit 7;; ${events[1].seq}) kill -9 $$;; esac` });
+        for (const event of events) handle(event);
+        await handle.idle();
+      } finally {
+        stderr.mockRestore();
+      }
+      expect(said.join(""), `print: ${print}`).toBe(
+        `ghostly: --exec exited 7 on event ${events[0].seq} (message.received)\n` +
+        `ghostly: --exec was killed by SIGKILL on event ${events[1].seq} (chat.created)\n`);
+      expect(readFileSync(ran, "utf8")).toBe(events.map((event) => `${event.seq}\n`).join(""));
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[2].seq));
+    }
+  }, 10_000);
+
+  it("with --print, a process the hook leaves running with its stdout does not hold the next event", async () => {
+    const said: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    try {
+      const handle = eventHandler({ types: [], print: true, write: () => {}, exec: `echo started "$GHOSTLY_EVENT_SEQ"; (sleep 4; echo late) &` });
+      const started = Date.now();
+      handle(received("c1", "a", "one"));
+      handle(received("c1", "b", "two"));
+      await handle.idle();
+      expect(Date.now() - started).toBeLessThan(3500);
+      expect(said.join("")).toMatch(/started \d+\nstarted \d+\n/);
+    } finally {
+      stderr.mockRestore();
+    }
+  }, 10_000);
+
+  it("without --print, a hook's stdout stays listen's stdout: nothing of it on stderr", async () => {
+    const said: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { said.push(String(chunk)); return true; });
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => { throw new Error("nothing is printed without --print"); }, exec: `echo ': hook output on stdout, as before'` });
+      handle(received("c1", "a", "one"));
+      await handle.idle();
+      expect(said).toEqual([]);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
 
   it("a webhook with a user or password in its URL is a usage error that does not repeat them: fetch never posts to one", async () => {
     // What `post` would meet: every event held as "not answering", for good, the password on stderr each time.
@@ -421,7 +514,7 @@ describe("listen with an allowlist and --turns", () => {
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
       getMessage: vi.fn(async (linkId: string, id: string) => (linkId === "c1" ? chat : crew).find((m) => m.id === id)),
       sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mine:1:1" })), groupTaken: () => 0,
-      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
+      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }), deleteMessage: vi.fn(() => ({ everyone: false })), messageDetails: vi.fn(async () => ({})),
       forwardMessages: vi.fn(async () => ({ results: [{ messageIds: [], error: null }] })), pressButton: vi.fn(async () => ({ error: null })),
     };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

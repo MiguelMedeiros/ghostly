@@ -7,7 +7,7 @@ import { Settings } from "../../pages/Settings";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { JoinHost } from "../../components/devices/JoinHost";
-import { defaultDeviceName, fitsDeviceName, lockPasswordMin, lockPasswordProblem } from "../../lib/devices";
+import { defaultDeviceName, fitsDeviceName, lockPasswordMin, lockPasswordProblem, readDeviceLink } from "../../lib/devices";
 import { loadLocale, translatorFor } from "../../locales";
 import { hashPassword } from "../../lib/settings";
 import { Home } from "../../pages/Home";
@@ -69,6 +69,18 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     // The lock is on, with the new password. The settings reach storage in an effect after the render that turned
     // the lock on, which can land after the code shows on a busy runner: waited for, not read once.
     await waitFor(() => expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true }));
+  });
+
+  it("a restored profile's code names it without the word for restored, so the new device's profile is not marked restored", async () => {
+    localStorage.setItem("ghostly_profiles", JSON.stringify({ version: 1, active: "abcdefghij", profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: "abcdefghij", name: "Work", createdAt: 1, restored: true }] }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    await user.type(screen.getByTestId("device-add-password"), "long enough");
+    await user.type(screen.getByTestId("device-add-password-again"), "long enough");
+    await user.click(screen.getByTestId("device-add-next"));
+    const link = (await screen.findByTestId("device-add-code")).getAttribute("data-link")!;
+    expect(readDeviceLink(link)).toEqual({ code: "ghostly1zexample", profile: "Work" });
   });
 
   it("a password stored with the lock turned off: typing it turns the lock on before the code is made", async () => {

@@ -156,7 +156,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
 
       const photo = held(null, 13_985_607, "image/png", sized(4032, 3024));
       fakeEngine.readClipboardFiles = vi.fn(async () => [photo]);
-      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).not.toHaveAttribute("aria-busy"));
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
       await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
       expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
@@ -168,7 +168,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
       expect(fireEvent.paste(dialog(), { clipboardData: transfer({}) })).toBe(false);
       await waitFor(() => expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).not.toHaveAttribute("aria-busy"));
       expect(screen.queryByRole("alert")).toBeNull();
 
       fakeEngine.readClipboardFiles = vi.fn(async () => [held("a.pdf", 4)]);
@@ -224,7 +224,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
 
         const huge = held("photo.png", 12 * 1024 * 1024 + 1);
         read.mockResolvedValueOnce([huge]);
-        await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+        await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).not.toHaveAttribute("aria-busy"));
         act(() => over(true));
         fireEvent.drop(dialog(), named());
         await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
