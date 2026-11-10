@@ -90,7 +90,8 @@ them. To keep them from an agent's tools, run Ghostly as an OS user of its own:
 
 Only one process opens a profile at a time. When a daemon runs it, every command goes through the daemon's socket.
 When none does, a command runs the profile itself for as long as it needs (a **one-shot**) and leaves: `send` then
-waits until the message went out. Bots should run the daemon: a one-shot is offline between commands.
+waits until the message went out (to a chat nobody joined yet it answers at once: the message goes once they join).
+Bots should run the daemon: a one-shot is offline between commands.
 
 ## Commands
 
