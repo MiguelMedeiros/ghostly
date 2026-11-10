@@ -242,7 +242,8 @@ const LOOK_BYTES = 64 * 1024;
  * in every frame itself (the web runner): the contact's policies take the guard's hash
  * (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
  * that is HTML gets the guard first in it; one the guard cannot be put in (another type, more than one type, a
- * compressed or UTF-16 body, a type with a quote or a backslash in it) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
+ * compressed, UTF-16 or ISO-2022-JP body, a type with a quote or a backslash in it, an escape byte before the guard's
+ * place) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
  */
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value) : value]);
@@ -252,14 +253,14 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   // One type, said once: of two (two headers, or a list in one) a browser reads the last, which may not be the one read here.
   const types = values("content-type");
   const type = types.length === 1 && !types[0].includes(",") ? types[0] : "";
-  // UTF-16 by any of its names (`unicode`, `ucs-2`, `csunicode`...), resolved as a browser does: the guard's bytes would
-  // not read as a script there. Every `charset=` counts, and a type with a quote or a backslash in it is not read at all
+  // UTF-16 by any of its names (`unicode`, `ucs-2`, `csunicode`...), resolved as a browser does, or ISO-2022-JP (whose
+  // escapes switch the decoder to two-byte text): the guard's bytes would not read as a script there. Every `charset=` counts, and a type with a quote or a backslash in it is not read at all
   // (a browser reads quoted strings, which can hide a charset or spell one with escapes): none of these runs scripts.
   // A name no browser knows falls back to an encoding that reads them.
-  const utf16 = [...type.matchAll(/charset\s*=\s*"?([^";\s]+)/g)].some(([, label]) => {
-    try { return new TextDecoder(label).encoding.startsWith("utf-16"); } catch { return false; }
+  const unreadable = [...type.matchAll(/charset\s*=\s*"?([^";\s]+)/g)].some(([, label]) => {
+    try { return /^(utf-16|iso-2022-jp$)/.test(new TextDecoder(label).encoding); } catch { return false; }
   });
-  const html = type.split(";")[0].trim() === "text/html" && !utf16 && !/["\\]/.test(type);
+  const html = type.split(";")[0].trim() === "text/html" && !unreadable && !/["\\]/.test(type);
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP] as [string, string]], body });
   if (!html || encoded) return noScripts();
@@ -279,8 +280,10 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
     if (first.length) yield first;
     if (!done) yield* rest;
   };
-  // A byte order mark of UTF-16: the guard's bytes would not read as a script there.
-  if ((head[0] === 0xfe && head[1] === 0xff) || (head[0] === 0xff && head[1] === 0xfe)) {
+  // A byte order mark of UTF-16, or an escape before the guard's place: the guard's bytes would not read as a script
+  // there. The escape is how ISO-2022-JP (the one stateful encoding a browser decodes, by the header or by a `<meta>`
+  // the page has after the guard) turns to two-byte text; a page has no other use for one in a comment or the doctype.
+  if ((head[0] === 0xfe && head[1] === 0xff) || (head[0] === 0xff && head[1] === 0xfe) || head.subarray(0, offset).includes(0x1b)) {
     return { headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP]], body: resumed(head) };
   }
   // Nothing to run in an empty answer (a HEAD, a 304): it stays empty.

@@ -108,6 +108,16 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     for (const type of ['text/html; foo="x;charset=utf-8";charset=unicode', 'text/html; charset="uni\\code"', 'text/html; charset="utf-8"', "text/html; charset=utf-8; charset=unicode"]) {
       expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toContain("script-src 'none'");
     }
+    // ISO-2022-JP: by the header, or an escape before the guard's place (how a `<meta>` after it would reach the guard).
+    const esc = (text: string) => new Uint8Array([...text].map((char) => (char === "~" ? 0x1b : char.charCodeAt(0))));
+    for (const charset of ["iso-2022-jp", "csiso2022jp"]) {
+      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).toContain("script-src 'none'");
+    }
+    for (const page of ["<!--~$B-->~(B--><meta charset=iso-2022-jp><p>hi", "<!doctype html ~$B>~(B><p>hi"]) {
+      expect((await noScripts([["content-type", "text/html"]], esc(page))).policies, page).toContain("script-src 'none'");
+    }
+    // One after the guard's place cannot change how the guard reads.
+    expect((await noScripts([["content-type", "text/html"]], esc("<!doctype html><p>~$B~(B"))).policies).not.toContain("script-src 'none'");
     for (const charset of ["utf-8", "windows-1252", "no-such-name"]) {
       expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).not.toContain("script-src 'none'");
     }

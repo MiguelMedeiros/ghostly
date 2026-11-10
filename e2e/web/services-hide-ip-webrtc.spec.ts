@@ -8,8 +8,8 @@ import { expect, test } from "../support/fixtures";
  * that server would see this device's address. With Hide my IP from contacts on, the web app serves each of the app's
  * pages with Ghostly's guard first in it (`guardViewerAnswer`, as apps/web/src/svc/opener.ts does) inside its bridge
  * page, which runs the guard too: no packet reaches the server from the page, the frames it makes, their `srcdoc`
- * pages, shadow trees it writes as HTML, the window that frames it, or a page sent as two types or in UTF-16 under
- * another name. With it off, each of those reaches it, as before.
+ * pages, shadow trees it writes as HTML, the window that frames it, or a page sent as two types, in UTF-16 under
+ * another name or in ISO-2022-JP. With it off, each of those reaches it, as before.
  * The STUN server is a UDP port on this machine that counts what reaches it.
  *
  * Not here, as a script in the page cannot do it (`VIEWER_GUARD_SCRIPT`): a frame's window read by its index while the
@@ -58,6 +58,8 @@ const CASES: Record<string, string> = {
   "a page in UTF-16 by another name": `twice("/u16");`,
   "a page whose UTF-16 charset hides behind a quoted one": `twice("/u16-quoted");`,
   "a page whose UTF-16 charset is spelled with an escape": `twice("/u16-escaped");`,
+  "an ISO-2022-JP page whose escape hides the guard": `twice("/jis");`,
+  "a page made ISO-2022-JP by its meta, with an escape before the guard": `twice("/jis-meta");`,
   "a shadow tree made by setHTMLUnsafe": `document.body.appendChild(document.createElement("div")).setHTMLUnsafe(SHADOW);`,
   "a shadow tree made by Document.parseHTMLUnsafe": `document.body.append(document.adoptNode(Document.parseHTMLUnsafe(SHADOW).body.firstElementChild));`,
   "a shadow tree written by document.write": `document.write(SHADOW);`,
@@ -92,6 +94,11 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
     if (path === "/u16") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16 };
     // The same, said in ways a browser reads as UTF-16 through MIME's quoted strings.
     if (path === "/u16-quoted") return { headers: [["content-type", `text/html; foo="x;charset=utf-8";charset=unicode`]], body: utf16 };
+    // ISO-2022-JP: an escape in a leading comment turns the decoder to two-byte text, which the guard after it would
+    // be read as; the page turns it back and closes the comment before its own script. By the header, or by a meta.
+    const jis = (meta: string) => new Uint8Array([...`<!--~$B-->~(B-->${meta}<script src="/go.js"></script>`].map((char) => (char === "~" ? 0x1b : char.charCodeAt(0))));
+    if (path === "/jis") return { headers: [["content-type", "text/html; charset=iso-2022-jp"]], body: jis("") };
+    if (path === "/jis-meta") return { headers: [["content-type", "text/html"]], body: jis(`<meta charset="iso-2022-jp">`) };
     if (path === "/u16-escaped") return { headers: [["content-type", `text/html; charset="uni\\code"`]], body: utf16 };
     // HTML by the first type and an SVG by the last, which is the one a browser renders.
     if (path === "/two-types") return { headers: [["content-type", "text/html"], ["content-type", "image/svg+xml"]], body: `<svg xmlns="http://www.w3.org/2000/svg"><script href="/go.js"/></svg>` };
