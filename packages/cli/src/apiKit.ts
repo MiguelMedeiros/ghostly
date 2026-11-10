@@ -351,6 +351,25 @@ export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).l
 /** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
 export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
 
+/** `nobodyJoined` by the chat's id: a group's (`group:<id>`) is never one. */
+export const nobodyJoinedChat = (ctx: ApiContext, chat: string): boolean => {
+  const link = state(ctx).links.find((l) => l.id === chat);
+  return !!link && nobodyJoined(link);
+};
+
+/**
+ * Whether a one-shot waits by default on what it did in a 1:1 chat: it leaves with its process, so it stays until that
+ * went out or the contact confirmed it. Not on a chat nobody joined yet: there is no one to wait for, and `edit`, `react`,
+ * `pin`, a card or a file sat their whole wait (a file 300 s), then failed `timeout`, exit 4, which a bot retries: one
+ * more card or file each time. What was done is kept and goes once they join; the answer says so (`keptForJoin`).
+ */
+export const oneShotWaits = (ctx: ApiContext, chat: string): boolean => ctx.mode === "one-shot" && !nobodyJoinedChat(ctx, chat);
+
+/** An answer's `note` on a chat nobody joined yet: `what` is kept and goes once they join. Nothing on any other chat. */
+export const keptForJoin = (ctx: ApiContext, chat: string, what: string): { note?: string } => nobodyJoinedChat(ctx, chat)
+  ? { note: `Nobody joined this chat yet: ${what} goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }
+  : {};
+
 /**
  * A chat whose invite nobody took yet has no session to close either: `chat disconnect` answered done with the chat at
  * `connecting`, and `--hold` put the waiting invite on DHT only (a one-shot answered `pairing: error`).
