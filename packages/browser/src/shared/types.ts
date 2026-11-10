@@ -302,13 +302,16 @@ export interface GroupLive {
 }
 
 /**
- * What a pin or a deletion for everyone changes of a private group's record, in a row of its own (settings store,
- * `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the record is behind
- * on them, deleted each time the record is written whole (`engine/groupRows.ts`). `of`: what the record held of them
- * when the row was written (a hash); a record that holds something else now was written by an app from before since,
- * and counts. Absent in rows from before it.
+/**
+ * What a pin, a deletion for everyone or a change of hubs changes of a private group's record, in a row of its own
+ * (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the
+ * record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`). `hubs`: the
+ * record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count. `large`: the
+ * members noted in `StoredGroup.large` since the record was written, which the record's are added to. `of`: what the
+ * record held of them when the row was written (a hash); a record that holds something else now was written by an app
+ * from before since, and counts. Absent in rows from before it.
  */
-export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; of?: string }
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; of?: string }
 
 export interface GroupMemberView {
   key: string;
