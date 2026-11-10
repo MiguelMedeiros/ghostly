@@ -31,9 +31,11 @@ describe("a contact's mDNS candidates", () => {
       const offer = { ...contact.local, c: names } as CallSignal;
       // The first answer and each re-answer of a newer offer (`MAX_REDIALS`).
       for (let i = 0; i < 5; i++) (await CallMedia.answer(stack, offer, options)).close();
-      // This side's own call: the contact's answer carries the same names.
+      // This side's own call: the contact's answer carries the same names. The contact's side gets the offer without
+      // its candidates: with them, its checks and its DTLS hello reach this side before the answer, and libdatachannel
+      // 0.24.5 can refuse that answer (the race CallManager's `redial` describes).
       const own = await CallMedia.offer(stack, options);
-      const theirs = await CallMedia.answer(stack, { ...own.local } as CallSignal, options);
+      const theirs = await CallMedia.answer(stack, { ...own.local, c: [] } as CallSignal, options);
       try {
         own.applyAnswer({ ...theirs.local, c: names } as CallSignal);
       } finally {
