@@ -127,4 +127,15 @@ describe("the push relay's limit per push endpoint (infra/services/push-relay)",
     expect((await post(1, "https://127.0.0.1/d")).status).toBe(429);
     expect((await post(1, "https://127.0.0.1/a")).status).toBe(200);
   });
+
+  it("a full table keeps an endpoint at its limit and forgets one under it, so newcomers do not start its minute over", async () => {
+    const { delivered, post } = await relayed({ perMinute: 100, perEndpoint: 2, tracked: 3 });
+    expect((await post(1)).status).toBe(200);
+    expect((await post(2)).status).toBe(200);
+    expect((await post(3)).status).toBe(429);
+    // Newcomers enough to fill the table past it, one forward each: the endpoint at its limit is now the one seen longest ago.
+    for (const path of ["b", "c", "d", "e"]) expect((await post(10, `https://127.0.0.1/${path}`)).status).toBe(200);
+    expect((await post(4)).status).toBe(429);
+    expect(delivered.get("https://127.0.0.1/sub/one")).toBe(2);
+  });
 });
