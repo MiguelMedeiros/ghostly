@@ -84,7 +84,9 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   const [availability, setAvailability] = useState<StatusAvailability>(status?.availability ?? "available");
   const [emoji, setEmoji] = useState(status?.emoji);
   const [text, setText] = useState(status?.text ?? "");
-  const [end, setEnd] = useState<StatusEnd>(status ? (status.until ? "keep" : "never") : "today");
+  // The end it opened with, held: the engine forgets the status once that passes, and Until it must not become no end.
+  const [kept] = useState(status?.until);
+  const [end, setEnd] = useState<StatusEnd>(status ? (kept ? "keep" : "never") : "today");
   const [at, setAt] = useState(() => localDateTime((status?.until ?? Date.now() + 3_600_000)));
   const [past, setPast] = useState(false);
   const [moreEmoji, setMoreEmoji] = useState(false);
@@ -96,15 +98,16 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
     try { await work(); onClose(); } catch (e) { setProblem(problemText(e, t)); } finally { setBusy(false); }
   };
   const save = () => {
-    const until = end === "keep" ? status?.until : end === "custom" ? new Date(at).getTime() : statusEnd(end, language);
-    if (end === "custom" && !(until && until > Date.now())) { setPast(true); return; }
+    const until = end === "keep" ? kept : end === "custom" ? new Date(at).getTime() : statusEnd(end, language);
+    // A kept end can pass while the picker is open: the engine would clear the status rather than set it.
+    if ((end === "keep" || end === "custom") && !(until && until > Date.now())) { setPast(true); return; }
     const words = text.trim();
     void run(() => engine.call("setOwnStatus", { status: { availability, ...(emoji ? { emoji } : {}), ...(words ? { text: words } : {}), ...(until ? { until } : {}) } }));
   };
 
   const emojiChoices = emoji && !(STATUS_EMOJI as readonly string[]).includes(emoji) ? [emoji, ...STATUS_EMOJI] : STATUS_EMOJI;
   const endOptions = [
-    ...(status?.until ? [{ value: "keep" as const, label: t("status.ends.keep", { time: statusEndText(status.until, language) }) }] : []),
+    ...(kept ? [{ value: "keep" as const, label: t("status.ends.keep", { time: statusEndText(kept, language) }) }] : []),
     ...STATUS_ENDS.map((value) => ({ value, label: t(`status.ends.${value}`) })),
   ];
   const chip = "grid place-items-center w-9 h-9 max-md:w-10 max-md:h-10 rounded-full text-xl leading-none cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
