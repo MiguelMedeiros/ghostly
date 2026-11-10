@@ -21,6 +21,7 @@ import { problemLine } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
+import { sourceWords } from "../../lib/providerWords";
 
 type Entry =
   | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
@@ -173,7 +174,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
             <Block>
               <code dir="ltr" className="block text-left break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
               <p className="text-xs text-text-muted leading-5">
-                <bdi>{p.verified.source}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
+                <bdi>{sourceWords(p.provider, p.verified.source, t)}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>
               {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: card.refusedBy.join(", ") })}</p>}
               {(card.status === "expired" || card.status === "expiring") && (
