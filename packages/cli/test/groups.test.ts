@@ -169,6 +169,25 @@ describe("group rename", () => {
   });
 });
 
+describe("group remove", () => {
+  it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
+    const { ctx, node } = fake();
+    const remove = async (member: string) => await callApi(ctx, "group.remove", { group: "Crew", member }) as Record<string, unknown>;
+    const removed = await remove("Ana");
+    expect(node.removeGroupMember).toHaveBeenCalledWith({ groupId: "g1", key: "anakey" });
+    expect(removed.warning).toBe("Ana can still join again with the group's link: ghostly group link g1 --reset gives it a new one and keeps them out");
+    // A warning names no secret, and the answer is the group as before.
+    expect(JSON.stringify(removed)).not.toContain(LINK);
+    expect(removed).toMatchObject({ id: "g1", link: "<hidden>" });
+    // No link on: nothing to say. A member the roster has no name for is "They".
+    const noLink = { ...group, entryLink: undefined } as GroupView;
+    node.getState = () => ({ links: [], groups: [noLink], settings: {}, transport: {} }) as unknown as EngineState;
+    expect(await remove("Ana")).not.toHaveProperty("warning");
+    node.getState = () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState;
+    expect((await remove("bokey")).warning).toMatch(/^They can still join again/);
+  });
+});
+
 describe("other groups under the same id", () => {
   it("are shown beside the group held, a link hidden unless asked for", () => {
     expect(groupJson(group)).not.toHaveProperty("others");

@@ -132,6 +132,7 @@ test("a share that started the app is not offered again when Android brings the 
   await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's process" }).not.toBe("");
   let page = await webViewPage(device, Number(pid));
   await expect(page.getByTestId("share-text")).toHaveText(text, { timeout: 120_000 });
+  await expect(page.getByTestId("share-next")).toContainText(text);
   await page.getByTestId("share-cancel").click();
   await expect(page.getByTestId("share-picker")).toBeHidden();
 
@@ -163,8 +164,17 @@ function shownView(adb: Adb, id: string): boolean | null {
   return line ? /\{[0-9a-f]+ V/.test(line) : null;
 }
 
+/** Whether the app's window is secure (FLAG_SECURE): the `fl=` flags of its window in `dumpsys window windows`. */
+function secureWindow(adb: Adb): boolean {
+  const windows = adb.shell("dumpsys window windows").split(/\n(?=\s*Window #)/);
+  const own = windows.find((entry) => entry.includes(`${PKG}/${PKG}.MainActivity`) || entry.includes(`${PKG}/.MainActivity`));
+  return /\bfl=[^\n]*\bSECURE\b/.test(own ?? "");
+}
+
 test("with the lock screen on, the app switcher shows the app's cover: its mark and one line", { tag: ["@feature:android.host.switcher-cover", "@gated"] }, async ({ app }) => {
   const { page, adb } = app;
+  // With no lock, screenshots and screen sharing of the app work as any app's.
+  expect(secureWindow(adb), "the window is not secure with no lock").toBe(false);
   await page.evaluate(() => { location.hash = "#/settings/privacy"; });
   await page.getByTestId("settings-lock").click();
   const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
@@ -172,6 +182,9 @@ test("with the lock screen on, the app switcher shows the app's cover: its mark 
   await passwords.nth(1).fill("switcher-cover");
   await page.getByRole("button", { name: "Set password" }).click();
   await expect(page.getByTestId("settings-lock-now")).toBeVisible();
+  // Secure before the switcher opens: its opening shows the app's live window before the app hears it is going, so
+  // only a secure window keeps the page out of a picture, screenshot or recording of it (the cover comes after).
+  await expect.poll(() => secureWindow(adb), { timeout: 10_000, message: "the window secure with the lock on" }).toBe(true);
   adb.shell("input keyevent KEYCODE_APP_SWITCH");
   // The switcher shows the app's live window: the cover is over the page there, with the app's mark and its line.
   await expect.poll(() => shownView(adb, "lock_cover"), { timeout: 20_000, message: "the cover shown in the switcher" }).toBe(true);

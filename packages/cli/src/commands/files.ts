@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
@@ -46,8 +47,10 @@ export const commands: Record<string, Command> = {
       if (options.dir === "") throw new CliError("usage", "--dir needs a folder");
       if (options.dir !== undefined && options.path !== undefined) throw new CliError("usage", "--path names the file: not with --dir");
       if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
+      // A separator at its end names a folder: kept for the daemon to refuse, as resolving the path drops it.
+      const path = here(options.path), folder = typeof options.path === "string" && (options.path.endsWith("/") || options.path.endsWith(sep)) && !path!.endsWith(sep);
       return {
-        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
+        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: folder ? `${path}${sep}` : path, force: options.force === true,
         wait: options.wait === true ? true : undefined, timeout: timeout(options, LONG_WAIT_SECONDS),
       };
     },

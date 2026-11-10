@@ -24,13 +24,26 @@ import { qrFits } from "../lib/qrFits";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
+import { getPrefix } from "../lib/storage";
 
-const SETTLED_KEY = "ghostly_settled_money";
+/**
+ * The one list every profile of the device kept before: it cannot be told apart by profile, so it goes, unread. Money
+ * settled before then is offered once more, and its press says it was paid or spent already.
+ */
+const SHARED_SETTLED_KEY = "ghostly_settled_money";
+/**
+ * The marks are the profile's own (WISP 04), under its prefix: another profile neither reads nor clears them, and
+ * Clear all data and Delete profile take them with its other keys.
+ */
+function settledKey(): string {
+  localStorage.removeItem(SHARED_SETTLED_KEY);
+  return `${getPrefix()}settled_marks`;
+}
 
-// Which invoices and tokens this device already dealt with, so the card does not offer them again.
+// Which invoices and tokens this profile already dealt with on this device, so the card does not offer them again.
 function isSettled(id: string): boolean {
   try {
-    return (JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]") as string[]).includes(id);
+    return (JSON.parse(localStorage.getItem(settledKey()) ?? "[]") as string[]).includes(id);
   } catch {
     return false;
   }
@@ -46,8 +59,9 @@ function settledMoneyId(text: string): string {
 const SETTLED_EVENT = "ghostly-settled-money";
 function markSettled(id: string) {
   try {
-    const all = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]") as string[];
-    localStorage.setItem(SETTLED_KEY, JSON.stringify([...all.filter((entry) => entry !== id), id].slice(-200)));
+    const key = settledKey();
+    const all = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
+    localStorage.setItem(key,JSON.stringify([...all.filter((entry) => entry !== id), id].slice(-200)));
   } catch {
     // only a convenience
   }
@@ -324,7 +338,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
   const [feeKept, setFeeKept] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
-  const { copied, failed, copy } = useMoneyCopy(value);
+  const { copied, failed, copy } = useMoneyCopy(value, inspection?.kind === "token");
   // Redeemed (or Already spent) takes the place of the Redeem that was pressed, and its keys: not when the token was
   // redeemed before.
   const redeemedLine = useRef<HTMLSpanElement>(null);

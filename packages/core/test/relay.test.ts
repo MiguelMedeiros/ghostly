@@ -1091,6 +1091,17 @@ describe("relay transport: a chat's offer or answer goes over a spent minute", (
     expect(log.slice(REQUESTS_PER_MINUTE)).toEqual([...Array(allowance - 1).fill("GET"), "PUT"]);
   });
 
+  it("lets the reads for an answer past another chat's packet that waits for the minute: it cannot go before the minute frees anyway", async () => {
+    // A web app reloaded with 150 contacts away and 4 invites made just before: the newest invite's presence, refused at
+    // every poll, held the live chat's reads for its answer 5 s at a time for the whole minute, and the chat came back
+    // only when the minute freed: 62 s, against 8 s without the invites (bug hunt, 2026-11-07).
+    const { relay, log, went } = counting();
+    await spendTheMinute(relay);
+    expect(await went(write(relay, false))).toBe(false);
+    expect(await went(read(relay))).toBe(true);
+    expect(log.slice(REQUESTS_PER_MINUTE)).toEqual(["GET"]);
+  });
+
   it("leaves a group's edge a smaller one, which a chat still goes past, and a background request none", async () => {
     const { relay, went } = counting();
     await spendTheMinute(relay);

@@ -48,7 +48,8 @@ describe("the saved messages' reads, in a chat sent as its newest page", () => {
     // The saved one deleted.
     act(() => engine.emit({ kind: "message-changes", linkId: LINK, messages: [], deleted: ["peer_5"] }));
     await waitFor(() => expect(engine.callsTo("savedMessages")).toHaveLength(before + 2));
-  });
+    // Twelve real settles are 4.2 s of the default 5 s: 4.8 s at a 40% CPU share, over 5 s at 25% (a busy runner).
+  }, 15_000);
 
   it("are made again when the whole history comes without a saved message", async () => {
     const { engine } = renderApp(<SidebarSaved active={false} onOpen={() => {}} />, { route: "/" });

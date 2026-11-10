@@ -19,7 +19,7 @@ beforeAll(async () => {
 });
 afterEach(() => { vi.useRealTimers(); });
 
-const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", dataLink: "open", pairing: { status: "ready" }, ...fields }) as unknown as LinkView;
+const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", dataLink: "open", pairing: { status: "ready" }, runnableTransports: ["webrtc/1"], ...fields }) as unknown as LinkView;
 
 function fake(mode: "daemon" | "one-shot" = "daemon") {
   const events = new Set<(e: GhostlyEvent) => void>();
@@ -34,6 +34,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setTyping: vi.fn(),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     getMessages: vi.fn(async () => []),
+    fileMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
     fileAction: vi.fn(async () => undefined),
     disconnect: vi.fn(),
@@ -144,7 +145,7 @@ describe("file list", () => {
   it("says whose decision a file waits for: mine for one received, the contact's for one sent", async () => {
     const { ctx, node, transfer } = fake();
     const message = (id: string, file: string) => ({ id, sender: id.startsWith("me_") ? "me" : "peer", timestamp: 1, file: { id: file, name: "big.bin", size: 40_000_000, mime: "application/octet-stream" } });
-    node.getMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
+    node.fileMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
     transfer("chat-one-in-i", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
     transfer("chat-one-out-j", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
     transfer("chat-one-in-k", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "queued" });
@@ -429,5 +430,34 @@ describe("chat disconnect --hold", () => {
     await vi.waitFor(() => expect(JSON.parse(readFileSync(holds, "utf8"))).toEqual({}));
     expect(second.emitted.at(-1)).toMatchObject({ type: "chat.released", reason: "expired" });
     expect(existsSync(holds)).toBe(true);
+  });
+
+  // A one-shot that only read (`chat show`, `chat list`, `status`) opens no chat, and the engine refuses to switch one
+  // it has not opened: each said on stderr that the hold "could not end: Delivery method unavailable." and `chat show`
+  // still gave its past `heldUntil`, until a command that opened the chat ran.
+  it("whose time is up in a run that has not opened the chat reports no hold, says nothing, and ends once the chat opens", async () => {
+    vi.useFakeTimers();
+    const first = fake();
+    await callApi(first.ctx, "chat.disconnect", { chat: "Alice", hold: 1 });
+    const holds = join(first.dir, "holds.json");
+    const second = fake("one-shot");
+    (second.ctx.runtime.paths as { dir: string }).dir = first.dir;
+    second.setLink("chat-one", { deliveryMode: "dht", runnableTransports: undefined });
+    second.node.setDeliveryMode.mockRejectedValue(new Error("Delivery method unavailable."));
+    vi.setSystemTime(Date.now() + 66_000);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      resumeHolds(second.ctx);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(stderr).not.toHaveBeenCalled();
+    } finally { stderr.mockRestore(); }
+    expect(await callApi(second.ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null });
+    expect(second.node.setDeliveryMode).not.toHaveBeenCalled();
+    // The run opens the chat (a `send`): the hold ends then, as its time is up.
+    second.node.setDeliveryMode.mockImplementation(async ({ linkId, mode: m }) => { second.setLink(linkId, { deliveryMode: m as never }); });
+    second.linkChanged("chat-one", { runnableTransports: ["webrtc/1"] });
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(holds, "utf8"))).toEqual({}));
+    expect(second.node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
+    expect(second.emitted.at(-1)).toMatchObject({ type: "chat.released", reason: "expired" });
   });
 });

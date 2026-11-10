@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatAmount } from "../../lib/amount";
 import { translateWith } from "../../locales/translate";
-import { LOCALES } from "./locales";
+import { LOCALES, flatten } from "./locales";
 
 // covers: app.i18n
 
@@ -44,9 +44,8 @@ describe("a counted string", () => {
     expect(ar("identities.nostr.youFollowAsOf", { count: 200, time: "x" })).toBe("تتابع 200 حساب (القائمة حتى x).");
     expect([0, 2, 1234].map((count) => ar("identities.profile.followers", { count: formatAmount(count, "ar") }))).toEqual(["لا متابعين", "متابعان", "1,234 متابعًا"]);
     // Every counted Identities string has Arabic's dual, 3-10 and 11-99 forms.
-    const counted = Object.entries(LOCALES.en.identities).flatMap(([area, keys]) =>
-      Object.entries(keys as Record<string, string>).filter(([, text]) => text.includes("{{count}}")).map(([key]) => `identities.${area}.${key}`));
-    expect(counted.length).toBe(17);
+    const counted = [...flatten(LOCALES.en.identities, "identities")].filter(([, text]) => (text as string).includes("{{count}}")).map(([key]) => key);
+    expect(counted.length).toBe(18);
     const same = counted.filter((key) => new Set([2, 3, 11].map((count) => ar(key as "identities.add.days", { count, contact: "c", time: "t" }).replace(/\d+/, ""))).size < 3);
     expect(same).toEqual([]);
   });
@@ -54,6 +53,21 @@ describe("a counted string", () => {
   it("takes its count from {{count}}, or from its one number when it has no count", () => {
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 2 })).toBe("انتظر دقيقتين، ثم أرسله مرة أخرى.");
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 5 })).toBe("انتظر 5 دقائق، ثم أرسله مرة أخرى.");
+  });
+
+  // The chat list says every row's time again every few seconds ("5m", "3h"): each made its language's plural rules anew.
+  it("reads its language's plural rules once, however many counted strings it says", () => {
+    const Real = Intl.PluralRules, intl = Intl as { PluralRules: typeof Intl.PluralRules };
+    let made = 0;
+    intl.PluralRules = class extends Real { constructor(...args: ConstructorParameters<typeof Real>) { super(...args); made++; } } as typeof Intl.PluralRules;
+    try {
+      const pt = translateWith(LOCALES.pt, "pt"), ja = translateWith(LOCALES.ja, "ja");
+      const times = (say: typeof pt) => [0, 1, 2, 5, 59].map((count) => say("chat.listTime.minutes", { count }));
+      const first = [times(pt), times(ja)];
+      made = 0;
+      for (let i = 0; i < 20; i++) expect([times(pt), times(ja)]).toEqual(first);
+      expect(made).toBe(0);
+    } finally { intl.PluralRules = Real; }
   });
 
   it("with no form for its count, or no count at all, is the key's own text", () => {

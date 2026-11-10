@@ -338,6 +338,8 @@ export class LinkSession {
   private upkeepOnly = false;
   /** The last write this link asked for was a background one (`retryDelay`). */
   private wroteInBackground = false;
+  /** The records built for a packet that did not go out, and what they say: a try again of the same reuses them (`publishOnce`). */
+  private unsent: { says: string; built: ReturnType<typeof buildLinkRecords> } | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -356,6 +358,8 @@ export class LinkSession {
   private signalReadsLeft = 0;
   /** Fast reads still signaling while the contact's offer is due (`SIGNAL_DUE_READS`). */
   private dueSignalReadsLeft = 0;
+  /** This side just left DHT only and its presence is not out yet: the contact dials on it (`presenceDue`). */
+  private presenceDueOut = false;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   /**
@@ -496,6 +500,7 @@ export class LinkSession {
     countUnusedInvite(this.transport, this, false);
     this.rtcSignal = null;
     this.callSignal = null;
+    this.presenceDueOut = false;
     this.events.onStatus?.("offline");
     if (announce) {
       try {
@@ -566,6 +571,15 @@ export class LinkSession {
    * the windows that look fast for the contact (`expectPeer`, `watchPeer`) end, and the link reads at its pace from the
    * next read on. An offer of this side's out keeps its window.
    */
+  /**
+   * This side just left DHT only: the contact that dials waits on its next packet that advertises, so that one is
+   * signaling (`PkarrRequestOptions.signal`). As a plain write, an app that had spent its relay minute held it 55 s,
+   * and the contact dialled only then.
+   */
+  presenceDue(): void {
+    this.presenceDueOut = true;
+  }
+
   calm(): void {
     if (this.rtcSignal !== null) return;
     this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = this.lingerUntil = this.dueSignalReadsLeft = 0;
@@ -816,28 +830,32 @@ export class LinkSession {
       // held back every read of the chats still waiting for an answer until the minute freed.
       const awaited = this.connected || this.presence.online || this.sentBuffer.length > 0 || this.callSignal !== null || this.awaitingPeer();
       const takesBack = !rtcSignal && this.rtcSignalOut !== null;
-      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
+      const options = (rtcSignal && rtcSignal !== this.rtcSignalOut) || (advertise && this.presenceDueOut) ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       this.wroteInBackground = options?.background === true;
       // No relay takes it now: refused before it is built, as before it is signed (`RelayTransport.publishDated`). With
       // 200 chats on the web, the packets built for that were a quarter of the script of a page left alone.
       const held = this.transport.publishHeld?.(this.identity.pubKeyZ32, options);
       if (held) throw held;
-      const built = buildLinkRecords(
-        this.identity.pubKeyZ32,
-        {
-          messages: this.sentBuffer,
-          ackTimestamp: this.myAck,
-          nick: this.nick,
-          callSignal: this.callSignal,
-          rtcSignal,
-          services: advertise ? this.getServices() : undefined,
-          transports: advertise ? this.transports : null,
-        },
-        this.encKey,
-      );
+      const state = {
+        messages: this.sentBuffer,
+        ackTimestamp: this.myAck,
+        nick: this.nick,
+        callSignal: this.callSignal,
+        rtcSignal,
+        services: advertise ? this.getServices() : undefined,
+        transports: advertise ? this.transports : null,
+      };
+      // A try again of a packet that did not go out, saying the same: the records built for it, not sealed anew. Each
+      // sealing is new bytes, and a group edge that is down hands every new packet to members (`CarriedTransport`): an
+      // edge to a member who left handed two of them the same packet again at each try the relays' budget held, every
+      // few seconds (35 KB a minute on an idle web app with two such edges, bug hunt 2026-11-08).
+      const says = JSON.stringify(state);
+      const built = this.unsent?.says === says ? this.unsent.built : buildLinkRecords(this.identity.pubKeyZ32, state, this.encKey);
+      this.unsent = { says, built };
       keptMessages = built.keptMessages;
       await this.transport.publish(this.identity, built.records, options);
+      this.unsent = null;
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
@@ -846,6 +864,7 @@ export class LinkSession {
     }
     const ms = Date.now() - started;
     this.lastPublishedAt = Date.now();
+    if (advertise) this.presenceDueOut = false;
     // Signaling's fast window counts from when its signal went out: one the relays' budget held back for most of the
     // window (an offer held 50 s) would otherwise have its answer read at the background pace (2026-09-27).
     const signalOut = !!rtcSignal && rtcSignal !== this.rtcSignalOut;

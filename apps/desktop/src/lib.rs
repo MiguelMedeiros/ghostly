@@ -80,6 +80,8 @@ mod types;
 mod unread_count;
 #[cfg(desktop)]
 mod viewer;
+#[cfg(any(target_os = "macos", test))]
+mod web_process;
 
 use commands::AppState;
 #[cfg(mobile)]
@@ -131,6 +133,7 @@ macro_rules! commands {
             app_sandbox::app_open,
             app_sandbox::app_post,
             app_sandbox::app_title,
+            clipboard::copy_secret,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
@@ -139,6 +142,7 @@ macro_rules! commands {
             commands::bitcoind_rpc,
             commands::call_service,
             commands::close_service_windows,
+            commands::connection_service,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -217,6 +221,7 @@ macro_rules! commands {
             native_call::native_call_close,
             native_call::native_call_devices,
             native_call::native_call_devices_watch,
+            native_call::native_call_levels,
             native_call::native_call_microphone,
             native_call::native_call_mute,
             native_call::native_call_offer,
@@ -301,6 +306,10 @@ pub fn run() {
     // On a Mac, the app menu with New Chat (Cmd+N) and Settings… (Cmd+,); Linux and Windows keep no menu bar.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_window::menu);
+    // The Ghostly window's page whose process WebKit ended: loaded again a few times, waiting longer each time, then the
+    // person is asked instead of a window that reloads forever (`web_process`).
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(web_process::ended);
 
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -365,6 +374,7 @@ pub fn run() {
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
+        .manage(clipboard::SecretSink::system())
         .manage(clipboard::PasteShelf::default())
         .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {

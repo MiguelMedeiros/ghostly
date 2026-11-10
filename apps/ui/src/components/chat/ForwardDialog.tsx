@@ -134,10 +134,13 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         </ul>
       )}
     </div>
+    {/* The alert around the list, not on it: on the <ul> it took the place of the list, and its lines were read as no list. */}
     {problems.length > 0 && (
-      <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">
-        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
-      </ul>
+      <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
+        <ul className="m-0 list-none space-y-1 p-0">
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
+        </ul>
+      </div>
     )}
     {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 line-clamp-2 break-words text-xs text-text-muted" data-testid="forward-sent"
       title={namesTitle(sentTo, t)}>{sentBefore}<NameList names={sentTo} />{sentAfter}</p>}

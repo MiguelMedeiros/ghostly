@@ -257,7 +257,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     </div>
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />
     {camera ? <button ref={cancelButton} onClick={() => { focusSwap.current = document.activeElement === cancelButton.current ? "scan" : null; stop(); }} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
-      <button ref={primary} disabled={busy} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header`}>
+      {/* Busy, not disabled: a press from the keys keeps the focus here through a refusal, as `paste` ignores a second one. */}
+      <button ref={primary} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header aria-disabled:opacity-40 aria-disabled:cursor-progress`}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12h8M8 16h5"/></svg>
         {t("join.paste")}
       </button>

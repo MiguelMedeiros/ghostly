@@ -83,6 +83,11 @@ export interface BrowserHost {
    */
   withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
   /**
+   * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
+   * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.
+   */
+  localAccessAllowed?(origin: string): Promise<boolean>;
+  /**
    * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
    * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
    */
@@ -133,6 +138,12 @@ export interface BrowserHost {
    * sees them in the paste event (a browser, WebKit on macOS).
    */
   readClipboardFiles?(): Promise<ClipboardFile[]>;
+  /**
+   * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
+   * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
+   * The page's own copy cannot mark it. Left out where the page's copy is the way.
+   */
+  copySecret?(text: string): Promise<void>;
   /**
    * Where calls get their media, when not from the page's own WebRTC. Ghostly Desktop on Linux: WebKitGTK has
    * no WebRTC there, and GStreamer runs the calls. Left out where the page has it.

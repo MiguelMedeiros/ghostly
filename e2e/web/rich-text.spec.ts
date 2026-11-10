@@ -45,6 +45,14 @@ test("formatted text is sent as typed and shows formatted on both sides", {
   await expect(bob.page.getByText("the ending: ▒▒▒")).toBeVisible();
   await expect(bob.page.getByText("the ghost was the narrator")).toHaveCount(0);
   await bob.page.goBack();
+  // Revealed from the keyboard, a spoiler keeps the focus on the text it uncovers rather than dropping it to the page.
+  await say(alice, "the twist: ||it was all a dream||");
+  const twist = bubble(bob, "the twist").getByTestId("rich-spoiler");
+  await twist.focus();
+  await bob.page.keyboard.press("Enter");
+  await expect(twist).toHaveAttribute("data-shown", "");
+  await expect(twist).toBeFocused();
+  await expect(twist).toHaveText("it was all a dream");
 
   // A code block: highlighted once the highlighter has loaded, copied as written.
   await say(alice, "try this:\n```ts\nconst answer: number = 42;\n```");

@@ -14,6 +14,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
       links: [
         { label: t.links.open, href: APP_URL },
         { label: t.links.download, href: "/#download" },
+        { label: t.links.android, href: "/android" },
         ...(apps ? [{ label: t.links.apps, href: "/apps" }] : []),
         { label: t.links.privacy, href: "/privacy" },
         { label: t.links.terms, href: "/terms" },

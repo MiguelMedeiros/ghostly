@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { copyForForward } from "@ghostly/browser/engine/forwards";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
@@ -25,7 +26,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-/** `file save` marks a contact's file as downloaded, as a browser and Ghostly Desktop do; one sent from here it leaves. */
+/** `file save` marks a saved file as downloaded, as a browser and Ghostly Desktop do: a contact's, forwarded or not, and so every one. */
 const link = { id: "chat-one", label: "Alice", peerPubKeyZ32: "palice", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", dataLink: "idle",
   capabilities: { files: true }, pairing: { status: "ready" } } as unknown as LinkView;
 
@@ -77,7 +78,7 @@ describe("file save marks a received file as downloaded", () => {
     expect(readFileSync(saved.path, "utf8")).toBe("#!/bin/sh\necho boo\n");
   });
 
-  it("a file sent from here is not marked", async () => {
+  it("a file sent from here is marked too, as Desktop marks every save", async () => {
     Object.defineProperty(process, "platform", { value: "win32" });
     const ctx = world();
     const source = join(dir, "report.txt");
@@ -86,10 +87,20 @@ describe("file save marks a received file as downloaded", () => {
     const copy = join(mkdtempSync(join(dir, "sent-")), "copy.txt");
     await callApi(ctx, "file.save", { file: sent.file.id, path: copy });
     expect(readFileSync(copy, "utf8")).toBe("quarterly data");
-    expect(existsSync(`${copy}:Zone.Identifier`)).toBe(false);
+    expect(readFileSync(`${copy}:Zone.Identifier`, "utf8")).toBe("[ZoneTransfer]\r\nZoneId=3\r\n");
     Object.defineProperty(process, "platform", { value: "darwin" });
     await callApi(ctx, "file.save", { file: sent.file.id, path: `${copy}.2` });
-    expect(xattr).toEqual([]);
+    expect(xattr.map((call) => call.args[4])).toEqual([`${copy}.2`]);
+  });
+
+  it("a contact's file forwarded to another chat is marked: its copy is sent from here, its bytes and name are the contact's", async () => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const file = { id: "chat-two-out-fwd", name: "run me.command", size: 19, mime: "application/octet-stream" };
+    await copyForForward("chat-one-in-cmd", { linkId: "chat-two", wireId: "fwd", timestamp: 2, file });
+    expect((await fileStore.get(file.id))?.direction).toBe("out");
+    const saved = await callApi(world(), "file.save", { file: file.id, dir: mkdtempSync(join(dir, "fwd-")) }) as { path: string };
+    expect(xattr.map((call) => call.args.slice(1, 3).concat(call.args[4]))).toEqual([["-w", "com.apple.quarantine", saved.path]]);
+    expect(xattr[0].bytes).toBe("#!/bin/sh\necho boo\n");
   });
 
   it("a file system that takes no mark still gets the file", async () => {

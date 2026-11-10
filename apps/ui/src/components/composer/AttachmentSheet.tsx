@@ -22,12 +22,22 @@ function usePictures(files: File[]): (string | undefined)[] {
       void decodablePicture(file).then((yes) => setDrawable((was) => new Map(was).set(file, yes)));
     }
   }, [files]);
+  // One URL per picture while it stays: made once its read says yes, revoked when it is taken out or the sheet closes.
+  // Remaking them all at each answer or × had the browser decode every picture again (n(n+1)/2 decodes for n).
+  const made = useRef(new Map<File, string>());
   const [urls, setUrls] = useState<(string | undefined)[]>([]);
   useEffect(() => {
-    const made = files.map((file) => drawable.get(file) ? URL.createObjectURL(file) : undefined);
-    setUrls(made);
-    return () => made.forEach((url) => url && URL.revokeObjectURL(url));
+    const kept = new Set(files);
+    for (const [file, url] of made.current) {
+      if (!kept.has(file)) { URL.revokeObjectURL(url); made.current.delete(file); }
+    }
+    for (const file of files) if (drawable.get(file) && !made.current.has(file)) made.current.set(file, URL.createObjectURL(file));
+    setUrls(files.map((file) => made.current.get(file)));
   }, [files, drawable]);
+  useEffect(() => () => {
+    made.current.forEach((url) => URL.revokeObjectURL(url));
+    made.current.clear();
+  }, []);
   return urls;
 }
 

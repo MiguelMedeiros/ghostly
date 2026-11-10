@@ -115,6 +115,14 @@ export function useInstalledApp(ref: string | undefined): InstalledAppView | und
   return app;
 }
 
+/**
+ * A version found revoked or removed (WISP 1200 § Takedowns): every screen that shows the installed app (the Apps page,
+ * the composer's Apps, an app card in a chat) says "Stopped" and offers no plain Open.
+ */
+export function appStopped(app: InstalledAppView): boolean {
+  return app.run.status === "revoked" || app.run.status === "removed";
+}
+
 /** The installed apps as last read (null until a screen read them): for a line, not a hook. */
 export function installedApps(): readonly InstalledAppView[] | null {
   return apps;

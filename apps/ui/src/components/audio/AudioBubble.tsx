@@ -283,7 +283,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               disabled={!canPlay || !!problem}
               aria-disabled={state === "loading" || undefined}
               onClick={() => (state === "loading" ? undefined : state === "playing" ? pause() : void play())}
-              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/20 border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/30"
+              className="tap-target w-9 h-9 flex items-center justify-center rounded-full bg-black/20 border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/30"
             >
               {state === "playing" ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
@@ -321,7 +321,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
         </div>
         {ready && (
           <button type="button" data-testid="audio-save" title={t("common.save")} aria-label={t("chat.audio.save")} onClick={save}
-            className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit border-none cursor-pointer">
+            className="tap-target w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit border-none cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
             </svg>

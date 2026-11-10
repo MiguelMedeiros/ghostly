@@ -34,6 +34,8 @@ export const IDENTITY_MAX_EVIDENCE = 16 * 1024;
 export const IDENTITY_MAX_FRAME = 32 * 1024;
 /** Unanswered challenges a verifier keeps per conversation. */
 const MAX_CHALLENGES = 8;
+/** A challenge still open at `now` (seconds): a presentation for it is still taken. */
+const liveAt = (c: { issuedAt: number }, now: number) => c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW;
 /**
  * Proofs a verifier keeps from one contact. A newer proof of the same identity replaces the older one, and one no longer
  * standing (withdrawn, revoked, expired) gives its place to a new one; past that a presentation is refused before it is
@@ -43,6 +45,19 @@ export const IDENTITY_MAX_RECEIVED = 16;
 /** `idp-*` frames a paired session reads from the contact per `IDENTITY_FRAME_WINDOW_MS`; the rest are dropped unread. */
 export const IDENTITY_FRAME_LIMIT = 40;
 export const IDENTITY_FRAME_WINDOW_MS = 60_000;
+/**
+ * A proof this side holds verified, presented again with the same evidence between the same keys, is answered from that
+ * check while it is younger than this (seconds): the contact chooses how often it presents, and each check costs this
+ * device a provider lookup (a forge's per-IP quota, a DNS query, a contact's server) and a Pkarr read. An hour keeps an
+ * answer as fresh as a re-share can expect; past it, and between, the daily re-check (or Check again) asks the provider.
+ */
+export const IDENTITY_REUSE_CHECK_S = 3600;
+/**
+ * Presentations a verifier checks with their provider per contact in an hour; past it the contact is told the check
+ * could not run. Room for every proof it may keep (`IDENTITY_MAX_RECEIVED`) and a few retries: a contact making fresh
+ * proofs cannot spend a forge's per-IP quota (GitHub: 60 an hour) for every chat and app on this network.
+ */
+export const IDENTITY_MAX_CHECKS_PER_HOUR = 20;
 
 export const IDENTITY_PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** Printable ASCII without spaces, so the statement can be built but never needs parsing. */
@@ -191,16 +206,18 @@ export function boundVerifiedIdentity(v: VerifiedIdentity): VerifiedIdentity {
   const attester = clean(v.attester, 253);
   if (attester) out.attester = attester;
   if (v.expiresAt !== undefined) { if (!isInt(v.expiresAt)) throw new Error("Provider returned an invalid expiry"); out.expiresAt = v.expiresAt; }
-  if (v.display) {
-    const d = v.display;
-    const display: IdentityDisplay = { source: clean(d.source, 120) ?? "Self-described", fetchedAt: isInt(d.fetchedAt) ? d.fetchedAt : nowSeconds() };
-    const name = clean(d.name, 64);
-    if (name) display.name = name;
-    if (typeof d.avatar === "string" && d.avatar.length <= 48 * 1024 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(d.avatar)) display.avatar = d.avatar;
-    if (typeof d.url === "string" && d.url.length <= 512) { try { const u = new URL(d.url); if (u.protocol === "https:" && !u.username && !u.password) display.url = u.href; } catch { /* dropped */ } }
-    out.display = display;
-  }
+  if (v.display) out.display = boundIdentityDisplay(v.display);
   return out;
+}
+
+/** Bounds a provider's public name/picture (from a proof or `lookupDisplay`): a name with nothing visible left is dropped. */
+export function boundIdentityDisplay(d: IdentityDisplay): IdentityDisplay {
+  const display: IdentityDisplay = { source: clean(d.source, 120) ?? "Self-described", fetchedAt: isInt(d.fetchedAt) ? d.fetchedAt : nowSeconds() };
+  const name = clean(d.name, 64);
+  if (name) display.name = name;
+  if (typeof d.avatar === "string" && d.avatar.length <= 48 * 1024 && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(d.avatar)) display.avatar = d.avatar;
+  if (typeof d.url === "string" && d.url.length <= 512) { try { const u = new URL(d.url); if (u.protocol === "https:" && !u.username && !u.password) display.url = u.href; } catch { /* dropped */ } }
+  return display;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -318,6 +335,8 @@ export const IDENTITY_CHECK_UNAVAILABLE = "Your contact's app could not check it
 
 const TOO_MANY_RECEIVED = "Your contact keeps too many identities from you already";
 
+const NEWER_HELD = "Your contact keeps a newer proof of this identity from you";
+
 const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
 
 const UNSUPPORTED_KIND = "Your contact's app cannot verify this kind of identity yet";
@@ -325,7 +344,7 @@ const NOT_IN_PROFILE = "That identity is no longer in your profile";
 const CONTACT_REFUSED = "Your contact could not verify it";
 const EXPIRED = "The proof has expired";
 /** The refusals a contact's app writes itself (onRequest, onPresent): the only words of its `idp-result` kept as they came. */
-const CONTACT_REFUSALS = new Set([UNSUPPORTED_KIND, IDENTITY_CHECK_UNAVAILABLE, TOO_MANY_RECEIVED, REVOKED, EXPIRED]);
+const CONTACT_REFUSALS = new Set([UNSUPPORTED_KIND, IDENTITY_CHECK_UNAVAILABLE, TOO_MANY_RECEIVED, REVOKED, EXPIRED, NEWER_HELD]);
 
 /**
  * Why a share of mine was not accepted, as this app may say it under my identity: one of the refusals above or my own
@@ -351,6 +370,8 @@ export class IdentityExchange {
   private requested = new Set<string>();
   /** The nonces of the presentations in their provider's check now. */
   private checking = new Set<string>();
+  /** When the contact's presentations were checked with their provider (seconds), for `IDENTITY_MAX_CHECKS_PER_HOUR`. */
+  private checks: number[] = [];
   constructor(private options: IdentityExchangeOptions) {}
   private now() { return (this.options.now ?? nowSeconds)(); }
   /** The ledger with one more step on the chat's timeline, in milliseconds (a test's clock, in seconds, when given). */
@@ -383,6 +404,24 @@ export class IdentityExchange {
     }
   }
   stop(): void { this.requested.clear(); this.peerProviders = undefined; }
+
+  /**
+   * The challenges whose window ended unanswered go, and with them their requests' lines still verifying: a contact
+   * whose app closed, or whose proof left its profile, before it presented tells this side nothing, and its line read
+   * "verifying" for good. No write when none ended.
+   */
+  async expire(): Promise<void> {
+    const now = this.now();
+    if (!this.options.storage.read().challenges.some(c => !liveAt(c, now))) return;
+    await this.options.storage.update(l => this.withoutExpired(l, now));
+  }
+  private withoutExpired(l: IdentityLedger, now: number): IdentityLedger {
+    const live = l.challenges.filter(c => liveAt(c, now));
+    if (live.length === l.challenges.length) return l;
+    // A request sent again (a reconnect) has a live challenge of the same id, whose line it shares.
+    const ended = new Set(l.challenges.filter(c => c.id !== undefined && !liveAt(c, now) && !live.some(x => x.id === c.id)).map(c => c.id!));
+    return [...ended].reduce((out, proof) => this.log(out, { type: "unanswered", side: "theirs", proof }), { ...l, challenges: live });
+  }
 
   /** Share a proof of this profile with this contact: now if connected, else when it next is. */
   async share(id: string, connected: boolean): Promise<void> {
@@ -538,9 +577,10 @@ export class IdentityExchange {
     const challenge: IdentityChallenge = { nonce: toBase64Url(randomBytes(32)), issuedAt: now, provider, id };
     // Saved before it is sent: a presentation for a nonce this side never saved is always refused.
     await this.options.storage.update(l => {
-      const live = l.challenges.filter(c => c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
-      if (live.length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
-      return this.log({ ...l, challenges: [...live, challenge] }, { type: "shared", side: "theirs", proof: id, provider });
+      if (l.challenges.filter(c => liveAt(c, now)).length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
+      // The request's line first, the ended challenges after: a line of this kind an ended one left verifying is
+      // taken over in place (its id and time stay), and only the other ended ones' lines go.
+      return this.withoutExpired(this.log({ ...l, challenges: [...l.challenges, challenge] }, { type: "shared", side: "theirs", proof: id, provider }), now);
     });
     this.send({ t: "idp-challenge", id, nonce: challenge.nonce, issuedAt: challenge.issuedAt });
   }
@@ -576,7 +616,7 @@ export class IdentityExchange {
     const id = statement.id;
     const scope = this.incomingScope();
     const now = this.now();
-    const challengeOf = (l: IdentityLedger) => l.challenges.find(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
+    const challengeOf = (l: IdentityLedger) => l.challenges.find(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && liveAt(c, now));
     const known = (l: IdentityLedger) => !!challengeOf(l);
     if (!known(this.options.storage.read())) throw new Error("Unknown or reused identity challenge");
     let verified: VerifiedIdentity | undefined;
@@ -586,6 +626,10 @@ export class IdentityExchange {
     let reason: string | undefined;
     /** Its owner withdrew the proof while this check ran: no result goes out (see below). */
     let withdrawn = false;
+    /** The check could not run on this side (IdentityCheckUnavailable). */
+    let unavailable = false;
+    /** The same proof this side holds verified, checked recently: its answer is reused (`IDENTITY_REUSE_CHECK_S`). */
+    let reused: ReceivedIdentity | undefined;
     try {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
       // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
@@ -595,13 +639,22 @@ export class IdentityExchange {
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
-      const result = boundVerifiedIdentity(await this.options.verify(statement, evidence));
+      const evidenceJson = JSON.stringify(evidence ?? null);
+      reused = this.options.storage.read().received.find(r => r.id === id && r.status === "verified" && r.presenter === scope.subject &&
+        r.audience === scope.audience && r.context === scope.context && r.checkedAt <= now && now - r.checkedAt < IDENTITY_REUSE_CHECK_S &&
+        JSON.stringify(r.evidence ?? null) === evidenceJson);
+      if (!reused) {
+        this.checks = this.checks.filter(t => t > now - 3600 && t <= now);
+        if (this.checks.length >= IDENTITY_MAX_CHECKS_PER_HOUR) throw new IdentityCheckUnavailable("Too many of this contact's proofs to check this hour");
+        this.checks.push(now);
+      }
+      const result = reused ? reused.verified : boundVerifiedIdentity(await this.options.verify(statement, evidence));
       if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error(EXPIRED);
       // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
-      // fails is not a refusal, a revocation found is.
-      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
+      // fails is not a refusal, a revocation found is. A held proof was looked up with its check.
+      if (!reused && await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
       verified = result;
-    } catch (e) { error = peerError(e); reason = shortError(e); }
+    } catch (e) { error = peerError(e); reason = shortError(e); unavailable = e instanceof IdentityCheckUnavailable; }
     // Consuming the nonce and recording the outcome are one transaction.
     await this.options.storage.update(l => {
       const challenge = challengeOf(l);
@@ -616,14 +669,31 @@ export class IdentityExchange {
       const subject = verified?.subject;
       // A re-check may have found it revoked while it was being checked.
       if (verified && revokedHere(l.received, id)) { verified = undefined; error = reason = REVOKED; }
+      // Checked beside a newer one that is stored already: the binding's date decides, not which check ended last.
+      if (verified && l.received.some(r => r.id !== id && r.binding.provider === binding.provider && r.verified.subject === subject &&
+        r.binding.issuedAt > binding.issuedAt && standing(r, now))) { verified = undefined; error = reason = NEWER_HELD; }
+      // A held proof's record as it is now: one a re-check found unconfirmed meanwhile is not written back verified.
+      const prior = reused && l.received.find(r => r.id === id);
+      if (verified && reused && prior?.status !== (withdrawn ? "withdrawn" : "verified")) {
+        verified = undefined; error = IDENTITY_CHECK_UNAVAILABLE; reason = "It was checked again while it was presented";
+      }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
+      // This proof, held from this contact already, presented again (its result was lost, so it was asked again): the
+      // check settles the held copy. One that could not run leaves a verified copy standing, and the contact is told it
+      // is held; one that failed turns it unconfirmed, as a re-check does.
+      const held = verified ? undefined : l.received.find(r => r.id === id && r.presenter === scope.subject && r.audience === scope.audience &&
+        (r.status === "verified" || r.status === "unconfirmed"));
+      const stands = held?.status === "verified" && unavailable;
+      if (stands) { verified = held.verified; error = reason = undefined; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
-      if (!verified || !received) return { ...logged, challenges };
+      if (stands) return { ...logged, challenges };
+      if (!verified || !received) return { ...logged, challenges, received: held && !unavailable
+        ? l.received.map(r => r === held ? { ...r, checkedAt: now, status: "unconfirmed" as const, error: reason } : r) : l.received };
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
-        verifiedAt: now, checkedAt: now, status: withdrawn ? "withdrawn" : "verified" };
+        verifiedAt: prior?.verifiedAt ?? now, checkedAt: prior?.checkedAt ?? now, status: withdrawn ? "withdrawn" : "verified" };
       // The older proof it replaced is no longer held: its share stops on the timeline (one already stopped has its stop).
       const replaced = l.received.filter(r => r.id !== id && !received.includes(r) && r.binding.provider === binding.provider && r.verified.subject === subject
         && r.status !== "withdrawn" && r.status !== "revoked");

@@ -100,6 +100,13 @@ pub fn clipboard_text() -> Result<String, String> {
         .unwrap_or_default())
 }
 
+/// Puts `text` on the clipboard marked sensitive (`ClipDescription.EXTRA_IS_SENSITIVE`): a secret the person copied.
+pub async fn copy_secret(text: String) -> Result<(), String> {
+    call_async::<Value>("clipboardWriteSecret", json!({ "text": text }))
+        .await
+        .map(drop)
+}
+
 #[derive(Deserialize)]
 struct Permission {
     state: String,
@@ -183,6 +190,15 @@ struct Held {
 /// it runs now.
 pub fn keep_awake(on: bool) -> Result<bool, String> {
     Ok(call::<Held>("keepAwake", json!({ "on": on }))?.held)
+}
+
+/// Holds the connection service (`on`) so chats and groups stay connected with the app out of sight, or lets it go;
+/// `links`: whether any link is up now (its wake lock).
+pub fn connection_service(
+    on: bool,
+    links: bool,
+) -> Result<crate::commands::ConnectionHeld, String> {
+    call("connectionService", json!({ "on": on, "links": links }))
 }
 
 /// Holds the call service while a call is on (`call`: who it is with, whether it sends the camera's picture), so it

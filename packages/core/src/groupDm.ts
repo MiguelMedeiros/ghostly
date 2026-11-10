@@ -41,7 +41,11 @@ const PAIR_AHEAD_MS = 2 * 60_000;
 /** Frames of one member a hub passes on per minute. */
 export const PAIRS_PER_MINUTE = 10;
 /** Frames whose nonce a receiver or a hub remembers, to take or pass each once within `PAIR_FRESH_MS`. */
-const SEEN_KEPT = 1024;
+export const PAIR_SEEN_KEPT = 1024;
+/** Of those, frames from one member a receiver takes while they could still be fresh (12 minutes). */
+export const PAIR_SEEN_PER_MEMBER = 64;
+/** How long a nonce is kept: a frame up to `PAIR_AHEAD_MS` ahead stays fresh until `PAIR_FRESH_MS` past its time. */
+const SEEN_FOR_MS = PAIR_FRESH_MS + PAIR_AHEAD_MS;
 
 /** `k`: the inviter's participation key for the 1:1 chat, the one `c` pins; it names the request in the answers. */
 export type DmBody = { t: "req"; c: string; k: string; n?: string } | { t: "got" | "no"; k: string };
@@ -116,20 +120,38 @@ export function readGroupPair(raw: unknown): GroupPairFrame | null {
 /** Where a frame came from: the session's group, the member at the other end of the edge, who is in the roster. */
 export interface GroupPairSource { group: string; edge: string; member(key: string): boolean }
 
-/** Nonces of frames already taken, each until its frame is no longer fresh. */
+/**
+ * Nonces of frames already taken, each until its frame can no longer be fresh. A nonce is never forgotten before then:
+ * with `PAIR_SEEN_KEPT` kept, or `perMember` from one member, a new frame is refused instead. So at most
+ * `PAIR_SEEN_KEPT` nonces and as many member counts.
+ */
 class Seen {
-  private readonly at = new Map<string, number>();
-  constructor(private readonly now: () => number) {}
+  private readonly at = new Map<string, { at: number; from: string }>();
+  private readonly counts = new Map<string, number>();
+  constructor(private readonly now: () => number, private readonly perMember = PAIR_SEEN_KEPT) {}
 
-  has(nonce: string): boolean { return this.at.has(nonce); }
+  has(nonce: string): boolean { this.drop(); return this.at.has(nonce); }
 
-  /** True the first time; false for a nonce seen within `PAIR_FRESH_MS`. Kept in order: the oldest go first. */
-  add(nonce: string): boolean {
-    const now = this.now();
-    for (const [n, at] of this.at) { if (now - at < PAIR_FRESH_MS + PAIR_AHEAD_MS && this.at.size < SEEN_KEPT) break; this.at.delete(n); }
-    if (this.at.has(nonce)) return false;
-    this.at.set(nonce, now);
+  /** Whether one more frame from `from` may be kept now. */
+  fits(from: string): boolean { this.drop(); return this.at.size < PAIR_SEEN_KEPT && (this.counts.get(from) ?? 0) < this.perMember; }
+
+  /** True the first time it fits; false for a nonce kept already, or with no room for it. */
+  add(nonce: string, from: string): boolean {
+    if (this.has(nonce) || !this.fits(from)) return false;
+    this.at.set(nonce, { at: this.now(), from });
+    this.counts.set(from, (this.counts.get(from) ?? 0) + 1);
     return true;
+  }
+
+  /** Kept in order of arrival: only those whose frame can no longer be fresh go, the oldest first. */
+  private drop(): void {
+    const now = this.now();
+    for (const [nonce, kept] of this.at) {
+      if (now - kept.at <= SEEN_FOR_MS) break;
+      this.at.delete(nonce);
+      const left = (this.counts.get(kept.from) ?? 1) - 1;
+      if (left > 0) this.counts.set(kept.from, left); else this.counts.delete(kept.from);
+    }
   }
 }
 
@@ -138,18 +160,19 @@ const fresh = (ts: number, now: number) => ts >= now - PAIR_FRESH_MS && ts <= no
 /** What one member key takes of the `group-pair` frames that come to it. */
 export class GroupPairInbox {
   private readonly seen: Seen;
-  constructor(private readonly me: Identity, private readonly now: () => number = Date.now) { this.seen = new Seen(now); }
+  constructor(private readonly me: Identity, private readonly now: () => number = Date.now) { this.seen = new Seen(now, PAIR_SEEN_PER_MEMBER); }
 
   /**
    * The payload of a frame for me, or null. Straight from an edge, only from the member at its other end; handed on,
-   * only from a member of the roster. Fresh, opened as from `from`, and once.
+   * only from a member of the roster. Fresh, opened as from `from`, and once: past `PAIR_SEEN_PER_MEMBER` from one
+   * member, or `PAIR_SEEN_KEPT` in all, that could still be fresh, a new frame is refused rather than one forgotten.
    */
   open(raw: unknown, source: GroupPairSource): { from: string; payload: Record<string, unknown> } | null {
     const f = readGroupPair(raw);
     if (!f || f.g !== source.group || f.to !== this.me.pubKeyZ32 || !fresh(f.ts, this.now())) return null;
     if (f.h ? !source.member(f.from) : f.from !== source.edge) return null;
     const plain = openPair(this.me.seed, this.me.pubKeyZ32, f.from, f, pairAad(f.g, f.from, f.to, f.ts));
-    if (!plain || !this.seen.add(f.n)) return null;
+    if (!plain || !this.seen.add(f.n, f.from)) return null;
     try {
       const payload: unknown = JSON.parse(utf8Decode(plain));
       return payload && typeof payload === "object" && !Array.isArray(payload) ? { from: f.from, payload: payload as Record<string, unknown> } : null;
@@ -160,7 +183,8 @@ export class GroupPairInbox {
 /**
  * What a hub does with a `group-pair` that is not for it: passes it on once, marked `h`, to the edge of `to`. Only a
  * frame its sender put on the edge it came on (never one handed on already), for a member of the roster, fresh, and at
- * most `PAIRS_PER_MINUTE` of one member. It checks no box: it cannot open it.
+ * most `PAIRS_PER_MINUTE` of one member. It checks no box: it cannot open it. With `PAIR_SEEN_KEPT` passed that could
+ * still be fresh, it passes none until one can no longer be, rather than forget one it might then pass again.
  */
 export class GroupPairRelay {
   private readonly seen: Seen;
@@ -172,8 +196,8 @@ export class GroupPairRelay {
     if (!f || f.h || f.g !== source.group || f.from !== source.edge || !source.member(f.to) || !fresh(f.ts, this.now())) return null;
     let rate = this.rates.get(f.from);
     if (!rate) this.rates.set(f.from, rate = new RateWindow(PAIRS_PER_MINUTE, 60_000, this.now));
-    if (this.seen.has(f.n) || !rate.take()) return null;
-    this.seen.add(f.n);
+    if (this.seen.has(f.n) || !this.seen.fits(f.from) || !rate.take()) return null;
+    this.seen.add(f.n, f.from);
     return { ...f, h: 1 };
   }
 }

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { db } from "../src/engine/db";
-import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
+import { NotSent, Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.paired.offline-send, chat.paired.receipts, chat.dht.send, chat.waiting
 
@@ -232,7 +232,7 @@ describe("automatic resend", () => {
   });
 
   it("gives up after its window while the contact stays away", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const p = memory(async () => "You are offline.", { ready: () => false });
     await p.box.transmit(p.id);
     await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs + 5 * 60_000);
@@ -270,7 +270,7 @@ describe("automatic resend", () => {
   });
 
   it("hands a message to store-and-forward once the contact has been away a while", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const divert = vi.fn(async () => true);
     const p = memory(async () => "You are offline.", { ready: () => false, divert });
     await p.box.transmit(p.id);
@@ -351,6 +351,60 @@ it("resumes a DHT receipt timer at the original deadline without retransmitting 
   await restarted.stop();
 });
 
+describe("a DHT receipt deadline stamped by a clock that later went back", () => {
+  const TTL = 5 * 60_000, DAY = 24 * 60 * 60_000;
+  /** A DHT-only chat's text `sent`, its stored deadline `ahead` ms from now, restarted with a receipt window of `TTL`. */
+  const restart = async (ahead: number) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const row: StoredMessage = { linkId: "dht-clock", id: `me_${WIRE}`, wireId: WIRE, text: "pending", sender: "me", timestamp: Date.now(), via: "pkarr", delivery: "sent" };
+    const send = vi.fn(async () => null);
+    const store = { read: async () => [{ ...row }], get: async () => ({ ...row }), update: async (_id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string) => { row.delivery = delivery; row.deliveryError = error; } };
+    const deadline = Date.now() + ahead;
+    const box = new Outbox(store, send, TTL, () => deadline, { resender: { ready: () => false, via: () => "pkarr", requeueExpired: () => false } });
+    await box.recover();
+    return { row, send, box };
+  };
+
+  it("leaves 'sent' one receipt window after the restart, not an hour later", async () => {
+    const t = await restart(60 * 60_000 + 4 * 60_000);
+    await vi.advanceTimersByTimeAsync(TTL - 1);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.row.delivery).toBe("failed");
+    expect(t.row.deliveryError).toContain("No DHT receipt before it expired.");
+    expect(t.send).not.toHaveBeenCalled();
+    await t.box.stop();
+  });
+
+  it("past the timer's 32-bit limit, does not fail at once while the DHT still publishes it", async () => {
+    const t = await restart(30 * DAY);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(TTL - 1_000);
+    expect(t.row.delivery).toBe("failed");
+    expect(t.send).not.toHaveBeenCalled();
+    await t.box.stop();
+  });
+
+  it("keeps a deadline within the window as it was", async () => {
+    const t = await restart(4 * 60_000);
+    await vi.advanceTimersByTimeAsync(4 * 60_000 - 1);
+    expect(t.row.delivery).toBe("sent");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.row.delivery).toBe("failed");
+    await t.box.stop();
+  });
+});
+
+it("a receipt timeout past the timer's 32-bit limit waits instead of firing at once", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const p = memory(async () => null, { ready: () => true }, 30 * 24 * 60 * 60_000);
+  await p.box.transmit(p.id);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect((await p.row()).delivery).toBe("sent");
+  await p.box.stop();
+});
+
 describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", () => {
   it("is kept as waiting, sent once when the chat can carry it, counting no attempt before", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
@@ -370,7 +424,7 @@ describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", 
   });
 
   it("survives a restart as waiting, and fails without claiming the contact may have it when the week passes", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const send = vi.fn(async () => null);
     const m = memory(send, { ready: () => false });
     await m.box.wait(m.id, "Sent when your contact is reachable.");
@@ -431,7 +485,7 @@ describe("turns behind a slow one", () => {
 describe("a chat with many queued messages and the contact away", () => {
   /** `n` queued DHT texts in a store that counts its reads of the whole chat, on fake timers; `ready`: whether the chat can carry text. */
   async function many(n: number, ready: boolean) {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
       const wireId = `w${String(i).padStart(21, "0")}`;
       return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "pkarr", delivery: "queued" };
@@ -706,5 +760,74 @@ describe("a session that opens (agents#2468)", () => {
       store.update = update;
       await box.stop();
     }
+  });
+});
+
+describe("texts written behind one no relay took", () => {
+  /**
+   * A DHT chat whose relays refuse every publication (`NotSent`), in a store that counts the rows it reads, one by one
+   * or in one go; `taken`: the relays take them now.
+   */
+  function refused() {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const rows: StoredMessage[] = [];
+    const reads = { rows: 0, whole: 0 };
+    const store = {
+      read: async () => { reads.whole++; return rows.map(row => ({ ...row })); },
+      get: async (id: string) => { reads.rows++; const row = rows.find(r => r.id === id); return row && { ...row }; },
+      getMany: async (ids: string[]) => { reads.rows += ids.length; return ids.map(id => { const row = rows.find(r => r.id === id); return row && { ...row }; }); },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      },
+    };
+    const relays = { taken: false };
+    const sent: string[] = [];
+    const send = vi.fn(async (m: StoredMessage) => {
+      if (!relays.taken) return new NotSent("Publish failed on every relay.");
+      sent.push(m.text);
+      setTimeout(() => void box.received(m.wireId!), 1);
+      return null;
+    });
+    // The DHT path, free: the floor holds nothing, since nothing left this device.
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => true, via: () => "pkarr" } });
+    const write = async (i: number) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      rows.push({ linkId: "refused", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: Date.now(), via: "pkarr", delivery: "sending" });
+      await box.transmit(`me_${wireId}`);
+    };
+    return { rows, reads, relays, sent, send, box, write };
+  }
+
+  it("a new text costs a few row reads however many wait, an idle minute about one look, and they all go in order once a relay takes them", async () => {
+    const { rows, reads, relays, sent, send, box, write } = refused();
+    await write(0);
+    expect(rows[0].delivery).toBe("waiting");
+    const perSend: number[] = [];
+    for (let i = 1; i < 200; i++) {
+      const before = reads.rows + reads.whole;
+      await write(i);
+      perSend.push(reads.rows + reads.whole - before);
+      // As a person writes them, a moment apart.
+      await vi.advanceTimersByTimeAsync(9);
+    }
+    expect(rows.every(r => r.delivery === "waiting"), "all wait behind the first").toBe(true);
+    // Each new text read again every text already waiting, about 4 times: 780 reads per send at 200 waiting.
+    expect(Math.max(...perSend.slice(-50)), "row reads for one new text with ~200 waiting").toBeLessThanOrEqual(8);
+    // Left alone: each check walked every waiting text again the same way, about 4,500 row reads a minute.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.slice(0, 3).reduce((a, b) => a + b));
+    const attempts = send.mock.calls.length;
+    reads.rows = reads.whole = 0;
+    await vi.advanceTimersByTimeAsync(120_000);
+    // About one look a minute, at the waiting rows by id: never the chat's whole history, however long it is.
+    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(rows.length + 20);
+    expect(reads.whole, "whole-chat reads while idle").toBe(0);
+    // Only the first is published again, at its own checks.
+    expect(send.mock.calls.slice(attempts).every(([m]) => m.text === "m0")).toBe(true);
+    relays.taken = true;
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.at(-1)!);
+    expect(sent).toEqual(rows.map(r => r.text));
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    await box.stop();
   });
 });

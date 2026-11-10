@@ -261,7 +261,7 @@ describe("DID signatures", () => {
     expect(() => checkDidJws(other.jws({}), messages, k.doc())).toThrow(/does not match/);
     expect(() => checkDidJws(k.jws({}, utf8Encode("something else")), messages, k.doc())).toThrow(/another text/);
     expect(() => checkDidJws(k.jws({ kid: `${other.did}#x` }), messages, k.doc())).toThrow(/not a key of/);
-    expect(() => checkDidJws(k.jws({ kid: `${k.did}#nope` }), messages, k.doc())).toThrow(/lists no key/);
+    expect(() => checkDidJws(k.jws({ kid: `${k.did}#nope` }), messages, k.doc())).toThrow(/^The DID document does not list the key the JWS names$/);
     expect(() => checkDidSignature(other.raw(utf8Encode(STATEMENT)), messages, k.doc())).toThrow(/does not match/);
     const secp = keyOn("secp256k1");
     expect(() => checkDidJws(secp.jws({}), messages, k.doc())).toThrow(/no secp256k1 key/);
@@ -286,8 +286,8 @@ describe("DID signatures", () => {
     }
     // Named by its id that may not sign, it is still refused.
     const view = parseDidDocument(did, { id: did, verificationMethod: [vm("#enc"), vm("#sig")], authentication: ["#sig"] });
-    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/#enc, which the DID document does not list/);
-    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/#enc, which the DID document does not list/);
+    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/^Signed by a key the DID document does not list/);
+    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/^Signed by a key the DID document does not list/);
   });
 
   it("parses only JWS it can check", () => {

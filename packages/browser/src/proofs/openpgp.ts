@@ -39,6 +39,10 @@ export const PGP_LIMITS = {
   sharedKey: 9 * 1024,
   /** User IDs kept in the minimal key and shown. */
   userIds: 16,
+  /** Signatures of one kind on one part of a shared key (self-certifications of a user ID, binding signatures, revocations). */
+  signaturesPerKind: 2,
+  /** Signatures in a shared key, back-signatures included: each costs one verification, ~10 ms in JavaScript for brainpoolP512r1. */
+  keySignatures: 20,
   /** Bytes per user ID. */
   userIdLength: 256,
   /** A keyserver response. */
@@ -231,6 +235,59 @@ async function readOneKey(pgp: Pgp, input: { armored: string } | { binary: Uint8
   return key as OpenPGP.PublicKey;
 }
 
+type Sig = OpenPGP.SignaturePacket;
+interface SignedPart { sigs: Sig[]; type: OpenPGP.enums.signature; data: object; by: OpenPGP.PublicKeyPacket | OpenPGP.PublicSubkeyPacket }
+/** Every signature group of a key, with what it signs. */
+function signedParts(pgp: Pgp, key: OpenPGP.PublicKey): SignedPart[] {
+  const t = pgp.enums.signature, primary = key.keyPacket as OpenPGP.PublicKeyPacket;
+  const direct = (key as unknown as { directSignatures?: Sig[] }).directSignatures ?? [];
+  return [
+    { sigs: key.revocationSignatures, type: t.keyRevocation, data: { key: primary }, by: primary },
+    { sigs: direct, type: t.key, data: { key: primary }, by: primary },
+    ...key.users.flatMap(u => [
+      { sigs: u.selfCertifications, type: t.certGeneric, data: { userID: u.userID, key: primary }, by: primary },
+      { sigs: u.revocationSignatures, type: t.certRevocation, data: { userID: u.userID, key: primary }, by: primary },
+    ]),
+    ...key.subkeys.flatMap(s => {
+      const data = { key: primary, bind: s.keyPacket };
+      return [
+        { sigs: s.bindingSignatures, type: t.subkeyBinding, data, by: primary },
+        { sigs: s.bindingSignatures.flatMap(b => b.embeddedSignature ? [b.embeddedSignature] : []), type: t.keyBinding, data, by: s.keyPacket as OpenPGP.PublicSubkeyPacket },
+        { sigs: s.revocationSignatures, type: t.subkeyRevocation, data, by: primary },
+      ];
+    }),
+  ];
+}
+/** Whether a signature verifies, at `date` or, with null, whenever. OpenPGP.js caches a success, not a failure. */
+const holds = (part: SignedPart, sig: Sig, date: Date | null, cfg: OpenPGP.PartialConfig) =>
+  sig.verify(part.by, part.type, part.data, date as Date, undefined, cfg as OpenPGP.Config).then(() => true, () => false);
+
+/**
+ * A contact's key has the shape `minimalKey` writes, and every signature in it verifies, before OpenPGP.js
+ * looks at it: it re-verifies a signature that failed on each of its passes over the key, so padding a key
+ * with spoiled copies of its own self-signatures (which pass the hash-prefix check) multiplied the cost of a check.
+ * Here each signature is verified once, success is cached, and the first failure refuses the key.
+ */
+async function assertMinimalKey(pgp: Pgp, key: OpenPGP.PublicKey): Promise<void> {
+  const cfg = config(pgp);
+  const parts = signedParts(pgp, key);
+  if (key.users.length > PGP_LIMITS.userIds || key.subkeys.length > 1 || key.users.some(u => !u.userID || u.otherCertifications.length) ||
+    parts.some(p => p.sigs.length > PGP_LIMITS.signaturesPerKind) || parts.reduce((n, p) => n + p.sigs.length, 0) > PGP_LIMITS.keySignatures)
+    throw new PgpProofError('Invalid OpenPGP proof');
+  for (const part of parts) for (const sig of part.sigs) if (!await holds(part, sig, null, cfg)) throw new PgpProofError('Invalid OpenPGP proof');
+}
+
+/** The newest signature of `part` valid at each date, once each: what a check at those dates uses. */
+async function newestValid(part: SignedPart, dates: Date[], cfg: OpenPGP.PartialConfig): Promise<Sig[]> {
+  const kept = new Set<Sig>();
+  for (const date of dates) {
+    let best: Sig | undefined;
+    for (const sig of part.sigs) if ((!best || sig.created! >= best.created!) && await holds(part, sig, date, cfg)) best = sig;
+    if (best) kept.add(best);
+  }
+  return [...kept];
+}
+
 /** Valid, unrevoked, self-certified user IDs at `at`. */
 async function validUserIds(key: OpenPGP.PublicKey, at: Date, cfg: OpenPGP.PartialConfig): Promise<OpenPGP.User[]> {
   const valid: OpenPGP.User[] = [];
@@ -244,21 +301,33 @@ async function validUserIds(key: OpenPGP.PublicKey, at: Date, cfg: OpenPGP.Parti
 /**
  * The transferable key a contact receives: primary key and its direct/revocation
  * signatures, valid user IDs with self-certifications only (third-party
- * certifications and photos dropped), and the one subkey that signed.
+ * certifications and photos dropped), and the one subkey that signed. Of each
+ * kind of self-signature, only the newest valid now and the newest valid when
+ * it signed are kept (superseded ones are what `assertMinimalKey` refuses).
  */
-async function minimalKey(pgp: Pgp, key: OpenPGP.PublicKey, signer: OpenPGP.PublicKey | OpenPGP.Subkey, at: Date, cfg: OpenPGP.PartialConfig): Promise<Uint8Array> {
+async function minimalKey(pgp: Pgp, key: OpenPGP.PublicKey, signer: OpenPGP.PublicKey | OpenPGP.Subkey, at: Date, signedAt: Date, cfg: OpenPGP.PartialConfig): Promise<Uint8Array> {
+  const parts = signedParts(pgp, key);
+  const part = (sigs: Sig[]) => parts.find(p => p.sigs === sigs)!;
+  const kept = (sigs: Sig[]) => newestValid(part(sigs), [at, signedAt], cfg);
+  // Revocations count whenever they were made: the newest that verify are kept.
+  const revocations = async (sigs: Sig[]) => {
+    const valid: Sig[] = [];
+    for (const sig of sigs) if (await holds(part(sigs), sig, null, cfg)) valid.push(sig);
+    return valid.sort((a, b) => b.created!.getTime() - a.created!.getTime()).slice(0, PGP_LIMITS.signaturesPerKind);
+  };
   const packets = new pgp.PacketList<OpenPGP.AnyPacket>();
-  packets.push(key.keyPacket, ...key.revocationSignatures);
+  packets.push(key.keyPacket, ...await revocations(key.revocationSignatures));
   // Direct-key self-signatures carry v6 key properties; OpenPGP.js keeps them here.
-  const direct = (key as unknown as { directSignatures?: OpenPGP.SignaturePacket[] }).directSignatures ?? [];
-  packets.push(...direct);
-  for (const user of await validUserIds(key, at, cfg)) packets.push(user.userID!, ...user.selfCertifications, ...user.revocationSignatures);
+  packets.push(...await kept(parts[1].sigs)); // signedParts lists them second
+  for (const user of await validUserIds(key, at, cfg)) packets.push(user.userID!, ...await kept(user.selfCertifications), ...await revocations(user.revocationSignatures));
   if (signer !== key) {
     const sub = signer as OpenPGP.Subkey;
-    packets.push(sub.keyPacket, ...sub.bindingSignatures, ...sub.revocationSignatures);
+    packets.push(sub.keyPacket, ...await kept(sub.bindingSignatures), ...await revocations(sub.revocationSignatures));
   }
+  const sigs = packets.filter((p): p is Sig => p instanceof pgp.SignaturePacket);
   const bytes = new pgp.PublicKey(packets).write();
-  if (bytes.length > PGP_LIMITS.sharedKey) throw new PgpProofError('This key is too large to share, even without third-party certifications. Remove old user IDs or use a smaller key.');
+  if (bytes.length > PGP_LIMITS.sharedKey || sigs.length + sigs.filter(s => s.embeddedSignature).length > PGP_LIMITS.keySignatures)
+    throw new PgpProofError('This key is too large to share, even without third-party certifications. Remove old user IDs or use a smaller key.');
   return bytes;
 }
 
@@ -382,8 +451,9 @@ export async function preparePgpEvidence(input: { statement: string; signature: 
   const single = new pgp.PacketList<OpenPGP.AnyPacket>(); single.push(sig);
   const signature = new pgp.Signature(single as OpenPGP.PacketList<OpenPGP.SignaturePacket>).write();
   if (signature.length > PGP_LIMITS.sharedSignature) throw new PgpProofError('This signature is too large to share.');
-  const at = new Date((options.now ?? nowSeconds()) * 1000);
-  const evidence: PgpEvidence = { scheme: PGP_SCHEME, key: toBase64Url(await minimalKey(pgp, key, signer, at, config(pgp))), signature: toBase64Url(signature) };
+  const now = options.now ?? nowSeconds();
+  const at = new Date(now * 1000), signedAt = new Date(Math.min(info.signedAt, now) * 1000);
+  const evidence: PgpEvidence = { scheme: PGP_SCHEME, key: toBase64Url(await minimalKey(pgp, key, signer, at, signedAt, config(pgp))), signature: toBase64Url(signature) };
   return { evidence, verified: info };
 }
 
@@ -407,6 +477,7 @@ export async function verifyPgpEvidence(raw: PgpEvidence, statement: string, opt
   const keyBytes = fromBase64Url(evidence.key), sigBytes = fromBase64Url(evidence.signature);
   const pgp = await loadOpenPgp();
   const key = await readOneKey(pgp, { binary: keyBytes });
+  await assertMinimalKey(pgp, key);
   const sig = await readSignaturePacket(pgp, { binary: sigBytes });
   return (await verifyPacket(pgp, key, sig, statement, options)).info;
 }

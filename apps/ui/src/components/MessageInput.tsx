@@ -23,8 +23,9 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
-import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { keepEditWords, keptEditWords } from "../lib/keptEdits";
+import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
 import { useKeptOnScreen } from "./composer/keptOnScreen";
 import { useComposition } from "../hooks/useComposition";
@@ -222,6 +223,8 @@ export function MessageInput({
   const readingRef = useRef(false);
   /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
   const [dropsReading, setDropsReading] = useState(0);
+  /** A share from the "Share to…" picker waits for this chat's edit to end: said by the edit bar. */
+  const [shareWaits, setShareWaits] = useState(false);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -292,18 +295,34 @@ export function MessageInput({
   }, [replyKey]);
 
   // Editing: the message's words in the field, the caret at their end; the draft is kept aside until the edit ends.
+  // An edit open as this composer went (the chat left for the Share to… picker) comes back with the words typed into it
+  // (lib/keptEdits.ts); the draft set aside is the one in storage, the field's as the composer opens.
   const editKey = edit?.key, editText = edit?.text;
   const draftAside = useRef<string | null>(null);
+  /** The words an edit opened with, until the field shows them: before that, the field still holds the draft. */
+  const editOpening = useRef<string | null>(null);
   useEffect(() => {
     if (!editKey || editText === undefined) return;
     if (draftAside.current === null) draftAside.current = textareaRef.current?.value ?? "";
-    caretRef.current = editText.length;
-    setText(editText);
+    const words = (draftId && keptEditWords(draftId, editKey)) ?? editText;
+    editOpening.current = words;
+    caretRef.current = words.length;
+    setText(words);
     textareaRef.current?.focus({ preventScroll: true });
-  }, [editKey, editText]);
+  }, [draftId, editKey, editText]);
+  useEffect(() => {
+    if (!draftId || !editKey || draftAside.current === null) return;
+    if (editOpening.current !== null) {
+      if (text !== editOpening.current) return;
+      editOpening.current = null;
+    }
+    keepEditWords(draftId, editKey, text);
+  }, [draftId, editKey, text]);
   const endEdit = () => {
     const draft = draftAside.current ?? "";
     draftAside.current = null;
+    editOpening.current = null;
+    if (draftId) keepEditWords(draftId, null);
     setText(draft);
     edit?.onClose();
   };
@@ -312,8 +331,10 @@ export function MessageInput({
     if (editKey || draftAside.current === null) return;
     const draft = draftAside.current;
     draftAside.current = null;
+    editOpening.current = null;
+    if (draftId) keepEditWords(draftId, null);
     setText(draft);
-  }, [editKey]);
+  }, [draftId, editKey]);
 
   const editing = !!edit;
   // The draft is written after a pause in the typing (the guard reads all of it: per key, a long draft cost a frame on a
@@ -751,9 +772,14 @@ export function MessageInput({
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
-  /** A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a paste's. */
+  /**
+   * A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a
+   * paste's. Read to its end where files cannot go any more (an edit began meanwhile), they wait for this chat again.
+   */
   const offerShared = (share: IncomingShare) => {
-    shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
+    shareFiles(share).then((files) => {
+      if (files.length && !offerRef.current(files) && draftId) { keepShareFor(draftId, { title: "", text: "", url: "", files }); setShareWaits(true); }
+    }, (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
   /**
@@ -790,7 +816,7 @@ export function MessageInput({
     // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
     if (readingRef.current) return true;
     const read = platformPastedFiles();
-    if (!read) return false;
+    if (!read) return keptFiles(data);
     readingRef.current = true;
     setReading(true);
     // With what it brought, in one go: the line gives way to the sheet, or to the reason there is none.
@@ -804,6 +830,17 @@ export function MessageInput({
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
+    return true;
+  };
+  /**
+   * A paste that says it carries files and hands the page none, where nothing else can read them (the web app): iOS
+   * Safari's paste of a PDF copied in Files. Said, with the file picker one tap away (not beside the sheet, whose files
+   * the picker would not join); anything else is left to the field.
+   */
+  const keptFiles = (data: DataTransfer | null): boolean => {
+    if (!pasteKeepsFiles(data)) return false;
+    if (fileUnavailable) showToast(fileUnavailable);
+    else showToast(t("errors.files.pasteKept"), attached ? undefined : { label: t("composer.chooseFiles"), run: () => fileInputRef.current?.click() });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
@@ -834,12 +871,15 @@ export function MessageInput({
   // Files are listened for where they can go, and where there is a reason to give for why they cannot (a group).
   const hearsFiles = canAttach || (!!fileUnavailable && !disabled && !locked);
   // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
-  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked).
+  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked). While
+  // one of my messages is edited here, the whole share waits for the edit to end (saved or left): the field holds the
+  // edit's words, the draft it goes into is set aside, and an edit takes no files. Said by the edit, until it lands.
   useEffect(() => {
     if (!draftId) return;
     const take = () => {
       const waiting = peekShareFor(draftId);
-      if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
+      setShareWaits(!!waiting && editing);
+      if (!waiting || editing || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
       // Longer than the field takes, or than one message can be once in the draft (counted in bytes, as Send counts):
@@ -858,7 +898,7 @@ export function MessageInput({
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
+  }, [draftId, editing, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
   // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them. A dialog
@@ -1059,6 +1099,7 @@ export function MessageInput({
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {edit && shareWaits && <p role="status" data-testid="composer-share-waits" className="m-0 mb-2 px-1 text-[13px] text-text-secondary animate-fade-in">{t("composer.shareWaitsForEdit")}</p>}
       {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {previewOpen && <TranslatePreview state={drafting.state!} stale={translationStale(drafting.state, text)} disabled={disabled} onEdit={drafting.edit}
         onChoose={(code) => guardThen(() => void drafting.translateInto(code, text, picker.compose(text)))} onAgain={translateAgain}

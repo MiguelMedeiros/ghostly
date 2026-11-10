@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -24,6 +25,8 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   const tabs = page.getByTestId("mobile-tabs");
   await tabs.getByRole("button", { name: "Wallets" }).click();
   await expect(page.getByTestId("wallet")).toBeVisible();
+  // A new profile's first-run card (no setup runs under test), its inline New with it: measured once it is there.
+  await expect(page.getByTestId("wallet-first").getByTestId("wallet-first-new")).toBeVisible();
   await measure("wallet");
   await tabs.getByRole("button", { name: "Apps" }).click();
   await expect(page.getByTestId("apps-page")).toBeVisible();
@@ -101,22 +104,49 @@ test("on a phone every button, link and control on the main screens is a 44 px t
   expect([...small.values()], "controls under 44 × 44 px on a phone").toEqual([]);
 });
 
+/** The app in `language` (the setting a reload reads), back on the screen that was open. */
+const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
+  await page.evaluate((language) => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+  }, language);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("dir", dir);
+};
+
+/**
+ * The narrowest phone (320 × 568): the composer's + and smiley were 36 px wide, to leave the message more room, and the
+ * chat's Back 36 px, to leave the name more. They are 44 px targets as everywhere else, and the message field is still
+ * wide enough to write in, in English and in Arabic.
+ */
+test("on a 320 px phone the chat's Back and the composer's + and smiley are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("narrow-chat-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("narrow-chat-bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+  await page.setViewportSize({ width: 320, height: 568 });
+  const small: string[] = [];
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    await speak(alice, language, dir);
+    const field = page.locator(".composer-textarea");
+    await expect(field).toBeVisible();
+    // The chat's rows slide in after the reload: measured where they come to rest.
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity));
+    for (const target of await smallTargets(page)) small.push(`${language}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+    await page.screenshot({ path: testInfo.outputPath(`chat-320-${language}.png`) });
+    const width = (await field.boundingBox())!.width;
+    testInfo.annotations.push({ type: "message field", description: `${language}: ${width} px wide at 320 px` });
+    expect(width, `${language}: the message field keeps room to write in`).toBeGreaterThanOrEqual(150);
+  }
+  expect(small, "controls under 44 × 44 px on a 320 px phone").toEqual([]);
+});
+
 /**
  * A system line long enough to wrap (the contact's "joined the chat", in Japanese at 375 px: "<key> がチャットに参加しました")
  * took the row's whole width, which put its ⋮ against the screen's edge: the edge cut where a tap lands on it to 33 px
  * wide. A system row keeps the room the ⋮'s hit area takes, on both sides: in Arabic the ⋮ is on the left.
  */
 test.describe("on a phone a system line that wraps", () => {
-  /** The app in `language` (the setting a reload reads), back on the chat that was open. */
-  const speak = async ({ page }: Peer, language: string, dir: "ltr" | "rtl") => {
-    await page.evaluate((language) => {
-      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
-      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
-    }, language);
-    await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("dir", dir);
-  };
-
   /**
    * The contact's joined line (not mine) wraps, and its ⋮ is inside the screen and a 44 px target where a tap lands. How
    * wide the line is depends on the machine's fonts (GitHub's runner has no Japanese one and draws narrower boxes): the
@@ -292,6 +322,32 @@ test.describe("a voice message on a phone", () => {
 });
 
 /**
+ * An audio file (not a voice note) in the chat, which none of the screens above shows: its Play took taps on 36 × 36 px
+ * and its Save on 32 × 32, beside a voice note's Play on 44. Bob's file is played and paused, so the speed pill shows too.
+ */
+test("on a phone a received audio file's Play, speed pill and Save are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:files.audio.play"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("audio-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("audio-phone-bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+
+  await bob.page.getByTestId("file-input").setInputFiles(fileURLToPath(new URL("../support/audio-fixtures/ghost-tune.mp3", import.meta.url)));
+  const received = chat(alice).getByTestId("audio-bubble").last();
+  await expect(received.getByTestId("audio-play")).toBeEnabled({ timeout: 30_000 });
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "paused");
+  await expect(received.getByTestId("voice-speed")).toBeVisible();
+  await expect(received.getByTestId("audio-save")).toBeVisible();
+  await received.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("audio-file-paused.png") });
+
+  const small = (await smallTargets(page)).filter((target) => /audio-|voice-speed/.test(target.name)).map((target) => `${target.name} ${target.width}×${target.height} (${target.stops})`);
+  expect(small, "an audio file's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
  * Settings' on/off switches, in every section and on the Profile page, on a phone: 48 × 24 px drawn, and a tap landed on
  * 64 × 40 px of it, short of the 44 the rest of the app gives a thumb.
  */
@@ -386,6 +442,80 @@ test.describe("on a phone, Send files", () => {
 });
 
 /**
+ * A chat's search bar on a phone: its ⓘ, ↑, ↓ and ✕ took taps on 40 × 40 px. On the narrowest phone, and in Arabic
+ * (right to left, the buttons on the left), they are 44 px targets and the field keeps room for a word.
+ */
+test("on a phone the chat's search bar takes taps on 44 px and keeps room for the words", { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("search-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("search-phone-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "find this word");
+  await expect(chat(alice).getByText("find this word")).toBeVisible();
+  const { page } = alice;
+  for (const [language, dir, width] of [["en", "ltr", 375], ["en", "ltr", 320], ["ar", "rtl", 320]] as const) {
+    if (language === "ar") {
+      await page.evaluate(() => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+      });
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("dir", dir);
+    }
+    await page.setViewportSize({ width, height: 667 });
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await page.getByTestId("chat-search-input").fill("word");
+    await expect(page.getByTestId("chat-search-older")).toBeEnabled();
+    const label = `${language} at ${width} px`;
+    const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${label}: search bar controls under 44 × 44 px`).toEqual([]);
+    expect((await page.getByTestId("chat-search-input").boundingBox())!.width, `${label}: the search field's width`).toBeGreaterThanOrEqual(64);
+    await page.screenshot({ path: testInfo.outputPath(`chat-search-${language}-${width}.png`) });
+    await page.getByTestId("chat-search-close").click();
+    await expect(page.getByTestId("chat-search")).toHaveCount(0);
+  }
+});
+
+/**
+ * A chat's search bar on a 320 px phone once its count shows: "Nenhum resultado" beside the field and the four 44 px
+ * buttons left the field 12 px wide in Portuguese (it 18, fr 27, es 28, en 50). The count goes on a line of its own under
+ * the field, in every language, and the buttons keep their 44 px.
+ */
+test("on a 320 px phone the chat's search field keeps room for the words once the count shows, in every language", { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(4 * 60_000);
+  const [alice, bob] = await Promise.all([peer("search-count-alice", { mobile: true, viewport: { width: 320, height: 640 } }), peer("search-count-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "find this word");
+  await expect(chat(alice).getByText("find this word")).toBeVisible();
+  const { page } = alice;
+  const field = page.getByTestId("chat-search-input"), count = page.getByTestId("chat-search-count");
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"] as const) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await field.fill("zzqx nothing here");
+    await expect(count).toHaveText(/\S/);
+    await expect(page.getByTestId("chat-search-older")).toBeDisabled();
+    expect(await field.evaluate((el) => el.clientWidth), `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
+    const fieldBox = (await field.boundingBox())!, countBox = (await count.boundingBox())!;
+    expect(countBox.y, `${language}: the count is under the field`).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+    const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${language}: search bar controls under 44 × 44 px`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), `${language}: nothing wider than the screen`).toBeLessThanOrEqual(320);
+    await page.screenshot({ path: testInfo.outputPath(`chat-search-count-${language}-320.png`) });
+    await page.getByTestId("chat-search-close").click();
+    await expect(page.getByTestId("chat-search")).toHaveCount(0);
+  }
+});
+
+/**
  * The screens a first visit opens, on a phone, control by control: every Settings section, the Profile and Services
  * pages, and the New wallet, Add identity and Join dialogs. A row's ⓘ took taps on 41 × 40 px, a dialog's Close on
  * 40 × 41, the colour swatches 32 × 32, Light / Dark / Auto and Compact / Comfortable were 32 px tall, the sound
@@ -434,4 +564,71 @@ test("on a phone every control in Settings, Profile, Services and the first dial
 
   expect(seen, "controls seen").toBeGreaterThan(80);
   expect(small, "controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * The composer's emoji panel, a sheet on a phone: its category icons took taps on 45 × 40 px (38 × 40 at 320 px), the
+ * skin tone on 36 × 36, Emoji and GIF on 57 × 32, and at 320 px each emoji on 43 × 40. In English and in Arabic, at 375
+ * and 320 px, each in turn brought into view and measured; the grid still never scrolls sideways, seven emoji to a row
+ * at 320 px, and the category row keeps the one underlined in view as the grid scrolls.
+ */
+test("on a phone the emoji panel's categories, skin tone, Emoji / GIF switch and emoji are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.emoji-picker", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const alice = await peer("emoji-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  const small: string[] = [];
+  const panel = page.getByTestId("expression-panel");
+  const grid = panel.getByTestId("emoji-grid");
+  const measure = async (place: string, controls: Locator[]) => {
+    for (const control of controls) {
+      await control.evaluate((el) => { el.scrollIntoView({ block: "nearest", inline: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${place}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await control.evaluate((el) => el.removeAttribute("data-measured"));
+    }
+  };
+
+  const field = page.locator("textarea");
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    // A new chat, the first time; after that the reload comes back to it.
+    await speak(alice, language, dir);
+    const newChat = page.getByTestId("sidebar-new-chat").filter({ visible: true }).first();
+    await expect(field.or(newChat)).toBeVisible();
+    if (!(await field.isVisible())) await newChat.click();
+    await expect(field).toBeVisible();
+    for (const [width, height] of [[375, 667], [320, 568]]) {
+      const place = `${language} at ${width} px`;
+      await page.setViewportSize({ width, height });
+      await page.getByTestId("composer-expressions").click();
+      await expect(grid.locator("[data-emoji]").first()).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`emoji-${language}-${width}.png`) });
+
+      const categories = await panel.locator("[data-testid^='emoji-category-']").all();
+      expect(categories.length, place).toBeGreaterThanOrEqual(8);
+      // The first two rows of emoji, whole in the grid's view.
+      const cells = (await grid.getByTestId("emoji-section-people").locator("[data-emoji]").all()).slice(0, 14);
+      await measure(place, [...categories, panel.getByTestId("emoji-skin"), panel.getByTestId("expression-tab-emoji"), panel.getByTestId("expression-tab-gif"), ...cells]);
+
+      const layout = await grid.evaluate((box) => ({
+        sideways: box.scrollWidth - box.clientWidth,
+        columns: getComputedStyle(box.querySelector(".emoji-grid")!).gridTemplateColumns.split(" ").length,
+      }));
+      expect(layout.sideways, `${place}: the grid scrolls sideways by`).toBe(0);
+      if (width === 320) expect(layout.columns, `${place}: emoji to a row`).toBe(7);
+
+      // The last category, reached by scrolling the grid: its icon is underlined and whole in the row.
+      await grid.evaluate((box) => { box.scrollTop = box.scrollHeight; });
+      const last = categories[categories.length - 1];
+      await expect(last).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => last.evaluate((icon) => {
+        const row = icon.parentElement!.getBoundingClientRect(), box = icon.getBoundingClientRect();
+        return box.left >= row.left - 0.5 && box.right <= row.right + 0.5;
+      }), `${place}: the underlined category is in view`).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`emoji-${language}-${width}-last.png`) });
+
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+    }
+  }
+
+  expect(small, "the emoji panel's controls under 44 × 44 px on a phone").toEqual([]);
 });
