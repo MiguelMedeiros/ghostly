@@ -661,6 +661,8 @@
   "services": {
     "addressNext": "Use um endereço deste computador, como localhost:3400.",
     "badAddress": "Não deu para ler esse endereço",
+    "lockedBeforeOpen": "O perfil foi bloqueado antes de o app abrir",
+    "lockedBeforeOpenNext": "Desbloqueie e abra o app de novo.",
     "name": "Dê um nome ao serviço",
     "noCredentials": "O endereço não pode ter usuário nem senha",
     "noQuery": "O endereço não pode ter uma parte com ? ou #",
