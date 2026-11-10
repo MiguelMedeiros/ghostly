@@ -200,6 +200,7 @@
     "pasteFileUnreadableNext": "Allegalo con +.",
     "pasteGone": "Il contenuto incollato non è più disponibile",
     "pasteGoneNext": "Incollalo di nuovo.",
+    "pasteKept": "Il browser non ha passato il file che hai copiato. Sceglilo tra i tuoi file.",
     "pasteLate": "Impossibile aggiungere ora ciò che hai incollato. Incollalo di nuovo quando hai finito.",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
     "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",

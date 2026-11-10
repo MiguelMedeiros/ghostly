@@ -23,7 +23,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
 import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
@@ -814,7 +814,7 @@ export function MessageInput({
     // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
     if (readingRef.current) return true;
     const read = platformPastedFiles();
-    if (!read) return false;
+    if (!read) return keptFiles(data);
     readingRef.current = true;
     setReading(true);
     // With what it brought, in one go: the line gives way to the sheet, or to the reason there is none.
@@ -828,6 +828,17 @@ export function MessageInput({
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
+    return true;
+  };
+  /**
+   * A paste that says it carries files and hands the page none, where nothing else can read them (the web app): iOS
+   * Safari's paste of a PDF copied in Files. Said, with the file picker one tap away (not beside the sheet, whose files
+   * the picker would not join); anything else is left to the field.
+   */
+  const keptFiles = (data: DataTransfer | null): boolean => {
+    if (!pasteKeepsFiles(data)) return false;
+    if (fileUnavailable) showToast(fileUnavailable);
+    else showToast(t("errors.files.pasteKept"), attached ? undefined : { label: t("composer.chooseFiles"), run: () => fileInputRef.current?.click() });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
