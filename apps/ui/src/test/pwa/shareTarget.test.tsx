@@ -260,6 +260,18 @@ describe("in a composer editing one of my messages", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("the same files shared again while they wait for the edit go on the sheet once; other files join them", async () => {
+    const { user } = renderApp(<Editing />);
+    deliver("chat-1", { text: "Look", files: [file()] });
+    deliver("chat-1", { text: "Look", files: [file()] });
+    deliver("chat-1", { files: [file("other.txt")] });
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getAllByTestId("attachment-item").map((item) => item.textContent)).toEqual([expect.stringContaining("ghost.txt"), expect.stringContaining("other.txt")]);
+    expect(field().value).toBe("Look");
+  });
+
   it("files still being read as an edit begins wait for it to end, never dropped", async () => {
     let done!: (files: File[]) => void;
     const read = vi.fn(() => new Promise<File[]>((resolve) => { done = resolve; }));
@@ -278,6 +290,7 @@ describe("in a composer editing one of my messages", () => {
     expect(field().value).toBe("my old words");
     await act(async () => done([file("photo.jpg")]));
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    expect(screen.getByTestId("composer-share-waits")).toBeInTheDocument();
     await user.click(field());
     await user.keyboard("{Escape}");
     const sheet = await screen.findByTestId("attachment-sheet");
