@@ -40,7 +40,9 @@ export type IdentityTimelineEvent =
   | { type: "result"; side: IdentityTimelineSide; proof: string; requested?: string; provider?: string; subject?: string; ok: boolean; error?: string }
   | { type: "stopped"; side: IdentityTimelineSide; proof: string; provider: string; subject?: string; reason: "withdrawn" | "revoked" }
   /** A share taken back before it ever left this side (queued, the contact never heard of it): its entry goes. */
-  | { type: "unsent"; side: "mine"; proof: string };
+  | { type: "unsent"; side: "mine"; proof: string }
+  /** The contact asked for a challenge and presented nothing within its window: its entry goes, as `unsent` does. */
+  | { type: "unanswered"; side: "theirs"; proof: string };
 
 /** Entries a chat keeps, newest last. */
 export const IDENTITY_TIMELINE_MAX = 100;
@@ -114,6 +116,7 @@ export function applyIdentityEvent(timeline: readonly IdentityTimelineEntry[], e
       add({ proof: event.proof, side: event.side, kind: "stopped", provider: event.provider, subject: event.subject ?? last?.subject, reason: event.reason });
       break;
     case "unsent":
+    case "unanswered":
       if (last?.kind === "shared" && last.state === "verifying") out.splice(i, 1);
       break;
   }
