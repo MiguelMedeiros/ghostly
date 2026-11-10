@@ -24,7 +24,7 @@
   "readRelaysRelayOnly": "Ocultar mi IP está activado: esta app lee y escribe solo por estos relays, nunca directamente en la DHT.",
   "relayOnly": "Ocultar mi IP a los contactos",
   "relayOnlyHint": "Llamadas y chats pasan solo por tu servidor TURN.",
-  "relayOnlyInfo": "Los contactos ven tu servidor TURN, nunca tu IP. Si falla, nada va directo: las llamadas fallan y los chats esperan. Las llamadas están desactivadas en la app de Linux.",
+  "relayOnlyInfo": "Los contactos ven tu servidor TURN, nunca tu IP. Si falla, nada va directo: las llamadas fallan y los chats esperan.",
   "relays": "Relays Pkarr",
   "relaysHint": "Uno por línea. Solo ven paquetes firmados y cifrados.",
   "relaysInfoDirect": "Los contactos en la web y en la extensión no llegan a la DHT Mainline y leen a través de relays, así que esta app también escribe en ellos.",
