@@ -1282,7 +1282,10 @@ mod command_tests {
         let state = app.state::<OidcState>();
         assert!(!state.answer(&answer));
         assert!(!state.not_taken("?code=c"), "no state");
-        assert!(!state.not_taken(&format!("?code=c&state={STATE}")), "a loopback state");
+        assert!(
+            !state.not_taken(&format!("?code=c&state={STATE}")),
+            "a loopback state"
+        );
         assert!(!oidc_interrupted(app.state()));
         assert!(state.not_taken(&answer));
         assert!(oidc_interrupted(app.state()), "the page hears of it");

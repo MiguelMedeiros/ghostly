@@ -270,7 +270,9 @@ fn received(kind: &str, value: String) {
                     crate::diagnostics::log("oidc: the sign-in this answers was interrupted");
                     let _ = app.emit_to("main", OIDC_INTERRUPTED_EVENT, ());
                 }
-                Some(_) => crate::diagnostics::log("oidc: a sign-in answer nobody waits for, dropped"),
+                Some(_) => {
+                    crate::diagnostics::log("oidc: a sign-in answer nobody waits for, dropped")
+                }
                 None => crate::diagnostics::log("oidc: not a sign-in link, dropped"),
             }
         }
