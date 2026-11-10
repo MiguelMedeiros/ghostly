@@ -1245,9 +1245,12 @@ export class DhtDelivery {
    * As plain reads, an extension that stayed on Automatic, its minute spent by what it did before, read nothing of its
    * contact for 40 s after the contact left DHT only, and the matrix's chat stayed "On DHT · retrying live" (E2E full,
    * 2026-11-07 and 11-08). No more reads than before: those it made anyway, the minute spent, go within the allowance.
+   * Not while this side is leaving DHT only itself (`signalReads` left, `leavingRead`): its read at the switch stays a
+   * plain one, the rest are signaling, so the few requests past a spent minute stay for the dialling side's read of the
+   * answer. As a departed read, the switch's took one, and both sides leaving went live in 34 s, against 10.
    */
   private departedRead(): boolean {
-    return this.mode !== "dht" && this.state.peerMode === "dht" && !!this.options.credentials.peerKey;
+    return this.mode !== "dht" && this.state.peerMode === "dht" && this.signalReads === 0 && !!this.options.credentials.peerKey;
   }
   /**
    * This side is DHT only, and nothing waits on the contact's mailbox: the contact, pinned, is away (nothing new of its
