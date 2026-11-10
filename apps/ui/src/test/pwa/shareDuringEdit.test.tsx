@@ -129,7 +129,9 @@ describe("a chat left for the Share to… picker while one of my messages is edi
     await editThenShare(user);
     receiveShare(share({ text: "shared words" }));
     await user.click(screen.getByText("share comes in"));
-    await user.click(await screen.findByTestId("share-chat"));
+    await screen.findByTestId("share-chat");
+    settled();
+    await user.click(screen.getByTestId("share-chat"));
     await tick();
     expect(field()).toHaveValue("heron note 8813");
     expect(peekShareFor("heron")?.text).toBe("shared words");
