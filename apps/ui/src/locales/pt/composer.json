@@ -17,6 +17,7 @@
     "recent": "Recentes",
     "symbols": "Símbolos"
   },
+  "chooseFiles": "Escolher arquivos",
   "closeCamera": "Fechar câmera",
   "dhtTooLong": "Longo demais para a DHT ({{bytes}} de {{max}} bytes). Encurte ou conecte ao vivo; o rascunho fica.",
   "document": "Documento",
