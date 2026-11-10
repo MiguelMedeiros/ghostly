@@ -236,6 +236,39 @@ describe("updates", () => {
     expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, permissions: ["internet", "chat"] });
   });
 
+  async function waiting() {
+    const { store, v1 } = await installed({ permissions: [] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    return { store, v1, v2 };
+  }
+
+  it.each([false, true])("Update and Uninstall at once, the update's files gone (Uninstall first: %s): the app stays uninstalled", async (first) => {
+    const { store, v1, v2 } = await waiting();
+    // A restored profile: the waiting update's files are not on this device.
+    await (await fileBytes()).remove(`app-${v2.digest}`);
+    const update = () => store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["chat"] }).catch((e: Error) => e.message);
+    const uninstall = () => store.uninstall({ ref: v1.ref }).then(() => "ok");
+    const [a, b] = await Promise.all(first ? [uninstall(), update()] : [update(), uninstall()]);
+    expect(first ? a : b).toBe("ok");
+    expect(await appRows(), "not written back after Uninstall answered").toEqual([]);
+  });
+
+  it.each([false, true])("Update and Uninstall at once, the update adding other permissions now (Uninstall first: %s): the app stays uninstalled", async (first) => {
+    const { store, v1 } = await waiting();
+    const [row] = await appRows() as { pending: { added: string[] } }[];
+    row!.pending.added = ["name"];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    const update = () => store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] }).catch((e: Error) => e.message);
+    const uninstall = () => store.uninstall({ ref: v1.ref }).then(() => "ok");
+    const [a, b] = await Promise.all(first ? [uninstall(), update()] : [update(), uninstall()]);
+    expect(first ? a : b).toBe("ok");
+    expect(await appRows(), "not written back after Uninstall answered").toEqual([]);
+  });
+
   it("Update of a screen drawn before the check found a newer update grants nothing it did not show, and the newer one is shown", async () => {
     const { store, v1 } = await installed({ permissions: ["chat"] });
     const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
@@ -1269,6 +1302,26 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(entry.digest).toBe(v1.digest);
     expect(net.requests, "peeked, then read whole").toEqual([BUNDLE_URL, BUNDLE_URL]);
     expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+  });
+
+  it("uninstalled between the files written and the record written: not put back, its files go", async () => {
+    const { v1, store } = await restored();
+    // Moved from a Desktop: the record names files kept natively, none of them here.
+    const [row] = await appRows() as { bytes: string }[];
+    row!.bytes = "native";
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    const engine = store as unknown as { app(ref: string): Promise<unknown> };
+    const read = engine.app.bind(store);
+    let reads = 0;
+    vi.spyOn(engine, "app").mockImplementation(async (ref) => {
+      const now = await read(ref);
+      // The read after the files are written: Uninstall (another tab) commits before the record is written.
+      if (++reads === 2) await store.uninstall({ ref });
+      return now;
+    });
+    await expect(store.fetchFiles({ ref: v1.ref })).rejects.toThrow(/^not-installed/);
+    expect(await appRows()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
   });
 
   it("takes only the installed digest: another version at the URL leaves it needing its files, never run unchecked", async () => {
