@@ -26,6 +26,7 @@ export * from "./callSignal";
 export * from "./signal";
 export * from "./frames";
 export * from "./http";
+export * from "./viewerGuard";
 export * from "./link";
 export * from "./datalink";
 export * from "./ghostlink";

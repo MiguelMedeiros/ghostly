@@ -39,6 +39,8 @@ export const RUST_INPUTS = [
   "native/translation/",
   // viewer.rs: a test keeps its connection policy the same as `service open`'s.
   "packages/cli/src/services.ts",
+  // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
+  "packages/core/src/viewerGuard.ts",
 ];
 
 /**
