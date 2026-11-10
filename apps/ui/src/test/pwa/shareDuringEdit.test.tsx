@@ -110,6 +110,35 @@ describe("a chat left for the Share to… picker while one of my messages is edi
     expect(engine.callsTo("editMessage")).toEqual([]);
   });
 
+  it("says, by the edit, that what was shared goes in once the edit ends; the line goes when it lands", async () => {
+    const { user } = await openChat();
+    await editThenShare(user);
+    expect(screen.getByTestId("composer-edit")).toBeInTheDocument();
+    const line = screen.getByTestId("composer-share-waits");
+    expect(line).toHaveAttribute("role", "status");
+    expect(line).toHaveTextContent("What you shared goes in once this edit ends.");
+
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    expect(field()).toHaveValue("shared words");
+    expect(screen.queryByTestId("composer-share-waits")).toBeNull();
+  });
+
+  it("the same share picked again while one waits for the edit goes in the draft once", async () => {
+    const { user } = await openChat();
+    await editThenShare(user);
+    receiveShare(share({ text: "shared words" }));
+    await user.click(screen.getByText("share comes in"));
+    await user.click(await screen.findByTestId("share-chat"));
+    await tick();
+    expect(field()).toHaveValue("heron note 8813");
+    expect(peekShareFor("heron")?.text).toBe("shared words");
+
+    await user.click(field());
+    await user.keyboard("{Escape}");
+    expect(field()).toHaveValue("shared words");
+  });
+
   it("a share picked for another chat leaves this edit as it is, and waits for that chat", async () => {
     const { user } = await openChat();
     await user.click(field());
@@ -120,6 +149,7 @@ describe("a chat left for the Share to… picker while one of my messages is edi
     expect(screen.getByTestId("composer-edit")).toBeInTheDocument();
     expect(field()).toHaveValue("heron note 8813");
     expect(peekShareFor("other")?.text).toBe("for someone else");
+    expect(screen.queryByTestId("composer-share-waits")).toBeNull();
   });
 });
 

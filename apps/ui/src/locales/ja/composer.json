@@ -77,6 +77,7 @@
   "services": "共有サービス",
   "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
   "servicesShared": "このチャットで {{count}} 件共有中",
+  "shareWaitsForEdit": "共有した内容は、この編集が終わると入ります。",
   "sharedTextFile": "共有されたテキスト",
   "skinTone": "肌の色",
   "takePhoto": "写真を撮る",

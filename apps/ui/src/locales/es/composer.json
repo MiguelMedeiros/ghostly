@@ -77,6 +77,7 @@
   "services": "Servicios compartidos",
   "servicesNeedApp": "Necesita la extensión o la app de escritorio de Ghostly",
   "servicesShared": "{{count}} compartido(s) en este chat",
+  "shareWaitsForEdit": "Lo que compartiste entra cuando termine esta edición.",
   "sharedTextFile": "Texto compartido",
   "skinTone": "Tono de piel",
   "takePhoto": "Hacer foto",

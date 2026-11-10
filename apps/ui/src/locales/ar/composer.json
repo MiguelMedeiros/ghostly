@@ -80,6 +80,7 @@
   "services": "الخدمات المشتركة",
   "servicesNeedApp": "يتطلب إضافة Ghostly للمتصفح أو تطبيق سطح المكتب",
   "servicesShared": "{{count}} مشتركة في هذه الدردشة",
+  "shareWaitsForEdit": "ما شاركته يُضاف عند انتهاء هذا التعديل.",
   "sharedTextFile": "نص مشارك",
   "skinTone": "لون البشرة",
   "takePhoto": "التقاط صورة",

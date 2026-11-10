@@ -152,13 +152,22 @@ export function carryIncomingShare(): boolean {
 
 /**
  * The chat picked: the share waits for its composer, and the next one waiting, if any, is shown. `chat` is the
- * composer's draft id (a session id, `group:<id>`).
+ * composer's draft id (a session id, `group:<id>`). The same share picked again for a chat where it still waits (an
+ * edit open there, which the composer says) is not kept twice: shared again as it looked lost, it would go in twice.
  */
 export function sendShareTo(chat: string): void {
   if (!pending) return;
-  forChat.set(chat, [...forChat.get(chat) ?? [], pending]);
+  const waiting = forChat.get(chat) ?? [];
+  const share = pending;
+  if (!waiting.some((kept) => sameShare(kept, share))) forChat.set(chat, [...waiting, share]);
   pending = behind.shift() ?? null;
   emit();
+}
+
+/** Whether two shares bring the same: the same text and the same files (by name, size and type), in their order. */
+function sameShare(a: IncomingShare, b: IncomingShare): boolean {
+  return shareText(a) === shareText(b) && a.files.length === b.files.length
+    && a.files.every((file, i) => file.name === b.files[i]!.name && file.size === b.files[i]!.size && file.type === b.files[i]!.type);
 }
 
 /** The shares sent to one chat as one: their texts one under the other, and all their files, in their order. */
@@ -188,8 +197,8 @@ export function takeShareFor(chat: string): IncomingShare | null {
 
 /**
  * A share a composer took but could not keep (its files read only once an edit had begun there): it waits for that
- * chat's composer again, ahead of any sent there since. Nothing is said: the composer looks again once it can take
- * files (the edit ended), and a share made meanwhile is still shown in the picker as usual.
+ * chat's composer again, ahead of any sent there since. The composer says it waits by the edit, and looks again once
+ * it can take files (the edit ended); a share made meanwhile is still shown in the picker as usual.
  */
 export function keepShareFor(chat: string, share: IncomingShare): void {
   forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
