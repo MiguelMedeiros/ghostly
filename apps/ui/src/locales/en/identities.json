@@ -120,6 +120,7 @@
     "showProfile": "Show public profile",
     "since": "Since",
     "sourceKeyserver": "Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's",
+    "sourceNostrSignature": "Nostr signature (NIP-01, BIP-340)",
     "sourceSigned": "Signed by {{provider}}",
     "sourceSignedEmailUnverified": "Signed by {{provider}}; email not verified by {{provider}}",
     "sourceSignedEmailVerified": "Signed by {{provider}}; email verified by {{provider}}",
@@ -360,6 +361,282 @@
     "pictureMiss": "The profile’s picture is not shown: {{reason}}.",
     "sourceAsked": "Asked {{from}} {{time}}. Asking told that server this device’s IP address.",
     "sourceFound": "Loaded from {{from}} {{time}}. What the account says about itself, not part of the proof. Asking told that server this device’s IP address."
+  },
+  "providers": {
+    "atproto": {
+      "description": "Proves you control a Bluesky (AT Protocol) account: approve on your server, and Ghostly publishes one record in your account's repository. It is public, like the rest of your repository: anyone can see this account made a Ghostly proof, not who you share it with. Contacts check it without logging in.",
+      "limits": "Signed with your account's key, which your server usually holds. It proves control of the account, not who you are; the handle is shown only while it points back to the account.",
+      "privacy": "Your contact's app asks the PLC directory (or your did:web host) for your account's document, your server for the record, and its DNS-over-HTTPS resolver or your handle's website for your handle, so they learn this account was checked.",
+      "signers": {
+        "atproto-oauth": {
+          "action": "Continue on your server",
+          "description": "Opens your server's login page. Ghostly asks only to create and delete its own proof records: never to post, read your messages or edit your profile.",
+          "fields": {
+            "handle": {
+              "help": "Your Bluesky handle, your own domain if you use one, or your DID.",
+              "label": "Handle"
+            }
+          },
+          "label": "Your server (Bluesky or another PDS)"
+        },
+        "atproto-oauth-full": {
+          "action": "Continue on your server (full access)",
+          "description": "Asks for access to your whole account, for servers that cannot limit Ghostly's permission. Ghostly suggests it when your server refuses the narrower sign-in or the record's write. Ghostly still only writes this one record, and gives the access back right away.",
+          "fields": {
+            "handle": {
+              "help": "Your Bluesky handle, your own domain if you use one, or your DID.",
+              "label": "Handle"
+            }
+          },
+          "label": "Your server, full access (older servers)"
+        }
+      },
+      "subject": {
+        "label": "Account (DID)"
+      },
+      "summary": "Publish a record on your Bluesky server",
+      "unpublish": {
+        "description": "Also deletes the record on your server: your server asks you to approve."
+      }
+    },
+    "bitcoin": {
+      "description": "Proves you can sign with the key behind a Bitcoin address: your wallet signs the statement and you paste the signature.",
+      "label": "Bitcoin address",
+      "limits": "It does not prove a balance, a past payment, or that you would pay.",
+      "privacy": "Nothing: the signature is checked on this device, with no blockchain lookup. Contacts you share it with learn the address.",
+      "signers": {
+        "bitcoin-core": {
+          "description": "Legacy message signature: for a legacy 1… address only."
+        },
+        "coldcard": {
+          "description": "BIP-322 message signature."
+        },
+        "electrum": {
+          "description": "Legacy message signature: for a legacy 1… address only."
+        },
+        "other": {
+          "description": "BIP-322 message signature.",
+          "label": "Another wallet"
+        },
+        "sparrow": {
+          "description": "BIP-322 message signature."
+        },
+        "trezor": {
+          "description": "Legacy message signature: for a legacy 1… address only."
+        }
+      },
+      "subject": {
+        "help": "Proves: whoever made this signature could sign with the key behind this address when they signed. Does not prove the address holds any balance, now or ever. Does not prove they sent or received any past payment. Does not prove they would pay you, or spend from this address at all.",
+        "label": "Bitcoin address",
+        "placeholder": "bc1q… (tb1… on test networks)"
+      },
+      "summary": "Sign a message in your own wallet"
+    },
+    "did": {
+      "description": "Proves you control a decentralized identifier (W3C DID): sign the statement with a key its DID document lists, or, for did:web, publish it beside your did.json.",
+      "limits": "Does not prove who controls the DID, only that whoever added the proof held one of its keys (or its website).",
+      "privacy": "did:key and did:jwk: nothing, checked on this device. did:web: the contact's app asks its DNS-over-HTTPS resolver for your domain and downloads your did.json, so your web server sees the contact's IP address. did:dht: one of the contact's Pkarr relays (their Network settings) learns which DID was looked up.",
+      "signers": {
+        "file": {
+          "description": "did:web only: upload a small file next to your did.json. Contacts' apps download both from your server.",
+          "label": "Publish a file beside did.json"
+        },
+        "service": {
+          "description": "did:web only: add one entry to the service list of your did.json. Contacts' apps read it there.",
+          "label": "Add a service to did.json"
+        },
+        "sign": {
+          "description": "Sign the statement with a key your DID document lists for authentication or assertionMethod, and paste a JWS or the raw signature. The private key never enters Ghostly.",
+          "label": "Sign with a key of the DID"
+        }
+      },
+      "subject": {
+        "help": "did:key, did:jwk, did:dht or did:web. Contacts see the whole DID, and the key that signed.",
+        "placeholder": "did:key:z6Mk… or did:web:example.com"
+      },
+      "summary": "did:key, did:jwk, did:dht or did:web"
+    },
+    "domain": {
+      "description": "Proves you control a domain name: publish a DNS TXT record or a file on its website, once. Contacts' apps look it up when you share it and can check again later.",
+      "label": "Domain",
+      "limits": "Does not prove who runs the domain, only that whoever added the proof could publish under it.",
+      "privacy": "DNS: the contact's app asks the DNS-over-HTTPS resolver chosen in its settings (Quad9 by default; the next of Quad9, Cloudflare and Google when it cannot be reached) for the record, so that resolver learns the domain was checked. Website or NIP-05: the resolver learns the domain, and the domain's web server sees the contact's IP address.",
+      "signers": {
+        "dns": {
+          "description": "Add a TXT record at your DNS host. Contacts' apps look it up through a DNS-over-HTTPS resolver.",
+          "label": "DNS TXT record"
+        },
+        "https": {
+          "description": "Upload a small file to your website. Contacts' apps download it from your server.",
+          "label": "File on your website"
+        },
+        "nip05-nip07": {
+          "description": "Already run NIP-05? Sign with the Nostr key your domain's nostr.json names for itself. No new record needed.",
+          "fields": {
+            "domain": {
+              "help": "Its /.well-known/nostr.json must name this Nostr key for \"_\" (the domain itself).",
+              "label": "Domain"
+            }
+          },
+          "label": "NIP-05 with a browser extension"
+        },
+        "nip05-nip46": {
+          "description": "Already run NIP-05? Sign with the Nostr key your domain's nostr.json names for itself. No new record needed.",
+          "fields": {
+            "bunker": {
+              "label": "Signer connection link"
+            },
+            "domain": {
+              "help": "Its /.well-known/nostr.json must name this Nostr key for \"_\" (the domain itself).",
+              "label": "Domain"
+            }
+          },
+          "label": "NIP-05 with a remote signer"
+        }
+      },
+      "subject": {
+        "help": "A domain or subdomain you control. A proof for alice.example.com is published under alice.example.com.",
+        "label": "Domain"
+      },
+      "summary": "A DNS record or a file on your site"
+    },
+    "nostr": {
+      "description": "Proves you hold a Nostr key: your signer signs the statement, your key never leaves it.",
+      "privacy": "Nothing: the signature is checked on this device. The proof is never published to a relay.",
+      "signers": {
+        "nip07": {
+          "description": "Approve in the Nostr extension of this browser.",
+          "label": "Browser extension (NIP-07)"
+        },
+        "nip46": {
+          "description": "Paste the bunker:// link from your signer app, then approve there.",
+          "fields": {
+            "bunker": {
+              "label": "Signer connection link"
+            }
+          },
+          "label": "Remote signer (NIP-46)"
+        }
+      },
+      "subject": {
+        "label": "Public key"
+      },
+      "summary": "Sign once with your Nostr signer"
+    },
+    "oidc": {
+      "description": "Sign in with Google, Microsoft, Apple, GitLab or Twitch: the provider vouches to Ghostly, with a signed token, that the account is yours.",
+      "label": "Account at a provider",
+      "limits": "Attested by the provider, not by a key you hold: your contact trusts that company.",
+      "privacy": "Your contact’s app downloads the provider’s public keys (for example from www.googleapis.com), so the provider sees that some app checked a sign-in, not whose. Your contact sees the account identifier and what you chose to share.",
+      "signers": {
+        "oidc-account": {
+          "description": "The token carries the provider’s identifier for your account, nothing else.",
+          "label": "Sign in: share the account only"
+        },
+        "oidc-email": {
+          "description": "Adds your email address, where the provider offers it.",
+          "label": "Sign in: share the account and email"
+        },
+        "oidc-profile": {
+          "description": "Adds your email address and name or username, where the provider offers them.",
+          "label": "Sign in: share the account, email and name"
+        }
+      },
+      "subject": {
+        "help": "Your contact sees your account’s identifier at that provider, plus what you choose to add. GitLab also adds the groups you belong to directly; Apple never gives Ghostly your email.",
+        "label": "Provider"
+      },
+      "summary": "Sign in with Google, Microsoft, Apple…"
+    },
+    "openpgp": {
+      "description": "Proves you hold an OpenPGP key: sign the statement with gpg (a YubiKey works too) and paste the result.",
+      "label": "OpenPGP key",
+      "limits": "Holding a key does not prove the names or emails in its user IDs.",
+      "lookupLabel": "Check emails with keys.openpgp.org",
+      "privacy": "Nothing: the signature is checked on this device. keys.openpgp.org is contacted only if you choose it for your key, or ask it to confirm emails.",
+      "signers": {
+        "gpg": {
+          "description": "Sign with gpg and paste what it prints, public key included. Nothing is looked up."
+        },
+        "gpg-keys-openpgp-org": {
+          "description": "Sign with gpg and paste the signature; Ghostly then fetches your public key from keys.openpgp.org, which learns which key was looked up.",
+          "label": "gpg, key from keys.openpgp.org"
+        }
+      },
+      "subject": {
+        "help": "The primary key's full fingerprint. Holding a key does not prove the names or emails in its user IDs.",
+        "label": "Key fingerprint",
+        "placeholder": "40 hex characters, from gpg --fingerprint"
+      },
+      "summary": "Sign with gpg and paste the result"
+    },
+    "pubky": {
+      "description": "Proves you hold a Pubky key: approve one request in Pubky Ring or Pubky Passport, and Ghostly writes a small proof file to your homeserver. Contacts’ apps read it back through your key’s own records.",
+      "limits": "The file is on your homeserver: whoever runs it could write there too. It does not prove who holds the key.",
+      "privacy": "Your contact’s app reads your key’s records from Pubky’s Pkarr relays (pkarr.pubky.org, pkarr.pubky.app), looks up your homeserver’s address through its DNS-over-HTTPS resolver (or the next one when that cannot be reached; it only contacts a public address, on port 443), and reads the proof file from your homeserver, which sees the contact’s IP address.",
+      "signers": {
+        "pubky-auth": {
+          "action": "Continue",
+          "description": "One request: approve it in Pubky Passport in your browser, or scan it with Pubky Ring. Ghostly only asks to write one small file to a new folder of your homeserver.",
+          "label": "Pubky Ring or Pubky Passport"
+        }
+      },
+      "subject": {
+        "help": "Comes from Pubky Ring or Passport when you approve.",
+        "label": "Pubky key"
+      },
+      "summary": "Approve in Pubky Ring or Passport",
+      "unpublish": {
+        "description": "Also deletes the proof file on your homeserver: that takes one more approval in Pubky Ring or Passport, since Ghostly kept no access to it."
+      }
+    },
+    "ssh": {
+      "description": "Proves you hold an SSH key, including FIDO security keys: sign the statement once with ssh-keygen and paste the signature.",
+      "label": "SSH key",
+      "privacy": "Nothing: the signature is checked on this device. The key's fingerprint links every chat you share it in.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Sign with OpenSSH's ssh-keygen (8.1 or later): a key file, ssh-agent, or a FIDO security key."
+        }
+      },
+      "subject": {
+        "help": "Your public key, the one line in the .pub file. Contacts see its fingerprint.",
+        "label": "Public key",
+        "placeholder": "ssh-ed25519 AAAA… (or SHA256:…)"
+      },
+      "summary": "Sign once with ssh-keygen"
+    },
+    "ssh-github": {
+      "description": "Proves you hold an SSH key your GitHub account publishes: sign the statement once with ssh-keygen. No GitHub login.",
+      "label": "GitHub (SSH key)",
+      "limits": "Does not prove a GitHub login: only that a key the account lists is yours, for as long as it stays listed.",
+      "privacy": "Your contact's app asks api.github.com for this account's public SSH keys, when you share it and on each re-check: GitHub learns the account was looked up, and from which IP address. So does this app when you add it.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Sign with an SSH key that your GitHub account lists (Settings → SSH keys)."
+        }
+      },
+      "subject": {
+        "label": "GitHub username"
+      },
+      "summary": "A key your GitHub account lists"
+    },
+    "ssh-gitlab": {
+      "description": "Proves you hold an SSH key your GitLab account publishes: sign the statement once with ssh-keygen. No GitLab login.",
+      "label": "GitLab (SSH key)",
+      "limits": "Does not prove a GitLab login: only that a key the account lists is yours, for as long as it stays listed.",
+      "privacy": "Your contact's app asks gitlab.com for this account's public SSH keys, when you share it and on each re-check: GitLab learns the account was looked up, and from which IP address. So does this app when you add it.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Sign with an SSH key that your GitLab account lists (Settings → SSH keys)."
+        }
+      },
+      "subject": {
+        "label": "GitLab username",
+        "placeholder": "username"
+      },
+      "summary": "A key your GitLab account lists"
+    }
   },
   "received": {
     "checked": "{{category}} · checked {{time}}",

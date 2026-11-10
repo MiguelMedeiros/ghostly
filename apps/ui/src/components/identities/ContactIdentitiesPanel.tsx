@@ -207,11 +207,13 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
 
 /**
  * Who wrote a name, in the app's language where the provider's words are fixed (a key's user ID is its holder's own, a
- * sign-in provider may not have checked the email): a caveat to act on. Any other source is shown as written.
+ * sign-in provider may not have checked the email): a caveat to act on. A Nostr proof's check is said the same way.
+ * Any other source is shown as written.
  */
 function nameSource(provider: string, source: string, t: Translate): string {
   const known = displaySourceOf(provider, source);
   if (!known) return source;
+  if (known.kind === "nostr-signature") return t("identities.contact.sourceNostrSignature");
   if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
   if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
   const signer = { provider: known.provider };
@@ -257,7 +259,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.proves")}</dt>
           <dd>{card.attested ? (r.verified.attester ? fillNames(t("identities.contact.attested"), { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
           <dt>{t("identities.contact.how")}</dt>
-          <dd><bdi>{r.verified.source}</bdi></dd>
+          <dd><bdi>{nameSource(r.provider, r.verified.source, t)}</bdi></dd>
           <dt>{t("identities.contact.checked")}</dt>
           <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>

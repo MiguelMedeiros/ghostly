@@ -120,6 +120,7 @@
     "showProfile": "Afficher le profil public",
     "since": "Depuis",
     "sourceKeyserver": "e-mail confirmé à keys.openpgp.org par son propriétaire : la vérification du serveur de clés, pas celle de Ghostly",
+    "sourceNostrSignature": "Signature Nostr (NIP-01, BIP-340)",
     "sourceSigned": "signé par {{provider}}",
     "sourceSignedEmailUnverified": "signé par {{provider}} ; e-mail non vérifié par {{provider}}",
     "sourceSignedEmailVerified": "signé par {{provider}} ; e-mail vérifié par {{provider}}",
@@ -360,6 +361,282 @@
     "pictureMiss": "La photo du profil n'est pas affichée : {{reason}}.",
     "sourceAsked": "{{from}} interrogé {{time}}. La requête a révélé à ce serveur l'adresse IP de cet appareil.",
     "sourceFound": "Chargé depuis {{from}} {{time}}. Ce que le compte dit de lui-même, pas une partie de la preuve. La requête a révélé à ce serveur l'adresse IP de cet appareil."
+  },
+  "providers": {
+    "atproto": {
+      "description": "Prouve que vous contrôlez un compte Bluesky (AT Protocol) : approuvez sur votre serveur, et Ghostly publie un enregistrement dans le dépôt de votre compte. Il est public, comme le reste de votre dépôt : tout le monde peut voir que ce compte a fait une preuve Ghostly, mais pas avec qui vous la partagez. Les contacts la vérifient sans se connecter.",
+      "limits": "Signée avec la clé de votre compte, que votre serveur détient en général. Elle prouve le contrôle du compte, pas qui vous êtes ; l'identifiant n'est affiché que tant qu'il renvoie vers le compte.",
+      "privacy": "L'app de votre contact demande le document de votre compte à l'annuaire PLC (ou à votre hôte did:web), l'enregistrement à votre serveur, et votre identifiant à son résolveur DNS-over-HTTPS ou au site web de votre identifiant, qui apprennent donc que ce compte a été vérifié.",
+      "signers": {
+        "atproto-oauth": {
+          "action": "Continuer sur votre serveur",
+          "description": "Ouvre la page de connexion de votre serveur. Ghostly demande seulement à créer et supprimer ses propres enregistrements de preuve : jamais à publier, lire vos messages ou modifier votre profil.",
+          "fields": {
+            "handle": {
+              "help": "Votre identifiant Bluesky, votre propre domaine si vous en utilisez un, ou votre DID.",
+              "label": "Identifiant"
+            }
+          },
+          "label": "Votre serveur (Bluesky ou un autre PDS)"
+        },
+        "atproto-oauth-full": {
+          "action": "Continuer sur votre serveur (accès complet)",
+          "description": "Demande l'accès à tout votre compte, pour les serveurs qui ne peuvent pas limiter la permission de Ghostly. Ghostly le propose quand votre serveur refuse la connexion plus restreinte ou l'écriture de l'enregistrement. Ghostly n'écrit toujours que cet enregistrement, et rend l'accès aussitôt.",
+          "fields": {
+            "handle": {
+              "help": "Votre identifiant Bluesky, votre propre domaine si vous en utilisez un, ou votre DID.",
+              "label": "Identifiant"
+            }
+          },
+          "label": "Votre serveur, accès complet (anciens serveurs)"
+        }
+      },
+      "subject": {
+        "label": "Compte (DID)"
+      },
+      "summary": "Publiez un enregistrement sur votre serveur Bluesky",
+      "unpublish": {
+        "description": "Supprime aussi l'enregistrement sur votre serveur : votre serveur vous demande d'approuver."
+      }
+    },
+    "bitcoin": {
+      "description": "Prouve que vous pouvez signer avec la clé derrière une adresse Bitcoin : votre portefeuille signe la déclaration et vous collez la signature.",
+      "label": "Adresse Bitcoin",
+      "limits": "Ne prouve pas un solde, un paiement passé, ni que vous paieriez.",
+      "privacy": "Rien : la signature est vérifiée sur cet appareil, sans recherche sur la blockchain. Les contacts avec qui vous la partagez apprennent l'adresse.",
+      "signers": {
+        "bitcoin-core": {
+          "description": "Signature de message ancienne : pour une ancienne adresse 1… seulement."
+        },
+        "coldcard": {
+          "description": "Signature de message BIP-322."
+        },
+        "electrum": {
+          "description": "Signature de message ancienne : pour une ancienne adresse 1… seulement."
+        },
+        "other": {
+          "description": "Signature de message BIP-322.",
+          "label": "Un autre portefeuille"
+        },
+        "sparrow": {
+          "description": "Signature de message BIP-322."
+        },
+        "trezor": {
+          "description": "Signature de message ancienne : pour une ancienne adresse 1… seulement."
+        }
+      },
+      "subject": {
+        "help": "Prouve : celui qui a fait cette signature pouvait signer avec la clé derrière cette adresse au moment de signer. Ne prouve pas que l'adresse détient un solde, maintenant ou un jour. Ne prouve pas qu'il a envoyé ou reçu un paiement passé. Ne prouve pas qu'il vous paierait, ni qu'il dépenserait depuis cette adresse.",
+        "label": "Adresse Bitcoin",
+        "placeholder": "bc1q… (tb1… sur les réseaux de test)"
+      },
+      "summary": "Signez un message dans votre propre portefeuille"
+    },
+    "did": {
+      "description": "Prouve que vous contrôlez un identifiant décentralisé (DID du W3C) : signez la déclaration avec une clé listée par son document DID, ou, pour did:web, publiez-la à côté de votre did.json.",
+      "limits": "Ne prouve pas qui contrôle le DID, seulement que celui qui a ajouté la preuve détenait une de ses clés (ou son site web).",
+      "privacy": "did:key et did:jwk : rien, vérifié sur cet appareil. did:web : l'app du contact interroge son résolveur DNS-over-HTTPS sur votre domaine et télécharge votre did.json, donc votre serveur web voit l'adresse IP du contact. did:dht : un des relais Pkarr du contact (ses réglages Réseau) apprend quel DID a été recherché.",
+      "signers": {
+        "file": {
+          "description": "did:web seulement : déposez un petit fichier à côté de votre did.json. Les apps des contacts téléchargent les deux depuis votre serveur.",
+          "label": "Publier un fichier à côté de did.json"
+        },
+        "service": {
+          "description": "did:web seulement : ajoutez une entrée à la liste service de votre did.json. Les apps des contacts la lisent là.",
+          "label": "Ajouter un service à did.json"
+        },
+        "sign": {
+          "description": "Signez la déclaration avec une clé que votre document DID liste pour authentication ou assertionMethod, et collez un JWS ou la signature brute. La clé privée n'entre jamais dans Ghostly.",
+          "label": "Signer avec une clé du DID"
+        }
+      },
+      "subject": {
+        "help": "did:key, did:jwk, did:dht ou did:web. Les contacts voient le DID entier, et la clé qui a signé.",
+        "placeholder": "did:key:z6Mk… ou did:web:example.com"
+      },
+      "summary": "did:key, did:jwk, did:dht ou did:web"
+    },
+    "domain": {
+      "description": "Prouve que vous contrôlez un nom de domaine : publiez une fois un enregistrement DNS TXT ou un fichier sur son site web. Les apps des contacts le recherchent quand vous le partagez et peuvent vérifier à nouveau plus tard.",
+      "label": "Domaine",
+      "limits": "Ne prouve pas qui gère le domaine, seulement que celui qui a ajouté la preuve pouvait publier sous ce domaine.",
+      "privacy": "DNS : l'app du contact demande l'enregistrement au résolveur DNS-over-HTTPS choisi dans ses réglages (Quad9 par défaut ; le suivant parmi Quad9, Cloudflare et Google s'il est injoignable), donc ce résolveur apprend que le domaine a été vérifié. Site web ou NIP-05 : le résolveur apprend le domaine, et le serveur web du domaine voit l'adresse IP du contact.",
+      "signers": {
+        "dns": {
+          "description": "Ajoutez un enregistrement TXT chez votre hébergeur DNS. Les apps des contacts le recherchent via un résolveur DNS-over-HTTPS.",
+          "label": "Enregistrement DNS TXT"
+        },
+        "https": {
+          "description": "Déposez un petit fichier sur votre site web. Les apps des contacts le téléchargent depuis votre serveur.",
+          "label": "Fichier sur votre site web"
+        },
+        "nip05-nip07": {
+          "description": "Vous utilisez déjà NIP-05 ? Signez avec la clé Nostr que le nostr.json de votre domaine indique pour lui-même. Aucun nouvel enregistrement nécessaire.",
+          "fields": {
+            "domain": {
+              "help": "Son /.well-known/nostr.json doit indiquer cette clé Nostr pour « _ » (le domaine lui-même).",
+              "label": "Domaine"
+            }
+          },
+          "label": "NIP-05 avec une extension du navigateur"
+        },
+        "nip05-nip46": {
+          "description": "Vous utilisez déjà NIP-05 ? Signez avec la clé Nostr que le nostr.json de votre domaine indique pour lui-même. Aucun nouvel enregistrement nécessaire.",
+          "fields": {
+            "bunker": {
+              "label": "Lien de connexion du signataire"
+            },
+            "domain": {
+              "help": "Son /.well-known/nostr.json doit indiquer cette clé Nostr pour « _ » (le domaine lui-même).",
+              "label": "Domaine"
+            }
+          },
+          "label": "NIP-05 avec un signataire distant"
+        }
+      },
+      "subject": {
+        "help": "Un domaine ou sous-domaine que vous contrôlez. Une preuve pour alice.example.com est publiée sous alice.example.com.",
+        "label": "Domaine"
+      },
+      "summary": "Un enregistrement DNS ou un fichier sur votre site"
+    },
+    "nostr": {
+      "description": "Prouve que vous détenez une clé Nostr : votre signataire signe la déclaration, votre clé ne le quitte jamais.",
+      "privacy": "Rien : la signature est vérifiée sur cet appareil. La preuve n'est jamais publiée sur un relais.",
+      "signers": {
+        "nip07": {
+          "description": "Approuvez dans l'extension Nostr de ce navigateur.",
+          "label": "Extension du navigateur (NIP-07)"
+        },
+        "nip46": {
+          "description": "Collez le lien bunker:// de votre app de signature, puis approuvez-y.",
+          "fields": {
+            "bunker": {
+              "label": "Lien de connexion du signataire"
+            }
+          },
+          "label": "Signataire distant (NIP-46)"
+        }
+      },
+      "subject": {
+        "label": "Clé publique"
+      },
+      "summary": "Signez une fois avec votre signataire Nostr"
+    },
+    "oidc": {
+      "description": "Connectez-vous avec Google, Microsoft, Apple, GitLab ou Twitch : le fournisseur atteste auprès de Ghostly, avec un jeton signé, que le compte est le vôtre.",
+      "label": "Compte chez un fournisseur",
+      "limits": "Attestée par le fournisseur, pas par une clé que vous détenez : votre contact fait confiance à cette entreprise.",
+      "privacy": "L'app de votre contact télécharge les clés publiques du fournisseur (par exemple depuis www.googleapis.com), donc le fournisseur voit qu'une app a vérifié une connexion, pas laquelle. Votre contact voit l'identifiant du compte et ce que vous avez choisi de partager.",
+      "signers": {
+        "oidc-account": {
+          "description": "Le jeton contient l'identifiant de votre compte chez le fournisseur, rien d'autre.",
+          "label": "Connexion : partager le compte seulement"
+        },
+        "oidc-email": {
+          "description": "Ajoute votre adresse e-mail, si le fournisseur la propose.",
+          "label": "Connexion : partager le compte et l'e-mail"
+        },
+        "oidc-profile": {
+          "description": "Ajoute votre adresse e-mail et votre nom ou nom d'utilisateur, si le fournisseur les propose.",
+          "label": "Connexion : partager le compte, l'e-mail et le nom"
+        }
+      },
+      "subject": {
+        "help": "Votre contact voit l'identifiant de votre compte chez ce fournisseur, plus ce que vous choisissez d'ajouter. GitLab ajoute aussi les groupes dont vous êtes membre direct ; Apple ne donne jamais votre e-mail à Ghostly.",
+        "label": "Fournisseur"
+      },
+      "summary": "Connectez-vous avec Google, Microsoft, Apple…"
+    },
+    "openpgp": {
+      "description": "Prouve que vous détenez une clé OpenPGP : signez la déclaration avec gpg (une YubiKey fonctionne aussi) et collez le résultat.",
+      "label": "Clé OpenPGP",
+      "limits": "Détenir une clé ne prouve pas les noms ni les e-mails de ses identifiants utilisateur.",
+      "lookupLabel": "Vérifier les e-mails avec keys.openpgp.org",
+      "privacy": "Rien : la signature est vérifiée sur cet appareil. keys.openpgp.org n'est contacté que si vous le choisissez pour votre clé, ou lui demandez de confirmer des e-mails.",
+      "signers": {
+        "gpg": {
+          "description": "Signez avec gpg et collez ce qu'il affiche, clé publique comprise. Rien n'est recherché."
+        },
+        "gpg-keys-openpgp-org": {
+          "description": "Signez avec gpg et collez la signature ; Ghostly récupère ensuite votre clé publique sur keys.openpgp.org, qui apprend quelle clé a été recherchée.",
+          "label": "gpg, clé depuis keys.openpgp.org"
+        }
+      },
+      "subject": {
+        "help": "L'empreinte complète de la clé principale. Détenir une clé ne prouve pas les noms ni les e-mails de ses identifiants utilisateur.",
+        "label": "Empreinte de la clé",
+        "placeholder": "40 caractères hexadécimaux, issus de gpg --fingerprint"
+      },
+      "summary": "Signez avec gpg et collez le résultat"
+    },
+    "pubky": {
+      "description": "Prouve que vous détenez une clé Pubky : approuvez une demande dans Pubky Ring ou Pubky Passport, et Ghostly écrit un petit fichier de preuve sur votre homeserver. Les apps des contacts le relisent via les propres enregistrements de votre clé.",
+      "limits": "Le fichier est sur votre homeserver : celui qui le gère pourrait aussi y écrire. Il ne prouve pas qui détient la clé.",
+      "privacy": "L'app de votre contact lit les enregistrements de votre clé sur les relais Pkarr de Pubky (pkarr.pubky.org, pkarr.pubky.app), cherche l'adresse de votre homeserver via son résolveur DNS-over-HTTPS (ou le suivant s'il est injoignable ; elle ne contacte qu'une adresse publique, sur le port 443), et lit le fichier de preuve sur votre homeserver, qui voit l'adresse IP du contact.",
+      "signers": {
+        "pubky-auth": {
+          "action": "Continuer",
+          "description": "Une seule demande : approuvez-la dans Pubky Passport dans votre navigateur, ou scannez-la avec Pubky Ring. Ghostly demande seulement à écrire un petit fichier dans un nouveau dossier de votre homeserver.",
+          "label": "Pubky Ring ou Pubky Passport"
+        }
+      },
+      "subject": {
+        "help": "Fournie par Pubky Ring ou Passport quand vous approuvez.",
+        "label": "Clé Pubky"
+      },
+      "summary": "Approuvez dans Pubky Ring ou Passport",
+      "unpublish": {
+        "description": "Supprime aussi le fichier de preuve sur votre homeserver : il faut une approbation de plus dans Pubky Ring ou Passport, car Ghostly n'y a gardé aucun accès."
+      }
+    },
+    "ssh": {
+      "description": "Prouve que vous détenez une clé SSH, clés de sécurité FIDO comprises : signez une fois la déclaration avec ssh-keygen et collez la signature.",
+      "label": "Clé SSH",
+      "privacy": "Rien : la signature est vérifiée sur cet appareil. L'empreinte de la clé relie toutes les discussions où vous la partagez.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Signez avec ssh-keygen d'OpenSSH (8.1 ou plus récent) : un fichier de clé, ssh-agent ou une clé de sécurité FIDO."
+        }
+      },
+      "subject": {
+        "help": "Votre clé publique, l'unique ligne du fichier .pub. Les contacts voient son empreinte.",
+        "label": "Clé publique",
+        "placeholder": "ssh-ed25519 AAAA… (ou SHA256:…)"
+      },
+      "summary": "Signez une fois avec ssh-keygen"
+    },
+    "ssh-github": {
+      "description": "Prouve que vous détenez une clé SSH publiée par votre compte GitHub : signez une fois la déclaration avec ssh-keygen. Pas de connexion à GitHub.",
+      "label": "GitHub (clé SSH)",
+      "limits": "Ne prouve pas une connexion à GitHub : seulement qu'une clé listée par le compte est la vôtre, tant qu'elle reste listée.",
+      "privacy": "L'app de votre contact demande à api.github.com les clés SSH publiques de ce compte, quand vous la partagez et à chaque nouvelle vérification : GitHub apprend que le compte a été recherché, et depuis quelle adresse IP. Idem pour cette app quand vous l'ajoutez.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Signez avec une clé SSH listée par votre compte GitHub (Settings → SSH keys)."
+        }
+      },
+      "subject": {
+        "label": "Nom d'utilisateur GitHub"
+      },
+      "summary": "Une clé listée par votre compte GitHub"
+    },
+    "ssh-gitlab": {
+      "description": "Prouve que vous détenez une clé SSH publiée par votre compte GitLab : signez une fois la déclaration avec ssh-keygen. Pas de connexion à GitLab.",
+      "label": "GitLab (clé SSH)",
+      "limits": "Ne prouve pas une connexion à GitLab : seulement qu'une clé listée par le compte est la vôtre, tant qu'elle reste listée.",
+      "privacy": "L'app de votre contact demande à gitlab.com les clés SSH publiques de ce compte, quand vous la partagez et à chaque nouvelle vérification : GitLab apprend que le compte a été recherché, et depuis quelle adresse IP. Idem pour cette app quand vous l'ajoutez.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Signez avec une clé SSH listée par votre compte GitLab (Settings → SSH keys)."
+        }
+      },
+      "subject": {
+        "label": "Nom d'utilisateur GitLab",
+        "placeholder": "nom d'utilisateur"
+      },
+      "summary": "Une clé listée par votre compte GitLab"
+    }
   },
   "received": {
     "checked": "{{category}} · contrôlée le {{time}}",
