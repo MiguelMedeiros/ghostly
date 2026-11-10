@@ -536,6 +536,26 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", status: "x".repeat(40) })).toMatchObject({ status: "x".repeat(40) });
   });
 
+  // A one-shot `send` to a chat whose invite nobody took sat its whole 30 s and failed `timeout` (exit 4, which a bot
+  // retries: one more copy each time), though the text is kept and goes once the contact joins.
+  it("a one-shot's send to a chat nobody joined yet answers at once, waiting for them; a --wait given still waits", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "waiting" })];
+      const { ctx, node } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const state = node.getState();
+      node.getState = () => ({ ...state, links: [link("chat-one", { label: "Alice", inviteCode: "ghostly1-code", peerParticipationKey: undefined } as Partial<LinkView>)] }) as EngineState;
+      let answer: unknown;
+      void callApi(ctx, "chat.send", { chat: "Alice", text: "hi" }).then((a) => { answer = a; });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(answer).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "waiting", note: "Nobody joined this chat yet: the message goes once they join while this profile is online (`ghostly daemon --detach`)" });
+      const given = callApi(ctx, "chat.send", { chat: "Alice", text: "hi", wait: "sent", timeout: 5 }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await given).toMatchObject({ code: "timeout" });
+    } finally { vi.useRealTimers(); }
+  });
+
   it("send waits for the delivery it was asked for, and fails with the engine's words", async () => {
     const stored = [msg("me_1", 5, { sender: "me", delivery: "sending" })];
     const { ctx, emit } = fake(stored);
