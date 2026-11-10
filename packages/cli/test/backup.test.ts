@@ -289,6 +289,37 @@ it("--light leaves out files over 1 MB (voice messages over 4 MB), and the copy 
   expect(existsSync(join(restored.folder, "restored")), "done once: the mark is gone").toBe(false);
 });
 
+// Only the store and the files were in a backup: the restored bot had the same chats, but stopped joining its owner's
+// groups and answering calls by itself, and nothing said so.
+it("a restored profile keeps auto-join (groups.json) and auto-answer (calls.json); a backup without them still restores", async () => {
+  const dir = home("backup-auto");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Auto bot"]));
+  const original = join(dir, "profiles", "default");
+  // As `group auto on --from` and `call auto on --from` write them: each chat with its contact's key.
+  const groups = JSON.stringify({ autoJoin: { from: [{ chat: "mn39w7wtxecr59op", contact: "a".repeat(52) }, { chat: "sbxpw9uki9fxrwtz", contact: "b".repeat(52) }] } }, null, 2) + "\n";
+  const calls = JSON.stringify({ autoAnswer: { on: true, from: ["mn39w7wtxecr59op"], rate: 48000 } }, null, 2) + "\n";
+  writeFileSync(join(original, "groups.json"), groups, { mode: 0o600 });
+  writeFileSync(join(original, "calls.json"), calls, { mode: 0o600 });
+
+  const file = join(dir, "auto.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file, "--no-passphrase"], { env: NO_PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: NO_PASS })) as { folder: string };
+  expect(readFileSync(join(restored.folder, "groups.json"), "utf8")).toBe(groups);
+  expect(readFileSync(join(restored.folder, "calls.json"), "utf8")).toBe(calls);
+  for (const name of ["groups.json", "calls.json"]) expect(statSync(join(restored.folder, name)).mode & 0o777).toBe(0o600);
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "group", "auto"]))).toEqual({ autoJoin: { on: true, from: ["mn39w7wtxecr59op", "sbxpw9uki9fxrwtz"] } });
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "call", "auto"]))).toEqual({ autoAnswer: { on: true, from: ["mn39w7wtxecr59op"], rate: 48000 } });
+
+  // A profile that never set them (as every backup an older CLI made): the copy has neither, and both are off.
+  const plain = home("backup-auto-none");
+  ok(await ghostly(["--home", plain, "profile", "set", "--name", "Plain bot"]));
+  const none = join(plain, "none.ghostly-backup");
+  ok(await ghostly(["--home", plain, "profile", "backup", "--out", none, "--no-passphrase"], { env: NO_PASS }));
+  const bare = ok(await ghostly(["--home", plain, "profile", "restore", none, "copy"], { env: NO_PASS })) as { folder: string };
+  expect(existsSync(join(bare.folder, "groups.json")) || existsSync(join(bare.folder, "calls.json"))).toBe(false);
+  expect(ok(await ghostly(["--home", plain, "--profile", "copy", "group", "auto"]))).toEqual({ autoJoin: { on: false, from: [] } });
+});
+
 // The profile keeps its messages in rows.db: its snapshot names them only. A backup is one store with every value in
 // it (format 1), which this ghostly and any older one restore.
 it("a backup carries the messages kept in rows.db, as a store of format 1", async () => {
