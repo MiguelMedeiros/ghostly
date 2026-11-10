@@ -83,8 +83,13 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.remove"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).removeGroupMember({ groupId: group.id, key: member(ctx, group, params).key });
-    return view(ctx, group.id, params);
+    const removed = member(ctx, group, params);
+    await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
+    // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
+    // app's Remove dialog says it.
+    const linkOn = !!(state(ctx).groups.find((g) => g.id === group.id) ?? group).entryLink;
+    return { ...view(ctx, group.id, params),
+      ...(linkOn && { warning: `${removed.nick ?? "They"} can still join again with the group's link: ghostly group link ${group.id} --reset gives it a new one and keeps them out` }) };
   },
   async "group.admin"(ctx, params) {
     const group = groupOf(ctx, params);
