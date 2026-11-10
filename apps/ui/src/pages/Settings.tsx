@@ -17,6 +17,7 @@ import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
 import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
 import { TranslateSettings } from "../components/settings/TranslateSettings";
+import { TextSizeSetting } from "../components/settings/TextSize";
 import { translateOffered } from "../lib/translateSettings";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
@@ -648,6 +649,7 @@ export function Settings() {
             ))}
           </div>
         </Row>
+        <TextSizeSetting />
         <Row label={t("settings.language")}
           hint={languageNotLoaded ? (
             <span role="status" data-testid="settings-language-not-loaded">

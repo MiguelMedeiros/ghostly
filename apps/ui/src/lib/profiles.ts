@@ -248,8 +248,9 @@ export function createProfile(name: string): ProfileEntry {
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
-    // The lock goes with it: a new profile must not be a way around the lock of the one it came from.
-    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
+    // The lock goes with it: a new profile must not be a way around the lock of the one it came from. The text size too:
+    // it is for the eyes of who uses this device.
+    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, textSize: current.textSize, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
   const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };

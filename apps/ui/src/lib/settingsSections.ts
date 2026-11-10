@@ -78,6 +78,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "appearance", label: "settings.colorTheme", words: "settings.searchWords.colour" },
   { section: "appearance", label: "settings.colorScheme", words: "settings.searchWords.mode" },
   { section: "appearance", label: "settings.chatListDensity", words: "settings.searchWords.chatList" },
+  { section: "appearance", label: "settings.textSize", words: "settings.searchWords.textSize" },
   { section: "appearance", label: "settings.language", words: "settings.searchWords.language" },
   { section: "appearance", label: "settings.translate.name", words: "settings.translate.searchWords", needs: "translate" },
   { section: "appearance", label: "settings.reduceMotion", words: "settings.searchWords.motion" },

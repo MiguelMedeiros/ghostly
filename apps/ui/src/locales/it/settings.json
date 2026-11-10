@@ -172,6 +172,7 @@
     "speaker": "audio, cuffie, uscita",
     "storage": "spazio, disco, quota",
     "systemNotices": "avvisi, banner, notifiche",
+    "textSize": "carattere, font, zoom, più grande, più piccolo, accessibilità",
     "turn": "NAT, firewall, chiamate",
     "updates": "aggiorna, nuova versione",
     "version": "build, versione",
@@ -213,6 +214,17 @@
   },
   "storageUsed": "Spazio utilizzato",
   "systemNotifications": "Notifiche di sistema",
+  "textSize": "Dimensione del testo",
+  "textSizeHint": "Messaggi, campo del messaggio ed elenco chat, su questo dispositivo",
+  "textSizePreview": "Ciao! Si legge bene?",
+  "textSizePreviewReply": "Sì, molto meglio 👍",
+  "textSizes": {
+    "default": "Predefinito",
+    "huge": "Enorme",
+    "large": "Grande",
+    "larger": "Più grande",
+    "small": "Piccolo"
+  },
   "theme": "Tema",
   "themes": {
     "dark": "Scuro",

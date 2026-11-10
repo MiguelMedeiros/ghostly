@@ -172,6 +172,7 @@
     "speaker": "音频、耳机、输出",
     "storage": "空间、磁盘、配额",
     "systemNotices": "提醒、横幅、通知",
+    "textSize": "字体, 字号, 缩放, 放大, 缩小, 无障碍",
     "turn": "NAT、防火墙、通话",
     "updates": "升级、新版本",
     "version": "构建、版本号",
@@ -213,6 +214,17 @@
   },
   "storageUsed": "已用存储空间",
   "systemNotifications": "系统通知",
+  "textSize": "文字大小",
+  "textSizeHint": "消息、输入框和聊天列表，仅限此设备",
+  "textSizePreview": "你好！看得清楚吗？",
+  "textSizePreviewReply": "清楚多了 👍",
+  "textSizes": {
+    "default": "默认",
+    "huge": "特大",
+    "large": "大",
+    "larger": "较大",
+    "small": "小"
+  },
   "theme": "主题",
   "themes": {
     "dark": "深色",
