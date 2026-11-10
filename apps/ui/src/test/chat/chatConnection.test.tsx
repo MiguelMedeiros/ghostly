@@ -528,9 +528,12 @@ describe("ChatConnection: what the panel does", () => {
     banner(link);
     expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first");
     expect(connectionSummary(linkView(link), Date.now())?.why)
-      .toBe("Automatic: the apps connect over Iroh first, which is back almost at once, then move to WebRTC, which is direct and faster.");
+      .toBe("Automatic: the apps put Iroh first, which is back almost at once, and move to WebRTC once connected, which is faster.");
     // A contact with no Iroh: WebRTC first, as before.
     expect(connectionSummary(linkView({ ...link, peerTransports: ["webrtc/1"] as LinkView["availableTransports"] }), Date.now())?.why)
+      .toBe("Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.");
+    // Fallback off: Automatic puts WebRTC first, as before (it would otherwise stay on Iroh's relay for good).
+    expect(connectionSummary(linkView({ ...link, transportFallback: false }), Date.now())?.why)
       .toBe("Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.");
     // Left on Iroh's relay: WebRTC could not connect.
     expect(connectionSummary(linkView({ ...link, pairing: ready({ transport: "iroh/1" }), transportRelayed: { relays: ["relay.test"] } }), Date.now())?.why)

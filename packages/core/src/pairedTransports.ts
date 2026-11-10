@@ -155,9 +155,12 @@ export function rankTransports(local: readonly string[], remote: readonly string
  * What a chat prefers when nobody chose (Automatic): Iroh where the app has it, then WebRTC, then HyperDHT (WISP 100,
  * revision 2026-11-08). Every app puts Iroh first, so the rank sum of two apps that both run it puts it first on both
  * sides. With nothing at all, WebRTC, which the offer then leaves out.
+ * With Fallback off the chat may use only that one transport, and nothing moves it off a relayed Iroh then: WebRTC
+ * where the app has it, else the first transport it has (a Linux Desktop: WebKitGTK has no WebRTC), as before.
  */
 export const AUTOMATIC_ORDER: readonly PairedTransport[] = ["iroh/1", "webrtc/1", "hyperdht/1"];
-export function automaticTransport(available: readonly PairedTransport[]): PairedTransport {
+export function automaticTransport(available: readonly PairedTransport[], fallback = true): PairedTransport {
+  if (!fallback) return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
   return AUTOMATIC_ORDER.find(t => available.includes(t)) ?? "webrtc/1";
 }
 

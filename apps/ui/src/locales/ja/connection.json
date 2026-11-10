@@ -214,7 +214,7 @@
     "automatic": "自動: 両方のアプリが {{transport}} を最優先しています。",
     "automaticNoWebrtc": "自動: 両方のアプリにある {{transport}} を使っています。一方のアプリには WebRTC がありません。",
     "automaticWebrtc": "自動: 両方のアプリが WebRTC を最優先しており、最初のペアリングは常に WebRTC を使います。",
-    "automaticWebrtcIroh": "自動: アプリはまずすぐに戻れる Iroh で接続し、その後、直接でより速い WebRTC に切り替えます。",
+    "automaticWebrtcIroh": "自動: アプリはすぐに戻れる Iroh を優先し、接続後により速い WebRTC に切り替えます。",
     "contactChose": "{{contact}} がこのチャットに {{transport}} を選びました。",
     "contactChoseUnnamed": "相手がこのチャットに {{transport}} を選びました。",
     "fallback": "このチャットには {{preferred}} を選びましたが、現在使えないため {{transport}} を使っています。",

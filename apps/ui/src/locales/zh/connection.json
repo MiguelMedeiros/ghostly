@@ -214,7 +214,7 @@
     "automatic": "自动：双方应用都优先 {{transport}}。",
     "automaticNoWebrtc": "自动：应用使用双方都有的 {{transport}}；其中一方没有 WebRTC。",
     "automaticWebrtc": "自动：双方应用都优先 WebRTC，而且首次配对总是使用 WebRTC。",
-    "automaticWebrtcIroh": "自动：应用先通过几乎立即恢复的 Iroh 连接，然后切换到直连且更快的 WebRTC。",
+    "automaticWebrtcIroh": "自动：应用优先使用几乎立即恢复的 Iroh，连接后再切换到更快的 WebRTC。",
     "contactChose": "{{contact}} 为此聊天选择了 {{transport}}。",
     "contactChoseUnnamed": "你的联系人为此聊天选择了 {{transport}}。",
     "fallback": "你为此聊天选择了 {{preferred}}，但它现在不可用，因此聊天使用 {{transport}}。",

@@ -214,7 +214,7 @@
     "automatic": "Automatique : les deux apps placent {{transport}} en premier.",
     "automaticNoWebrtc": "Automatique : les apps utilisent {{transport}}, que les deux ont ; l'une d'elles n'a pas WebRTC.",
     "automaticWebrtc": "Automatique : les deux apps placent WebRTC en premier, et un premier appairage utilise toujours WebRTC.",
-    "automaticWebrtcIroh": "Automatique : les apps se connectent d'abord par Iroh, qui revient presque aussitôt, puis passent à WebRTC, direct et plus rapide.",
+    "automaticWebrtcIroh": "Automatique : les apps mettent Iroh en premier, qui revient presque aussitôt, puis passent à WebRTC une fois connectées, qui est plus rapide.",
     "contactChose": "{{contact}} a choisi {{transport}} pour cette discussion.",
     "contactChoseUnnamed": "Votre contact a choisi {{transport}} pour cette discussion.",
     "fallback": "Vous avez choisi {{preferred}} pour cette discussion ; il n'est pas disponible pour l'instant, donc elle utilise {{transport}}.",

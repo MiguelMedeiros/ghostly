@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { checkedDescriptors, dialableIrohRelay, rankTransports, relayUrl, relayedTransports, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
+import { automaticTransport, checkedDescriptors, dialableIrohRelay, rankTransports, relayUrl, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
 import { TransportSwitch, type TransportPolicy } from "../src/transportSwitch";
 // covers: transport.relayed, transport.preference, transport.switch
 
@@ -100,6 +100,59 @@ it("moves a session on Iroh through its relay, ranked first, to WebRTC on the se
   expect(prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: ["webrtc/1", "iroh/1"], upgrade: true }), true);
   expect(prepare[1]).toHaveBeenCalledWith(expect.objectContaining({ upgrade: true }), false);
   switches.forEach(s => s.stop());
+});
+
+/** Two web apps on Automatic, each policy as GhostLink makes it (`ownPreferred`): the app's rule for what runs now. */
+function automaticWebPeers(fallback: [boolean, boolean], available: PairedTransport[][]) {
+  const policy = (i: number): Omit<TransportPolicy, "revision" | "intent"> => ({ preferred: automaticTransport(available[i], fallback[i]),
+    fallback: fallback[i], available: available[i], descriptors: available[i].includes("iroh/1") ? { "iroh/1": browser } : {} });
+  const queue: { side: number; frame: Record<string, unknown> }[] = [];
+  const prepare = [vi.fn(), vi.fn()], cancel = [vi.fn(), vi.fn()], kept = [vi.fn(), vi.fn()], unreached = [vi.fn(), vi.fn()], state = [vi.fn(), vi.fn()];
+  const switches = [0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1 - i),
+    policy: () => structuredClone(policy(i)), send: frame => queue.push({ side: 1 - i, frame: frame as Record<string, unknown> }),
+    peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], kept: kept[i], unreached: unreached[i], upgrade: () => true, timeoutMs: 100 }));
+  const flush = () => { let steps = 0; while (queue.length) { if (++steps > 100) throw new Error("Negotiation loop"); const { side, frame } = queue.shift()!; switches[side].handle(frame); } };
+  return { policy, prepare, cancel, kept, unreached, state, switches, flush };
+}
+
+it("on Automatic with Fallback off, offers WebRTC alone and leaves a WebRTC session there when the Iroh endpoint comes up", () => {
+  const web: PairedTransport[] = ["webrtc/1", "iroh/1"];
+  const available: PairedTransport[][] = [["webrtc/1"], web];
+  const h = automaticWebPeers([false, true], available);
+  h.switches.forEach(s => s.begin("session-1", "webrtc/1")); h.flush();
+  // This app's Iroh endpoint comes up while live (`registerEndpoint` → `advertiseTransports`).
+  available[0] = web; h.switches[0].changed(false); h.flush();
+  expect(h.prepare[0]).not.toHaveBeenCalled();
+  expect(h.prepare[1]).not.toHaveBeenCalled();
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  // Fallback off allows one transport: WebRTC, as before revision 2026-11-08, not Iroh through its relay for good.
+  expect(h.policy(0).preferred).toBe("webrtc/1");
+  expect(transportOrder(web, automaticTransport(web, false), false)).toEqual(["webrtc/1"]);
+  h.switches.forEach(s => s.stop());
+});
+
+it("an upgrade off Iroh's relay whose WebRTC never connects leaves the chat on Iroh, with no row, and is not planned again", () => {
+  vi.useFakeTimers();
+  try {
+    const web: PairedTransport[] = ["webrtc/1", "iroh/1"];
+    const h = automaticWebPeers([true, true], [web, web]);
+    h.switches.forEach(s => s.begin("session-1", "iroh/1")); h.flush();
+    expect(h.prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: ["webrtc/1", "iroh/1"], upgrade: true }), true);
+    expect(h.prepare[1]).toHaveBeenCalledWith(expect.objectContaining({ upgrade: true }), false);
+    // ICE never settles: the move's own time runs out on both sides.
+    vi.advanceTimersByTime(100); h.flush();
+    expect(h.cancel.every(c => c.mock.calls.length >= 1)).toBe(true);
+    expect([...h.kept, ...h.unreached].every(f => !f.mock.calls.length)).toBe(true);
+    // No error and no transport shown as wanted, on either side.
+    expect(h.state.every(s => s.mock.calls.every(args => args.every(a => a === undefined)))).toBe(true);
+    expect(h.switches.every(s => !s.pending && s.wanted()?.transport === "iroh/1")).toBe(true);
+    // Nothing loops: what the session hears again, or minutes on, plans nothing for the same policies.
+    h.switches.forEach(s => s.reconsider()); h.flush();
+    vi.advanceTimersByTime(10 * 60_000); h.flush();
+    expect(h.prepare.map(p => p.mock.calls.length)).toEqual([1, 1]);
+    expect(h.switches.every(s => !s.pending)).toBe(true);
+    h.switches.forEach(s => s.stop());
+  } finally { vi.useRealTimers(); }
 });
 
 it("lets an explicit choice of the relayed transport stand", () => {

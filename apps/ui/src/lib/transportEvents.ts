@@ -429,9 +429,10 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
     : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
     : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]
     : relayed ? [tr("connection.summary.noDirectShort"), tr("connection.summary.noDirect", { transport: t })]
-    // Both apps run Iroh: Automatic comes back over it first, then moves the session to WebRTC (WISP 100, revision 2026-11-08).
+    // Both apps run Iroh: Automatic comes back over it first, then moves the session to WebRTC (WISP 100, revision
+    // 2026-11-08). Not with Fallback off: then it puts WebRTC first, as before.
     : [tr("connection.event.automatic"), transport === "webrtc/1"
-      ? tr(ownTransports(link).includes("iroh/1") && !!link.peerTransports?.includes("iroh/1") ? "connection.summary.automaticWebrtcIroh" : "connection.summary.automaticWebrtc")
+      ? tr(link.transportFallback !== false && ownTransports(link).includes("iroh/1") && !!link.peerTransports?.includes("iroh/1") ? "connection.summary.automaticWebrtcIroh" : "connection.summary.automaticWebrtc")
       : tr(noWebrtc ? "connection.summary.automaticNoWebrtc" : "connection.summary.automatic", { transport: t })];
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [tr("connection.ms", { ms: link.transportRttMs })] : [];

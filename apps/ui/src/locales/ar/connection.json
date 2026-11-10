@@ -230,7 +230,7 @@
     "automatic": "تلقائي: يضع التطبيقان {{transport}} أولًا.",
     "automaticNoWebrtc": "تلقائي: يستخدم التطبيقان {{transport}} المتوفر لدى كليهما؛ أحدهما لا يدعم WebRTC.",
     "automaticWebrtc": "تلقائي: يضع التطبيقان WebRTC أولًا، والاقتران الأول يستخدم WebRTC دائمًا.",
-    "automaticWebrtcIroh": "تلقائي: يتصل التطبيقان أولًا عبر Iroh الذي يعود فورًا تقريبًا، ثم ينتقلان إلى WebRTC الأسرع والمباشر.",
+    "automaticWebrtcIroh": "تلقائي: يضع التطبيقان Iroh أولًا لأنه يعود فورًا تقريبًا، ثم ينتقلان بعد الاتصال إلى WebRTC الأسرع.",
     "contactChose": "اختار {{contact}} {{transport}} لهذه المحادثة.",
     "contactChoseUnnamed": "اختارت جهة اتصالك {{transport}} لهذه المحادثة.",
     "fallback": "اخترت {{preferred}} لهذه المحادثة؛ وهو غير متاح الآن، لذا تستخدم المحادثة {{transport}}.",

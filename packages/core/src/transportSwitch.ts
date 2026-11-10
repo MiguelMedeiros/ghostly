@@ -116,7 +116,8 @@ export class TransportSwitch {
   wanted(): { transport: PairedTransport; by?: "you" | "contact" } | undefined {
     if (!this.context || !this.remote) return undefined;
     const local = this.local(), remote = this.remote, winner = this.winner(local, remote);
-    const transport = this.choices(local, remote)[0] ?? winner.preferred;
+    // A move off a relay (`upgrade`) is quiet: the transport the session is on is not waiting for another.
+    const transport = (this.isUpgrade(local, remote) ? this.actual : undefined) ?? this.choices(local, remote)[0] ?? winner.preferred;
     return { transport, ...(winner.intent > 0 ? { by: winner === local ? "you" as const : "contact" as const } : {}) };
   }
   private local(): TransportPolicy { return { ...this.options.policy(), revision: this.revision, intent: this.intent }; }

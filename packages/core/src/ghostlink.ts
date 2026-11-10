@@ -2215,8 +2215,11 @@ export class GhostLink {
   get availableTransports(): PairedTransport[] {
     return [...(this.options.rtcAvailable !== false ? ["webrtc/1" as const] : []), ...this.endpoints.keys()];
   }
-  /** The transport this side's policy names: on Automatic, the app's rule for what runs now (Iroh once its endpoint is up). */
-  private get ownPreferred(): PairedTransport { return this.automatic ? automaticTransport(this.availableTransports) : this.preferred; }
+  /**
+   * The transport this side's policy names: on Automatic, the app's rule for what runs now (Iroh once its endpoint is
+   * up, with Fallback on; with it off, WebRTC where there is one, so an endpoint coming up moves nothing).
+   */
+  private get ownPreferred(): PairedTransport { return this.automatic ? automaticTransport(this.availableTransports, this.fallback) : this.preferred; }
   private transportOffer(): PairedTransport[] { return transportOrder(this.availableTransports, this.ownPreferred, this.fallback); }
 
   registerEndpoint(endpoint: NativeEndpoint): void {
@@ -2561,9 +2564,10 @@ export class GhostLink {
       // anyway. With no session behind it, the choice this side or the contact made meanwhile (WISP 100).
       // A resume over WebRTC on Automatic, where Iroh now ranks ahead of it (a chat live on WebRTC before Automatic put
       // Iroh first, WISP 100 revision 2026-11-08): it resumes on Iroh, which a dial in takes over a held session on.
+      // The WebRTC offer that follows if that dial fails still resumes (`resume`, `woke`): the contact takes its held session over.
+      const resume = this.resuming === "webrtc/1", woke = resume && this.resumingWoke;
       if (this.automatic && this.resuming === "webrtc/1" && ranked.includes("iroh/1") && ranked.indexOf("iroh/1") < ranked.indexOf("webrtc/1")) this.resuming = "iroh/1";
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
-      const resume = this.resuming === "webrtc/1", woke = resume && this.resumingWoke;
       if (chosen && chosen === this.resuming && ranked.includes(chosen)) { this.resuming = undefined; this.resumingWoke = false; }
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) {

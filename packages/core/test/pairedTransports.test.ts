@@ -38,6 +38,11 @@ it("prefers Iroh when nobody chose, then WebRTC, then HyperDHT (WISP 100, revisi
   expect(automaticTransport(["webrtc/1", "hyperdht/1"])).toBe("webrtc/1");
   expect(automaticTransport(["hyperdht/1"])).toBe("hyperdht/1");
   expect(automaticTransport([])).toBe("webrtc/1");
+  // Fallback off: the one transport the chat may use, WebRTC where there is one (Iroh's relay would be for good).
+  expect(automaticTransport(["webrtc/1", "iroh/1"], false)).toBe("webrtc/1");
+  expect(automaticTransport(["webrtc/1", "hyperdht/1", "iroh/1"], false)).toBe("webrtc/1");
+  expect(automaticTransport(["hyperdht/1", "iroh/1"], false)).toBe("iroh/1");
+  expect(automaticTransport(["hyperdht/1"], false)).toBe("hyperdht/1");
 });
 it("puts Iroh first on both sides when both apps run it and nobody chose", () => {
   const automatic = (available: PairedTransport[]) => transportOrder(available, automaticTransport(available), true);
