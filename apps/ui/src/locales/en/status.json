@@ -1,0 +1,33 @@
+{
+  "availabilities": {
+    "available": "Available",
+    "away": "Away",
+    "busy": "Busy",
+    "dnd": "Do not disturb"
+  },
+  "availability": "Availability",
+  "clear": "Clear status",
+  "customLabel": "Clear at",
+  "dndHint": "Messages come in without a sound or a notice. Calls still ring.",
+  "emoji": "Emoji",
+  "emojiMore": "More emoji",
+  "end": "Clear after",
+  "ends": {
+    "1h": "1 hour",
+    "30m": "30 minutes",
+    "4h": "4 hours",
+    "custom": "Choose a time…",
+    "keep": "Until {{time}}",
+    "never": "Don't clear",
+    "today": "Today",
+    "week": "This week"
+  },
+  "menuLabel": "Your status: {{status}}. Change status",
+  "past": "Choose a time later than now.",
+  "placeholder": "What's your status?",
+  "set": "Set a status",
+  "shared": "Your contacts see it beside your name.",
+  "text": "Status text",
+  "title": "Status",
+  "until": "until {{time}}"
+}

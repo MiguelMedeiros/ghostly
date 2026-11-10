@@ -9,13 +9,14 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useBackCloses } from "../hooks/useDismiss";
 import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
+import { StatusMenuItem } from "./StatusPicker";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
 );
 
 /**
- * The switcher itself: the active profile on top in its colors, which opens the Profile page; the others
+ * The switcher itself: the active profile on top in its colors, which opens the Profile page, and its status (StatusPicker.tsx); the others
  * below with their picture, what they left unread and whether something new waits for them, one tap each; then Add a profile and Manage profiles,
  * and Install app while the web app can be installed.
  * A popover over the account bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End,
@@ -34,8 +35,8 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   const { current, others } = glances;
   const items = () => [...(menuRef.current?.querySelectorAll<HTMLElement>("[role^='menuitem']") ?? [])];
 
-  // The most likely next step has focus: the first other profile, or adding one.
-  useEffect(() => { items()[1]?.focus(); }, []);
+  // The most likely next step has focus: the first other profile, or adding one (past this profile and its status).
+  useEffect(() => { items()[2]?.focus(); }, []);
   // Back (Android's back gesture) closes it alone, as every other menu and sheet.
   useBackCloses(() => onClose());
   useEffect(() => {
@@ -95,6 +96,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="m9 6 6 6-6 6" /></svg>
         </span>
       </button>
+      <StatusMenuItem className={itemClass} onClose={onClose} />
 
       {others.length > 0 && <div role="none" className="my-1 border-t border-border" />}
       {others.map((other) => {
