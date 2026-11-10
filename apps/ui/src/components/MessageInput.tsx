@@ -223,6 +223,8 @@ export function MessageInput({
   const readingRef = useRef(false);
   /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
   const [dropsReading, setDropsReading] = useState(0);
+  /** A share from the "Share to…" picker waits for this chat's edit to end: said by the edit bar. */
+  const [shareWaits, setShareWaits] = useState(false);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -776,7 +778,7 @@ export function MessageInput({
    */
   const offerShared = (share: IncomingShare) => {
     shareFiles(share).then((files) => {
-      if (files.length && !offerRef.current(files) && draftId) keepShareFor(draftId, { title: "", text: "", url: "", files });
+      if (files.length && !offerRef.current(files) && draftId) { keepShareFor(draftId, { title: "", text: "", url: "", files }); setShareWaits(true); }
     }, (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
@@ -871,11 +873,12 @@ export function MessageInput({
   // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
   // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked). While
   // one of my messages is edited here, the whole share waits for the edit to end (saved or left): the field holds the
-  // edit's words, the draft it goes into is set aside, and an edit takes no files.
+  // edit's words, the draft it goes into is set aside, and an edit takes no files. Said by the edit, until it lands.
   useEffect(() => {
     if (!draftId) return;
     const take = () => {
       const waiting = peekShareFor(draftId);
+      setShareWaits(!!waiting && editing);
       if (!waiting || editing || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
@@ -1096,6 +1099,7 @@ export function MessageInput({
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {edit && shareWaits && <p role="status" data-testid="composer-share-waits" className="m-0 mb-2 px-1 text-[13px] text-text-secondary animate-fade-in">{t("composer.shareWaitsForEdit")}</p>}
       {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {previewOpen && <TranslatePreview state={drafting.state!} stale={translationStale(drafting.state, text)} disabled={disabled} onEdit={drafting.edit}
         onChoose={(code) => guardThen(() => void drafting.translateInto(code, text, picker.compose(text)))} onAgain={translateAgain}
