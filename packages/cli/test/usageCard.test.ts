@@ -88,6 +88,14 @@ describe("usage send", () => {
     expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
   });
 
+  it("refuses a --resets or --also date with no year or milliseconds before 2000, where the card said 2001 or 1970", () => {
+    const refused = (argv: string[], flag: string, value: string) => expect(() => params(["Miguel", "--left", "40", ...argv])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(new RegExp(`^--${flag} takes a date with its year, or milliseconds from 2000: .*, not ${JSON.stringify(value)}$`)) }));
+    refused(["--resets", "Nov 8"], "resets", "Nov 8");
+    refused(["--resets", "2026"], "resets", "2026");
+    refused(["--also", "week=80@Dec 25 10:00"], "also", "Dec 25 10:00");
+    refused(["--also", "week=80@-5"], "also", "-5");
+  });
+
   it("refuses a --resets or --also time more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
     const zone = process.env.TZ;
     try {

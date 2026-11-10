@@ -426,20 +426,40 @@ function writtenDay(text: string): [number, number, number] | undefined {
   return year && word ? [Number(year[1]), MONTHS.indexOf(word.toLowerCase()) + 1, Number(day)] : undefined;
 }
 
+/** A time of day, with the zone offset after it if there is one: `10:00`, `01:00:00.5`, `10:00 GMT+0200`, `01:00+02:00`. */
+const TIME_OF_DAY = /\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:gmt|utc|ut|z)?\s*[+-]\d{2}(?::?\d{2})?)?/gi;
+const MONTH_NAME = new RegExp(`\\b(?:${MONTHS.join("|")})`, "i");
+
+/**
+ * Whether a date says its year: beside a month's name it has two numbers past its time of day (`Nov 8 26`), else three
+ * (`11/8/26`, `2026-11-08`). `Date.parse` makes a year left out 2001 (`Dec 25 10:00`, `11/20`, `-5`).
+ */
+function hasYear(text: string): boolean {
+  const date = text.replace(TIME_OF_DAY, " ");
+  return (date.match(/\d+/g)?.length ?? 0) >= (MONTH_NAME.test(date) ? 2 : 3);
+}
+
+/** The first time a card's time flag takes: 2000-01-01, so `2026` or `20261120` as milliseconds (1970) is no time. */
+const FIRST_CARD_TIME = Date.UTC(2000, 0, 1);
+
 /**
  * A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). A date with no
  * zone is local time in every form: `Date.parse` reads `2026-09-30 01:00` and `Sep 30 2026` as local but an ISO date
  * alone as UTC midnight (21:00 the day before in UTC-03, agents#2355), so that one is read as `2026-09-30T00:00`.
  * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1. A time more than a year
  * ahead is a usage error that names the flag and the last time it takes: before, it reached the card's check and failed
- * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken.
+ * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken,
+ * from 2000: a date with no year (`Dec 25 10:00`, which `Date.parse` made 2001) and a few digits (`2026`, 1970 as
+ * milliseconds) are refused.
  */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
   const day = ISO_DAY.exec(text);
-  const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  const digits = /^\d+$/.test(text);
+  const ms = digits ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
+  if (!Number.isSafeInteger(ms)) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  if (ms < FIRST_CARD_TIME || !(digits || day || hasYear(text))) throw new CliError("usage", `--${flag} takes a date with its year, or milliseconds from 2000: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
   const written = writtenDay(text);
   if (written) {
     const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
