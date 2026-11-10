@@ -1451,6 +1451,23 @@ fn ice_configuration(
     )
 }
 
+/// A description with the candidates of this round's gathering alone. On an ICE restart webrtc-rs's description
+/// still lists the round before's, ahead of the new ones, though their sockets are gone (and, with a TURN server,
+/// their relays freed): the signal keeps the first few of each kind (`pickCallCandidates`), so after a network
+/// change a contact was told the old addresses alone.
+fn gathered_only(sdp: &str, gathered: &[String]) -> String {
+    /// A candidate's address and port.
+    fn address(candidate: &str) -> Vec<&str> {
+        candidate.split(' ').skip(4).take(2).collect()
+    }
+    let this_round: Vec<Vec<&str>> = gathered.iter().map(|c| address(c)).collect();
+    sdp.split_inclusive('\n')
+        .filter(|line| {
+            !line.starts_with("a=candidate:") || this_round.contains(&address(line.trim_end()))
+        })
+        .collect()
+}
+
 /// A description with its relay candidates alone: what a relay-only call may tell the peer, whatever webrtc-rs
 /// gathered.
 fn relay_candidates_only(sdp: &str) -> String {
@@ -1684,7 +1701,13 @@ impl Call {
         Ok(())
     }
 
-    async fn local(&self, description: RTCSessionDescription) -> Result<String, String> {
+    /// Sets our description and waits for its candidates; `restart`: an ICE restart's, which carries this round's
+    /// candidates alone ([`gathered_only`]).
+    async fn local(
+        &self,
+        description: RTCSessionDescription,
+        restart: bool,
+    ) -> Result<String, String> {
         let started = Instant::now();
         self.pc
             .set_local_description(description)
@@ -1714,7 +1737,11 @@ impl Call {
             .local_description()
             .await
             .ok_or("No local description")?;
-        let mut described = describe(&local.sdp, &gathered, self.ssrcs);
+        let sdp = match restart {
+            true => gathered_only(&local.sdp, &gathered),
+            false => local.sdp,
+        };
+        let mut described = describe(&sdp, &gathered, self.ssrcs);
         if self.relay_only {
             described = relay_candidates_only(&described);
             if !described.contains("a=candidate:") {
@@ -1753,7 +1780,7 @@ impl Call {
             .create_offer(options)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(with_setup(&self.local(offer).await?, "active"))
+        Ok(with_setup(&self.local(offer, restart).await?, "active"))
     }
 
     /// Our answer to the peer's offer (rebuilt from its signal), gathered. `restart`: the offer is the peer's ICE
@@ -1776,7 +1803,7 @@ impl Call {
             .create_answer(None)
             .await
             .map_err(|e| e.to_string())?;
-        let answer = self.local(answer).await?;
+        let answer = self.local(answer, restart).await?;
         Ok(if active {
             with_setup(&answer, "passive")
         } else {
@@ -2158,6 +2185,78 @@ mod tests {
             assert!(seen(&lab.seen.channel_data_out) > 20, "ChannelData sent on");
             assert!(seen(&lab.seen.relayed_in) > 20, "relayed back");
         }
+        a.close().await;
+        b.close().await;
+    }
+
+    /// The `address port` of each candidate in a description.
+    fn candidate_addresses(sdp: &str) -> Vec<String> {
+        sdp.lines()
+            .filter(|l| l.starts_with("a=candidate:"))
+            .map(|l| l.split(' ').skip(4).take(2).collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
+    /// An ICE restart through the TURN server: the restart offer and its answer carry this round's relay
+    /// candidates alone. The relays of before are freed with their sockets, and the signal keeps the first two
+    /// relay candidates only (`pickCallCandidates`): listed first, they were all a contact was told.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_restart_offer_carries_this_rounds_candidates_alone() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let lab = TurnLab::start("ghost").await;
+        let servers = [turn_server(&format!("turn:{}?transport=udp", lab.addr))];
+        let call = || {
+            Call::new(
+                OPUS_PT,
+                VP8_PT,
+                true,
+                Devices::default(),
+                &servers,
+                true,
+                Arc::new(|_| {}),
+            )
+        };
+        let a = call().await.unwrap();
+        let offer = a.offer(false).await.unwrap();
+        let b = call().await.unwrap();
+        let answer = b.answer(&offer, false).await.unwrap();
+        a.accept(&answer).await.unwrap();
+        until(
+            "both hear through the relay",
+            30,
+            || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+            String::new,
+        )
+        .await;
+
+        let restart = a.offer(true).await.unwrap();
+        let before = candidate_addresses(&offer);
+        let stale: Vec<String> = candidate_addresses(&restart)
+            .into_iter()
+            .filter(|c| before.contains(c))
+            .collect();
+        assert!(stale.is_empty(), "{stale:?} in {restart}");
+        assert!(restart.contains(" typ relay"), "{restart}");
+        let restarted = b.answer(&restart, true).await.unwrap();
+        let before = candidate_addresses(&answer);
+        assert!(
+            candidate_addresses(&restarted)
+                .iter()
+                .all(|c| !before.contains(c)),
+            "{restarted}"
+        );
+        a.accept(&restarted).await.unwrap();
+        let (a_heard, b_heard) = (a.stats().audio_received, b.stats().audio_received);
+        until(
+            "both hear after the restart",
+            30,
+            || a.stats().audio_received > a_heard + 50 && b.stats().audio_received > b_heard + 50,
+            String::new,
+        )
+        .await;
         a.close().await;
         b.close().await;
     }
@@ -3143,7 +3242,7 @@ mod tests {
                 let offer = RTCSessionDescription::offer(offer.clone()).unwrap();
                 b.pc.set_remote_description(offer).await.unwrap();
                 let answer = b.pc.create_answer(None).await.unwrap();
-                b.local(answer).await.unwrap()
+                b.local(answer, false).await.unwrap()
             } else {
                 b.answer(&offer, false).await.unwrap()
             };
