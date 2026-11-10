@@ -117,6 +117,39 @@ describe("the status picker in the account menu", () => {
     expect(engine.callsTo("setOwnStatus")).toEqual([{ status: { availability: "away", until: new Date(2026, 10, 10, 9, 30).getTime() } }]);
   });
 
+  it("refuses the kept end once it has passed while open, and saves the edit with a new end", async () => {
+    answerStatus({ availability: "busy", text: "Meeting", until: NOW + 60_000 });
+    const { user, engine } = renderBar();
+    const dialog = await openPicker(user);
+    const field = within(dialog).getByRole("textbox", { name: "Status text" });
+    await user.clear(field);
+    await user.type(field, "Meeting runs late");
+    vi.setSystemTime(NOW + 120_000);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toHaveLength(0);
+    expect(engine.callsTo("clearOwnStatus")).toHaveLength(0);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Choose a time later than now.");
+
+    await choose(user, within(dialog).getByTestId("status-end"), "1h");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toEqual([{ status: { availability: "busy", text: "Meeting runs late", until: NOW + 120_000 + 3_600_000 } }]);
+  });
+
+  it("keeps the kept end when the engine ends the status while open, rather than saving it with no end", async () => {
+    answerStatus({ availability: "away", text: "Out", until: NOW + 60_000 });
+    const { user, engine } = renderBar();
+    const dialog = await openPicker(user);
+    vi.setSystemTime(NOW + 120_000);
+    // The engine ends it at its time and says so in its state.
+    const { ownStatus: _ended, ...settings } = fakeEngine.state.settings;
+    act(() => fakeEngine.setState({ ...fakeEngine.state, settings }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toHaveLength(0);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Choose a time later than now.");
+  });
+
   it("ends Today at midnight, and Don't clear sends no end", async () => {
     answerStatus();
     const { user, engine } = renderBar();
