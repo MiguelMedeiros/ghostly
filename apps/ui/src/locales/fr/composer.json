@@ -77,6 +77,7 @@
   "services": "Services partagés",
   "servicesNeedApp": "Nécessite l'extension ou l'app de bureau Ghostly",
   "servicesShared": "{{count}} partagé(s) dans cette discussion",
+  "shareWaitsForEdit": "Ce que vous avez partagé arrive une fois cette modification terminée.",
   "sharedTextFile": "Texte partagé",
   "skinTone": "Teint",
   "takePhoto": "Prendre une photo",
