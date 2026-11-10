@@ -641,6 +641,8 @@
   "relayOnly": {
     "appInExtension": "L'app di un contatto non si apre qui con Nascondi il mio IP attivo",
     "appInExtensionNext": "Il browser potrebbe mostrare il tuo IP ai server dell'app. Disattiva Nascondi il mio IP per aprirla.",
+    "appInWeb": "L'app di un contatto non si apre sul web con Nascondi il mio IP attivo",
+    "appInWebNext": "Il browser potrebbe mostrare il tuo IP ai server dell'app. Aprila nell'app desktop, o disattiva Nascondi il mio IP.",
     "keepsTurn": "Nascondi il mio IP richiede questo server TURN",
     "keepsTurnNext": "Disattivalo prima, poi rimuovi il server.",
     "needsTurn": "Aggiungi prima un server TURN",
