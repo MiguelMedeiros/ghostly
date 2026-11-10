@@ -351,7 +351,7 @@ const METHODS: Record<string, Method> = {
 
   async "chat.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
+    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group show");
@@ -721,7 +721,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt), autoJoin: ctx.groupAuto.get() };
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0)), autoJoin: ctx.groupAuto.get() };
   },
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
