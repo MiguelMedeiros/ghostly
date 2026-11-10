@@ -389,12 +389,12 @@ export const FILE_METHODS: Record<string, Method> = {
         : waitingGroupFile(f);
       return kept ? [[f.id, kept] as const] : [];
     }));
-    if ("group" in target) {
-      const kept = await keptOf(`group:${target.group.id}`);
-      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
-    }
-    const kept = await keptOf(target.link.id);
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
+    // The history's file rows only (the messages store's file index): a bot polling this in a chat of 9,000 texts read
+    // every one of them each time (75 ms), with the daemon's other calls waiting behind it.
+    const linkId = "group" in target ? `group:${target.group.id}` : target.link.id;
+    const kept = await keptOf(linkId);
+    const files = filesOf(await node(ctx).fileMessages(linkId), (id) => withWaitingFor(views[id] ?? kept.get(id)));
+    return "group" in target ? { group: target.group.id, files } : { chat: target.link.id, files };
   },
 
   /**
