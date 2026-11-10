@@ -1055,6 +1055,26 @@ describe("per chat", () => {
     engines.b.stop();
   });
 
+  it("a contact's proof checked while this device's clock ran ahead, for a provider with no recheck, reads as checked now, not at that future date", async () => {
+    const { engines, ledgers } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const proof = await prove(engines.a, 365);
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow + 2 * 86_400_000);
+    await engines.a.share({ linkId: "chat", id: proof.id });
+    await vi.waitFor(() => expect(ledgers.b.received[0]?.status).toBe("verified"));
+    // The clock is put right; nothing checks the proof again.
+    vi.setSystemTime(realNow);
+    const now = Math.floor(realNow / 1000);
+    expect(ledgers.b.received[0].checkedAt).toBeGreaterThan(now);
+    const view = engines.b.linkView("chat", true)!.received[0];
+    expect(view).toMatchObject({ status: "verified", recheckDue: false });
+    expect(view.checkedAt).toBeLessThanOrEqual(now);
+    expect(view.verifiedAt).toBeLessThanOrEqual(now);
+  });
+
   it("a check that could not reach the server changes nothing and backs off; offline nothing is checked; a check that holds is due a day later", async () => {
     const { engines, ledgers, state } = await shared();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
