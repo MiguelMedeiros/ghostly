@@ -8,8 +8,8 @@ import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
-import { databaseOfSpace, newSpace, pointProfile, recoverProfilePointer, registryKey } from "./profiles";
-import { dropWalletStorageOf } from "./profileData";
+import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
+import { dropWalletStorageOf, keyOfSpace } from "./profileData";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -201,15 +201,16 @@ function dropDatabase(name: string): Promise<void> {
 }
 
 /**
- * Every local key of a namespace (never the first profile's, whose prefix every other one shares). Never the registry
- * of profiles: in a Desktop space of its own (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and
- * the registry `ghostly_<base>_profiles` has its prefix. Deleting the old namespace after a handoff took the registry
- * with it, so the app opened the empty old namespace and listed no other profile (Linux bug hunt, 2026-10-03).
+ * Every local key of a namespace (`keyOfSpace`). Never the registry of profiles: in a Desktop space of its own
+ * (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and the registry `ghostly_<base>_profiles` has its
+ * prefix. Deleting the old namespace after a handoff took the registry with it, so the app opened the empty old
+ * namespace and listed no other profile (Linux bug hunt, 2026-10-03). The first profile's original namespace, whose
+ * prefix every other one shares, is dropped only once no profile runs on it: a take of it left its chats with their keys,
+ * drafts and invites, and the first profile listed them again once removed here.
  */
 function dropKeys(ns: string): void {
-  if (!ns) return;
-  const prefix = `ghostly_${ns}_`, registry = registryKey();
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix) && key !== registry);
+  if (!ns && profileOfDatabase(databaseOfSpace(ns))) return;
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key && keyOfSpace(ns, key));
   for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
 }
 
