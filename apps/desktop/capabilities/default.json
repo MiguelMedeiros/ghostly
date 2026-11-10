@@ -25,6 +25,7 @@
     "allow-bitcoind-rpc",
     "allow-call-service",
     "allow-close-service-windows",
+    "allow-connection-service",
     "allow-copy-secret",
     "allow-create-keypair",
     "allow-decrypt-text",

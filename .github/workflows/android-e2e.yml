@@ -32,7 +32,9 @@ on:
       - "apps/ui/src/lib/apps/flag.ts"
       - "apps/ui/src/lib/callService.ts"
       - "apps/ui/src/lib/notifications.ts"
+      - "apps/ui/src/lib/stayConnected.ts"
       - "apps/ui/src/lib/translateFlag.ts"
+      - "apps/ui/src/pages/Settings.tsx"
       - "apps/ui/src/components/voice/VoiceRecorderButton.tsx"
   schedule:
     - cron: "17 4 * * *"
