@@ -180,6 +180,26 @@ describe("an edge's packets, carried by members beside the relays", () => {
     expect(relays.packets.get(me.pubKeyZ32)!.timestampMicros).toBe(parseRelayPayload(me.pubKeyZ32, state.carried[2]).timestampMicros);
   });
 
+  // Review of ghostly#6126: `latest()` signs records kept while no member could carry them; the records handed a moment
+  // before must not then send the relays that other packet.
+  it("gives the relays the records it is asked to publish after latest() signed others", async () => {
+    const me = createIdentity(), peer = createIdentity();
+    let held: DiscoveryBudgetError | null = null, canCarry = true;
+    const relays = Object.assign(new Relays(), { publishHeld: () => held });
+    const transport = new CarriedTransport(relays, me.pubKeyZ32, peer.pubKeyZ32, {
+      carry: () => ({ taken: 2, sure: false }), open: () => false, look: () => {}, canCarry: () => canCarry,
+    });
+    relays.failPublish = new DiscoveryBudgetError(1_000);
+    await expect(transport.publish(me, records("here"))).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    canCarry = false; held = new DiscoveryBudgetError(1_000);
+    await expect(transport.publish(me, records("offer"))).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    canCarry = true;
+    expect(parseRelayPayload(me.pubKeyZ32, transport.latest()!).records.map(({ label, value }) => ({ label, value }))).toEqual(records("offer"));
+    held = null; relays.failPublish = null;
+    await transport.publish(me, records("here"));
+    expect(relays.publishes.at(-1)).toEqual(records("here"));
+  });
+
   it("answers the next read with a carried packet, without a request, and tells the edge to look", async () => {
     const { peer, relays, state, transport } = edge();
     expect(transport.accept(createRelayPayload(peer, records("offer")))).toBe(true);

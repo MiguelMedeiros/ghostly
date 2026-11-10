@@ -344,6 +344,8 @@ export class CarriedTransport implements PkarrTransport {
     if (this.unsigned) {
       const { identity, records } = this.unsigned;
       this.unsigned = null;
+      // Other records than the ones handed last: a publish of those must not send this packet (`handed`).
+      this.handed = null;
       this.mine = this.newest = this.stamp(identity, records);
     }
     return this.mine;
