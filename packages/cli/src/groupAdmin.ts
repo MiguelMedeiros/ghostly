@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, NO_PICTURE_METADATA, groupName, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, cleanName, findOwnNamedChat, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -100,9 +100,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.rename"(ctx, params) {
     const group = groupOf(ctx, params, "chat rename <chat> <name...>");
-    const clean = cleanName(str(params, "name", true), MAX_GROUP_NAME_LENGTH);
-    const name = clean && groupName(clean);
-    if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    const name = groupNameOf(params);
     // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
     guardText(name, bool(params, "force"), "group's name", "rename it");
     await node(ctx).renameGroup({ groupId: group.id, name });
