@@ -74,7 +74,8 @@ export function PeerPresenceLine({ peerKey, testId, className = "", emojiOnPhone
   const tone = presenceTone(entry);
   const shown = statusText(t, entry);
   if (!tone && !shown) return null;
-  const unseen = !shown ? "sr-only" : emojiOnPhone ? `max-md:[&_bdi]:sr-only${entry?.status?.emoji ? "" : " max-md:sr-only"}` : "";
+  // Each class whole in the source, for Tailwind to find it.
+  const unseen = !shown ? "sr-only" : !emojiOnPhone ? "" : entry?.status?.emoji ? "max-md:[&_bdi]:sr-only" : "max-md:[&_bdi]:sr-only max-md:sr-only";
   return (
     <span data-testid={testId} className={`flex min-w-0 items-center gap-1 ${unseen} ${className}`}>
       {tone && <span data-testid={`${testId}-presence`} className="sr-only">{presenceLabel(t, tone)}</span>}
