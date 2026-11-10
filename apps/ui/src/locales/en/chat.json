@@ -327,6 +327,21 @@
     "pin": "Pin",
     "unpin": "Unpin"
   },
+  "presence": {
+    "availability": {
+      "away": "Away",
+      "busy": "Busy",
+      "dnd": "Do not disturb"
+    },
+    "dot": {
+      "away": "Online, away",
+      "busy": "Online, busy",
+      "dnd": "Online, do not disturb",
+      "idle": "Online, idle",
+      "online": "Online"
+    },
+    "status": "Status: {{status}}"
+  },
   "preview": {
     "arkAddress": "Ark address",
     "bitcoinAddress": "₿ Bitcoin address",

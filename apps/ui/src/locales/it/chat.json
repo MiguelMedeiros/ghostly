@@ -328,6 +328,21 @@
     "pin": "Fissa",
     "unpin": "Non fissare"
   },
+  "presence": {
+    "availability": {
+      "away": "Assente",
+      "busy": "Occupato",
+      "dnd": "Non disturbare"
+    },
+    "dot": {
+      "away": "Online, assente",
+      "busy": "Online, occupato",
+      "dnd": "Online, non disturbare",
+      "idle": "Online, inattivo",
+      "online": "Online"
+    },
+    "status": "Stato: {{status}}"
+  },
   "preview": {
     "arkAddress": "Indirizzo Ark",
     "bitcoinAddress": "₿ Indirizzo Bitcoin",
