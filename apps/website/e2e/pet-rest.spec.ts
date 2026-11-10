@@ -50,6 +50,26 @@ for (const rest of RESTS) {
   });
 }
 
+// Before the pointer has moved it has nowhere to go: it used to glide for about 5 s at every page load toward a
+// pointer it had never seen (agents#3546), 45-60 frames a second on every page of a desktop visit.
+test("the pointer ghost asks for no frames until the pointer first moves", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/cli");
+  const pet = page.locator(".pet");
+  await expect(pet).toHaveCount(1);
+  await countFrames(page);
+  const before = await pet.boundingBox();
+  await page.clock.runFor(10_000);
+  expect(await frames(page), "frames asked for with a pointer that never moved").toBe(0);
+  expect(await pet.boundingBox(), "the ghost has moved").toEqual(before);
+
+  // The first move wakes it.
+  await page.mouse.move(600, 400, { steps: 4 });
+  await page.clock.runFor(1_000);
+  expect(await frames(page), "frames once the pointer moves").toBeGreaterThan(0);
+  expect(await pet.boundingBox(), "the ghost is still").not.toEqual(before);
+});
+
 // Asleep, its float and z's looped forever: 8 style recalcs a second beside a still pointer, and at the top of every
 // page where it sleeps at its start spot (agents#1115). They play a few times and rest, as the footer's sleeper does.
 test("the sleeping pointer ghost floats and breathes its z's a few times, then rests", async ({ page }) => {

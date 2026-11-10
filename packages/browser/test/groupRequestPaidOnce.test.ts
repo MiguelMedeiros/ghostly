@@ -60,7 +60,8 @@ function world() {
 beforeEach(() => {
   resetDb(); vi.clearAllMocks(); vi.spyOn(console, "warn").mockImplementation(() => {});
   mintDown = true; scriptMint();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // `performance` too: a redeem's watch hour is measured on the monotonic clock.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
 });
 afterEach(() => { vi.useRealTimers(); });
 

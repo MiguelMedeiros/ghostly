@@ -124,6 +124,8 @@ jobs:
     # workflow of its own and gets none of it.
     env:
       VITE_TRANSLATE: ${{ needs.guard.outputs.translate == 'true' && '1' || '' }}
+      # Home's version link opens this release's page when the tag is the version the app runs (HomeProjectLinks.tsx).
+      VITE_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -334,6 +336,7 @@ jobs:
     uses: ./.github/workflows/android.yml
     with:
       ref: ${{ inputs.tag || github.ref }}
+      release_tag: ${{ inputs.tag || github.ref_name }}
     secrets: inherit
 
   # ============================================

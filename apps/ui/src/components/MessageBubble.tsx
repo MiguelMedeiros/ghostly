@@ -29,6 +29,7 @@ import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
@@ -273,7 +274,7 @@ function UnconfirmedMark() {
   const { t } = useI18n();
   return (
     <div data-testid="message-unconfirmed" title={t("chat.unconfirmed.hint")}
-      className="text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      className="chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
       <span>{t("chat.unconfirmed.label")}</span>
       <span className="sr-only">{t("chat.unconfirmed.hint")}</span>
     </div>
@@ -287,7 +288,7 @@ function ForwardedMark({ hops }: { hops?: number }) {
   if (!label) return null;
   return (
     <div data-testid="message-forwarded" data-many={label === "chat.forward.many" || undefined}
-      className="flex items-center gap-1 text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      className="flex items-center gap-1 chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
       <ForwardGlyph size={13} />
       <span>{t(label)}</span>
     </div>
@@ -304,13 +305,13 @@ function EditGlyph() {
 
 /**
  * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
- * not been shown it yet. The earlier versions are in the message's details.
+ * not been shown it yet. The earlier versions are in the message's details. On a picture's dark chip, light as its time.
  */
-function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
+function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean; onPicture?: boolean }) {
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`text-[11px] leading-none italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -324,7 +325,7 @@ function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; g
  */
 function TranslatedMark({ translation }: { translation: ShownTranslation }) {
   const { t, dir } = useI18n();
-  const quiet = "text-[11px] leading-[16px] text-text-primary/65";
+  const quiet = "chat-text-note text-text-primary/65";
   if (translation.long) {
     return (
       <div dir={dir} className={`mt-[2px] ${quiet}`}>
@@ -354,7 +355,7 @@ function TranslatedMark({ translation }: { translation: ShownTranslation }) {
 function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
   const { t, language, dir } = useI18n();
   return (
-    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] chat-text-note text-text-primary/65 italic">
       <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
       <span aria-hidden="true"> · </span>
       <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
@@ -378,7 +379,8 @@ function ReplyAction({ onReply }: { onReply: () => void }) {
 
 const IMAGE_URL_RE =
   /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
-const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
+/** The whole message, as the other picture links: words after the link would show on neither side under a picture. */
+const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\/\S+$/i;
 /** A Wayback Machine capture of a GIF: `/web/`, an optional timestamp (and `im_`/`id_`), then the archived http(s) URL. */
 const WAYBACK_GIF_PATH_RE = /^\/web\/(?:\d{1,14}(?:im_|id_)?\/)?https?:\/\/[^/?#\s]+\/[^?#\s]*\.gif$/i;
 
@@ -860,9 +862,9 @@ export function MessageBubble(props: MessageBubbleProps) {
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
-  const { message, peerAck = 0, selection } = props;
+  const { message, selection } = props;
   // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
-  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const acked = ackedBy(props);
   const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
   return (
     <SameBubble
@@ -879,12 +881,30 @@ export function MessageBubble(props: MessageBubbleProps) {
 
 const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
-/** The same bubble to draw: see `MessageBubble`. */
-function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+/** What both comparisons below read alike: everything a bubble draws with but its acknowledgement and reactions' names. */
+function sameShown(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
+}
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.names === b.names && sameShown(a, b);
+}
+
+/** Whether the contact's acknowledgement covers this message of mine: what `MessageBubble` draws of `peerAck`. */
+const ackedBy = ({ message, peerAck = 0 }: MessageBubbleProps) => message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+
+/**
+ * The same `MessageBubble` to draw again, for a list that keeps its rows from drawing when nothing of them changed
+ * (`memo(MessageBubble, sameMessageRow)`). As `sameBubble`, callbacks only by whether they are there, so the list's
+ * callbacks must do what the list says when called (one function for its life, or one closing over the row's values),
+ * not what it said when the row was last drawn. `reactionName` by identity: the names it answers are drawn.
+ */
+export function sameMessageRow(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return ackedBy(a) === ackedBy(b) && a.reactionName === b.reactionName && sameShown(a, b);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -955,10 +975,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
   const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t, names]);
   const swipe = useSwipeReply(onReply);
-  const [imgError, setImgError] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+  // Both name the address they were for: an edit to another one asks again, and is read again.
+  /** The picture link that could not be read or drawn. */
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The picture link Show picture was pressed for: never another, even of the same host (each read says the chat is open). */
+  const [revealed, setRevealed] = useState<string | null>(null);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
@@ -1021,12 +1045,19 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
-  const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const detected = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const linked = detected === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // Hide my IP from contacts: a picture link someone else chose is never read, as a contact's public profile pictures
+  // are not (engine/publicProfiles.ts): its server would learn this device's address. It stays a link that says why.
+  const hiddenIp = linked !== null && relayOnly && (!isMe || !!message.forwarded) && !needsNoClick(linked);
+  const contentType = hiddenIp ? "text" : detected;
   // The picture this bubble shows, if it shows one (a card or a system line never does).
-  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  const picture = hiddenIp ? null : linked;
+  // Whether a picture waits for Show picture: a contact's, or a copy of one I forwarded (mine here, never asked for).
+  const asks = picture !== null && (!isMe || !!message.forwarded) && revealed !== picture && !needsNoClick(picture);
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
-  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
+  const readHere = picture !== null && !autoLoads(picture) && !asks ? picture : null;
   const [pictureRead, setPictureRead] = useState<{ link: string; read: PictureRead } | null>(null);
   useEffect(() => {
     if (!readHere) return;
@@ -1034,7 +1065,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
       if (read) setPictureRead({ link: readHere, read });
-      else setImgError(true);
+      else setFailed(readHere);
     });
     return () => { shown = false; };
   }, [readHere]);
@@ -1081,8 +1112,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
-        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <span>{refusedLine(refusedPayment, t)}</span>
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
@@ -1101,8 +1132,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const pubKeyShort = joiner ? publicKeyLabel(joiner) : "";
 
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
-        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
+        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -1139,9 +1170,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system ${
             isMissed
               ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
@@ -1168,7 +1199,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nickRun = <bdi>{nick}</bdi>;
   const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
+    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px]`}>
       {author && onOpenAuthor && !choosing
         ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
         : nickRun}
@@ -1249,11 +1280,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
   // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
+  // A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is.
+  const edit = message.edit && (!buttonsView || !!message.edit.history?.length) ? message.edit : undefined;
   const timestampEl = (
     <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
       <span dir={dir} className="inline-flex items-center gap-[3px]">
-        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} />}
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
@@ -1350,12 +1382,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} payee={payee} />
             {timestampEl}
           </div>
-        ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
+        ) : asks ? (
           // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
           // a contact's picture waits for a click.
           <div className="clearfix">
-            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
-              className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
+            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(picture)}
+              className="chat-text-link text-link underline decoration-dotted cursor-pointer break-all text-start">
               {t("chat.showPicture", { host: hostOf(message.text.trim()) })}
             </button>
             {timestampEl}
@@ -1373,13 +1405,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
-                onError={() => setImgError(true)}
+                onError={() => setFailed(message.text.trim())}
               />
             ) : (
               // Being read: the placeholder a picture has until it loads.
               <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
             )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+              {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} onPicture />}
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
@@ -1388,7 +1421,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : bigEmoji ? (
           <div className="clearfix">
-            <span className="text-[42px] leading-[50px] block text-center py-[2px]">
+            <span className="chat-text-emoji block text-center py-[2px]">
               {message.text}
             </span>
             {timestampEl}
@@ -1398,8 +1431,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
-            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="chat-text-message wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
+            {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />

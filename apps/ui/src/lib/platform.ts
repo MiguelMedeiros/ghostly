@@ -567,6 +567,12 @@ export interface ServicesPlatform {
   getSharedServices(): SharedService[];
   /** Throws with a readable message when the target is not acceptable or access was denied. */
   shareService(name: string, target: string): Promise<void>;
+  /**
+   * Is a shared app's address not yet allowed on this device (the extension: one that came with a restored or moved
+   * profile)? Its contacts are refused until `allowLocalAccess`, from a click. Left out where the share asked already.
+   */
+  localAccessNeeded?(target: string): Promise<boolean>;
+  allowLocalAccess?(target: string): Promise<void>;
   removeService(id: string): Promise<void>;
   setServiceEnabled(id: string, enabled: boolean): Promise<void>;
   /** Grants or withdraws one contact's access to one service. Nobody is granted by default. */

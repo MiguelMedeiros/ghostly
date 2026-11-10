@@ -448,6 +448,40 @@ describe("task update", () => {
     expect(node.editMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("after the device's clock went back, an update waits at most the gap, never the jump, and its updatedAt is not before startedAt", async () => {
+    // Before, the wait was the card's last edit + 2.5 s on the moved clock: 4 min here, the profile held all along.
+    for (const mode of ["one-shot", "daemon"] as const) {
+      const { ctx, node, rows } = fake(mode);
+      vi.useFakeTimers();
+      await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" }, wait: "none" });
+      await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, run: { result: "ok" }, wait: "none" });
+      const startedAt = rows("chat-one")[0]!.card!.kind === "task" ? (rows("chat-one")[0]!.card as { startedAt: number }).startedAt : 0;
+      vi.setSystemTime(Date.now() - 4 * 60_000);
+      const task = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 30 }, wait: "none" });
+      const routine = callApi(ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "failed" }, wait: "none" });
+      await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+      await Promise.all([task, routine]);
+      expect(node.editMessage, mode).toHaveBeenCalledTimes(2);
+      expect((rows("chat-one")[0]!.card as { updatedAt: number }).updatedAt).toBeGreaterThanOrEqual(startedAt);
+      expect(rows("chat-one")[1]!.card).toMatchObject({ lastRun: { result: "failed" } });
+      vi.useRealTimers();
+    }
+  });
+
+  it("after the clock went back past the skew, says the device's clock went back, not that a time is in the future", async () => {
+    const { ctx, node } = fake();
+    vi.useFakeTimers();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, run: { result: "ok" } });
+    vi.setSystemTime(Date.now() - 3_600_000);
+    // Before: "Status card: startedAt is a time in milliseconds, not in the future", a field the bot never set.
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "failed" } })).rejects.toMatchObject({
+      code: "bad_request", message: "This device's clock went back since the task was sent: its startedAt is later than now. Update it once the clock is right, or start a new card with ghostly task send" });
+    await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "ok" } })).rejects.toMatchObject({
+      code: "bad_request", message: expect.stringMatching(/^This device's clock went back since the routine was sent: its lastRun\.at is later than now/) });
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
   it("finds only a task of mine by its id, and refuses an update out of bounds", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "nope", card: {} })).rejects.toMatchObject({ code: "not_found" });

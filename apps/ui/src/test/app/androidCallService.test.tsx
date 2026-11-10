@@ -83,6 +83,18 @@ describe("the Android call service", () => {
     expect(told()).toHaveLength(4);
   });
 
+  it("names no one while the app lock is on, and stops naming the contact when it is turned on mid-call", async () => {
+    android(true);
+    const { rerender } = renderHook(({ locked }: { locked: boolean }) => useCallService({ name: "Ana", video: false }, vi.fn(), locked), { initialProps: { locked: true } });
+    // The shade of an unlocked phone would say who the call is with, while the app itself is behind its lock.
+    await waitFor(() => expect(told()).toEqual([{ name: "", video: false }]));
+    rerender({ locked: false });
+    await waitFor(() => expect(told()).toEqual([{ name: "", video: false }, { name: "Ana", video: false }]));
+    // Told again with no name, never stopped and started: from the background Android would refuse the start.
+    rerender({ locked: true });
+    await waitFor(() => expect(told()).toEqual([{ name: "", video: false }, { name: "Ana", video: false }, { name: "", video: false }]));
+  });
+
   it("stops when the chat goes with its call on", async () => {
     android(true);
     const { unmount } = renderHook(() => useCallService({ name: "Ana", video: false }, vi.fn()));

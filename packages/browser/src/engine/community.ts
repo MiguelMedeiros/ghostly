@@ -197,6 +197,23 @@ const ENTRY_LINGER_MS = 20_000;
 const FULL_TELL_MS = 5 * 60_000;
 const FULL_LINGER_MS = 5_000;
 const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
+/**
+ * Whether this device can let in no one new now (WISP 903 § Admissions while the admin is away): members signed
+ * `COMMUNITY_LIMITS.memberAdmissions` admissions in a row, counted as the session's `commit` counts them. Its hub
+ * answered every knock all the same: an entry session, an invite, the joiner told it was in "in a moment", and then
+ * the accept refused, every turn of the door for as long as the admin was away.
+ */
+function admissionsHeld(s: CommunitySession): boolean {
+  if (s.isAdmin) return false;
+  const admin = s.admin, chain = s.state.chain;
+  let n = 0;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const c = chain[i];
+    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
+    if (c.k === "add") n++;
+  }
+  return n >= COMMUNITY_LIMITS.memberAdmissions;
+}
 const RELAYED_KEPT = 4096;
 /**
  * Someone the chain took out while its app was closed comes back believing it is a member: it asks in a hub's lobby,
@@ -1833,7 +1850,7 @@ export class Communities {
     if (!s.adminWork || !s.entryKey || !s.state.entry.seedB64) return;
     // Full: a knock is answered all the same, with `group-full` (`entryReady`), at most every `FULL_TELL_MS` per joiner.
     // By the door alone, not the other hubs in turn: each keeps its own count, and two told the joiner twice as often.
-    const full = s.roster.length >= COMMUNITY_LIMITS.members;
+    const full = s.roster.length >= COMMUNITY_LIMITS.members, held = admissionsHeld(s);
     for (const [key, at] of live.fullTold) if (now - at >= FULL_TELL_MS) live.fullTold.delete(key);
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
@@ -1871,7 +1888,7 @@ export class Communities {
       const stillKnocking = now - ts < 2 * this.timings.slowKnockMs;
       if (rosterHas(s.roster, key)) {
         if (!stillKnocking || ts < this.addedAt(s, key) + this.timings.knockFallbackMs) continue;
-      } else if (full && (door !== s.myKey || live.fullTold.has(key))) continue;
+      } else if (full ? door !== s.myKey || live.fullTold.has(key) : held) continue;
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
       const seen = live.knocksSeen.get(key);
@@ -2007,6 +2024,12 @@ export class Communities {
       live.pendingEntries.delete(peer);
       live.fullTold.set(peer, now);
       live.lingering.set(linkId, now + FULL_LINGER_MS);
+      return true;
+    }
+    // Opened before the last admission members may sign went in: no invite the accept would refuse (`admissionsHeld`).
+    if (!rosterHas(s.roster, peer) && admissionsHeld(s)) {
+      live.pendingEntries.delete(peer);
+      void this.host.closeEdge(linkId).catch(() => {});
       return true;
     }
     try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }

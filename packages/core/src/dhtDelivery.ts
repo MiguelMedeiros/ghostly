@@ -8,7 +8,7 @@ import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, 
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
-import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, publishedNowhere, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 import { AWAITING_PEER_MS, countUnusedInvite, PRESENCE_WINDOW, UNUSED_INVITE_UPKEEP_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
@@ -20,6 +20,7 @@ export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
+const DHT_PACKET_BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
 const CONTROL_TTL = 10 * 60_000;
 /**
  * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`
@@ -44,11 +45,23 @@ const MAX_ATTEMPTS = 8;
  * nothing; one the budget turned away is not used again, as it may have gone out on the DHT (the CLI puts there too).
  */
 const SEQUENCE_BLOCK = 64;
+/** The longest the relays' request budget holds publications back (`budgetUntil`). */
+const BUDGET_HOLD_MAX_MS = 60_000;
+/** The longest wait `backoff` gives. */
+const BACKOFF_MAX_MS = 60_000;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
-const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
+const backoff = (attempts: number) => Math.min(BACKOFF_MAX_MS, 4_000 * 2 ** attempts);
 /**
- * The contact's mailbox is read this often while this side is DHT-only (a contact that chose it is read at the chat's
- * pace: `ACTIVE_DHT_POLL_MS` open, or on a daemon, `peerDhtPollMs`), and otherwise…
+ * A time this side set by its clock, at most `ms` after the moment it was set, read back `now`. One further ahead was set
+ * before the device clock went back (an NTP step, a clock that ran ahead set right): it counts from now, not for as long
+ * as the clock went back, as `relay.ts` counts its budget times. One already past (the clock set forward) stays past:
+ * what it timed ends early, never late.
+ */
+const bounded = (at: number, now: number, ms = 0): number => Math.min(at, now + ms);
+/**
+ * The contact's mailbox is read this often while this side is DHT-only, unless that contact is away with nothing of
+ * ours waiting on it (`dhtOnlyIdle`; a contact that chose it is read at the chat's pace: `ACTIVE_DHT_POLL_MS` open,
+ * or on a daemon, `peerDhtPollMs`), and otherwise…
  */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
@@ -67,6 +80,13 @@ export const LEAVING_DHT_FAST_MS = 2 * 60_000;
  * side's offer and its reads for the answer go over the minute on (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
 export const LEAVING_SIGNAL_READS = 3;
+/**
+ * How long a fresh link packet of a contact that still says DHT only after the reads it started waits before it may
+ * start them again (`peerLinkPacket`), doubling up to `LEAVING_PROBE_MAX_GAP_MS`. One that really left says so in
+ * seconds; one that stays (or anyone holding the invite) cannot keep this side reading its mailbox at the DHT pace.
+ */
+export const LEAVING_PROBE_GAP_MS = 2 * 60_000;
+export const LEAVING_PROBE_MAX_GAP_MS = 16 * 60_000;
 /** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
 export const LIVE_POLL_MS = 5 * 60_000;
 /**
@@ -237,6 +257,11 @@ export class DhtDelivery {
   private urgent = false;
   /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
   private signalReads = 0;
+  /** The read as this side leaves DHT only, before the signaling ones (`setMode`): a plain one. */
+  private leavingRead = false;
+  /** Until when a fresh link packet of the contact starts no signaling reads, and the wait it was held to (`peerLinkPacket`). */
+  private probeAt = 0;
+  private probeGap = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
@@ -256,12 +281,19 @@ export class DhtDelivery {
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
   /**
+   * This side left DHT only and no envelope saying so went out yet: the contact's live link waits on it (it holds this
+   * side's offer until it reads that), so it goes as signaling (`PkarrRequestOptions.signal`).
+   */
+  private leavingOut = false;
+  /**
    * Until when it held this side's last read of the contact's mailbox back: the read goes again then, not at the next
    * poll. A chat in the background reads every 30 s, and one held back while its link was redialling read the contact
    * 60 s after its live link dropped, the chat "On DHT · retrying live" all along while the contact had chosen DHT only.
    */
   private readHeldUntil = 0;
   private errors: Partial<Record<"publish" | "read", string>> = {};
+  /** Texts whose last `send` went nowhere (`wentNowhereFor`), newest last. */
+  private wentNowhere = new Set<string>();
   /** When the device's network last came back (`networkBack`): a read or publication started before failed for want of it. */
   private networkBackAt = -Infinity;
   private foreignKeySeenAt?: number;
@@ -425,12 +457,36 @@ export class DhtDelivery {
     if (json !== this.saved) { await this.options.save(structuredClone(next)); this.saved = json; }
     this.state = next;
   }
+  /** The key an envelope between this side and `peer` is sealed with: the same for the same contact, so derived once. */
+  private sealedKeys?: { peer: string; key: Uint8Array };
   private sealedKey(peer: string): Uint8Array {
-    const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
-    return hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
+    if (this.sealedKeys?.peer !== peer) {
+      const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
+      this.sealedKeys = { peer, key: hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32) };
+    }
+    return this.sealedKeys.key;
   }
   private signed(body: Body, recipient = "invite"): Uint8Array { return utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.from, this.to, recipient, body])); }
   private records(body: Body, recipient = this.options.credentials.peerKey): GhostRecord[] { return this.envelope(body, recipient).records; }
+  /**
+   * Whether an envelope to `recipient` whose plaintext is this many bytes fits the packet: its size depends on the
+   * length alone, so it is measured on a placeholder, with no signature, key or encryption.
+   */
+  private fits(bytes: number, recipient: string | undefined): boolean {
+    if (bytes > MAX_ENVELOPE_PLAINTEXT) return false;
+    const ratchet = this.ratcheted(recipient);
+    const sealed = ratchet ? 4 * Math.ceil((RATCHET_OVERHEAD + bytes) / 3) : sealedLength(bytes);
+    // The `_dmk` hint's value is the participation key sealed with the chat key: as long as any other one.
+    const hint = recipient ? [{ label: "_dmk", value: "A".repeat(sealedLength(utf8Encode(this.participation.pubKeyZ32).length)), ttl: ENVELOPE_TTL }] : [];
+    return measureRecords(this.identity.pubKeyZ32, [{ label: ratchet ? "_dr" : "_dm", value: "A".repeat(sealed), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+  }
+  /**
+   * Whether `body` fits an envelope to `recipient`, as `envelope` would find it, without building one: the signature is
+   * always 86 characters of base64url.
+   */
+  private bodyFits(body: Body, recipient: string | undefined): boolean {
+    return this.fits(utf8Encode(JSON.stringify([body, "x".repeat(86)])).length, recipient);
+  }
   /**
    * The envelope's records. Ratcheted (`ratcheted`), its `_dr` record is the right length but not sealed yet: `seal`
    * gives its bytes, under the chat's lock, once the publication is sure to go. Measuring a packet takes no key.
@@ -442,11 +498,9 @@ export class DhtDelivery {
     const ratchet = this.ratcheted(recipient);
     const sealedBytes = (bytes: number) => ratchet ? 4 * Math.ceil((RATCHET_OVERHEAD + bytes) / 3) : sealedLength(bytes);
     const label = ratchet ? "_dr" : "_dm";
-    // The packet a plaintext of this many bytes makes: its size depends on the length alone.
-    const fits = (bytes: number) => bytes <= MAX_ENVELOPE_PLAINTEXT &&
-      measureRecords(this.identity.pubKeyZ32, [{ label, value: "A".repeat(sealedBytes(bytes)), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+    const fits = (bytes: number) => this.fits(bytes, recipient);
     const bytes = utf8Encode(plaintext).length;
-    if (!fits(bytes)) throw new Error("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    if (!fits(bytes)) throw new Error(DHT_PACKET_BUDGET);
     // Padded with spaces up to the largest that fits, so a keep-alive is as long as a text. JSON allows spaces after the
     // value: readers from before read the envelope as ever.
     let padded = bytes;
@@ -499,8 +553,17 @@ export class DhtDelivery {
       // signaling (`LEAVING_SIGNAL_READS`). As plain reads, an extension whose relay minute was spent read its contact's
       // mailbox once as it left, just before the contact's envelope saying it left too got there, and the next read
       // waited 41 s: it never dialled, and the matrix's chat stayed "On DHT · retrying live" for 45 s (E2E full, 2026-11-05).
+      // The read at the switch itself is a plain one: the contact seldom left in the same instant, and that read, as
+      // signaling, took one of the few requests past a spent minute that the dialling side's read for the answer needed
+      // (it read the answer 31 s late). Held back, it costs nothing, and the next read, signaling, comes at the fast pace.
       if (mode === "dht") this.signalReads = 0;
-      else if (this.state.peerMode === "dht") this.signalReads = LEAVING_SIGNAL_READS;
+      else if (this.state.peerMode === "dht") { this.signalReads = LEAVING_SIGNAL_READS; this.leavingRead = true; }
+      // The envelope saying it left goes as signaling, within the chat's allowance past the minute, so a hold that plain
+      // writes ran into before does not keep it. As a plain write, an extension back from Offline that had spent its
+      // minute held it 55 s: the contact held the offer until it read it, and the matrix's chat stayed "On DHT ·
+      // retrying live" for 45 s (E2E full, 2026-11-07 and 2026-11-08).
+      this.leavingOut = mode === "stream";
+      if (this.leavingOut) this.budgetUntil = 0;
       this.changed();
     });
     void this.tick();
@@ -529,6 +592,21 @@ export class DhtDelivery {
     if (signal) this.signalReads = LEAVING_SIGNAL_READS;
     if (until <= this.fastUntil && !signal) return;
     this.fastUntil = Math.max(this.fastUntil, until); this.urgent = true; void this.tick();
+  }
+  /**
+   * A fresh link packet of a contact still saying DHT only (`expect`, signaling). Nothing signed says it is the contact's,
+   * and one that stays on DHT only (or anyone holding the invite) can put one before every read: the reads it starts are
+   * then held to a wait that doubles from `LEAVING_PROBE_GAP_MS` to `LEAVING_PROBE_MAX_GAP_MS`, and start over once the
+   * contact says it left. False when held. Its offer, signed by its pinned key, is not held (`expect` directly).
+   */
+  peerLinkPacket(ms: number): boolean {
+    const now = Date.now();
+    // A clock stepped back would hold it past the wait: that wait is over.
+    if (now < this.probeAt && this.probeAt - now <= this.probeGap) return false;
+    this.probeGap = Math.min(this.probeGap * 2 || LEAVING_PROBE_GAP_MS, LEAVING_PROBE_MAX_GAP_MS);
+    this.probeAt = now + this.probeGap;
+    this.expect(ms, true);
+    return true;
   }
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
@@ -561,6 +639,27 @@ export class DhtDelivery {
     this.active = active;
     if (active && !this.live) void this.tick(); else this.schedule();
   }
+  /**
+   * The device clock now, with every time this side set by it kept no further ahead than it is ever set (`bounded`).
+   * The outbox times a text's receipt on a timer, which a step of the clock does not move; these times are judged by
+   * the clock. Taken as they were, a clock set back an hour (or one an hour ahead set right) while a text awaited its
+   * receipt held every later text of the chat for that hour though the outbox showed the text failed at five minutes,
+   * the text was not published again meanwhile and the chat read every 4 s; and a contact away counted as there, its
+   * mailbox read every 4 s for most of the hour (bug hunt, 2026-11-08). Kept so in memory; the next save writes them.
+   */
+  private clock(): number {
+    const now = Date.now(), { pending, receipt } = this.state;
+    if (pending && (pending.expires > now + DHT_MESSAGE_TTL || pending.next > now + BACKOFF_MAX_MS))
+      this.state = { ...this.state, pending: { ...pending, expires: bounded(pending.expires, now, DHT_MESSAGE_TTL), next: bounded(pending.next, now, BACKOFF_MAX_MS) } };
+    if (receipt && (receipt.expires > now + DHT_MESSAGE_TTL || (receipt.next ?? 0) > now + BACKOFF_MAX_MS))
+      this.state = { ...this.state, receipt: { ...receipt, expires: bounded(receipt.expires, now, DHT_MESSAGE_TTL), ...(receipt.next !== undefined && { next: bounded(receipt.next, now, BACKOFF_MAX_MS) }) } };
+    this.peerNewAt = bounded(this.peerNewAt, now); this.lastPublish = bounded(this.lastPublish, now);
+    this.networkBackAt = bounded(this.networkBackAt, now); this.pinnedProbeAt = bounded(this.pinnedProbeAt, now);
+    this.controlDue = bounded(this.controlDue, now, Math.max(4 * 60_000, UNUSED_INVITE_UPKEEP_MS, this.options.firstControlAfterMs ?? 0));
+    this.budgetUntil = bounded(this.budgetUntil, now, BUDGET_HOLD_MAX_MS);
+    this.leavingUntil = bounded(this.leavingUntil, now, LEAVING_DHT_FAST_MS);
+    return now;
+  }
   validate(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
@@ -570,7 +669,7 @@ export class DhtDelivery {
     if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return DHT_TEXT_TOO_LONG;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
-    const now = Date.now(), pending = this.state.pending;
+    const now = this.clock(), pending = this.state.pending;
     if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
     if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
     const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
@@ -580,15 +679,18 @@ export class DhtDelivery {
     const error = this.packetError(next.message, next.expires, next.reply, next.edit);
     return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
+  /**
+   * Measured, not built (`bodyFits`): the outbox asks it of every waiting text at each look, and a text that waits as no
+   * relay takes it would cost a signature and a seal each time, for an answer that does not change.
+   */
   private packetError(message: Message, expires: number, reply?: string, edit?: DhtEdit): string | null {
-    try { this.records(this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
-    catch (error) { return error instanceof Error ? error.message : String(error); }
+    const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit);
+    return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32) ? null : DHT_PACKET_BUDGET;
   }
   /** Whether a text with its hop count fits the packet and what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). */
   private roomForHops(message: Message, expires: number, reply: string | undefined, forwarded: number): boolean {
     const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
-    try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
-    return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
+    return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32);
   }
   /**
    * `forwarded`: a forwarded text's hop count (WISP 403 § Forwards). Like a reply's id it goes only when the packet has
@@ -596,11 +698,14 @@ export class DhtDelivery {
    */
   async send(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit, forwarded?: number): Promise<string | null> {
     return this.serialize(async () => {
+      this.wentNowhere.delete(id);
       const error = this.validate(text, timestamp, id, reply, edit);
       if (error) return error;
       const now = Date.now(), pending = this.state.pending;
       const hops = edit ? undefined : readForwarded(forwarded);
-      let next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }), ...(hops && { forwarded: hops }) };
+      // Already the floor's text: an earlier publication of it may be out.
+      const again = pending?.message[0] === id && pending.expires > now;
+      let next = again ? pending! : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }), ...(hops && { forwarded: hops }) };
       if (next.forwarded && !this.roomForHops(next.message, next.expires, next.reply, next.forwarded)) { const { forwarded: _dropped, ...alone } = next; next = alone; }
       if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
@@ -609,10 +714,25 @@ export class DhtDelivery {
       catch (error) {
         // Held back by the relays' request budget: the text is queued and goes as soon as the budget frees a request.
         if (isDiscoveryBudgetError(error)) { this.schedule(); return null; }
-        this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish;
+        this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`;
+        // No relay holds this text (each refused it or was not asked), and it was not out before: it has not left this
+        // device. (An edit keeps the floor: nothing else sends it again.)
+        // It leaves the floor, so nothing publishes it behind the sender's back; the sender sends it again in its turn,
+        // or drops it (`wentNowhere`).
+        if (!again && !edit && publishedNowhere(error) && this.state.pending?.message[0] === id) {
+          await this.persist({ ...this.state, pending: undefined });
+          this.wentNowhere.add(id);
+          if (this.wentNowhere.size > 64) this.wentNowhere.delete(this.wentNowhere.values().next().value!);
+        }
+        this.changed(); return this.errors.publish;
       }
     });
   }
+  /**
+   * The last `send` of this id failed with no relay holding it, and it was not out before (`PublishFailedError`): it
+   * never left this device, and is no longer the floor's to publish.
+   */
+  wentNowhereFor(id: string): boolean { return this.wentNowhere.has(id); }
   /**
    * The envelope a file's offer would go in, as `send` builds a text's: the most it can say that fits the packet and
    * what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). Its meta goes first (a voice note's waveform thinned if it must),
@@ -630,8 +750,7 @@ export class DhtDelivery {
     const hops = readForwarded(forwarded);
     const fits = (element: DhtFileElement, withReply: boolean, withHops: boolean) => {
       const body = this.body(this.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
-      try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
-      return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
+      return this.bodyFits(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32);
     };
     const elements = dhtFileElements(file), bare = elements[elements.length - 1];
     const tries: [DhtFileElement, boolean, boolean][] = [...elements.map(e => [e, !!reply, !!hops] as [DhtFileElement, boolean, boolean]), [bare, !!reply, false], [bare, false, false]];
@@ -666,8 +785,8 @@ export class DhtDelivery {
   }
   /** The id of what awaits its receipt on the floor now, if anything does. */
   get pendingId(): string | undefined {
-    const pending = this.state.pending;
-    return pending && pending.expires > Date.now() && pending.attempts < MAX_ATTEMPTS ? pending.message[0] : undefined;
+    const now = this.clock(), pending = this.state.pending;
+    return pending && pending.expires > now && pending.attempts < MAX_ATTEMPTS ? pending.message[0] : undefined;
   }
   /**
    * This side's capability record has a new revision (WISP 03): an envelope names it now. Otherwise the contact
@@ -682,7 +801,7 @@ export class DhtDelivery {
       // An envelope went out a moment ago (a first contact's, as the link's transports are still coming up): this one
       // waits out the publication spacing and names the newest revision then, or none if the chat went live meanwhile
       // (a live session carries the news itself).
-      const wait = this.lastPublish + 4_000 - Date.now();
+      const wait = this.lastPublish + 4_000 - this.clock();
       if (wait > 0) {
         this.announceTimer ??= setTimeout(() => { this.announceTimer = null; if (!this.live) void this.announce(); }, wait);
         return;
@@ -738,7 +857,7 @@ export class DhtDelivery {
     return { body, ...this.envelope(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
-    const now = Date.now();
+    const now = this.clock();
     if (!this.running || (!force && (now - this.lastPublish < 4_000 || now < this.budgetUntil))) return;
     const pending = this.state.pending && this.state.pending.expires > now && this.state.pending.attempts < MAX_ATTEMPTS ? this.state.pending : undefined;
     const receipt = this.state.receipt && this.state.receipt.expires > now && this.state.receipt.attempts < MAX_ATTEMPTS ? this.state.receipt : undefined;
@@ -764,7 +883,8 @@ export class DhtDelivery {
     // once refused, the keep-alives of 200 chats whose contacts were away held back every read on one relay, and most
     // of those contacts were not read once in 25 minutes (bug hunt, 2026-11-01).
     const away = !!this.options.credentials.peerKey && now - this.peerNewAt >= PRESENCE_WINDOW;
-    const options = keepAlive && (this.live || away) ? { background: true } : undefined;
+    // The envelope saying this side left DHT only is signaling (`leavingOut`), never upkeep.
+    const options = this.leavingOut ? { signal: true } : keepAlive && (this.live || away) ? { background: true } : undefined;
     // No relay takes it now: refused before it is signed and encrypted, its sequence set aside or a ratchet key taken
     // (`LinkSession.publishOnce`). With 500 contacts away, about 500 envelopes a minute were built for none that went.
     const held = this.options.transport.publishHeld?.(identity.pubKeyZ32, options);
@@ -798,6 +918,7 @@ export class DhtDelivery {
       throw error;
     }
     this.namedRev = body[8] ?? undefined;
+    if (options?.signal) this.leavingOut = false;
     if (identity === this.identity) this.unsealedOut = !this.options.credentials.peerKey;
     delete this.errors.publish; this.changed();
   }
@@ -810,7 +931,7 @@ export class DhtDelivery {
    */
   private async heldBack(error: Parameters<typeof budgetRetryMs>[0], now: number, before: { lastPublish: number; controlDue: number },
     pending: DhtDeliveryState["pending"], receipt: DhtDeliveryState["receipt"]): Promise<void> {
-    const at = now + budgetRetryMs(error, 1_000, 60_000);
+    const at = now + budgetRetryMs(error, 1_000, BUDGET_HOLD_MAX_MS);
     this.budgetUntil = at;
     this.lastPublish = before.lastPublish; this.controlDue = Math.min(before.controlDue, at);
     traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
@@ -1050,11 +1171,11 @@ export class DhtDelivery {
       if (!this.running) return;
       // Only the slow, periodic looks (every 5 minutes while live, every 30 s for a chat in the background) are
       // background requests, served from the relays' background share; a chat on screen, a first contact, DHT
-      // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
+      // only with the contact there, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
-      const signal = this.signalReads > 0;
-      this.urgent = false; if (signal) this.signalReads--;
+      const signal = this.signalReads > 0 && !this.leavingRead;
+      this.urgent = false; this.leavingRead = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       // One that started before the network came back failed for want of it (`networkBack`): the read after it says.
       // An inviter's first envelope, before anyone is pinned, goes before the read: the joiner dials only once it read it, and
@@ -1070,7 +1191,7 @@ export class DhtDelivery {
       // relay.ts) used them up, and the next ones, plain reads, waited out the minute.
       if (signal && this.readHeldUntil > 0) this.signalReads++;
       // The contact says it left DHT only: nothing waits on its mailbox any more.
-      if (this.state.peerMode !== "dht") this.signalReads = 0;
+      if (this.state.peerMode !== "dht") { this.signalReads = 0; this.probeAt = this.probeGap = 0; }
       await this.publishOnTick();
       this.changed();
     });
@@ -1095,12 +1216,12 @@ export class DhtDelivery {
     if (this.options.pollMs) return this.options.pollMs;
     const taken = this.takenInviteWait();
     if (taken !== undefined) return taken;
-    const now = Date.now();
+    const now = this.clock();
     // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read, as far as their count needs.
     const unused = this.running ? this.unusedInviteAge(now) : undefined;
     const readers = countUnusedInvite(this.options.transport, this, unused !== undefined && !this.active && now >= this.fastUntil);
     if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, readers);
-    if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
+    if ((this.mode === "dht" && !this.dhtOnlyIdle(now)) || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
@@ -1112,6 +1233,19 @@ export class DhtDelivery {
     // hunt, 2026-11-07). Just started, a contact there is read at the background pace until its next envelope.
     const there = now - this.peerNewAt < PRESENCE_WINDOW;
     return this.state.peerMode === "dht" && this.options.peerDhtPollMs && there ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
+  }
+  /**
+   * This side is DHT only, and nothing waits on the contact's mailbox: the contact, pinned, is away (nothing new of its
+   * own in `PRESENCE_WINDOW`; it puts a keep-alive every four minutes while there), no text of ours awaits its receipt,
+   * and the chat is not on screen. Its mailbox is then read at the background pace, as background reads, not every 4 s:
+   * a daemon with 50 such chats looked each contact up on the Mainline DHT every ~3 s, 1,081 lookups a minute for as
+   * long as it ran, since its relays' budget held those reads and a held read nobody marked background goes to the DHT.
+   * The contact's next envelope (its first on coming back, or a text) is read at the next of those reads, and the
+   * 4 s pace is back from there. Just started, a contact there is read so until its next envelope too.
+   */
+  private dhtOnlyIdle(now: number): boolean {
+    if (this.active || !this.options.credentials.peerKey || now - this.peerNewAt < PRESENCE_WINDOW) return false;
+    return !(this.state.pending && this.state.pending.expires > now);
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
@@ -1138,7 +1272,7 @@ export class DhtDelivery {
     if (!this.running || this.ticking) return;
     if (this.timer) clearTimeout(this.timer);
     // A publication the budget held back goes when the budget frees a request, if that comes before the next read.
-    const held = this.budgetUntil - Date.now();
+    const held = this.budgetUntil - this.clock();
     // Reactions to carry, or to say taken, go once the publication spacing allows, not at the next read.
     // So does the envelope sealed to a contact just pinned (`resealDue`), live too, where the next read is minutes away;
     // after a failed one, at the chat's pace, and never before the budget frees a request.

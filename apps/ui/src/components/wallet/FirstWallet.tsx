@@ -86,8 +86,9 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
         </div>
       ))}
       {made.length > 0 && failed.length > 0 && <Button onClick={() => onMade(made[0])}>{t("wallet.first.openMade")}</Button>}
+      {/* New in the sentence takes a tap on 44 px on a phone (`.tap-target`), drawn as the word it is. */}
       <p className="text-sm text-text-secondary">{fillNodes(t("wallet.first.orNew"), {
-        new: <button type="button" data-testid="wallet-first-new" onClick={onNew} className="text-accent underline underline-offset-2 cursor-pointer">{t("sidebar.new")}</button>,
+        new: <button type="button" data-testid="wallet-first-new" onClick={onNew} className="tap-target text-accent underline underline-offset-2 cursor-pointer">{t("sidebar.new")}</button>,
       })}</p>
     </section>
   );

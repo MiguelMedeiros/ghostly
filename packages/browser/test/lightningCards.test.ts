@@ -157,6 +157,16 @@ describe("several cards on one network", () => {
     await expect(registry.rename(a, "x".repeat(33))).rejects.toThrow("At most 32 characters");
   });
 
+  it("names: a long wallet name is cut after a whole word with …; only an NWC name loses its \" via \" part", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const long = await registry.add("fake-node", { alias: "Home node in the living room" });
+    const via = await registry.add("fake-node", { alias: "Paid via Tor" });
+    const name = (card: string) => registry.views().find((v) => v.card === card)?.name;
+    expect(name(long)).toBe("Home node in the… (Fake node)");
+    expect(name(via)).toBe("Paid via Tor (Fake node)");
+  });
+
   it("the default for receiving: the first card shown, then the one set; a removed one hands it on; the last one gone brings the mints back", async () => {
     mints = false;
     const { registry } = cards();

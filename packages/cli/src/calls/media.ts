@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { lookup } from "node:dns/promises";
 import { createRequire } from "node:module";
 import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
@@ -410,16 +409,14 @@ export class CallMedia {
 /**
  * WebKit (Safari, the macOS app) hides its host addresses behind mDNS names, which other machines, and often this
  * one, cannot resolve: then the call can only connect when the contact's own checks reach this side. The log says so,
- * since that is what a call stuck on "connecting" needs to be understood.
+ * since that is what a call stuck on "connecting" needs to be understood. The names are not looked up for it: a name
+ * nobody answers holds one of the few threads every other lookup of the daemon waits on, for seconds.
  */
 function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
   for (const candidate of signal.c ?? []) {
     const host = candidate.split(" ")[4];
     if (!host?.endsWith(".local")) continue;
-    void lookup(host, { all: true }).then(
-      (found) => log(`${host} resolves here to ${found.map((a) => a.address).join(", ")}`),
-      () => log(`${host} does not resolve here: the call connects only if the contact's checks reach this side`),
-    );
+    log(`${host}: an mDNS name, not resolved here: the call connects only if the contact's checks reach this side`);
   }
 }
 

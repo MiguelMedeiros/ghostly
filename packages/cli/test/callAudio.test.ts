@@ -274,6 +274,8 @@ function handLoop() {
   vi.stubGlobal("clearTimeout", (timer: unknown) => { timers = timers.filter((t) => t !== timer); });
   vi.stubGlobal("setImmediate", (run: () => void) => { immediates.push(run); });
   vi.spyOn(Date, "now").mockImplementation(() => time);
+  // The call's own clock (`monotonic`) too: the loop's time is what passed, whatever the time of day says.
+  vi.spyOn(performance, "now").mockImplementation(() => time);
   return {
     turn(ms: number, read: () => void): void {
       time += ms;
@@ -397,8 +399,46 @@ describe("a call's audio through Opus", () => {
     });
   }
 
+  for (const [rate, start] of [[48000, "talking"], [16000, "talking"], [48000, "silent"], [16000, "silent"]] as const) {
+    it(`does not decode the contact's silence again once it decodes the same, at ${rate} Hz on a call that starts ${start}: the program gets the same frames`, async () => {
+      const stack = await loadCallStack();
+      if (typeof stack === "string") throw new Error(stack);
+      // The contact's side: a tone (or nothing yet), three seconds of nothing, a tone, as a person who stops talking.
+      const packets: Buffer[] = [];
+      const contact = new CallAudio({ rate, payloadType: 111, ssrc: 2, track: { send: (p) => packets.push(p), onPacket: () => {} }, encoder: stack.opus(rate), decoder: stack.opus(rate), onFrame: () => {} });
+      if (start === "talking") contact.queue.push(tone(440, rate, 1000));
+      for (let i = 0; i < 200; i++) contact.tick();
+      contact.queue.push(tone(660, rate, 1000));
+      for (let i = 0; i < 50; i++) contact.tick();
+      contact.stop();
+      // Packet 120 is lost on the way, in the middle of the silence.
+      const arriving = packets.filter((_, i) => i !== 120);
+      const real = stack.opus(rate);
+      let decodes = 0;
+      const frames: Buffer[] = [];
+      let listener: (p: Buffer) => void = () => {};
+      const audio = new CallAudio({
+        rate, payloadType: 111, ssrc: 1, encoder: stack.opus(rate), onFrame: (f) => frames.push(f), track: { send: () => {}, onPacket: (l) => { listener = l; } },
+        decoder: { encode: () => Buffer.alloc(0), decode: (packet) => { if (packet.length) decodes++; return real.decode(packet); }, delete: () => real.delete?.() },
+      });
+      const during = (from: number, to: number) => { const before = decodes; for (const packet of arriving.slice(from, to)) listener(packet); return decodes - before; };
+      expect(during(0, 50)).toBeGreaterThanOrEqual(start === "talking" ? 50 : 1);
+      expect(during(50, 199)).toBeLessThanOrEqual(10);
+      expect(during(199, arriving.length)).toBe(50);
+      // What a decoder that reads every packet hands on, byte for byte.
+      const reference = stack.opus(rate), expected: Buffer[] = [];
+      for (let i = 0; i < packets.length; i++) expected.push(Buffer.from(i === 120 ? reference.decode(Buffer.alloc(0)).subarray(0, frameBytes(rate)) : reference.decode(parseRtp(packets[i])!.payload)));
+      expect(frames.length).toBe(250);
+      expect(frames.map((f, i) => f.equals(expected[i]) ? -1 : i).filter((i) => i !== -1)).toEqual([]);
+      audio.stop();
+      reference.delete?.();
+    });
+  }
+
   it("catches up after the daemon stalls, so a program writing at real time is not heard later and later", async () => {
     vi.useFakeTimers();
+    // A stall is time that passed with nothing run: the call's own clock (`monotonic`) moves with the faked one.
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => Date.now());
     try {
       const { a, b } = await pair(48000);
       const frame = tone(440, 48000, 20);
@@ -423,6 +463,7 @@ describe("a call's audio through Opus", () => {
       clearInterval(writer);
       a.stop(); b.stop();
     } finally {
+      clock.mockRestore();
       vi.useRealTimers();
     }
   });

@@ -90,7 +90,7 @@ describe("SSH identity proofs", () => {
     await expect(Promise.resolve().then(() => paste("ssh-ed25519 AAAA"))).rejects.toThrow(/whole signature/);
     const elsewhere = statementFor(ssh, fingerprint);
     await expect(verify(ssh, s, await paste(mine.sign(elsewhere.text)))).rejects.toThrow(/not over this statement/);
-    await expect(verify(ssh, s, { signature: mine.sign(s.text, "file") })).rejects.toThrow(/namespace "file"/);
+    await expect(verify(ssh, s, { signature: mine.sign(s.text, "file") })).rejects.toThrow(/another namespace, not "ghostly"/);
     await expect(verify(ssh, s, { signature: other.sign(s.text) })).rejects.toThrow(/another SSH key/);
     // A pasted signature re-wrapped by a chat app or Windows still verifies.
     const messy = mine.sign(s.text).replace(/\n/g, "\r\n  ");

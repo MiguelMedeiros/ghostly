@@ -4,6 +4,7 @@ import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/b
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
+import { copySecret } from "../../lib/shareLink";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
 import { BackupRows } from "./BackupRows";
@@ -11,6 +12,7 @@ import { exportBackup, reveal } from "./walletPhrase";
 import { NETWORK_NAME, WALLET_NAME, walletLabel } from "./names";
 import { useRun } from "./run";
 import { removalWords } from "./removalWords";
+import { TakeBack } from "./SentEcash";
 import { Block, Button, Notice, Row, Section } from "./ui";
 
 /**
@@ -77,6 +79,11 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
   const [understood, setUnderstood] = useState(false);
   const { busy, error, run } = useRun();
   const backup = useRun();
+  // Ecash sent and not taken yet can be taken back before the wallet goes, as from its chat's bubble.
+  const back = useRun();
+  const takeBack = (item: { kind: string; paymentId?: string }) => item.kind === "sent" && item.paymentId
+    ? <TakeBack wallet={wallet} paymentId={item.paymentId} busy={back.busy || busy} run={back.run} running={back.running} testId="wallet-remove-take-back" />
+    : null;
   const [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const close = () => { if (!busy) onClose(); };
@@ -123,16 +130,32 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
         <div className="space-y-2" data-testid="wallet-remove-awaiting">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.awaiting")}</h3>
           <ul className="bg-surface rounded-xl divide-y divide-border text-sm">
-            {awaiting.map((item, i) => <li key={`${item.kind}-${item.paymentId ?? i}`} className="px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>{item.text}</li>)}
+            {awaiting.map((item, i) => (
+              <li key={`${item.kind}-${item.paymentId ?? i}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>
+                <span>{item.text}</span>{takeBack(item)}
+              </li>
+            ))}
           </ul>
           <p className="text-xs text-text-secondary" data-testid="wallet-remove-awaiting-note">{requests ? t("wallet.remove.closesRequests", { afterwards }) : afterwards}</p>
         </div>
       )}
       {returnable.length > 0 && (
-        <Notice testId="wallet-remove-returnable">
-          {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
-        </Notice>
+        <div className="space-y-2">
+          <Notice testId="wallet-remove-returnable">
+            {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
+          </Notice>
+          {returnable.some((item) => item.paymentId) && (
+            <ul className="bg-surface rounded-xl divide-y divide-border text-sm" data-testid="wallet-remove-returnable-items">
+              {returnable.filter((item) => item.paymentId).map((item) => (
+                <li key={item.paymentId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="wallet-remove-returnable-item">
+                  <span>{item.text}</span>{takeBack(item)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
+      {back.error && <Notice problem={back.error} testId="wallet-remove-take-back-error" />}
       {removal.pending > 0 && <Notice tone="error" testId="wallet-remove-pending">{t("wallet.remove.pending", { count: removal.pending })}</Notice>}
       {offerBackup && (
         <div className="space-y-2" data-testid="wallet-remove-backup">
@@ -144,7 +167,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
           ) : removal.backup === "tokens" ? (
             <Block>
               <p className="text-xs text-text-secondary">{t("wallet.remove.tokensHint")}</p>
-              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setNotice(tokens.length ? t("wallet.remove.tokensCopied") : t("wallet.remove.noTokens")); })}>{t("wallet.remove.copyTokens")}</Button>
+              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await copySecret(tokens.map((token) => token.token).join("\n")); setNotice(tokens.length ? t("wallet.remove.tokensCopied") : t("wallet.remove.noTokens")); })}>{t("wallet.remove.copyTokens")}</Button>
             </Block>
           ) : (
             <Notice testId="wallet-remove-no-backup">{t("wallet.remove.noBackup")}</Notice>

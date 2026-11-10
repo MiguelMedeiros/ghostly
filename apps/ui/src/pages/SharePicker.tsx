@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Page } from "../components/layout";
 import { ChatTargetRow } from "../components/chat/ChatTargets";
 import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Notice } from "../components/ui/Notice";
-import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
+import { SEARCH_STATUS_SETTLE_MS, SearchStatus } from "../components/ui/SearchStatus";
+import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare, type IncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -36,19 +37,51 @@ export function SharePicker() {
   const dropped = share?.dropped ?? 0;
   const targets = useChatTargets();
   const preview = share ? sharePreview(share) : "";
+  const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
+
+  // Each share shown (the first, and the next in place of the one just picked or put aside): said, and not acted on before it is.
+  const [said, setSaid] = useState("");
+  const shownAt = useRef(0);
+  const settling = () => Date.now() - shownAt.current < SEARCH_STATUS_SETTLE_MS;
+  const say = (shown: IncomingShare) => isEmptyShare(shown) ? "" : [t("pwa.shareFrom"), shown.files.length ? filesName(shown) : "", sharePreview(shown)].filter(Boolean).join(" ");
+  // The first share shown is said and waits as long: the picker may have opened by itself (a share forwarded to this
+  // tab moves it here from any screen), under a press meant for the screen it replaced.
+  if (share && !shownAt.current) {
+    shownAt.current = Date.now();
+    setSaid(say(share));
+  }
+  /**
+   * Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now. The
+   * focus leaves the button just pressed for the page's heading and the page is scrolled to the new share, which is
+   * said once it has settled; until then a press (a key held down, a double tap) does nothing, so a share is never
+   * sent or put aside before anyone saw it.
+   */
+  const showNext = (next: IncomingShare) => {
+    shownAt.current = Date.now();
+    setSaid(say(next));
+    document.querySelector<HTMLElement>('[data-testid="share-picker"] h1')?.focus();
+    document.querySelector<HTMLElement>('[data-testid="share-picker"] [data-page-body]')?.scrollTo?.({ top: 0 });
+  };
 
   const pick = (chat: string, path: string) => {
+    if (settling()) return;
     sendShareTo(chat);
-    nav.conversation(path);
+    // This one waits for its chat's composer. The last one picked opens its chat.
+    const next = incomingShare();
+    if (next) showNext(next);
+    else nav.conversation(path);
   };
   const cancel = () => {
+    if (settling()) return;
     dropIncomingShare();
-    // Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now.
-    if (!incomingShare()) nav.home();
+    const next = incomingShare();
+    if (next) showNext(next);
+    else nav.home();
   };
 
   return (
     <Page title={t("pwa.shareTitle")} testId="share-picker">
+      <SearchStatus testId="share-next" text={said} />
       {!share ? (
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
@@ -89,7 +122,7 @@ export function SharePicker() {
                     A long one-word file name wraps anywhere, so its extension stays inside the card. */}
                 {hasFiles && (
                   <p dir="auto" className="m-0 text-sm text-text-primary font-medium [overflow-wrap:anywhere]" data-testid="share-files">
-                    {share.files.length === 1 ? share.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(share.files.length) })}
+                    {filesName(share)}
                   </p>
                 )}
                 {preview && <p dir="auto" className="m-0 text-sm text-text-secondary line-clamp-3 break-words whitespace-pre-line" data-testid="share-text">{preview}</p>}

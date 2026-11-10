@@ -27,12 +27,18 @@ export async function iosKeyboard(page: Page): Promise<void> {
     };
     real.addEventListener("resize", () => events.dispatchEvent(new Event("resize")));
     Object.defineProperty(window, "visualViewport", { configurable: true, get: () => fake });
-    Object.defineProperty(window, "__iosKeyboard", { configurable: true, value: (height: number) => { covered = height; events.dispatchEvent(new Event("resize")); } });
+    Object.defineProperty(window, "__iosKeyboard", { configurable: true, value: (height: number, quietly: boolean) => {
+      covered = height;
+      if (!quietly) events.dispatchEvent(new Event("resize"));
+    } });
   });
   await page.reload();
 }
 
-/** Opens the keyboard `height` px tall (an iPhone's is about 336), or closes it with 0. */
-export async function keyboard(page: Page, height: number): Promise<void> {
-  await page.evaluate((h) => (window as unknown as { __iosKeyboard(h: number): void }).__iosKeyboard(h), height);
+/**
+ * Opens the keyboard `height` px tall (an iPhone's is about 336), or closes it with 0. `quietly`: with no resize the
+ * page hears, as iOS does for a page in the background.
+ */
+export async function keyboard(page: Page, height: number, { quietly = false } = {}): Promise<void> {
+  await page.evaluate(([h, q]) => (window as unknown as { __iosKeyboard(h: number, q: boolean): void }).__iosKeyboard(h, q), [height, quietly] as const);
 }

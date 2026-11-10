@@ -1,0 +1,33 @@
+{
+  "availabilities": {
+    "available": "Disponibile",
+    "away": "Assente",
+    "busy": "Occupato",
+    "dnd": "Non disturbare"
+  },
+  "availability": "Disponibilità",
+  "clear": "Cancella stato",
+  "customLabel": "Cancella alle",
+  "dndHint": "I messaggi arrivano senza suono né notifica. Le chiamate squillano comunque.",
+  "emoji": "Emoji",
+  "emojiMore": "Altre emoji",
+  "end": "Cancella dopo",
+  "ends": {
+    "1h": "1 ora",
+    "30m": "30 minuti",
+    "4h": "4 ore",
+    "custom": "Scegli un orario…",
+    "keep": "Fino alle {{time}}",
+    "never": "Non cancellare",
+    "today": "Oggi",
+    "week": "Questa settimana"
+  },
+  "menuLabel": "Il tuo stato: {{status}}. Cambia stato",
+  "past": "Scegli un orario dopo adesso.",
+  "placeholder": "Qual è il tuo stato?",
+  "set": "Imposta uno stato",
+  "shared": "I tuoi contatti lo vedono accanto al tuo nome.",
+  "text": "Testo dello stato",
+  "title": "Stato",
+  "until": "fino alle {{time}}"
+}

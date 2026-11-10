@@ -173,14 +173,14 @@ export function NetworkSettings() {
   // A refused field: its border says so, and it names its error to assistive technology.
   const invalid = (name: FieldName) => problems[name] ? { "aria-invalid": true, "aria-describedby": `${FIELDS[name]}-error` } : {};
   const problemUnder = (name: FieldName) => <FieldError id={`${FIELDS[name]}-error`} testId="network-error">{problems[name]}</FieldError>;
-  const reset = "min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
+  const reset = "tap-target min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
 
   return (
     <Section title={t("network.title")}>
       {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
       {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
       {direct && <Row label={t("network.readRelays")} hint={t(relayOnly ? "network.readRelaysRelayOnly" : "network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
-        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={switching || relayOnly} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+        <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={relayOnly} busy={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
@@ -215,7 +215,9 @@ export function NetworkSettings() {
         </div>}
       </Field>
 
-      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
+      {/* With Hide my IP from contacts on (every client), every connection to a contact goes through it: not optional. */}
+      <Field id={TURN_FIELD} testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url"
+        hint={t(credentialGone ? "network.turnCredentialAgain" : network.relayOnly === true ? "network.turnHintRelayOnly" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id={FIELDS.turnUrl} aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => { setTurn({ ...turn, urls: e.target.value }); edited("turnUrl"); }}
           placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" {...invalid("turnUrl")} className={`${field} font-mono text-sm`} />
         {problemUnder("turnUrl")}
@@ -230,7 +232,7 @@ export function NetworkSettings() {
       </Field>
 
       <Row label={t("network.relayOnly")} hint={t("network.relayOnlyHint")} info={t("network.relayOnlyInfo")} testId="network-relay-only-row">
-        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} disabled={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
+        <Switch label={t("network.relayOnly")} checked={network.relayOnly === true} busy={switching} onChange={(on) => void hideMyIp(on)} testId="network-relay-only" />
       </Row>
 
       <Block>
@@ -238,7 +240,7 @@ export function NetworkSettings() {
           <button
             onClick={() => void save()}
             data-testid="network-save"
-            className="px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
+            className="tap-target px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             {t("common.save")}
           </button>

@@ -98,7 +98,8 @@
       "older": "Mettez d'abord Ghostly à jour sur cet appareil.",
       "password": "Mot de passe incorrect.",
       "payment": "Un paiement est encore en cours. Réessayez dans un instant.",
-      "refused": "{{device}} ne laisse pas cet appareil prendre le profil.",
+      "refused": "{{device}} n'a pas laissé cet appareil prendre le profil.",
+      "refusedNext": "Si des mots de passe erronés ont été saisis ici, déverrouillez {{device}} et laissez cet appareil réessayer.",
       "room": "Pas assez d'espace sur cet appareil.",
       "settle": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion, puis réessayez.",
       "stalled": "Le transfert s'est arrêté",
@@ -347,6 +348,15 @@
     "reenroll": {
       "hint": "Ajoutez cet appareil à nouveau depuis l’appareil que vous utilisez maintenant.",
       "title": "Vos appareils ont changé pendant que celui-ci était éteint"
+    },
+    "removeHere": {
+      "button": "Retirer ce profil d'ici",
+      "confirm": "Tapez {{name}} pour confirmer",
+      "first": "Un profil vide prend sa place ici.",
+      "go": "Retirer",
+      "hint": "Ses discussions, clés et portefeuilles sont effacés de cet appareil. Vos autres appareils gardent le profil.",
+      "removing": "Retrait…",
+      "title": "Retirer {{name}} de cet appareil ?"
     },
     "title": {
       "moving": "Presque terminé",

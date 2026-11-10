@@ -59,7 +59,8 @@ test("a contact's app does not open while Hide my IP from contacts is on, so it 
     await expect(open).toBeVisible({ timeout: 120_000 });
     const pages = b.context.pages().length;
     await open.click();
-    const refused = b.page.getByText("A contact's app does not open here while Hide my IP is on.");
+    // One short line; the why, with the desktop app, is behind its ⓘ.
+    const refused = b.page.getByText("A contact's app does not open here while Hide my IP is on", { exact: true });
     // Until the app says why, or a tab it opened has had the time to load the app and send it away.
     await expect.poll(async () => connections > 0 || (await refused.isVisible()), { timeout: 60_000 }).toBe(true);
     await b.page.waitForTimeout(3_000);

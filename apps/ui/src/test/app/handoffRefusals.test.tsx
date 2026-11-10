@@ -37,7 +37,7 @@ describe("a move refused on this device", () => {
   });
 
   it("keeps the other device's answer as the other device's", () => {
-    expect(handoffProblem(new Error("handoff-refused: x"), english, { device: "Phone" })?.title).toBe("Phone does not let this device take the profile.");
+    expect(handoffProblem(new Error("handoff-refused: x"), english, { device: "Phone" })?.title).toBe("Phone did not let this device take the profile.");
     expect(handoffProblem(new Error("handoff-busy: x"), english, { device: "Phone" })?.title).toBe("Phone can't hand over the profile now. Try again later.");
     expect(handoffProblem(new Error("Something else"), english, { device: "Phone" })).toBeNull();
   });
@@ -56,6 +56,6 @@ describe("a move refused on this device", () => {
     const error = await screen.findByTestId("handoff-offer-error");
     expect(error).toHaveTextContent("That offer ended");
     expect(error).toHaveTextContent("Ask again from iPhone.");
-    expect(error).not.toHaveTextContent("does not let this device");
+    expect(error).not.toHaveTextContent("did not let this device");
   });
 });

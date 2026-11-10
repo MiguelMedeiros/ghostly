@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, PostedEvent, PostedState } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
@@ -50,6 +50,10 @@ class EngineClient {
   private readonly held = new Set<string>();
   /** Per chat, how many readers hold its whole history here (`keepWhole`). */
   private readonly kept = new Map<string, number>();
+  /** The group asked for last (`history`): the one the page shows, or showed last. */
+  private lastGroup: string | null = null;
+  /** That group, held or asked for when the peer went away: the next connection asks its whole history again. */
+  private readonly reread = new Set<string>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -69,7 +73,7 @@ class EngineClient {
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; text?: SentText }>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
@@ -119,6 +123,7 @@ class EngineClient {
    * group that opens reads it here, not from the store on each open.
    */
   history(linkId: string): StoredMessage[] | undefined {
+    if (linkId.startsWith("group:")) this.lastGroup = linkId;
     if (this.held.has(linkId)) return this.messages.get(linkId);
     if (!this.connection) {
       void this.connect().then(() => void this.history(linkId)).catch(() => {});
@@ -136,6 +141,8 @@ class EngineClient {
     this.partial.clear();
     this.asked.clear();
     this.held.clear();
+    this.reread.clear();
+    this.lastGroup = null;
     this.changed.clear();
   }
 
@@ -213,7 +220,7 @@ class EngineClient {
 
   /** A chat by its peer's key, or the edge of a group toward a member (payments with that member use it). */
   linkByPeer(peerPubKeyZ32: string): LinkView | undefined {
-    return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32) ?? this.state?.edges?.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
+    return linkOfPeer(this.state?.links, peerPubKeyZ32) ?? linkOfPeer(this.state?.edges, peerPubKeyZ32);
   }
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {
@@ -221,8 +228,9 @@ class EngineClient {
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
+    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0]) : undefined;
     return new Promise<Result<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(text && { text }) });
       connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
     });
   }
@@ -236,10 +244,19 @@ class EngineClient {
         () => {
           this.connection = null;
           // The next connection is sent each chat again: what it asked for, it asks again. A group's list here is no
-          // longer kept current: read again when it is asked for.
+          // longer kept current: read again once connected for the group open now (it asks nothing again), and for any
+          // other when it is opened. Not every group opened since the page loaded: each was read whole, in every tab.
+          const open = this.lastGroup;
+          if (open && (this.held.has(open) || this.asked.has(open))) this.reread.add(open);
           this.asked.clear();
           this.held.clear();
-          for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
+          for (const { resolve, reject, text } of this.pending.values()) {
+            const lost = new Error("Lost the Ghostly peer");
+            if (!text) { reject(lost); continue; }
+            // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
+            // not handed back to be sent twice. Only a text not in the chat failed.
+            void this.keptRow(text).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
+          }
           this.pending.clear();
           this.reconnect(500);
         },
@@ -247,6 +264,9 @@ class EngineClient {
       .then((connection) => {
         this.connection = connection;
         this.setReconnecting(false);
+        const reread = [...this.reread];
+        this.reread.clear();
+        for (const id of reread) this.history(id);
       })
       .finally(() => (this.connecting = null));
     return this.connecting;
@@ -261,6 +281,12 @@ class EngineClient {
       this.setReconnecting(true);
       this.reconnect(500);
     });
+  }
+
+  /** The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept. */
+  private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
+    const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
+    return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
   }
 
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
@@ -377,16 +403,40 @@ class EngineClient {
   }
 }
 
+/** A text sent at the page's own time (`sendMessage`'s `timestamp`): what finds its row in the chat. */
+interface SentText {
+  linkId: string;
+  text: string;
+  timestamp: number;
+}
+
+function sentText(params: Parameters<EngineApi["sendMessage"]>[0]): SentText | undefined {
+  const { linkId, text, timestamp } = params ?? {};
+  return typeof linkId === "string" && typeof text === "string" && text.trim() && Number.isSafeInteger(timestamp)
+    ? { linkId, text: text.trim(), timestamp: timestamp! } : undefined;
+}
+
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
 function keptState(posted: PostedState, before: EngineState | null): EngineState {
-  const kept = posted.keptPictures;
+  const kept = posted.keptPictures, views = posted.keptViews;
   const payments = "payments" in posted ? undefined : before?.payments, wallet = "wallet" in posted ? undefined : before?.wallet;
-  if (!payments && !wallet && !kept) return posted as EngineState;
-  const { keptPictures: _, ...state } = posted;
+  if (!payments && !wallet && !kept && !views) return posted as EngineState;
+  const { keptPictures: _, keptViews: __, ...sent } = posted;
+  const state = views ? keptViews(sent, before, views) : sent;
   return {
     ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}),
     ...(kept && keptPictures(state, before, kept)),
   } as EngineState;
+}
+
+/** The chats and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
+function keptViews<S extends Pick<EngineState, "links" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
+  const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined): T[] => {
+    if (!ids) return list;
+    const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
+    return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
+  };
+  return { ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups) };
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */
@@ -415,6 +465,24 @@ function keptPictures(state: Omit<PostedState, "keptPictures">, before: EngineSt
     ...(kept.identityProofs && { identityProofs: picturesBack(state.identityProofs, kept.identityProofs, before?.identityProofs, identityPicture) }),
     ...(kept.nostrOwn && { nostr: { ...state.nostr, own: picturesBack(state.nostr.own, kept.nostrOwn, before?.nostr.own, nostrPicture) } }),
   };
+}
+
+/** Per list of a state (its chats, its group edges), each view by its contact's key: made once per state, not per lookup. */
+const byPeer = new WeakMap<readonly LinkView[], Map<string, LinkView>>();
+
+/**
+ * The view in `list` with this contact's key (the first, as `find` would): each row of the chat list looks its contact
+ * up on every engine state, and a pass over the whole list for each made N rows cost N x N.
+ */
+export function linkOfPeer(list: readonly LinkView[] | undefined, peerPubKeyZ32: string | undefined): LinkView | undefined {
+  if (!list || peerPubKeyZ32 === undefined) return undefined;
+  let index = byPeer.get(list);
+  if (!index) {
+    index = new Map();
+    for (const view of list) if (!index.has(view.peerPubKeyZ32)) index.set(view.peerPubKeyZ32, view);
+    byPeer.set(list, index);
+  }
+  return index.get(peerPubKeyZ32);
 }
 
 export const engine = new EngineClient();

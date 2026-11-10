@@ -4,7 +4,7 @@ import * as nip04 from "nostr-tools/nip04";
 import * as nip44 from "nostr-tools/nip44";
 import { finalizeEvent, getPublicKey, verifyEvent, type Event } from "nostr-tools/pure";
 import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider } from "./lightning";
-import { parseNwcUri, type NwcConnection } from "./nwcProvider";
+import { nwcAlias, parseNwcUri, type NwcConnection } from "./nwcProvider";
 import { NothingSpentError, type ProviderNetwork } from "./types";
 
 /**
@@ -388,7 +388,7 @@ export class NwcLightning implements LightningProvider {
       if (!isMsat(result.balance)) throw new Error("The wallet returned an invalid balance");
       balance = Math.floor(result.balance / 1000);
     }
-    return { network: this.network, alias: `${this.alias ?? "NWC wallet"} via ${new URL(this.relay.url).host}`, balance };
+    return { network: this.network, alias: nwcAlias(this.alias, new URL(this.relay.url).host), balance };
   }
 
   async createInvoice(amount: number, memo?: string): Promise<LightningInvoice> {

@@ -43,7 +43,8 @@ describe("settings set", () => {
     for (const bad of ["wss://alice:hunter2@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"]) {
       expect(error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1).message).toBe(`hyperdhtRelay: not a relay address: ${bad}`);
     }
-    expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBeUndefined();
+    // None kept: the default (none) is what `settings get` shows.
+    expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBe("");
     expect(ok(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", "wss://relay.example"])).hyperdhtRelay).toBe("wss://relay.example");
   });
 });

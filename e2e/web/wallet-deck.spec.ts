@@ -178,7 +178,9 @@ test("real money and test money are two tabs, one deck at a time: the arrows mov
   await chosen(page, "cashu-mainnet");
   await expect(page.getByTestId("wallet-network-about")).toHaveText("Money you own: spend it with care.");
   await expect(page.getByTestId("wallet-panel-network")).toHaveText("Real money");
-  // Tab goes into its deck, where the keys move along the cards.
+  // Tab goes to the tab's total, then into its deck, where the keys move along the cards.
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("wallet-total-bitcoin")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(card(page, "cashu-mainnet")).toBeFocused();
   await page.keyboard.press("ArrowRight");
@@ -229,8 +231,10 @@ test("a card with the keyboard focus is ringed in a colour that shows on the pag
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
     await chosen(page, "cashu-mainnet");
-    // From its tab, with the keys: the way a keyboard reaches the deck.
+    // From its tab, with the keys: the way a keyboard reaches the deck, past the tab's total.
     await tab(page, "mainnet").focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("wallet-total-bitcoin")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(card(page, "cashu-mainnet")).toBeFocused();
     // 3:1, what WCAG asks of a focus indicator against what is next to it. A white ring all but vanished on a light page.

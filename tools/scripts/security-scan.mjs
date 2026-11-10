@@ -39,12 +39,13 @@ export const NOT_SHIPPED = {
   "e2e/infra/atproto/package-lock.json": "The end-to-end suite's AT Protocol network: it runs on the test machine only. Dependabot keeps it current.",
 };
 
-function npmPackages(lockfile) {
+export function npmPackages(lockfile) {
   const lock = JSON.parse(readFileSync(join(root, lockfile), "utf8"));
   const out = new Map();
   for (const [path, entry] of Object.entries(lock.packages ?? {})) {
     if (!path.includes("node_modules/") || entry.link || !entry.version) continue;
-    const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+    // An npm alias ("foo": "npm:real@1.2.3") sits at node_modules/foo and names the package it installs.
+    const name = entry.name ?? path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
     out.set(`${name}@${entry.version}`, { ecosystem: "npm", name, version: entry.version, dev: !!entry.dev, lockfile });
   }
   return [...out.values()];
