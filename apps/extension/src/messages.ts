@@ -83,7 +83,8 @@ export interface EngineStatus {
   activeId?: string;
   /**
    * The peer stopped for good (its document is closing for a switch, or "Clear all data" ran) and its document stays
-   * on with no peer: the page that would ask for a new one went away, or the worker did. Absent from an older build.
+   * on with no peer: the page that would ask for a new one went away, or the worker did. Or its start failed (the
+   * profile's database did not open) a while ago: the next ask tries again. Absent from an older build.
    */
   stopped?: boolean;
 }
