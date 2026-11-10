@@ -68,6 +68,13 @@ export function num(params: Params, name: string, fallback: number, { min = 0, m
   if (whole && !Number.isSafeInteger(value)) throw new CliError("bad_request", `${name} must be a whole number from ${min} to ${max}`);
   return value;
 }
+/**
+ * The seq `events.replay` and `events.subscribe` start after: whole, from 0; `fallback` when left out. A cursor sent as
+ * text ("412") was a stream from now on the socket with no error, and a negative one a gap of seqs that never were.
+ */
+export function sinceSeq(params: Params, fallback: number): number {
+  return num(params, "since", fallback, { whole: true });
+}
 export function bool(params: Params, name: string): boolean {
   const value = params[name];
   if (value === undefined || value === null) return false;
