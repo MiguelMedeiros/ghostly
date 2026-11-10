@@ -218,6 +218,23 @@ export function themeOf(id: string): ColorTheme {
 }
 
 /**
+ * Calls `changed` when a save of this profile's settings gives it another colour, the one thing of its settings that
+ * its badge and the profile lists show (`themeOf`, read from the saved copy). Any other setting (a name typed key by
+ * key, a switch) is no reason to draw them again, nor to read the other profiles. Returns the way to stop.
+ */
+export function onOwnThemeSaved(changed: () => void): () => void {
+  let theme = themeOf(activeProfileId());
+  const saved = () => {
+    const now = themeOf(activeProfileId());
+    if (now === theme) return;
+    theme = now;
+    changed();
+  };
+  window.addEventListener("settings-updated", saved);
+  return () => window.removeEventListener("settings-updated", saved);
+}
+
+/**
  * A new, empty profile with its own name and a theme no other profile uses yet, so switching is visible at
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
@@ -231,8 +248,9 @@ export function createProfile(name: string): ProfileEntry {
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
-    // The lock goes with it: a new profile must not be a way around the lock of the one it came from.
-    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
+    // The lock goes with it: a new profile must not be a way around the lock of the one it came from. The text size too:
+    // it is for the eyes of who uses this device.
+    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, textSize: current.textSize, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
   const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };

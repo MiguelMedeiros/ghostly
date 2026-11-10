@@ -121,11 +121,43 @@ describe("IdentityShareLine", () => {
     const failed = line(entry({ state: "failed", error: "No such record" }));
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("No such record");
+    // A reason the app does not know: a line of its own, never the check's English (that stays in the hover).
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("This proof couldn't be verified");
     failed.unmount();
     line(entry({ state: "verifying", subject: undefined, at: Date.now() - 10 * 60_000 }));
     expect(card()).toHaveAttribute("data-state", "unanswered");
     expect(status()).toBe("Not checked");
+  });
+
+  it("turns the contact's card Not checked when its challenge window ends, with no other change to draw it again", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() }));
+      act(() => { vi.advanceTimersByTime(299_000); });
+      expect(status()).toBe("Checking");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(card()).toHaveAttribute("data-state", "unanswered");
+      expect(status()).toBe("Not checked");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits quietly for a check window further off than a timer can hold (the clock set back a month since)", async () => {
+    // Past 2^31 - 1 ms a timer fires at once: each wake drew the line and set the next, a draw every few milliseconds.
+    const setTimer = vi.spyOn(globalThis, "setTimeout");
+    // React draws as a page does, not held until an act() ends.
+    const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() + 30 * 86_400_000 }));
+      scope.IS_REACT_ACT_ENVIRONMENT = false;
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(status()).toBe("Checking");
+      expect(setTimer.mock.calls.filter(([, ms]) => (ms ?? 0) > 86_400_000).length).toBe(1);
+    } finally {
+      scope.IS_REACT_ACT_ENVIRONMENT = true;
+      setTimer.mockRestore();
+    }
   });
 
   it("shows on the same card that the share stopped later: no longer shared, or revoked, on both sides, and never a card that still looks valid", () => {
@@ -221,7 +253,7 @@ describe("IdentityShareLine", () => {
     verified.unmount();
     line(entry({ state: "failed", error: "No such record" }));
     expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain/);
-    expect(button()).toHaveAccessibleDescription("Alice shared this identity No such record");
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity This proof couldn't be verified");
   });
 
   it("keeps the card left to right in a right-to-left language, with the caption in the page's direction", () => {
@@ -242,6 +274,26 @@ describe("IdentityShareLine", () => {
     theirs.unmount();
     line(entry({ kind: "stopped", state: undefined, reason: "revoked" }));
     expect(text()).toBe("Alice’s Domain · example.org was revoked");
+  });
+
+  it("keeps the contact's name and the identity whole in a right-to-left sentence: each its own <bdi>, the handle left to right", () => {
+    const arabic = (e: IdentityTimelineEntry) => renderApp(<IdentityShareLine entry={e} link={undefined} contact="Ana (work)" onOpen={() => {}} />, { language: "ar" });
+    const bdis = () => [...screen.getByTestId("identity-share-text").querySelectorAll("bdi")].map(b => `${b.getAttribute("dir") ?? ""}:${b.textContent}`);
+    const shared = arabic(entry());
+    expect(text()).toBe("شارك Ana (work) هذه الهوية");
+    expect(bdis()).toEqual([":Ana (work)"]);
+    shared.unmount();
+    const stopped = arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", provider: "ssh-github", subject: "octocat-old" }));
+    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (SSH key) · octocat-old");
+    expect(bdis()).toEqual([":Ana (work)", ":GitHub (SSH key) · octocat-old", "ltr:octocat-old"]);
+    stopped.unmount();
+    // Stopped before it was presented: the kind alone, its ")" kept on its own side of the Arabic after it.
+    const revoked = arabic(entry({ kind: "stopped", state: undefined, reason: "revoked", provider: "ssh-github", subject: undefined }));
+    expect(text()).toBe("أُلغي GitHub (SSH key) الخاص بـ Ana (work)");
+    expect(bdis()).toEqual([":GitHub (SSH key)", ":Ana (work)"]);
+    revoked.unmount();
+    arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", side: "mine", proof: "gone", subject: "example.com" }));
+    expect(bdis()).toEqual([":Domain · example.com", "ltr:example.com"]);
   });
 });
 

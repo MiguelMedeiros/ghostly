@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, StatusCard, TypingKind } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, PersonStatus, Presence, StatusCard, TypingKind } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -356,6 +356,22 @@ export interface EngineApi {
    */
   setGroupTyping(params: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
   /**
+   * The person is using the app (`active`, on input: a key, a click, a touch), or a page knows they left (`idle`). The
+   * engine says `idle` by itself 10 minutes after the last `active` (WISP 401 § Presence and status). Nothing is said
+   * before a page's first word, nor while Settings `sharePresence` is off.
+   */
+  setPresence(params: { presence: Presence }): void;
+  /**
+   * This profile's status (availability, one emoji, a text of 60 characters, `until` in Unix ms), checked, kept and said
+   * to every paired 1:1 contact whose app offers `status/1`, now or on its next session. While its availability is
+   * `dnd` (until its end) messages make no sound and no notice here; calls still ring. Ends by itself at `until`.
+   */
+  setOwnStatus(params: { status: PersonStatus }): Promise<void>;
+  /** No status any more: every contact is told. */
+  clearOwnStatus(): Promise<void>;
+  /** What this profile says now: its presence (as a page last said), its status while it lasts, and the switch. */
+  getOwnStatus(): { presence?: Presence; status?: PersonStatus; sharePresence: boolean };
+  /**
    * This profile's push subscription (the installed web app, WISP 401 § Wake-up push), or null to stop being woken:
    * shared with every paired contact whose app offers `wake/1`, under a new token per chat each time it changes.
    */
@@ -585,7 +601,7 @@ export interface EngineApi {
    * Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for,
    * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
    */
-  appInstall(params: { digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
+  appInstall(params: { stage?: string; digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
   /**
    * Installs the waiting update whose new permissions the person accepted; `sequence` and `added` what the screen listed
    * (`InstalledAppView.pending`): another update waiting now, or one that adds more, is refused with `permissions-changed`.
@@ -730,10 +746,17 @@ export interface KeptPictures {
 }
 
 /**
- * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
- * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`); the page keeps
- * those.
+ * The chats (`links`) and groups a posted state left out as the ones that client was sent last: each list here is every
+ * id of the state's list, in its order, and the state's list holds only the views that changed or are new. An id the
+ * state's list lacks is the page's view from the state before (its pictures with it); an id no longer here is gone.
  */
-export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures };
+export interface KeptViews { links?: string[]; groups?: string[] }
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`) and each chat's
+ * and group's view (`keptViews`); the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures; keptViews?: KeptViews };
 /** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
 export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

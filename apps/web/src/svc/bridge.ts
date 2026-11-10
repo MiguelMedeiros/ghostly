@@ -7,6 +7,7 @@
  */
 import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
 import { clearSite, dropSharedCookies } from "./clearSite";
+import { VIEWER_GUARD_SCRIPT } from "../../../../packages/core/src/viewerGuard";
 
 declare const __SERVICES_HOST__: string;
 /** The app's own origin: the one page that may hand this bridge its port. */
@@ -45,6 +46,13 @@ function start(): void {
     }
     if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
+    // Hide my IP from contacts: the app's frame is on this origin and reaches this window, so the WebRTC guard runs here
+    // too, before the frame is made. Inline, as this page's policy allows it by its hash (`bridgeHtml`).
+    if ((event.data as { relayOnly?: unknown }).relayOnly === true) {
+      const guard = document.createElement("script");
+      guard.textContent = VIEWER_GUARD_SCRIPT;
+      document.head.append(guard);
+    }
     // One left by another contact's app (any chat, any profile) is not this one's to read: not framed while it stays.
     void dropSharedCookies(host.suffix)
       .then(() => workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" }))

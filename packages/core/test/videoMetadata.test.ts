@@ -186,6 +186,37 @@ describe("withoutVideoMetadata", () => {
     }
   });
 
+  it("a 400 MiB free box or trailer goes as zeros without 400 MiB of zeros copied into the video sent", async () => {
+    const mp4 = withMovie(H264_MP4, [xyzUdta()]);
+    const size = 400 * 1024 * 1024;
+    // The source's 400 MiB made of one MiB of zeros by reference, as a file opened from disk holds none of its bytes.
+    const mib = new Blob([new Uint8Array(1024 * 1024)]);
+    const body = new Blob(Array.from({ length: size / mib.size }, () => mib));
+    const header = Buffer.alloc(8);
+    header.writeUInt32BE(8 + size, 0);
+    header.write("free", 4, "latin1");
+    const NativeBlob = Blob;
+    for (const [name, source] of [["free box", new Blob([mp4, header, body])], ["trailer", new Blob([mp4, header.subarray(0, 4), body])]] as const) {
+      // The bytes the strip hands a Blob to copy, as the Blob constructor copies every ArrayBufferView part.
+      let copied = 0;
+      vi.stubGlobal("Blob", class extends NativeBlob {
+        constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+          super(parts, options);
+          for (const part of parts ?? []) if (ArrayBuffer.isView(part)) copied += part.byteLength;
+        }
+      });
+      try {
+        const out = (await withoutVideoMetadata(source, "video/mp4"))!;
+        expect(out.size, name).toBe(source.size);
+        expect(copied, name).toBeLessThan(2 * 1024 * 1024);
+        expect(hasPlace(await bytesOf(out.slice(0, mp4.length + 8))), name).toBe(false);
+        expect((await bytesOf(out.slice(-1024 * 1024 - 5))).every((b) => b === 0), name).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  });
+
   it("any bytes after the last whole box (1 to 7 zeros, a phone's trailer) go as zeros, the size kept", async () => {
     const mp4 = withMovie(H264_MP4, [xyzUdta()]);
     const trailer = Buffer.from(`SEFT trailer ${PLACE}`, "latin1");
@@ -283,6 +314,38 @@ describe("withoutVideoMetadata", () => {
     // The same fragmented video without such a track goes, its frames as they were.
     const out = await bytesOf((await withoutVideoMetadata(new Blob([fragmented as BlobPart]), "video/mp4"))!);
     expect(await played(out)).toEqual(await played(fragmented));
+  });
+
+  it("a subtitle or caption track's samples (a drone's or a dashcam's GPS and home point each second) are zeroed where they are", async () => {
+    const line = Buffer.from(`F/2.8, SS 1000, ISO 100, GPS ${PLACE} HOME ${PLACE} 2026-11-08 14:02:11`, "latin1");
+    const sample = Buffer.concat([Buffer.from([0, line.length]), line]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      for (const mime of ["video/mp4", "video/quicktime"]) {
+        const captioned = withMovie(H264_MP4, [], sample, handler);
+        expect(hasPlace(captioned)).toBe(true);
+        const out = await bytesOf((await withoutVideoMetadata(new Blob([captioned]), mime))!);
+        expect(hasPlace(out), `${handler} ${mime}`).toBe(false);
+        const zeroed = await bytesOf((await withoutVideoMetadata(new Blob([withMovie(H264_MP4, [], Buffer.alloc(sample.length), handler)]), mime))!);
+        expect(Buffer.from(out).equals(zeroed), `${handler} ${mime}`).toBe(true);
+        expect(await played(out)).toEqual(await played(captioned));
+      }
+    }
+
+    // Fragmented: the track's table in `moov` holds none of it, its samples are in a fragment's run, zeroed there.
+    const u32 = (n: number) => Buffer.from([n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    const fragmented = await repack(false, "fragmented");
+    const moof = (offset: number) => box("moof", box("mfhd", u32(0), u32(99)),
+      box("traf", box("tfhd", u32(0x20000), u32(0)), box("trun", u32(0x201), u32(1), u32(offset), u32(sample.length))));
+    const tail = Buffer.concat([moof(moof(0).length + 8), box("mdat", sample)]);
+    for (const handler of ["text", "sbtl", "subt", "clcp"]) {
+      const file = Buffer.concat([withMovie(fragmented, [], Buffer.alloc(0), handler), tail]);
+      expect(hasPlace(file)).toBe(true);
+      const out = await bytesOf((await withoutVideoMetadata(new Blob([file]), "video/mp4"))!);
+      expect(hasPlace(out), handler).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(out.subarray(-sample.length).every((b) => b === 0), handler).toBe(true);
+      expect(await played(out)).toEqual(await played(file));
+    }
   });
 
   it("a fragmented video with a box it empties in each fragment is checked once per fragment, not against every other fragment", async () => {

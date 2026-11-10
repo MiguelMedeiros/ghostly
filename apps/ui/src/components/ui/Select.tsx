@@ -202,11 +202,15 @@ export function Select<V extends string = string>({
     return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("focusin", focus, true); };
   }, [open]);
 
+  // The active option comes into view once the list has its place, and each time another option becomes active. Not
+  // on a re-measure (a resize, a scroll of the page): that scrolled a list the person had scrolled back to the chosen
+  // option, under the pointer about to press another.
+  const placed = place !== null;
   useEffect(() => {
-    if (open && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
+    if (open && placed && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
     // optionId is derived from uid, which never changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, active, place]);
+  }, [open, active, placed]);
 
   const small = size === "sm";
   // Every side is set: a popover's own style (inset: 0) would fill in any side left out.

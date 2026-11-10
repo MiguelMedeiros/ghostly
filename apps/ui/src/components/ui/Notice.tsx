@@ -19,7 +19,8 @@ const COLOR: Record<NoticeTone, string> = {
  * One error, warning or note, the app's way (docs: short labels, details behind ⓘ): a title of a few words saying what
  * happened, maybe a next step under it, and the rest (the engine's own English, addresses, codes) behind an ⓘ with a
  * Copy button, never in the line itself. A plain `children` is the title, as the wallet's notices always were.
- * `problem` (lib/problemText.ts) gives the three parts and the tone at once.
+ * `problem` (lib/problemText.ts) gives the parts and the tone at once; its `info`, the why in the app's language, goes
+ * behind the same ⓘ, above the English.
  */
 export function Notice({ tone, title, next, details, problem, children, testId, className = "text-xs" }: {
   tone?: NoticeTone; title?: ReactNode; next?: ReactNode; details?: string; problem?: Problem | null; children?: ReactNode; testId?: string; className?: string;
@@ -30,6 +31,7 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
   const said = problem ? { tone: problem.tone, title: problem.title, next: problem.next, details: problem.detail } : {};
   const kind: NoticeTone = tone ?? said.tone ?? "muted";
   const head = title ?? said.title ?? children, then = next ?? said.next, more = details ?? said.details;
+  const why = problem?.info;
   const { copied, failed, copy } = useCopyKey(more ?? "");
   return (
     <div role={kind === "error" ? "alert" : undefined} data-testid={testId} data-tone={kind} className={`${COLOR[kind]} ${className}`}>
@@ -38,9 +40,10 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
           <span data-testid={testId ? `${testId}-title` : undefined}>{head}</span>
           {then && <span data-testid={testId ? `${testId}-next` : undefined} className="block text-text-secondary">{then}</span>}
         </p>
-        {more && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId ? `${testId}-info` : undefined} className="mt-px" />}
+        {(more || why) && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId ? `${testId}-info` : undefined} className="mt-px" />}
       </div>
-      {more && open && <div id={id} data-testid={testId ? `${testId}-details` : undefined} className="mt-1 flex items-start gap-2 border-s-2 border-border ps-2 text-text-secondary">
+      {why && open && <p id={id} data-testid={testId ? `${testId}-why` : undefined} className="m-0 mt-1 break-words border-s-2 border-border ps-2 text-text-secondary">{why}</p>}
+      {more && open && <div id={why ? undefined : id} data-testid={testId ? `${testId}-details` : undefined} className="mt-1 flex items-start gap-2 border-s-2 border-border ps-2 text-text-secondary">
         <p dir="ltr" lang="en" className="m-0 min-w-0 flex-1 break-words font-mono text-[11px] leading-4">{more}</p>
         <button type="button" onClick={copy} data-testid={testId ? `${testId}-copy` : undefined}
           className="min-h-6 shrink-0 rounded-md px-1.5 text-[11px] text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">

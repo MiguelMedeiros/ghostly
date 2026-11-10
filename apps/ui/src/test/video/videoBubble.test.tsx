@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
+import { CallOverlay } from "../../components/CallOverlay";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
@@ -158,6 +159,40 @@ describe("a video in the chat", () => {
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     renderApp(<div data-testid="list" data-message-list><VideoBubble file={video()} sender="peer" peerName="Ana" /></div>);
     expect(inits).toEqual([{ root: screen.getByTestId("list"), rootMargin: "200px 0px" }]);
+    vi.unstubAllGlobals();
+  });
+
+  it("with no poster from its sender, one scrolled past before its turn to have one made reads nothing; back on screen, it gets one", async () => {
+    const seen: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { seen.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    // The first one's read is held until the others have left the screen.
+    const reads: string[] = [];
+    let first: (blob: Blob | null) => void = () => {};
+    getFile.mockImplementation((id: string) => {
+      reads.push(id);
+      return reads.length === 1 ? new Promise<Blob | null>((resolve) => { first = resolve; }) : Promise.resolve(null);
+    });
+    const files = [1, 2, 3].map(() => video({ video: { duration: 12_000, width: 1280, height: 720 } }));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-message-list>{files.map((file) => <VideoBubble key={file.id} file={file} sender="peer" peerName="Ana" />)}</div>);
+    act(() => { for (const callback of seen) callback([{ isIntersecting: true }]); });
+    await flush();
+    expect(reads).toEqual([files[0]!.id]);
+    // Flung past: the second and third leave the screen while the first is still being read.
+    act(() => { seen[1]!([{ isIntersecting: false }]); seen[2]!([{ isIntersecting: false }]); });
+    first(null);
+    await flush();
+    await flush();
+    expect(reads).toEqual([files[0]!.id]);
+    // Back on screen, the second one's poster is made after all.
+    act(() => seen[1]!([{ isIntersecting: true }]));
+    await flush();
+    await flush();
+    expect(reads).toEqual([files[0]!.id, files[1]!.id]);
     vi.unstubAllGlobals();
   });
 
@@ -427,6 +462,34 @@ describe("a video in the chat", () => {
     ring.unmount();
   });
 
+  // A call already in its small window was drawn under it: Mute, End call and the contact's picture all under the video,
+  // and nothing on screen said a call was on.
+  it("filling the window (Desktop on Linux), a call already in its small window stays over it, and its whole one too", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    const z = (element: Element) => Number(element.className.match(/\bz-\[?(\d+)\]?/)?.[1] ?? 0);
+    const call = (pinned: boolean) => (
+      <CallOverlay callState="connected" pinned={pinned} localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />
+    );
+    const callView = renderApp(call(true));
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const frame = screen.getByTestId("video-frame");
+    expect(frame).toHaveAttribute("data-theater", "true");
+    expect(z(screen.getByTestId("call-window"))).toBeGreaterThan(z(frame));
+    // Its Back to full screen, now in reach: the whole call window is over the video too.
+    callView.rerender(call(false));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+    expect(z(screen.getByTestId("call-window"))).toBeGreaterThan(z(frame));
+    // Out of full screen, the call is back in its usual place, under dialogs and menus.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(frame).not.toHaveAttribute("data-theater");
+    expect(z(screen.getByTestId("call-window"))).toBe(50);
+    callView.unmount();
+  });
+
   // Fixed over the whole window, it left Tab to the page: from Exit full screen on to the message's ⋮, the composer, the
   // chat list, each under the video, and keys typed into a composer nobody saw.
   it("filling the window (Desktop on Linux), Tab goes round its own controls, not to the chat under it", async () => {
@@ -450,6 +513,27 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-frame")).toContainElement(document.activeElement as HTMLElement);
     // In the chat again, Tab goes on to the page as before.
     expect(fireEvent.keyDown(exit, { key: "Tab" })).toBe(true);
+  });
+
+  // WebKitGTK takes the focus off the player once it is no longer a stop of its own (its tabIndex goes with the full
+  // window): Escape left the keyboard on the page body, and the next Tab started from the top of the app.
+  it("filling the window (Desktop on Linux), Escape from the player gives the focus back to Full screen, not the page", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const player = screen.getByTestId("video-player");
+    // WebKit's focus fixup, after the render: a focused element that lost its tabindex is blurred.
+    const fixup = new MutationObserver(() => { if (!player.hasAttribute("tabindex") && document.activeElement === player) player.blur(); });
+    fixup.observe(player, { attributes: true, attributeFilter: ["tabindex"] });
+    player.focus();
+    expect(document.activeElement).toBe(player);
+    fireEvent.keyDown(player, { key: "Escape" });
+    await flush();
+    fixup.disconnect();
+    expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Full screen" }));
   });
 
   it("filling the window (Desktop on Linux), it goes on playing though the chat list no longer sees it", async () => {

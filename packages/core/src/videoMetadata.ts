@@ -1,13 +1,14 @@
 /**
  * What a video leaves with. An MP4 or QuickTime file says more than its frames: its `udta` and `meta` boxes hold where
  * it was recorded (`©xyz`, `com.apple.quicktime.location.ISO6709`), the device, often its software; a timed metadata
- * track (an iPhone's location and motion, a GoPro's GPS) holds them sample by sample; the movie's, each track's and
+ * track (an iPhone's location and motion, a GoPro's GPS) holds them sample by sample, a caption track (a drone's, a
+ * dashcam's) a line of them each second; the movie's, each track's and
  * each track's media header (`mvhd`, `tkhd`, `mdhd`) say when it was recorded, to the second, and a camera's timecode
  * track the time of day. The sender removes them before the file is stored and its digest computed, without decoding
  * or re-encoding a frame: each such box becomes a `free` box of the same size, zeroed, the headers' creation and
  * modification times are zeroed (0 is "unknown"), the space already left in it (`free`, `skip`, `wide`: what an edit in
  * place left behind, a recorder's GPS log) is zeroed after its header, so are the names of its handlers and of the
- * compressor that made its frames, and each metadata and timecode track's samples are zeroed where they are, so no
+ * compressor that made its frames, and each metadata, timecode and caption track's samples are zeroed where they are, so no
  * offset in the file moves and it plays as it did. Only the boxes' headers, `moov` and `moof` are read; the
  * media goes untouched.
  *
@@ -59,13 +60,18 @@ const MOOV_KEEPS = new Set(["mvhd", "trak", "mvex", "iods", "ctab", ...SPACE]);
 const TRAK_KEEPS = new Set(["tkhd", "edts", "mdia", "tref", "tapt", "load", "txas", "matt", ...SPACE]);
 /** Boxes looked into below a track (and in a fragment) for the metadata boxes in them. */
 const CONTAINERS = new Set(["mdia", "minf", "dinf", "stbl", "edts", "mvex", "traf"]);
-/** Track handlers kept as they are: picture, sound, text and subtitles, timecode, hints. `meta` tracks have their samples zeroed, `tmcd` ones too. */
-const HANDLERS = new Set(["vide", "soun", "text", "sbtl", "subt", "clcp", "tmcd", "hint", "auxv", "pict", "sdsm", "odsm", "subp"]);
+/** Track handlers kept as they are: picture, sound, timecode, hints. `meta` tracks have their samples zeroed, `tmcd` ones and `CAPTIONS` too. */
+const HANDLERS = new Set(["vide", "soun", "tmcd", "hint", "auxv", "pict", "sdsm", "odsm", "subp"]);
+/**
+ * Text, subtitle and caption tracks: what a recorder writes there is a log (a drone's or a dashcam's GPS, home point,
+ * date and time each second), so their samples are zeroed, in `moov`'s tables and in fragments alike; they show nothing.
+ */
+const CAPTIONS = new Set(["text", "sbtl", "subt", "clcp"]);
 /** The handlers whose sample descriptions are a visual one's, a compressor's name in each. */
 const VISUAL = new Set(["vide", "auxv", "pict"]);
 
-/** Zeros put in a Blob a part at a time. */
-const ZEROS = new Uint8Array(1024 * 1024);
+/** Zeros put in a Blob a slice at a time: a Blob's Blob parts are not copied, so a zeroed range of any size holds no more. */
+const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
 
 const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
@@ -232,10 +238,11 @@ function defaultSampleSizes(moov: Uint8Array): Map<number, number> {
  * The byte ranges of a fragment's samples in the file, one per track run (`trun`), from its `moof` read whole (`at` its
  * offset in the file): each run starts at its data offset from its track fragment's base (`tfhd`'s base data offset,
  * else the `moof`'s start for the first track fragment or one that says so, else where the previous one's data ended),
- * or where the previous run ended; its length is its samples' sizes, its own or `tfhd`'s or `trex`'s default.
+ * or where the previous run ended; its length is its samples' sizes, its own or `tfhd`'s or `trex`'s default. Each
+ * with its track's ID.
  */
-function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): [number, number][] {
-  const ranges: [number, number][] = [];
+function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): [number, number, number][] {
+  const ranges: [number, number, number][] = [];
   let previous = at;
   for (const traf of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (traf.type !== "traf") continue;
@@ -250,7 +257,8 @@ function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): 
     }
     if (flags & 0x2) field += 4;
     if (flags & 0x8) field += 4;
-    let size = sizes.get(u32be(b, tfhd.body + 4));
+    const track = u32be(b, tfhd.body + 4);
+    let size = sizes.get(track);
     if (flags & 0x10) {
       check(field + 4 <= tfhd.end);
       size = u32be(b, field);
@@ -278,7 +286,7 @@ function fragmentRanges(b: Uint8Array, at: number, sizes: Map<number, number>): 
         length = count * size;
       }
       check(Number.isSafeInteger(next) && Number.isSafeInteger(next + length));
-      if (length) ranges.push([next, next + length]);
+      if (length) ranges.push([next, next + length, track]);
       next += length;
     }
     previous = next;
@@ -295,12 +303,13 @@ function selfContained(b: Uint8Array, minf: Box): boolean {
 
 /**
  * `moov` with its metadata boxes emptied and its headers' times zeroed, read whole: whether it has a video track, the
- * byte ranges of its metadata and timecode tracks' samples (zeroed by the caller where they are), whether it has a
- * metadata or timecode track, and every track's sample table.
+ * byte ranges of its metadata, timecode and caption tracks' samples (zeroed by the caller where they are), whether it
+ * has a metadata or timecode track, every track's sample table, and the IDs of its caption tracks (their samples in
+ * fragments zeroed too).
  */
-function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[] } {
+function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metadata: boolean; zeroed: [number, number][]; tables: Box[]; captions: Set<number> } {
   let video = false, fragmented = false, metadata = false;
-  const zeroed: [number, number][] = [], tables: Box[] = [];
+  const zeroed: [number, number][] = [], tables: Box[] = [], captions = new Set<number>();
   for (const box of boxes(b, header(b, 0, b.length).body, b.length)) {
     if (METADATA.has(box.type)) { empty(b, box); continue; }
     check(MOOV_KEEPS.has(box.type));
@@ -308,11 +317,11 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
     if (box.type === "mvhd") zeroTimes(b, box);
     if (box.type === "mvex") { fragmented = true; emptyWithin(b, box.body, box.end); }
     if (box.type !== "trak") continue;
-    let mdia: Box | undefined;
+    let mdia: Box | undefined, tkhd: Box | undefined;
     for (const part of boxes(b, box.body, box.end)) {
       if (METADATA.has(part.type)) { empty(b, part); continue; }
       check(TRAK_KEEPS.has(part.type));
-      if (part.type === "tkhd") zeroTimes(b, part);
+      if (part.type === "tkhd") { check(!tkhd); tkhd = part; zeroTimes(b, part); }
       if (part.type === "mdia") { check(!mdia); mdia = part; }
     }
     check(!!mdia);
@@ -332,12 +341,19 @@ function stripMoov(b: Uint8Array): { video: boolean; fragmented: boolean; metada
       // A camera's timecode starts at the time of day it recorded: it starts at 0 instead.
       metadata = true;
       for (const range of sampleRanges(b, stbl)) zeroed.push(range);
+    } else if (CAPTIONS.has(handler)) {
+      check(selfContained(b, minf) && !!tkhd);
+      // Its ID (after the times, 32 or 64 bits each), for its samples in fragments.
+      const id = tkhd.body + 4 + (b[tkhd.body] === 1 ? 16 : 8);
+      check(id + 4 <= tkhd.end);
+      captions.add(u32be(b, id));
+      for (const range of sampleRanges(b, stbl)) zeroed.push(range);
     } else check(HANDLERS.has(handler));
     if (handler === "vide") video = true;
     if (VISUAL.has(handler)) zeroCompressorNames(b, stbl);
     emptyWithin(b, box.body, box.end);
   }
-  return { video, fragmented, metadata, zeroed, tables };
+  return { video, fragmented, metadata, zeroed, tables, captions };
 }
 
 /** A video as it is read: its size, and `length` of its bytes from `offset` (fewer only at its end). */
@@ -427,7 +443,7 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
   for (const patch of patches) {
     if (patch.start > at) parts.push(source.slice(at, patch.start));
     if (patch.bytes) parts.push(patch.bytes as BlobPart);
-    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.length) parts.push(ZEROS.subarray(0, Math.min(left, ZEROS.length)) as BlobPart);
+    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.size) parts.push(ZEROS.slice(0, Math.min(left, ZEROS.size)));
     at = patch.end;
   }
   if (at < source.size) parts.push(source.slice(at));
@@ -482,7 +498,7 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
   check(moovs.length === 1);
 
   const moov = await whole(source, moovs[0]!);
-  const { video, fragmented, metadata, zeroed, tables } = stripMoov(moov);
+  const { video, fragmented, metadata, zeroed, tables, captions } = stripMoov(moov);
   if (!video && !typed) return undefined;
   patches.push({ start: moovs[0]!.start, end: moovs[0]!.end, bytes: moov });
 
@@ -497,12 +513,17 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
 
   // A metadata or timecode track's samples in fragments are not looked for: such a video is refused.
   check(!fragmented || !metadata);
-  const sizes = dropped.length && fragmented ? defaultSampleSizes(moov) : undefined;
+  const sizes = (dropped.length || captions.size) && fragmented ? defaultSampleSizes(moov) : undefined;
   for (const box of top) {
     if (box.type === "moof") {
       const moof = await whole(source, box);
-      // No fragment's sample is where zeros go either.
-      if (dropped.length) for (const [start, end] of fragmentRanges(moof, box.start, sizes ?? new Map())) check(!meets(dropped, start, end));
+      // No fragment's sample is where zeros go either; a caption track's samples are zeroed.
+      if (dropped.length || captions.size) {
+        for (const [start, end, track] of fragmentRanges(moof, box.start, sizes ?? new Map())) {
+          check(!meets(dropped, start, end));
+          if (captions.has(track)) zeroed.push([start, end]);
+        }
+      }
       emptyWithin(moof, box.body - box.start, moof.length);
       patches.push({ start: box.start, end: box.end, bytes: moof });
     } else if (SPACE.has(box.type)) {
@@ -516,7 +537,7 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
     }
   }
 
-  // The metadata and timecode samples, each within a `mdat`: zeros where they were, ranges that touch made one.
+  // The metadata, timecode and caption samples, each within a `mdat`: zeros where they were, ranges that touch made one.
   const mdats = top.filter((box) => box.type === "mdat");
   const merged: [number, number][] = [];
   for (const [start, end] of zeroed.sort((a, b) => a[0] - b[0])) {

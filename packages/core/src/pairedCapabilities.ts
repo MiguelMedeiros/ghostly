@@ -33,6 +33,12 @@ export const FILES_BINARY_CAPABILITY = "files/4";
 /** The typing indicator: `paired-typing` frames on this session, 1:1 chats only (WISP 401 § Typing, `pairedTyping.ts`). */
 export const TYPING_CAPABILITY = "typing/1";
 
+/**
+ * Presence and a set status: `paired-status` frames on this session, 1:1 chats only (WISP 401 § Presence and status,
+ * `pairedStatus.ts`).
+ */
+export const STATUS_CAPABILITY = "status/1";
+
 /** Reactions to messages: `paired-reaction` frames on this session, 1:1 chats only (WISP 401 § Reactions, `reactions.ts`). */
 export const REACTIONS_CAPABILITY = "react/1";
 
@@ -83,10 +89,10 @@ export const APP_RANGES_CAPABILITY = "app-ranges/1";
  * What only a device link offers (WISP 06, `deviceLink.ts`): the frames between a person's own devices. They are in
  * the type so a device link can announce them, and not in `KNOWN_SESSION_CAPABILITIES`: no chat knows them.
  */
-export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof FILES_BINARY_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY | typeof APPS_CAPABILITY | typeof APP_RANGES_CAPABILITY;
+export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof FILES_BINARY_CAPABILITY | typeof TYPING_CAPABILITY | typeof STATUS_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY | typeof UPGRADE_CAPABILITY | typeof APPS_CAPABILITY | typeof APP_RANGES_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, TYPING_CAPABILITY, STATUS_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

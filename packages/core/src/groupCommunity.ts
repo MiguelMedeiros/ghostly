@@ -71,6 +71,12 @@ export const COMMUNITY_LIMITS = {
   window: 64,
   /** Commits known off the main branch. */
   side: 512,
+  /**
+   * Of those, the branches one member's commit ends (its newest), and the commits it signed: a handful of races, and
+   * one full run of its admissions (`memberAdmissions`, with the leaves among them). The admin's are not counted.
+   */
+  sideTips: 8,
+  sideCommits: 64,
   /** Commits waiting for their parent. */
   pendingCommits: 64,
   /** Epoch secrets waiting for their commit. */
@@ -79,6 +85,11 @@ export const COMMUNITY_LIMITS = {
   pendingMs: 120_000,
   waiting: 64,
   waitingBytes: 1024 * 1024,
+  /**
+   * Of those, the ones signed by a key no commit I know names (a newcomer whose admission has not come yet, or a key
+   * anyone can make up): the newest only, they push out nobody else's, and they make no catch-up hurry.
+   */
+  waitingStrangers: 8,
   replay: 256,
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
@@ -689,7 +700,7 @@ export class CommunitySession {
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
   private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
-  private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
+  private waiting: { from: string; frame: CommunityMessageFrame; stranger: boolean }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
   /** Per member: until when what comes over its edge may be its answer to my sync (`ANSWER_WINDOW_MS`). In memory only. */
@@ -1431,10 +1442,36 @@ export class CommunitySession {
     if (key !== this.state.entry.key) this.state.entry = { key, seedB64: "" };
   }
 
-  /** Side commits stay up to a bound, the most recent ones (a longer branch being assembled included). */
+  /**
+   * Side commits stay up to a bound, the most recent ones (a longer branch being assembled included), and a member's
+   * newest only: past `sideTips` of the branches it ends or `sideCommits` of its commits, its oldest branch goes, from
+   * the tip down, so nothing kept loses its parent. Each is weighed at every commit taken and saved with the group, so
+   * what one member signs off the main branch costs every member a bounded amount. What it signs last is kept, so a
+   * branch it grows still comes in commit by commit (one let go comes again from where it parts in a catch-up).
+   */
   private pruneSide(): void {
-    this.state.side = this.state.side.slice(-COMMUNITY_LIMITS.side);
-    const keep = new Set(this.state.side.map(c => communityCommitHash(c)));
+    const admin = this.admin, hashes = new Map<CommunityCommit, string>();
+    const hash = (c: CommunityCommit) => { let h = hashes.get(c); if (!h) hashes.set(c, h = communityCommitHash(c)); return h; };
+    let side = this.state.side.slice(-COMMUNITY_LIMITS.side);
+    for (;;) {
+      const held = new Set(side.map(hash)), parents = new Set(side.map(c => c.p)), drop = new Set<CommunityCommit>();
+      const signed = new Map<string, number>(), tips = new Map<string, number>(), oldest = new Map<string, CommunityCommit>(), cut = new Set<string>();
+      for (const c of side) signed.set(c.by, (signed.get(c.by) ?? 0) + 1);
+      // Newest first: a member's newest branches are those kept.
+      for (let i = side.length - 1; i >= 0; i--) {
+        const c = side[i];
+        if (!held.has(c.p) && !this.mainIndex.has(c.p)) { drop.add(c); continue; }
+        if (parents.has(hash(c))) continue;
+        const n = (tips.get(c.by) ?? 0) + 1;
+        tips.set(c.by, n);
+        if (c.by !== admin && n > COMMUNITY_LIMITS.sideTips) { drop.add(c); cut.add(c.by); } else oldest.set(c.by, c);
+      }
+      for (const [by, n] of signed) if (by !== admin && n > COMMUNITY_LIMITS.sideCommits && !cut.has(by) && oldest.has(by)) drop.add(oldest.get(by)!);
+      if (!drop.size) break;
+      side = side.filter(c => !drop.has(c));
+    }
+    this.state.side = side;
+    const keep = new Set(side.map(hash));
     for (const [h, c] of [...this.known]) {
       if (this.mainIndex.has(h)) { if (this.mainIndex.get(h)! < this.state.chain.length - 1 - COMMUNITY_LIMITS.window) this.rosters.delete(h); continue; }
       if (!keep.has(h)) { this.known.delete(h); this.rosters.delete(h); void c; }
@@ -1459,9 +1496,17 @@ export class CommunitySession {
     }
   }
 
+  /**
+   * Those of the main branch's window always stay, the current epoch's included; side commits, however many are
+   * kept, only get what is left of the bound, the most recent first.
+   */
   private pruneSecrets(): void {
-    const order = [...this.state.chain.slice(-COMMUNITY_LIMITS.window - 1), ...this.state.side].map(c => communityCommitHash(c));
-    const keep = new Set(order.slice(-COMMUNITY_LIMITS.secrets));
+    const keep = new Set(this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)));
+    let room = COMMUNITY_LIMITS.secrets - [...keep].filter(h => this.state.secrets[h]).length;
+    for (let i = this.state.side.length - 1; i >= 0 && room > 0; i--) {
+      const h = communityCommitHash(this.state.side[i]);
+      if (this.state.secrets[h] && !keep.has(h)) { keep.add(h); room--; }
+    }
     for (const h of Object.keys(this.state.secrets)) if (!keep.has(h)) delete this.state.secrets[h];
   }
 
@@ -2378,7 +2423,8 @@ export class CommunitySession {
     // One I took already (from a second hub, or in a catch-up answer) is dropped before its signature is checked: it
     // would be dropped below whether the signature holds or not.
     if (this.isDuplicate(raw)) { this.handedInAnswer(from, raw, now); return false; }
-    // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
+    // Signed by its author before anything else, so a frame no member wrote takes no member's place among those waiting
+    // (`park`).
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
     // what it wrote before its leave only (and for the epochs it was in: the roster check below).
@@ -2527,17 +2573,24 @@ export class CommunitySession {
   private park(from: string, frame: CommunityMessageFrame): void {
     if (frame.e > this.epoch + COMMUNITY_LIMITS.window) return;
     if (this.waiting.some(w => w.frame.s === frame.s && w.frame.e === frame.e && w.frame.h === frame.h && w.frame.n === frame.n)) return;
-    this.waiting.push({ from, frame });
+    // Its signature says only that its key wrote it, and anyone can make a key: one no commit I know names waits among
+    // `waitingStrangers` only (`COMMUNITY_LIMITS`), and goes before any member's.
+    const stranger = !rosterHas(this.roster, frame.s) && !this.isRecentMember(frame.s);
+    this.waiting.push({ from, frame, stranger });
     this.waitingBytes += frame.c.length;
-    while (this.waiting.length > COMMUNITY_LIMITS.waiting || this.waitingBytes > COMMUNITY_LIMITS.waitingBytes) this.waitingBytes -= this.waiting.shift()!.frame.c.length;
+    for (;;) {
+      const strangers = this.waiting.filter(w => w.stranger).length;
+      if (strangers <= COMMUNITY_LIMITS.waitingStrangers && this.waiting.length <= COMMUNITY_LIMITS.waiting && this.waitingBytes <= COMMUNITY_LIMITS.waitingBytes) break;
+      this.waitingBytes -= this.waiting.splice(strangers ? this.waiting.findIndex(w => w.stranger) : 0, 1)[0].frame.c.length;
+    }
     this.ask(from);
   }
 
-  /** Something is missing here: the current epoch's secret, or the epoch of frames waiting. */
+  /** Something is missing here: the current epoch's secret, or the epoch of a member's frames waiting. */
   get needsCatchUp(): boolean {
     if (!this.isMember) return false;
     this.dropStale(this.pendingCommits, this.hooks.clock?.() ?? Date.now());
-    return !this.state.secrets[this.topHash] || this.waiting.length > 0 || this.pendingCommits.size > 0;
+    return !this.state.secrets[this.topHash] || this.waiting.some(w => !w.stranger) || this.pendingCommits.size > 0;
   }
   /** Asks a member I have an edge to for what I lack (the engine calls it now and then while `needsCatchUp`). */
   catchUp(to: string): void { this.ask(to); }

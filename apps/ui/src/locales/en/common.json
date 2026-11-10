@@ -26,6 +26,7 @@
     "title": "Waiting for you"
   },
   "notCopied": "Not copied",
+  "quotedName": "“{{name}}”",
   "save": "Save",
   "size": {
     "b": "{{n}} B",

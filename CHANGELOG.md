@@ -4,6 +4,306 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.10.6
+
+### Security
+
+**Apps**
+
+- On the web, a mini-app beside a chat that keeps taking the keyboard from Ghostly's fields by script is now stopped, and its place says why.
+
+## 1.10.5
+
+### Security
+
+**Browser extension**
+
+- A local app you share is served to contacts only at an address you allowed in this browser for that profile. An app that came with a restored or moved profile shows Allow on its card first.
+- A contact's app opened while the extension was still starting now opens only for the profile in use.
+
+**Chat and transports**
+
+- An incoming native connection while a contact is on DHT only can no longer make this device read that contact's DHT mailbox far more often than usual.
+- A relay named by a contact is now used only when its name resolves to public internet addresses.
+- A contact can no longer make this device read its capability record many times a minute.
+
+**Groups**
+
+- The answer to a group invitation no longer depends on whether you already belong to that group.
+
+**Relays (self-hosted)**
+
+- The HyperDHT relay now tracks the data each stream is waiting to deliver at a constant cost per write.
+
+### For developers
+
+- The test of edits on a private group's hubs runs the same way every time and waits for a newcomer's catch-up: with random keys and waits, members still moving to the new hubs took the edits ~105 s after a 30 s wait ended, and an edge kept for a closed hub held the setup for 10 minutes, so about one run in eight failed.
+
+## 1.10.4
+
+### Security
+
+**Apps**
+
+- Install now always uses the source and store of the install screen it was pressed on.
+- A revocation delivered by an app store is now reliably kept on the installed app.
+- Opening an app whose files had to be downloaded again checks your stores as they are once the download ends, so a store's takedown added in the meantime is respected.
+- Run anyway for an app a store removed now covers only that run: a later run is stopped again if a store removes the app again.
+- On the web, a contact's shared app runs under the same connection policy as on Desktop and in the browser extension.
+- On the web, a contact's shared app can no longer make the Ghostly page hold an unbounded number of pending requests.
+
+**Browser extension**
+
+- A contact's app tab left open across an extension update or reload is now closed by the lock screen, a profile switch and Clear all data.
+- A contact's app opened from a chat can no longer open windows of its own, which could stay open after the app's tab was closed.
+
+**Calls**
+
+- Answering a ringing call from the lock screen or with End and answer always matches the kind of call that rang (audio or video).
+- In the CLI, a call no longer lets a contact delay the daemon's other network name lookups.
+
+**Chat and transports**
+
+- A contact's or group member's chosen name can no longer make their actions read as your own in group history, reply quotes and the chat list.
+- Packet dates under keys shared with other people are bounded, so another holder of the key can no longer stop this device's records from being published or read.
+- A contact that stays on DHT only can no longer make this device read its DHT mailbox far more often than usual.
+- The CLI daemon's Mainline DHT node bounds what it answers and stores for addresses it does not know.
+
+**Desktop**
+
+- Invite, device and group links and wallet backups you copy are marked so that clipboard history, cloud clipboard and clipboard managers do not keep them.
+
+**Devices**
+
+- A wrong-password lock-out lasts at most its hour, even when a device's clock was wrong when it was counted.
+- A profile no longer moves to another device while a device is being added, so a device whose addition did not finish still gets the new device secret.
+- A move to another device that was cancelled or failed deletes the files it had already copied there.
+- The active device warns that a wrong password was tried whenever another device's attempt to move the profile ends without it, including attempts that stop partway.
+- On the web, data that contacts' apps kept in the browser for a deleted profile is removed when the app next starts, if it could not be removed at the moment of deletion.
+
+**Files**
+
+- A video sent no longer carries the text of its subtitle and caption tracks, where some recorders write location data.
+- The CLI's `file save` marks every saved file as downloaded from the internet, including files forwarded from another chat.
+
+**Groups**
+
+- Communities always keep the keys a community currently uses, so members can keep sending and reading.
+- Communities bound how many off-branch membership changes are kept from any one member.
+- Communities limit messages waiting for a group update by who signed them, so they cannot crowd out members' messages or keep the app catching up.
+- In private groups, when many edits wait at once, the edits and deletions of members who send few are no longer the first to be discarded.
+- Private groups apply each member's message and edit rate to messages other members pass on during a catch-up as well.
+- In private groups, frames for a later epoch wait bounded by author and age.
+
+**Identities**
+
+- When a contact's identity proof cannot be verified, the reason shown is always the app's own description of the problem.
+- When a contact checks an identity it already holds a second time, both sides agree on whether it is still verified.
+- When two proofs of the same identity are checked at the same time, the newer proof is always the one kept.
+- Checking a contact's OpenPGP proof takes a bounded amount of work for every key type.
+- The automatic daily re-check of contacts' proofs paces its lookups to services that limit requests, so checks you start yourself are not refused after the app was closed for a while.
+- A proof a contact presents again is answered from its recent check, and checks of one contact's proofs are rate-limited.
+- A contact's unverified identity shares keep one timeline line per kind, so they cannot push the real lines out.
+
+**Relays (self-hosted)**
+
+- The push relay counts each push subscription once however its endpoint URL is written, and no longer counts wake-ups the push service rejects against a subscription's limit.
+- The HyperDHT relay bounds how long, and for how many handshakes, it waits on a client's firewall answer.
+
+**Wallet**
+
+- An incoming ecash payment in a chat is limited per chat, so one contact cannot slow the wallet's mint or fill the chat with refusal notices.
+- The link a Lightning service leaves after a payment shows the address it really opens.
+- On Android, a Cashu token copied from a chat is marked sensitive, so the system's copy preview and keyboards do not show or keep it.
+
+**Web app**
+
+- The Share to… picker no longer acts on a press in the first moment after it opens by itself.
+- Clear all data also drops shares from other apps still waiting in the open page, so the next page does not show them.
+
+### Fixed
+
+**Chat**
+
+- With a screen reader, a text you sent that turns "Not sent", or starts waiting for your contact to be online, is now read out once in the open chat. Several at once are read as one count ("3 messages not sent"); sent and delivered texts are not read out.
+- Cancel sending on a text that waits to be sent (no relay took it) now always keeps it from your contact. A Cancel that came just as the app was trying it again deleted it on your side while it still went out, and your contact read a text you had taken back. Now the text either never goes, or, if it was already on its way, it is deleted for everyone so its removal follows it. Delete for everyone on a waiting text works the same way.
+- An open chat no longer redraws itself and its messages each time it checks for new ones, or when the contact starts or stops typing. Only the header updates. A new message now redraws just its own bubble, not the others on screen.
+- Closing a chat's payment sheet with Escape or Close (also on a payment that is not confirmed yet) now gives the keyboard focus back to the message field, as a payment that goes out does. Before, it fell to the top of the page.
+- Searching a chat of long messages no longer freezes the page at each word. A common word such as "the" was marked hundreds of times in every long message on screen, and each word typed blocked the page for 380-500 ms on a fast computer. Now a message marks its first 100 matches. It is still found and shown as before.
+- On a phone on its side with the keyboard up, searching a chat now shows the message it found. Before, the chat's header, the search bar and the message field filled the screen, so "1 of 8" showed no message at all. While you search, the message field waits behind the keyboard.
+- On a phone the search bar inside a chat takes taps on 44 px: its ⓘ, ↑, ↓ and ✕ were 40 × 40 px. On a phone held upright the result count goes on its own line under the field, so the field keeps room for the words in every language.
+- In the web app, a text to a contact who is away that never left your device, because every relay turned it down or could not be asked just then, now shows "Waiting for your contact to be online" and offers Cancel sending in its ⋮, like the texts written after it. Before, it showed as sending ("No receipt yet. Sends again by itself.") with no way to cancel it, and it went out once the relays answered again. A cancelled text is not sent later, and the texts after it still go in the order you wrote them. A text that a relay may have received (it did not answer in time, or the connection dropped) still shows as sending, as before.
+- A screen reader now reads out a message the contact sent at the same moment as yours. Before, an answer that crossed your own message was never read out.
+- Delete all chats in Settings now stops a voice message or audio file still playing from one of those chats. Before, it played on, and the bar at the top still named the deleted chat.
+- A text sent over the DHT that was still waiting for its receipt when the app closed no longer shows "sent" for an hour after the app opens again when the device clock was set back an hour in between (or a clock that ran ahead was set right). It waits for its receipt for at most its usual five minutes from the restart. After a clock change of more than about 25 days, such a text is also no longer marked failed right at start while it is still going out.
+- A message edited into a picture link, or whose picture was swapped for another, now says "edited" on the chip over the picture, as an edited text does beside its time. Before, it looked never edited.
+- On a phone, the emoji panel gives its category icons, skin tone, Emoji / GIF switch and emoji a thumb's 44 px (the icons were 40 px tall and 38 px wide on the narrowest phones, the skin tone 36 px, the switch 32 px tall, each emoji 43 × 40 px at 320 px). Category icons that don't fit scroll sideways, keeping the one underlined in view; seven emoji still fit a row at 320 px.
+- On a phone on its side, or a small phone held upright, searching the emoji and GIF panel with the keyboard up now shows the results: the panel drops its grabber and category icons and puts the Emoji/GIF switch beside the search, so at least two rows of emoji fit above the keyboard. Before, the results area showed no emoji on its side and a single row on the smallest phones. With the keyboard down, or with room for two rows, the panel is as before.
+- In the emoji panel (the composer's and a message's reaction +), choosing a skin tone with the keyboard now puts the focus back on the skin-tone button, instead of losing it to the top of the page. Escape while the tones are shown now closes only the tones and keeps the panel open.
+- A screen reader now reads the chats a forward could not reach as a list, with how many there are. The contact's identities panel over the chat is also a dialog that accessibility checkers accept.
+- On a phone, the line above the message box that says what waits for an away contact shows its whole sentence, on a second line if need be. It was cut to one line, so on a 320 px phone it lost how much of the storage is used ("… MB of … MB") in Spanish, Arabic, French, Portuguese, Italian and Japanese.
+- A chat that leaves DHT only goes live in seconds even when your app had used up its share of the relays before you
+  left it. Before, the note telling your contact you left DHT only, and the sign that you are there, waited for the
+  relays for up to a minute, so your contact did not answer or did not call you until then, and the chat stayed on
+  "On DHT · retrying live".
+- With many contacts, reloading the page (or opening the app again) a few minutes after making New chat invites no longer leaves your live chats on "On DHT · retrying live" for a minute. A chat coming back used to wait about 60 seconds, against 8 without the invites, because it held its reads for the contact's answer behind an invite's packet that could not go out until the relays' minute freed. It now reads that answer at once, within the small allowance already kept for connecting chats.
+- On the narrowest phones (320 px wide), a chat's Back and the message field's + and smiley take a thumb's 44 px like every other control (they were 36 px wide). The message field is still about 156 px wide there.
+- Setting the device clock back (or a clock that ran ahead being set right) no longer delays handing a text written to an away contact to held items: it is handed over about a minute after it was queued, as before, not once the clock has caught up again (an hour later after a one-hour change, a day later after a day). A clock set days forward no longer fails every queued text at once as "not confirmed within 7 days": each still gets its week, counted while the app runs.
+- On a phone or tablet without a mouse, opening a chat or a group (from its row or with New chat) gives the keyboard focus to the chat's name at the top, instead of leaving it on the page, so a keyboard, a switch or a screen reader starts from the chat. The message field still waits for a tap, so the on-screen keyboard does not come up.
+- A very thin picture sent to you, or one whose sender gives it such a size, is now shown in a box no taller than the usual 330 px picture. Before, a picture said to be 1 × 65535 pixels left a blank bubble tens of thousands of pixels tall in the chat, before and after it arrived.
+- A pinned message in another script than the app's language is now cut at its end in the bar under the chat's header, as the reply bar already does. Before, a message in Latin letters pinned in an Arabic app (or an Arabic message pinned in an English app) lost its start and showed only its last words. The same goes for groups.
+- On a phone on its side with the keyboard up, the message field stays above the keyboard in a chat with a pinned message, and while you reply or edit. Before, the pinned bar and the reply bar pushed the field under the keyboard, so you could not see what you typed. While you type there, the pinned bar waits behind the keyboard and the reply bar takes one line.
+- When your contact comes back while the keyboard focus is on Reconnect in a chat's connection panel, the focus now moves to the panel's state line, which says the chat is connected. Before, Reconnect went away from under the focus, which fell to the top of the page: a screen reader lost its place, and Tab started again from the beginning.
+- Reconnect in a chat's connection panel now says "Reconnecting…" while it waits for your contact, and the rest of the panel stays usable. Before, with the contact away, DHT only, Fallback and Reconnect were all greyed out for up to 90 seconds with no word why, and the keyboard focus fell to the top of the page.
+- On a phone, Send files (files pasted, dropped or shared into a chat) gives each file's × a thumb's 44 px (it was 28 px) and makes Cancel and Send 44 px tall (they were 40 px). The × look the same: where a tap lands grows around them.
+- Send files reads each picture once. Pasting, dropping or sharing many photos at once had the app read every picture again each time another one was checked, 1,275 times for 50 photos, and again for the others each time one was taken out. On a phone that meant seconds of work and a lot of memory while the sheet opened. Now each picture is read once while it stays on the sheet.
+- Folding or unfolding the chat list, or any other setting changed with a chat open, no longer draws every message on screen again, so a chat of long messages no longer stutters as it does.
+- Revealing a spoiler in a message from the keyboard (Enter or Space) keeps the focus on the text it uncovers, and Show map on a location card moves the focus to the map (or to the line saying it could not load). Before, the focus fell to the page, so a screen reader read nothing where you were and the next Tab started over from the top.
+- Pairing several people one after another no longer stalls on the third: on relays that allow 30 requests a minute (self-hosted ones, pkarr.pubky.org), the third invite made within a minute took about 60 seconds to connect, against 3 to 5 for the others, because the inviter did not read the joiner's answer until a minute of requests had passed. It now reads an invite it has just made a few times past that limit, within the small allowance already kept for connecting chats.
+- A video that came without a picture is no longer read and decoded to make one after you scrolled past it. Flinging through 20 such videos read each whole file (up to 64 MiB on Desktop), one after another, and the video you stopped on waited behind them all; now only the ones still on screen are read, and one you scroll back to gets its picture then.
+- On a phone, the question asked when you press Esc on a longer voice recording ("Discard voice message?") reads in full above the recording bar, with Keep and Discard side by side. It was cut to a word or two in most languages.
+- In Arabic, the waveform drawn while a voice message records now runs left to right with the newest sound on the right, like the preview and the sent message, instead of turning around when you stop.
+- A chat with many received voice messages opens faster: which ones were played is read from this device's storage once, not again for each voice message.
+- A voice message recorded while the device's clock changes (set by hand, or set right by the network) is as long as what was recorded. Setting the clock 15 minutes or more ahead no longer stops the recording and sends a few seconds of sound as a 15:00 message, and setting it back no longer throws the recording away as too short when you press Send.
+- Files sent to a contact who is away, once their offer is on the DHT floor, no longer each look through the chat's whole history every 5 minutes until the contact is back. Ten files sent a minute apart read a 5,000-message chat 60 times an hour for nothing; they now read none of it while they wait, and still go as soon as the chat is live.
+
+**Apps**
+
+- An app card in a chat now says "Stopped", as the Apps page does, when the installed version was revoked by its publisher or removed by one of your stores, and no longer offers "Open". For a version a store removed, the card offers "Run anyway" as the app's details do.
+- An app you chose to "Run anyway" after one of your stores removed it now opens again in a chat when you press Open again after it stopped responding. Before, Open again in the chat refused it as removed, and you had to go back to its card and press Run anyway again. Full screen, it already opened again.
+- After an app stopped responding, Open again now says why when it can't open the app (for example, when you are offline), under the button. It shows that line in a chat and for an app open full screen. Before, nothing changed on screen in a chat, and an app open full screen disappeared. While it opens, the button shows it is busy. In a chat, once the app is open again, the keyboard focus stays in the app's panel instead of jumping back to the top of the page.
+- An app opened from the Apps page in a chat you then never went to is dropped after a minute even when the device's clock was set back, so it no longer opens by itself the next time you open that chat.
+- App cards in a chat are no longer all drawn again each time Ghostly checks for app updates, which happens at every visit to the Apps page, in every open tab. Only the cards of an app that changed are drawn again.
+- On the web, Back (Android's back gesture) closes an app's request to read your files or folders, as Cancel does, and the chat under it stays where it was. Before, the request stayed up while the page under it went back.
+- On the web, Back (Android's back gesture) closes a full-screen app opened from the Apps page, as it closes a dialog. Before, the app stayed on screen while the page under it went back to the one before, and closing the app then left the keyboard focus nowhere.
+- On the web, an app opened in a chat no longer pops up full screen over another page when you leave the chat while it is still opening (its files still downloading). It doesn't start, and you can open it again from the chat.
+- With a screen reader, searching a store's apps on the Apps page, and searching for the chat to open an app in, now says what was found once you stop typing: how many apps or chats, or that none matches. Forward and the emoji search already did; these two said nothing.
+- Adding a store that removes or revokes an app you installed now stops that app at once, on the Apps page and where it runs, instead of still offering Open until the next update check.
+- On the Apps page, when Try again reads the installed apps or the stores after a failed read, the keyboard focus now goes to the first app or store it found (or to Add when there is none). Before, the focus was lost and the next Tab started from the top of the page.
+
+**Files**
+
+- On a phone, an audio file's Play and Save in the chat now take a tap on 44 × 44 px, as a voice message's Play does. Before, a tap landed only on the 36 px Play and the 32 px Save.
+- Cancel sending on a file that waits for your contact, pressed just as the app tells your contact the file is coming, now reaches your contact too: their chat says the file was cancelled the next time you are connected. Before, it kept waiting for a week and then said the file did not come.
+- Cancel sending on a file that waits for your contact now keeps it deleted when it comes just as the chat goes live. The app could write the file back into the chat as sent a moment later, where it stayed after a restart, though your contact never got it.
+- A file on its way while the device's clock changes (set by hand, or set right by the network) shows its real speed and time left, and says it is stuck after the usual quiet spell. Setting the clock back no longer freezes the speed it had or hides Send again on a stuck file for as long as the clock went back, and setting it ahead no longer shows a moving file as stuck.
+
+**Everywhere**
+
+- On the web, the first Back (Android's back gesture) after a move of the app's own, such as the tab bar's Chats from Settings, closes the menu, sheet or dialog that is open. Before, that Back left it open, or within a second and a half of the move left the chat under it instead.
+- In Profile › Backups, S3's Test and save, and a restore's Take over, Replace or Restore as a copy, now keep the keyboard focus, or get it back when the progress closes. Before, a refused save or restore left the focus at the top of the page.
+- A group invitation's Accept, Decline, Try again and Delete, and Download in the translation question, now keep the keyboard focus while they work. Before, the focus fell to the top of the page, and stayed there when the answer was refused.
+- In the browser extension, every update the open tabs got (a contact typing, a message arriving, a file moving) still carried every chat and every group again, with each group's whole member list. Now a chat or group travels to a tab only when it changed: with 50 chats and a community of 300 members, a contact typing costs each tab about 3.5 KB instead of 118 KB.
+- On Desktop and in the Android app, the version at the bottom of Home opens that version's release page. Since 1.0.0 every release called itself a "Local version" there and opened the list of releases.
+- A contact's Iroh relay this device does not dial (in a chat's not-live box), a Lightning card that cannot look up its invoices (on Receive and on a chat request), and an OpenPGP key of a kind or size Ghostly does not accept now say what happened and what to do in the app's language. The OpenPGP ones used to show only "Something went wrong", and the others were in English.
+- In Arabic, a chat's location card drew its coordinates with each minus after its number ("46.63330- ,23.55050-"). They now read left to right, as written: "-23.55050, -46.63330".
+- When one discovery relay takes connections but never answers, a new device's first pairing no longer waits on it: it took about 8 seconds instead of 2.5, and now takes about as long as with every relay answering. A relay that has left a request unanswered for a moment is asked after the others.
+- On a phone the smaller controls of Settings, Profile, Services and the first dialogs take a thumb's 44 px too: each ⓘ, the Close of New wallet, Add identity and Join, the colour theme swatches, Light, Dark and Auto, Compact and Comfortable, the sound previews, Network's Reset and Save, Generate random name, the GitHub link and Services' Online. They took taps on 32 to 41 px. They look the same; the swatches sit a little further apart.
+- On a phone every on/off switch takes a thumb's 44 px, as the other controls do: in each Settings section, on the Profile page and wherever else one shows, a tap landed on only 40 px of its height. It looks the same.
+- On a phone, a sheet narrower than the screen now stands in the middle. Before, the invite QR on a large phone, and New wallet, Add identity or Apps › Add on a phone on its side, sat on the left edge with the page showing beside them.
+- The screen shown when a profile can't be opened now has a heading, and a screen reader says why only once when it appears. Check now and Update are told in a short line of their own, the download in steps of ten percent. Before, every change on the screen, down to each percent of the download, had the whole explanation read out again.
+- With one Pkarr relay taking connections but never answering, every read of something not published yet (a contact's answer, a joiner who is not there yet) waited 6 s for it, again and again, and the relay still showed as working. Such a relay now goes after the others after one wait, and counts as failing as it should.
+- Take it back on a chat payment with nothing left now says "Nothing to take back" in the button's words, not "nothing to reclaim" (in Portuguese and Arabic, the word for Redeem). A text that did not go reads "Not sent" in Message details too, as in the chat, not "Failed".
+- On the web, Back (Android's back gesture) with a select's list open, such as Settings' Language, closes the list alone and keeps you where you were. Before, it left the page, or closed the whole dialog the select was in.
+- A select's open list, such as Settings' Language, stays where you scrolled it when the window resizes or the page scrolls under it. Before, it jumped back to the chosen option, and a click meant for the last option could choose the one above it.
+- Changing a setting, such as folding the chat list or turning a switch in Settings, redraws the app once instead of twice.
+- An app or CLI daemon left running no longer keeps, in memory, what it published for each invite it prepared in advance and never handed out. It prepares a fresh one every 15 minutes, and each old one stayed for as long as it ran: about 5,500 keys after a month of uptime.
+- A chat's transport can be changed several times in a minute again: the sixth change within a minute used to say "Transport change timed out" and took 40 to 50 seconds to land. Now each one moves the chat in about a second.
+- On a phone a voice message's speed pill (1× / 1.5× / 2×) takes a thumb's 44 px (it was 42 × 26 px), and so does the round ↻ that sends a voice message or file again or asks for it again (37 × 36 px). They look the same: where a tap lands grows around them.
+- On a phone the voice recorder's bin, Pause / Resume and the preview's Play take a thumb's 44 px (they were 36 px), and so do Keep and Discard when Esc asks before throwing a recording away (34 px tall). They look the same: where a tap lands grows around them.
+
+**Calls**
+
+- In a call, the notice that a microphone, camera or speaker went away or came back no longer takes the keyboard focus with it when it goes. After Switch back, its close button, or when it closes by itself, the focus moves to the call's Devices button. Before, it fell to the page, so a screen reader lost its place in the call and the next Tab started over.
+- On a phone, in a call, the notice that your microphone, camera or speaker is back has its Switch back and its close button take a thumb's 44 px (they were 84 × 24 and 20 × 20 px, 12 px apart). They look the same: where a tap lands grows around them, and neither reaches the other.
+- In a call, the notice that your chosen microphone, camera or speaker is back no longer closes after 10 seconds while the keyboard focus or the pointer is on it. Its time starts over when they leave. Before, it could close while you were tabbing to Switch back or reading it, and since the offer comes only once, the Devices menu was the only way back.
+- Calling back a contact whose quick redial was held back as missed now rings their call, even if you were on another page when it came in and call back more than 15 seconds later. Before, both of you saw "Calling..." until the calls gave up, and your chat then said the contact declined.
+- A contact's call after the device's clock was set back rings. A call that comes right after a missed one that barely rang is still kept as missed, but the clock going back no longer makes a call minutes later look that quick, nor makes a call that rang a while look like one that barely rang.
+- A call's length is the time it lasted when the device's clock changes during it (set by hand, or a phone fixing its time). Before, the call window's clock jumped with it, an hour ahead six seconds in or negative after a clock set back, and the chat's "call ended" line kept that length.
+- Closing the "The call couldn't connect" note from the keyboard moves the focus to the chat's ⋮ button. Before, the focus fell to the page with the note's close button, so a screen reader lost its place and the next Tab started over.
+- On a phone, a call's notice that a microphone or camera went away or came back, and the one that says who is sharing a screen, show their whole sentence on a second line. They were cut to one line, so "… disconnected. Using the default" lost what the call uses now (on a 320 px phone in every language, and in Spanish, French and Japanese at 375 px).
+- On a phone or tablet, the small call window's buttons take a thumb's 44 px (they were 32 px, 5 px apart, and its corner button 30 px), and End call stands apart from Share screen, so a thumb aimed at Share screen or Devices no longer ends the call. On a touch screen the small window opens a little bigger, 264 × 168 px, to fit them.
+- A call no longer measures how loud each side is while the app is out of sight (the Android app in the background, a
+  browser tab behind another). Each side's speaking ring kept its own audio running 12 times a second for nobody to
+  see. The rings follow the voices again as soon as the app is back.
+- On a phone held sideways in a browser, a call's avatars and names stay clear of its buttons. At 320 to 350 px of height the names were drawn over Camera, Devices and Share screen; now the avatars are smaller, the two sides of a voice call sit side by side, and the buttons sit a little lower.
+- CLI: a call keeps going when the device's clock changes during it (set by hand, or a VM or a phone fixing its time). Before, a clock set back stopped the call's outgoing audio for as long as the jump, a clock set ahead ended the call as `failed`, and `call.ended` gave the jump as the call's `duration` (negative after a clock set back). A clock set back right after a call also no longer refuses `call start` in that chat, or holds the contact's next call as missed, for as long as the jump.
+- On Linux Desktop, a video call no longer hands the window how loud each side is, about 20 times a second, when the
+  call window draws no speaking ring. The levels come back as soon as a ring shows, for example once the camera is off.
+
+**Wallets**
+
+- An ecash payment in a chat that was approved while its mint could not be reached no longer asks that mint about it every 10 seconds for as long as the app is open. It is asked about every 10 seconds while the payment may still reach the mint, then less and less often, down to once every 10 minutes, and several such payments at the same mint share one try instead of each trying on its own.
+- An ecash payment in a chat that the contact has not taken yet no longer asks the mint about it every 10 seconds, nor sends the contact the same token again each time, for as long as the app is open. It is asked about every 10 seconds at first, then less and less often, down to once every 10 minutes, and the token goes again when the chat reconnects.
+- Ecash a contact sent that your mint has not taken yet is asked about again at the wallet's own pace (every 30 s at first, then less and less often), not each time the contact's app sends the same payment again: about 10 swaps an hour instead of one every 10 s, each with its own restore and spent check.
+- Taking back ecash sent in a chat no longer marks the contact's request as paid when the mint is slow to confirm it. The request showed Paid and played the paid sound, and could not be paid again, while the sats came back to your wallet. The ecash being taken back is also no longer sent to the contact again when the chat reconnects meanwhile.
+- Taking back ecash sent in a chat no longer marks the contact's request as paid. If the payment was checked while it was being taken back, the request showed Paid and played the paid sound, and it could not be paid again. Ecash taken back while the chat was still reconnecting after a restart is no longer sent to the contact, and the payment shows "taken back" right away.
+- Redeem on ecash whose mint does not know its keyset (a made-up token, or one of a keyset the mint dropped) says so, in your language, and that you can ask the sender for new ecash, instead of "Something went wrong".
+- In a chat, a payment's own buttons now keep the keyboard focus. Close under a request's review moves it back to Review payment, or to the payment when the request is paid, and Take it back leaves it on the payment. Before, the focus fell to the top of the page.
+- After a mint refuses a Lightning payment from the Cashu or Lightning card ("it is safe to try again"), Pay on the same review tries it again. It used to fail with "The mint quoted another amount than this invoice's".
+- Paying a Lightning address whose service answers with an invoice for another amount than the one you chose, or for any amount, now says so in the app's language, with what to do next, instead of a line in English. The amounts the service and you named are kept behind the ⓘ.
+- A check on a payment still on its way that finds nothing new no longer saves the payment again and reloads the whole wallet (every payment, the ecash and the history of each network). With many chat payments waiting for the contact, the wallet did this every few seconds for as long as the app was open.
+- In a browser set to a language that writes its own digits, such as Arabic in Egypt or Saudi Arabia, or Persian, an amount above the limit and a Fedimint federation without enough sats now say so in the app's language. They were in English.
+- Wallets: on a phone, the New in "or New …" on the card of a profile with no wallet yet takes a tap on 44 px, with the same look as before. It took taps on 28 × 20 px only.
+- A screen reader now says how a payment from a Cashu or Lightning card's Send ended: "Paid." or that it is still pending. Before, the result took the review's place and the focus went to Done without a word, so you could not tell whether the payment went through.
+- On the Wallets page, Try again and Skip under a Mainnet wallet the first start could not make now keep the keyboard focus. Try again keeps it while it works and after it fails again, and Skip, or a Try again that makes the wallet, moves it to the next wallet's Try again, or to New when none is left. Before, the focus fell to the top of the page.
+
+**CLI**
+
+- A call's daemon no longer decodes the contact's silence again for every packet while it lasts: once the same packet gave the same audio twice in a row, that audio is handed on again. What the program hears is the same, byte for byte, and a quiet call takes about half the work it did on the daemon's thread.
+- A `ghostly daemon` on a laptop that slept, or on a machine that changed networks, reconnects its chats at once, as the app does when its window comes back, instead of minutes later or only after a restart. A container's or a VM's network made or removed on the machine (Docker, libvirt, WSL) is not taken for another network.
+
+**Groups**
+
+- In a community where members have let in as many people as they may while the admin is away, a member's app no longer answers each knock at the link. It opened a connection, invited the person and showed them "you are in in a moment", then refused to let them in, again and again for as long as the admin stayed away. The person now waits until the admin lets them in.
+- A group file coming at a good pace keeps coming from the same member when the device's clock is set ahead, and one coming slowly moves to a faster member when the clock is set back. A device sharing files with a full set of members no longer drops one of them when its clock is set ahead, or answers busy to everyone else when it is set back.
+- A group member back from away with many files waiting for an author who is offline no longer checks all of them again each time another file finishes or is refused, so the app stays responsive while files arrive.
+- The chat list no longer redraws each time a member of one of your groups starts or stops typing, comes online or goes away, or reconnects. It updates only when something it shows changes, such as a group's name, member count or latest reaction.
+- Answering "Another group has this group's id" with Keep this one, or with a confirmed Switch, puts the keyboard focus on the group's name once the notice goes. Before, it fell to the page, and the next Tab started again from the top.
+- A payment request you made to a group no longer comes back after you leave the group and join it again, or switch to another group under the same id. Before, after the app restarted, it was posted again as a new open request, to members who joined since or to the other group's members.
+- An open group no longer redraws its messages each time a member starts or stops typing, or comes online or goes away. Only the header updates. A new message now redraws just its own bubble, not the others on screen.
+
+**Desktop**
+
+- On a Mac, when the Ghostly window's page keeps stopping while it opens, the app no longer reloads it forever on a blank, blinking window: it tries again three times, waiting a little longer each time, then asks whether to try again or quit.
+- On Linux, a video playing full screen now steps back into the chat when a call rings, so you see who is calling and can answer or decline. Before, the call was drawn under the video, out of sight.
+- On Linux, a call in its small window now stays on top when you play a video full screen, so Mute, End call and the other person's picture are still in sight. Before, the video covered the call until you left full screen.
+- On Linux, pressing Escape on the player of a video that fills the window now puts the keyboard focus on the video's Full screen button. Before, the focus went back to the top of the app, and the next Tab started over from there.
+- On Linux, while a video plays full screen, Tab now goes round the video's own controls. Before, it went on to the chat hidden under the video, and what you typed could land in a message box you couldn't see.
+- On Linux, Shift+Tab now stays inside an open dialog, sheet or panel, as Tab does. Before, it went on to the controls on the page behind it, out of sight.
+
+**Devices**
+
+- Add a device works again on a new device whose date is about 25 days or more behind the other device's. It used to show the digits and fail as unanswered at the same moment; it now waits for your answer on the other device as long as a code lasts.
+- On a standby device, answering "Move this profile here?" with Use here or Not now now keeps the keyboard focus: it goes to the move's Cancel, or to what the move says. Before, it fell to the top of the page.
+- Pressing Not now when your active device offers to move your profile here now just closes the offer. Before, this device then showed a red "Stopped. Nothing changed." and a "Try again" button that asked for your password, as if the move had failed.
+- On a device on standby, This is right and This is wrong under the new device list, and Try again and Remove on a device that did not finish joining, now keep the keyboard focus while they work. When the list goes, the focus moves to Use here (or to the screen's title), and after a Try again that changed nothing it stays on Try again. Before, it fell to the top of the page.
+- On a standby phone, Your devices shows the active device's full name: when the name and Check connection don't both fit on one line, the button goes below it. Before, the name was cut (in Italian, "Chrome, Windows" showed as "Chrome, Win…").
+- A move of a profile with many small files onto a web device leaves both devices waiting for less time. The new device now reads and then clears the staged copies of a batch of up to 200 files at the same time, instead of one file after another. With 8,000 small files, that part took 13 s while neither device could be used.
+- After a takeover, pressing Not now or Make a new device secret on the offer under Devices now moves the keyboard focus to the device that stopped (or to Add a device) once the offer goes. Before, the focus was lost and the next Tab started from the top of the page.
+
+**Transports**
+
+- Leaving DHT only for WebRTC or Automatic no longer greys out a chat's connection choices while Iroh's relay is out of reach. Before, they stayed off for 24 to 44 seconds after the chat was live again, with the keyboard focus on the page.
+
+**Settings**
+
+- Typing your name in Settings or on the Profile page no longer redraws the page up to three times per key, and no setting you change makes the app read every other profile on the device again (their databases, unread counts and pictures). A change of your own settings now redraws the page once; the other profiles' summaries in the profile switcher still update when one of them changes.
+- Check now and Update in Settings › Updates, and on the screen shown when a profile was last opened by a newer version, now keep the keyboard focus while they work and move it to the update's button when one is found. Before, the focus fell to the top of the page.
+
+**Payments**
+
+- A payment from a chat's sheet that the contact refused at once closes the sheet like any payment that went out, and its bubble says it came back. When the refusal arrived before Approve answered, the sheet stayed open on "failed".
+
+**Web**
+
+- In the web app, when Cancel or a chat picked in the Share to… picker brings up the next share waiting, a screen reader now says that share, and the focus moves to the page's heading. Presses in the moment before it is said (Enter pressed again, a double tap or double click) do nothing. Before, the focus stayed on the button just pressed and nothing was said, so a second press put aside the next share, or sent it to the same chat, before anyone saw it.
+- In the web app, with two or more shares waiting, picking a chat for the first now shows the next one in the Share to… picker, and the last one picked opens its chat (a chat picked twice gets both). A share made later opens the picker again. Before, the chat opened and the shares still waiting were never shown, and no later share opened the picker, although their tabs said they were sent to Ghostly.
+
+**Website**
+
+- On a desktop, the little ghost beside the pointer waits asleep until the pointer first moves, instead of gliding for about 5 seconds after every page load.
+
 ## 1.10.3
 
 ### Security

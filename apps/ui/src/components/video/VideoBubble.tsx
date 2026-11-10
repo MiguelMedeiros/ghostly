@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTabTrap } from "../../hooks/useDismiss";
@@ -8,7 +8,7 @@ import { downloadFile } from "../../lib/fileDownload";
 import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
-import { onCallWindowShown } from "../../lib/serviceWindows";
+import { onCallWindowShown, windowFilled } from "../../lib/serviceWindows";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -71,6 +71,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // Filling the window, it is over everything: Tab goes round its own controls, not to the chat under it.
   useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fullRef = useRef<HTMLButtonElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
@@ -103,9 +104,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // No poster from the sender: one made here from the first frame, once the file is in.
   useEffect(() => {
     if (meta?.poster || !ready || !playable || !visible || !platform) return;
-    let cancelled = false;
-    void localPoster(file.id, () => platform.getFile(file.id)).then((made) => { if (!cancelled && made) setLocal(made); });
-    return () => { cancelled = true; };
+    const left = new AbortController();
+    void localPoster(file.id, () => platform.getFile(file.id), left.signal).then((made) => { if (!left.signal.aborted && made) setLocal(made); });
+    return () => left.abort();
   }, [meta?.poster, ready, playable, visible, platform, file.id]);
 
   const unload = useCallback(() => {
@@ -131,8 +132,11 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     document.addEventListener("keydown", onKey);
     // A call that rings or starts is drawn under it: it makes way, as a contact's app drawn over the app does.
     const stop = onCallWindowShown(() => setTheater(false));
+    // One already in its small window stays over it.
+    const unfill = windowFilled();
     return () => {
       stop();
+      unfill();
       document.removeEventListener("keydown", onKey);
       void fullscreen(false).catch(() => {});
     };
@@ -196,6 +200,15 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       refusedRef.current();
     });
   }, [phase, src]);
+
+  // Out of the full window with the keyboard on the player: it goes to Full screen. WebKitGTK's player drops the
+  // control that had it as it shrinks back into the chat, and the focus fell to the page.
+  const filled = useRef(false);
+  useLayoutEffect(() => {
+    const left = filled.current && !theater;
+    filled.current = theater;
+    if (left && videoRef.current && document.activeElement === videoRef.current) (fullRef.current ?? rootRef.current)?.focus({ preventScroll: true });
+  }, [theater]);
 
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
@@ -322,6 +335,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             />
             {canTheater && (
               <button
+                ref={fullRef}
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}

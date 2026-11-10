@@ -288,8 +288,31 @@ describe("app revoke", () => {
     expect(existsSync(join(keys, "missing.pem"))).toBe(false);
     error(await ghostly(["app", "revoke", dir, "--key", key]), "usage", 2);
     error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--digest", first.digest as string]), "usage", 2);
-    expect((error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-revocation");
+    expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "usage", 2).message).toContain("--digest \"not-a-digest\"");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
+  }, 60_000);
+
+  it("refuses a bad --digest or --reason as a usage error naming the option, and signs no empty reason", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    const first = ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const digest = first.digest as string;
+    const revoke = async (...args: string[]) => error(await ghostly(["app", "revoke", dir, "--key", key, ...args]), "usage", 2).message;
+
+    expect(await revoke("--digest", "nope")).toBe("--digest \"nope\" is not a bundle digest (43 base64url characters, as app verify prints it)");
+    expect(await revoke("--digest", digest, "--digest", digest)).toBe(`--digest ${digest} is given twice`);
+    const many = Array.from({ length: 65 }, (_, i) => ["--digest", createHash("sha256").update(`version ${i}`).digest("base64url")]).flat();
+    expect(await revoke(...many)).toContain("--digest is given at most 64 times");
+    // Empty, blank, two lines or past 200 characters: never signed, never published.
+    expect(await revoke("--up-to", "1", "--reason", "")).toBe("--reason is one line of 1 to 200 characters, not \"\"");
+    expect(await revoke("--up-to", "1", "--reason", "   ")).toBe("--reason is one line of 1 to 200 characters, not \"   \"");
+    expect(await revoke("--up-to", "1", "--reason", "two\nlines")).toBe("--reason is one line of 1 to 200 characters, not \"two\\nlines\"");
+    expect(await revoke("--up-to", "1", "--reason", "x".repeat(600))).toBe("--reason is one line of 1 to 200 characters, not 600 characters");
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
+
+    // A reason of exactly 200 characters is still signed and published.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", digest, "--reason", "y".repeat(200)]))).toMatchObject({ digests: [digest], reason: "y".repeat(200), added: true, revocations: 1 });
   }, 60_000);
 
   it("refuses --up-to past the newest version unless --force, and publish never makes a version the list already stops", async () => {

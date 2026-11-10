@@ -9,6 +9,7 @@ import { profileDatabase } from "./profileData";
 import { linkedFilesDatabase } from "./apps/webFiles";
 import { pushPlatform } from "./wakePush";
 import { forgetGifSearches } from "./gifSearch";
+import { resetIncomingShare } from "./incomingShare";
 
 /** How long the peer may take to take things back from the network and stop, before the clear goes on without it. */
 export const CLEAR_ENGINE_MS = 15_000;
@@ -32,6 +33,8 @@ export const CLEAR_ENGINE_MS = 15_000;
  * All of it is the profile's this page runs as, should another tab switch to another profile meanwhile.
  */
 export function clearAllData(): Promise<void> {
+  // The shares this page holds are the profile's too: the reload after the clear would carry them to the next page.
+  resetIncomingShare();
   clearing ??= clearProfile(activeProfileId()).finally(() => { clearing = null; });
   return clearing;
 }

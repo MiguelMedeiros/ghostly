@@ -32,6 +32,15 @@ export function mintRefused(error:unknown):boolean{
  * those outputs is ever signed; new ones on the keyset it signs with now can be. cashu-ts says it in its own English,
  * which is never shown to a person.
  */
+/**
+ * The mint failed, and said nothing of the request: a server error (5xx, "internal error"), or no answer at all (a
+ * closed connection, cashu-ts's `NetworkError`). Unlike a refusal, it may work later. By name, as `mintRefused`.
+ */
+export function mintFailed(error:unknown):boolean{
+ if(!(error instanceof Error))return false;
+ const status=(error as {status?:unknown}).status;
+ return error.name==='NetworkError' || (error.name==='HttpResponseError' && typeof status==='number' && status>=500);
+}
 export function keysetRefused(error:unknown):boolean{
  return error instanceof Error && error.name==='StaleKeysetError' && mintRefused(error);
 }
@@ -80,16 +89,18 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   * A Take it back of it under way when the mint is asked, or started while it answers, is waited for: its swap makes
   * the ecash read spent before the ecash is back here. Ended with the ecash back, the payment was taken back; ended
   * with the mint saying the contact had it first, it is paid; ended any other way, this round's spent read proves
-  * nothing, and the next round asks again (nothing is sent meanwhile).
+  * nothing, and the next round asks again (nothing is sent meanwhile). One whose answer from the mint was lost is still
+  * under way while its redeem is written down: asked before whether the ecash is back, which is stored as it ends.
   */
  private async outcome(review:PaymentReview,prepared:CashuPrepared){
   const before=this.takingBack(review.id);
   const spent=await this.wallet.reviewedCashuSpent(prepared);
   const reclaim=this.takingBack(review.id) ?? before;
   const ended=await reclaim;
+  const unsettled=await this.wallet.cashuTakingBack(review.id);
   const back=await this.takenBack(review.id);
   if(back)return back;
-  if(reclaim && ended!=='settled')return {settled:false};
+  if(unsettled || (reclaim && ended!=='settled'))return {settled:false};
   return spent?{settled:true}:undefined;
  }
  /** Taken back, waiting for a Take it back under way first: the payment then ends failed, its sats back here. */

@@ -80,6 +80,8 @@ mod types;
 mod unread_count;
 #[cfg(desktop)]
 mod viewer;
+#[cfg(any(target_os = "macos", test))]
+mod web_process;
 
 use commands::AppState;
 #[cfg(mobile)]
@@ -140,6 +142,7 @@ macro_rules! commands {
             commands::bitcoind_rpc,
             commands::call_service,
             commands::close_service_windows,
+            commands::connection_service,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -303,6 +306,10 @@ pub fn run() {
     // On a Mac, the app menu with New Chat (Cmd+N) and Settings… (Cmd+,); Linux and Windows keep no menu bar.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_window::menu);
+    // The Ghostly window's page whose process WebKit ended: loaded again a few times, waiting longer each time, then the
+    // person is asked instead of a window that reloads forever (`web_process`).
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(web_process::ended);
 
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -367,6 +374,7 @@ pub fn run() {
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
+        .manage(clipboard::SecretSink::system())
         .manage(clipboard::PasteShelf::default())
         .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {

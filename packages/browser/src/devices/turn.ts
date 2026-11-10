@@ -166,6 +166,17 @@ export function tombstoneBelieved(record: DeviceRecord, tombstone: TurnRecord): 
   return key === active || key === record.handoff?.release?.to || key === record.handoff?.peer;
 }
 
+/**
+ * Whether a tombstone leaves this device with no exit but enrolling anew: it does not list this device, it is not
+ * believed, and this device holds no copy to start a set of its own from. It may be the real tombstone of a device the
+ * profile moved to while this one was off: that device sends no frame to a device it removed, and the device this one
+ * believes signs nothing any more. A forged one ends nothing either way: a `set-update` the believed device signs is
+ * still accepted (WISP 06 § Removing a device).
+ */
+function stranded(record: DeviceRecord, read: Pick<TurnRead, "result" | "record" | "listed">): boolean {
+  return read.result === "tombstone" && !!read.record && read.listed === false && !record.copy && !tombstoneBelieved(record, read.record);
+}
+
 /** The record's slots as the device state keeps them. */
 export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
   return record.slots.map((slot) => slot && { key: toBase64Url(slot.key), name: slot.name });
@@ -619,9 +630,10 @@ export class TurnKeeper {
           ? { activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) } : {};
         // Closed by a tombstone: `moving`, with the tombstone kept. When the device its stored record names active is not
         // listed there (or is this device), no `set-update` can ever be accepted: it is enrolled anew; unless it ran the
-        // profile and another slot closed its address, when it starts a set of its own instead.
+        // profile and another slot closed its address, when it starts a set of its own instead. So is one that holds no
+        // copy and is not listed in a tombstone it does not believe (`stranded`).
         const tombstoned = state === "moving" && read.result === "tombstone" && read.record && read.payload
-          ? { tombstone: toBase64Url(read.payload), ...(storedActiveListed(held.record, read.record) || (foreign && ran) ? {} : { reenroll: true as const }) } : {};
+          ? { tombstone: toBase64Url(read.payload), ...((storedActiveListed(held.record, read.record) || (foreign && ran)) && (ran || !stranded(held.record, read)) ? {} : { reenroll: true as const }) } : {};
         // A takeover that won: the device that stopped still holds `D`, so "New device secret" is offered (`rotate.ts`).
         // Kept by its key: names change, and two devices may have the same one.
         const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer) : undefined;
@@ -652,7 +664,10 @@ export class TurnKeeper {
         return { kind: "show", screen: action.screen, ...(device ? { device } : {}), ...(read.forced && !read.known ? { forced: true } : {}), read };
       }
       case "wait": return { kind: "wait", read };
-      case "stay": return { kind: "stay", offers: action.offers, ...(action.awaits ? { awaits: action.awaits } : {}), read };
+      case "stay":
+        // A `moving` device that waited for good without the offer (it read the tombstone before this rule) gets it now.
+        if (held.record.state === "moving" && !held.record.reenroll && stranded(held.record, read)) held.record = await this.store.amend(this.options.profile, { reenroll: true });
+        return { kind: "stay", offers: action.offers, ...(action.awaits ? { awaits: action.awaits } : {}), read };
       case "impossible": return { kind: "impossible", row, read };
     }
   }

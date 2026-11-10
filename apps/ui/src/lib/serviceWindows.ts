@@ -68,6 +68,34 @@ export function callWindowOn(): boolean {
   return callWindows > 0;
 }
 
+/*
+ * A video filling the window (Desktop on Linux) is drawn over everything. A call already in its small window when it
+ * started stays over it: its End call and Mute in reach, a video call's picture in sight.
+ */
+let filling = 0;
+const fillingWatchers = new Set<() => void>();
+
+/** A video fills the window, from its effect: returns its end. */
+export function windowFilled(): () => void {
+  filling += 1;
+  for (const watch of [...fillingWatchers]) watch();
+  return () => {
+    filling -= 1;
+    for (const watch of [...fillingWatchers]) watch();
+  };
+}
+
+/** For `useSyncExternalStore`: `watch` is called when a video starts or stops filling the window. */
+export function watchWindowFilled(watch: () => void): () => void {
+  fillingWatchers.add(watch);
+  return () => { fillingWatchers.delete(watch); };
+}
+
+/** Whether a video fills the window now. */
+export function windowFilledNow(): boolean {
+  return filling > 0;
+}
+
 const HOST_ERRORS: Record<string, TranslationKey> = {
   unreachable: "services.window.notAnswering",
   timeout: "services.window.tooSlow",

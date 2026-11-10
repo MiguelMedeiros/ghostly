@@ -376,13 +376,17 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
 
 /**
  * What a bundle carries of a profile's device set (WISP 06 § A backup restored where a device set exists): the secret,
- * the set and the turn, and the takeover count, never the device signing key, the stored packet or the state of this
- * device. Null for a profile with no device set, and where the device state cannot be read.
+ * the set and the turn, the takeover count and the slot active as this device knows it (its own, when it is the active
+ * one), never the device signing key, the stored packet or the state of this device. Null for a profile with no device
+ * set, and where the device state cannot be read.
  */
 async function bundleDevicesOf(database: string): Promise<BundleDevices | null> {
   const record = await readDeviceRecord(database).catch(() => null);
   if (!record?.d) return null;
-  return { d: record.d, set: record.deviceSet.map((slot) => slot && { key: slot.key, name: slot.name }), turn: record.turn, takeovers: record.takeovers };
+  const set = record.deviceSet.map((slot) => slot && { key: slot.key, name: slot.name });
+  const known = record.state === "active" ? record.ownSlot : record.activeSlot;
+  const active = known !== undefined && set[known] ? known : undefined;
+  return { d: record.d, set, turn: record.turn, takeovers: record.takeovers, ...(active !== undefined ? { active } : {}) };
 }
 
 /** `writeProfileBackup` into memory: for a profile small enough to hold whole (tests, a bundle sent to S3). */

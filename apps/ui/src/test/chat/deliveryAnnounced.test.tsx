@@ -24,13 +24,13 @@ const wait = async (ms: number) => {
   for (let left = ms; left > 0; left -= 100) { act(() => { vi.advanceTimersByTime(Math.min(100, left)); }); await flush(); }
 };
 
-function setup(messages: readonly Announceable[], language?: Language) {
-  const view = renderApp(<MessageAnnouncer chat="c" messages={messages} nameOf={nameOf} />, language ? { language } : undefined);
+function setup(messages: readonly Announceable[], language?: Language, name = nameOf) {
+  const view = renderApp(<MessageAnnouncer chat="c" messages={messages} nameOf={name} />, language ? { language } : undefined);
   heard = [];
   observer = new MutationObserver(() => { const text = region().textContent ?? ""; if (text) heard.push(text); });
   observer.observe(region(), { childList: true, characterData: true, subtree: true });
   return async (next: readonly Announceable[], chat = "c") => {
-    view.rerender(<MessageAnnouncer chat={chat} messages={next} nameOf={nameOf} />);
+    view.rerender(<MessageAnnouncer chat={chat} messages={next} nameOf={name} />);
     await flush();
   };
 }
@@ -54,7 +54,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     const update = setup(start);
     await update(turned(start, "m1", "failed"));
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
-    expect(heard).toEqual(["Not sent: see you at noon"]);
+    expect(heard).toEqual(["Your message “see you at noon” was not sent"]);
     expect(region()).toHaveAttribute("aria-live", "polite");
     expect(region()).toHaveTextContent("");
   });
@@ -64,7 +64,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     const update = setup(start);
     await update(turned(start, "m1", "waiting"));
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
-    expect(heard).toEqual(["Waiting for your contact to be online: are you there?"]);
+    expect(heard).toEqual(["Your message “are you there?” is waiting for your contact to be online"]);
   });
 
   it("one I just sent that fails at once is said too", async () => {
@@ -72,7 +72,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     await update([...HISTORY, mine("m1", "hello", "sending")]);
     await update([...HISTORY, mine("m1", "hello", "failed")]);
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
-    expect(heard).toEqual(["Not sent: hello"]);
+    expect(heard).toEqual(["Your message “hello” was not sent"]);
   });
 
   it("the chat's texts that were not sent before it opened are not said", async () => {
@@ -125,7 +125,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     const update = setup(start);
     await update(turned(turned(turned(start, "m1", "waiting"), "m2", "waiting"), "m3", "failed"));
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS * 3);
-    expect(heard).toEqual(["Not sent: c", "2 messages waiting for your contact to be online"]);
+    expect(heard).toEqual(["Your message “c” was not sent", "2 messages waiting for your contact to be online"]);
   });
 
   it("offline, a text that waits is not said (it waits for this device): one not sent still is", async () => {
@@ -134,7 +134,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     const update = setup(start);
     await update(turned(turned(start, "m1", "waiting"), "m2", "failed"));
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS * 2);
-    expect(heard).toEqual(["Not sent: b"]);
+    expect(heard).toEqual(["Your message “b” was not sent"]);
   });
 
   it("a contact's message, a file of mine and a chat's note are not delivery news", async () => {
@@ -157,7 +157,7 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     for (const m of texts) now = turned(now, m.id, "failed");
     await update(now);
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
-    expect(heard).toEqual(["Não enviada: oi", "3 mensagens não enviadas"]);
+    expect(heard).toEqual(["Sua mensagem “oi” não foi enviada", "3 mensagens não enviadas"]);
   });
 
   it("a long chat: a text failing reads my texts still on their way and the new rows, not the whole history", async () => {
@@ -171,7 +171,27 @@ describe("a text of mine that needs me, read out to a screen reader", () => {
     await update(counted(turned([...start, { id: "p-new", sender: "peer", text: "hey" }], "m1", "failed")));
     expect(reads).toBeLessThan(50);
     await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS * 2);
-    expect(heard).toEqual(["Not sent: late", "Alice: hey"]);
+    expect(heard).toEqual(["Your message “late” was not sent", "Alice: hey"]);
+  });
+
+  // A contact's name is its own (sanitizeNick keeps "Not sent"): with the mark's words in the name's place, my text
+  // not sent and that contact's text were the same line, so it could put words of "mine" in the live region.
+  it.each([
+    ["en", "Not sent", "failed"],
+    ["pt", "Não enviada", "failed"],
+    ["en", "Waiting for your contact to be online", "waiting"],
+  ] as const)("%s: a contact named %j is not heard as my text %s", async (language, name, delivery) => {
+    const start = [...HISTORY, mine("m1", "see you at noon", "sent")];
+    const update = setup(start, language, () => name);
+    await update(turned(start, "m1", delivery));
+    await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
+    await update([...turned(start, "m1", delivery), { id: "p1", sender: "peer", text: "see you at noon" }]);
+    await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
+    expect(heard).toHaveLength(2);
+    expect(heard[1]).toBe(`${name}: see you at noon`);
+    expect(heard[0]).not.toBe(heard[1]);
+    // Nor any other name: my line does not open with a name's place before the text.
+    expect(heard[0]).not.toMatch(/^[^“”"]*: see you at noon$/);
   });
 
   it("another chat opened: the last one's pending step is not said in it", async () => {

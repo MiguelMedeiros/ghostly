@@ -246,18 +246,42 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
  * (all of it while a dial has not opened), in its UDX stream, and in the writes that UDX stream has handed to its native
  * side, each held until the far end acks it (udx-native's `_wreqs`; its buffers are not copied). That far end sets the
  * pace, and dht-relay 0.4.3 writes on whatever the stream says: unbounded, a far peer that stops acking has the relay
- * hold everything its client sends.
+ * hold everything its client sends. A stream is weighed after every write, so this costs the same however much it holds.
  */
 const unsent = stream => {
   let bytes = stream._writableState?.buffered ?? 0
   const raw = stream.rawStream
   if (!raw) return bytes
-  bytes += raw._writableState?.buffered ?? 0
-  for (const write of raw._wreqs ?? []) {
-    if (write.buffer) bytes += write.buffer.byteLength
-    else if (write.buffers) for (const buffer of write.buffers) bytes += buffer.byteLength
-  }
+  return bytes + (raw._writableState?.buffered ?? 0) + (raw._unacked ?? 0)
+}
+
+/**
+ * What each UDX stream has handed to its native side and not had acked yet (`_unacked`), counted as each write goes down
+ * and as its ack comes: going over its writes after each one cost the relay the square of them. UDX batches small writes
+ * while its far end does not ack, and 100,000 writes of 16 bytes had it look at 747 million buffers, the whole relay
+ * stalled for 0.4 s. udx-native hands its native side `_onack` as each stream is made, so the prototype's is replaced
+ * here, before the relay's node makes any. An ack frees exactly what its write held (its `buffer` or `buffers`, which
+ * udx-native drops then); a write the native side refuses (not connected) throws before it is counted.
+ */
+const UDXStream = createRequire(hyperdht.resolve('dht-rpc'))('udx-native/lib/stream.js')
+const writeBytes = write => {
+  if (write.buffer) return write.buffer.byteLength
+  let bytes = 0
+  if (write.buffers) for (const buffer of write.buffers) bytes += buffer.byteLength
   return bytes
+}
+const handDown = UDXStream.prototype._writev
+UDXStream.prototype._writev = function (buffers, cb) {
+  let bytes = 0
+  for (const buffer of buffers) bytes += buffer.byteLength
+  this._unacked = (this._unacked ?? 0) + bytes
+  try { return handDown.call(this, buffers, cb) } catch (error) { this._unacked -= bytes; throw error }
+}
+const acked = UDXStream.prototype._onack
+UDXStream.prototype._onack = function (id) {
+  const write = this._wreqs[id]
+  if (write) this._unacked = Math.max(0, (this._unacked ?? 0) - writeBytes(write))
+  return acked.call(this, id)
 }
 
 /**
@@ -412,6 +436,43 @@ HandshakeProxy.prototype.recv = function (payload) {
   this._received = true
   return recvHandshake.call(this, payload)
 }
+
+/**
+ * A custodial client (it hands the relay its secret key) runs no handshake of its own: HyperDHT runs it on the relay and
+ * asks the client's firewall whether to take each connection, and dht-relay 0.4.3 waits for that answer with no end.
+ * HyperDHT holds the handshake, its Noise state and the far peer's request until it comes, so a client that never
+ * answers would have the relay hold every handshake anyone sent its key. Its answer now counts as the handshakes above
+ * do: denied after `handshakeMs`, and one asked for only within the client's share of `handshakes` (a server's quarter,
+ * all servers' together leaving a quarter to its dials), else denied without asking.
+ */
+const { FirewallProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'firewall-proxy.js'))
+function firewallCrowded(firewall, limits) {
+  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  if (firewall._requests.size >= quarter) return 'listen share'
+  let waiting = 0
+  for (const server of firewall._node._servers.values()) waiting += server._firewall?._requests.size ?? 0
+  return waiting >= limits.handshakes - quarter ? 'incoming' : null
+}
+Object.defineProperty(FirewallProxy.prototype, '_deny', {
+  // dht-relay sets its own `_deny` in the constructor; this keeps a bounded one in its place.
+  set(deny) {
+    Object.defineProperty(this, '_deny', {
+      value: (...args) => {
+        const limits = this._node._limits ?? DEFAULT_LIMITS
+        const why = firewallCrowded(this, limits)
+        if (why) {
+          this._node._refused?.('refused handshake', why)
+          return Promise.resolve(true)
+        }
+        const answer = deny(...args)
+        // deny() has just put its request last in the map: answered as a deny once the wait is over.
+        const id = [...this._requests.keys()].at(-1)
+        const timer = setTimeout(() => this._requests.get(id)?.(true), limits.handshakeMs)
+        return answer.finally(() => clearTimeout(timer))
+      },
+    })
+  },
+})
 
 /**
  * The address a client counts against. Behind Cloudflare (`cloudflare`), `CF-Connecting-IP`, which its edge writes

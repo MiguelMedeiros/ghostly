@@ -621,7 +621,9 @@ describe("real money and test money, two wallets apart", () => {
     expect(tab("mainnet")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
     expect(tab("testnet")).toHaveFocus();
-    // Tab leaves the tablist for the network's deck, on its chosen card.
+    // Tab leaves the tablist for the network's total over the deck, then the deck, on its chosen card.
+    await user.tab();
+    expect(screen.getByTestId("wallet-total-bitcoin")).toHaveFocus();
     await user.tab();
     expect(screen.getByTestId("wallet-card-cashu-testnet")).toHaveFocus();
   });

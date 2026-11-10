@@ -12,9 +12,11 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "notSent": "Il tuo messaggio «{{text}}» non è stato inviato",
     "notSentCount": "{{count}} messaggi non inviati",
     "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate",
     "rowMoved": "Ora al posto {{place}} di {{count}}",
+    "waiting": "Il tuo messaggio «{{text}}» è in attesa che il tuo contatto sia online",
     "waitingCount": "{{count}} messaggi in attesa che il tuo contatto sia online"
   },
   "audio": {
@@ -318,12 +320,28 @@
     "off": "Disattivato in questa chat: attiva un metodo in Accetta",
     "offOrOld": "Il tuo contatto ha disattivato i pagamenti in questa chat, o deve aggiornare Ghostly"
   },
+  "pictureHiddenIp": "Non mostrata con Nascondi il mio IP attivo",
   "pinned": {
     "bar": "Messaggio fissato",
     "info": "Un messaggio fissato per chat, visibile a tutti. Uno nuovo sostituisce il precedente. In una community, solo l’admin fissa.",
     "notHere": "Non è su questo dispositivo",
     "pin": "Fissa",
     "unpin": "Non fissare"
+  },
+  "presence": {
+    "availability": {
+      "away": "Assente",
+      "busy": "Occupato",
+      "dnd": "Non disturbare"
+    },
+    "dot": {
+      "away": "Online, assente",
+      "busy": "Online, occupato",
+      "dnd": "Online, non disturbare",
+      "idle": "Online, inattivo",
+      "online": "Online"
+    },
+    "status": "Stato: {{status}}"
   },
   "preview": {
     "arkAddress": "Indirizzo Ark",

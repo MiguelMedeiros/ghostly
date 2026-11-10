@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { connect, expect, link, test, type Peer } from "../support/fixtures";
 import { smallTargets } from "../support/touchTargets";
 
@@ -304,7 +304,54 @@ test("on a phone the device notice's Switch back and close are 44 px targets", {
   await bob.page.getByTestId("call-hang-up").click();
 });
 
-test("on a phone the notice that the contact shares their screen is clear of your own picture", { tag: ["@feature:calls.video", "@feature:calls.screen-share", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+/** A notice's words: how much of them is cut, and whether the notice stays on the screen. */
+const wholeText = (notice: Locator) => notice.evaluate((el) => {
+  const words = el.querySelector("span")!, box = el.getBoundingClientRect();
+  return { cut: words.scrollWidth - words.clientWidth, inside: box.left >= 0 && box.right <= document.documentElement.clientWidth };
+});
+
+/**
+ * On a 320 px phone a call's notices were cut to one line: "Fake Audio Input 1 desconectado. Usand…" lost what the call
+ * uses now (98 px of it), and "Contacto · … está compartiendo su p…" what is shared. They wrap onto another line now.
+ */
+test("on a 320 px phone a call's device and screen-share notices show their whole sentence", { tag: ["@feature:calls.devices", "@feature:calls.screen-share", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 568 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await bob.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "es" }));
+  });
+  await bob.page.reload();
+  await expect(bob.page.locator("html")).toHaveAttribute("lang", /^es/);
+  await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+  await bob.page.getByTestId("call-audio").click();
+  await alice.page.getByTitle("Accept audio call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  const first = await bob.page.evaluate(async () => (await navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === "audioinput" && d.label === "Fake Audio Input 1")!.deviceId);
+  await bob.page.getByTestId("call-devices").click();
+  await bob.page.locator(`[data-testid=call-device-audioinput][data-device-id="${first}"]`).click();
+  await expect(bob.page.getByTestId("call-devices-menu")).toHaveCount(0);
+  const notice = bob.page.getByTestId("call-device-notice");
+  await unplug(bob, first);
+  await expect(notice).toHaveAttribute("data-type", "lost");
+  expect(await wholeText(notice)).toEqual({ cut: 0, inside: true });
+  await unplug(bob, null);
+  await expect(notice).toHaveAttribute("data-type", "back");
+  expect(await wholeText(notice)).toEqual({ cut: 0, inside: true });
+  await notice.getByRole("button", { name: "Cerrar" }).click();
+
+  await alice.page.getByTestId("share-screen").click();
+  const sharing = bob.page.getByTestId("call-sharing");
+  await expect(sharing).toHaveText(/está compartiendo su pantalla$/);
+  expect(await wholeText(sharing)).toEqual({ cut: 0, inside: true });
+  await bob.page.getByTestId("call-hang-up").click();
+  await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+});
+
+test("on a phone the notice that the contact shares their screen is clear of your own picture",{ tag: ["@feature:calls.video", "@feature:calls.screen-share", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const alice = await peer("alice");
   const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
   await link(alice, bob);

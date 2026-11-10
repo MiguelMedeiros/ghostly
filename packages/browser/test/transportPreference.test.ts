@@ -34,6 +34,9 @@ it.each([[false, "missing"], [false, "failed"], [false, "pending"], [true, "miss
     node.setActiveLink({ linkId: row.id });
     await vi.waitFor(() => expect(current().availableTransports).toHaveLength(3));
     if (discovery === "failed") await vi.waitFor(() => expect(current().discoveryError).toContain("discovery publication unavailable"));
+    // A chosen transport first: on an Automatic chat, Iroh with Fallback off is what the Fallback switch sends (it stays
+    // Automatic, ghostly#6125), and this test is about saving choices without a handshake.
+    await node.setChatTransport({ linkId: row.id, transport: "hyperdht/1" });
     for (const preferred of ["iroh/1", "hyperdht/1", "webrtc/1"] as PairedTransport[]) {
       for (const fallback of [false, true]) {
         await node.setTransportPreference({ linkId: row.id, preferred, fallback });

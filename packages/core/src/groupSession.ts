@@ -45,6 +45,13 @@ export const GROUP_LIMITS = {
   /** Frames waiting for an epoch (or its secret) that has not arrived yet. */
   waiting: 64,
   waitingBytes: 1024 * 1024,
+  /**
+   * Of those, and of the edits waiting, the ones signed by a key no recent commit names (a newcomer whose admission has
+   * not come yet, or a key anyone can make up): the newest only, they go first, and they never say I am behind.
+   */
+  waitingStrangers: 8,
+  /** How long a frame or edit waits: then it is dropped, and a later catch-up brings it again if it was real. */
+  waitingMs: 120_000,
   /** Epoch secrets kept: past this, older epochs cannot be read or handed on. */
   secrets: 32,
   /** Secrets in one `group-secrets` frame: apps from before revision 0.9 drop a frame with more. */
@@ -319,21 +326,32 @@ const ANSWER_WINDOW_MS = 5_000;
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
  * One not taken is neither seen nor kept nor passed on, so a sync still names it (`miss`) and a catch-up hands it again.
- * What another member hands on in its answer to my sync is not counted: it took each at its author's pace already, and
- * a catch-up holds many.
+ * What another member hands on in its answer to my sync (or what waited for a secret) is counted too, and may run the
+ * author's allowance below nothing by one answer's worth (`AUTHOR_OWED`): a catch-up holds more than a burst, and lands
+ * at once; the author's next frames wait until the pace pays it back. Not counted, a member at the other end of my sync
+ * handed on all a second member signed, at any rate.
  */
 const AUTHOR_BURST = { frames: 2 * GROUP_LIMITS.outlog, bytes: 2 * GROUP_LIMITS.outlogBytes };
+/** How far below nothing an answer may run an author's allowance: all its messages one answer hands on, or edits. */
+const AUTHOR_OWED = {
+  messages: { frames: GROUP_LIMITS.relay, bytes: GROUP_LIMITS.relayBytes },
+  edits: { frames: GROUP_LIMITS.handOnEdits, bytes: GROUP_LIMITS.relayEditBytes },
+} as const;
 class AuthorPace {
   private frames: number = AUTHOR_BURST.frames;
   private bytes: number = AUTHOR_BURST.bytes;
   private at: number | undefined;
 
-  take(bytes: number, now: number): boolean {
+  constructor(private readonly owed: { frames: number; bytes: number }) {}
+
+  /** `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`). */
+  take(bytes: number, now: number, answer = false): boolean {
     const elapsed = Math.max(0, now - (this.at ?? now)) / GROUP_LIMITS.messageWindowMs;
     this.at = now;
     this.frames = Math.min(AUTHOR_BURST.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
     this.bytes = Math.min(AUTHOR_BURST.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
-    if (this.frames < 1 || this.bytes < bytes) return false;
+    const floor = answer ? this.owed : { frames: 0, bytes: 0 };
+    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) return false;
     this.frames -= 1; this.bytes -= bytes;
     return true;
   }
@@ -490,6 +508,24 @@ function isMessageFrame(v: unknown): v is GroupMessageFrame {
     typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
 
+/** A frame waiting for its epoch or secret: who handed it over, since when, and whether no recent commit names its key. */
+interface Waiting<F> { from: string; frame: F; at: number; stranger: boolean }
+
+/**
+ * A waiting list past `max` places, past `waitingStrangers` of keys no recent commit names, or past its bytes (`heavy`):
+ * which one goes, or -1. Such a key's oldest first, else the oldest of the author holding the most places, so one
+ * author's frames for an epoch that never comes push out its own, not another member's.
+ */
+function overflow(list: readonly Waiting<{ s: string }>[], max: number, heavy = false): number {
+  const strangers = list.filter(w => w.stranger).length;
+  if (!list.length || (!heavy && list.length <= max && strangers <= GROUP_LIMITS.waitingStrangers)) return -1;
+  if (strangers) return list.findIndex(w => w.stranger);
+  const places = new Map<string, number>();
+  for (const w of list) places.set(w.frame.s, (places.get(w.frame.s) ?? 0) + 1);
+  const most = Math.max(...places.values());
+  return list.findIndex(w => places.get(w.frame.s) === most);
+}
+
 /** The chain cut in consecutive pieces of at most `chainPiece` commits and `chainPieceBytes`: a roster of 32 makes a commit ~2.4 KB. */
 export function chainPieces(chain: GroupCommit[]): GroupCommit[][] {
   const pieces: GroupCommit[][] = [];
@@ -507,10 +543,15 @@ export class GroupSession {
   readonly state: GroupState;
   private readonly identity;
   /** Frames for an epoch, or a secret, not here yet. In memory only. */
-  private waiting: { from: string; frame: GroupMessageFrame }[] = [];
+  private waiting: Waiting<GroupMessageFrame>[] = [];
   private waitingBytes = 0;
   /** Edits for an epoch, or a secret, not here yet: tried again with the frames above. In memory only. */
-  private waitingEdits: { from: string; frame: GroupEditFrame }[] = [];
+  private waitingEdits: Waiting<GroupEditFrame>[] = [];
+  /**
+   * Members one of whose frames waited `waitingMs` for an epoch that never came → when it was dropped: until my chain
+   * moves, theirs waiting say I am behind no more (`behind`). In memory only.
+   */
+  private waitedInVain = new Map<string, number>();
   private pendingCommits = new Map<number, GroupCommitFrame>();
   /** When each member was last asked to catch me up, so a stream of unreadable frames is one question, not a loop. */
   private asked = new Map<string, number>();
@@ -1295,8 +1336,15 @@ export class GroupSession {
     });
   }
 
-  /** Something is missing here: the current epoch's secret, a commit ahead of my chain, or the epoch of frames waiting. */
-  private get behind(): boolean { return !this.state.secrets[this.epoch] || this.waiting.length > 0 || this.pendingCommits.size > 0; }
+  /**
+   * Something is missing here: the current epoch's secret, a commit ahead of my chain, or the epoch of a member's frames
+   * waiting, unless one of that member's waited in vain since my chain last moved (`waitedInVain`).
+   */
+  private get behind(): boolean {
+    this.expireWaiting();
+    const member = (w: Waiting<GroupMessageFrame>) => !w.stranger && !((this.waitedInVain.get(w.frame.s) ?? -Infinity) >= this.chainMovedAt);
+    return !this.state.secrets[this.epoch] || this.waiting.some(member) || this.pendingCommits.size > 0;
+  }
 
   private async resealBehind(): Promise<void> {
     const alone = new Set(this.state.alone ?? []);
@@ -1693,7 +1741,6 @@ export class GroupSession {
     if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
     const now = this.now(), answer = (this.answering.get(from) ?? 0) > now;
-    if (answer) this.answering.set(from, now + ANSWER_WINDOW_MS);
     if (relayed && (!rosterHas(this.roster, from) || !this.handsOn(raw.s))) return;
     // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
     // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
@@ -1704,6 +1751,8 @@ export class GroupSession {
     // signature time, ~0.19 s of 256 messages at 1x CPU, ~1.1 s at 6x (agents#1656). No `xs`, or one that fails: `sig`.
     const signedWhole = relayed && this.wholeSigned(raw);
     if (!signedWhole && !verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
+    // A frame of the answer keeps it open (it goes a slice at a time); a copy I hold already, or one no member signed, not.
+    if (answer) this.answering.set(from, now + ANSWER_WINDOW_MS);
     if (raw.e > this.epoch) { this.park(from, raw); return; }
     // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
     if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
@@ -1719,8 +1768,8 @@ export class GroupSession {
       if (this.provisional.has(own)) return;
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
     }
-    // At its author's pace, once it is known to be theirs, unless a member hands it on in its answer to my sync.
-    if (!(relayed && (answer || waited)) && !this.paced(this.messagePace, raw.s, frameBytes(raw))) return;
+    // At its author's pace, once it is known to be theirs; handed on in an answer to my sync, one catch-up past it.
+    if (!this.paced(this.messagePace, raw.s, frameBytes(raw), relayed && (answer || waited))) return;
     // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
     const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
     if (raw.o !== undefined && !first) return;
@@ -1788,7 +1837,7 @@ export class GroupSession {
     if (!commit || !rosterHas(commit.m, raw.s)) return;
     // At its author's pace (`AuthorPace`), as a message is; one I hold already (another hub's copy) costs nothing.
     const held = (this.state.relayEdits ?? []).some(f => f.s === raw.s && f.e === raw.e && f.n === raw.n && f.v >= raw.v);
-    if (!held && !(raw.s !== from && (this.awaitsAnswer(from) || waited)) && !this.paced(this.editPace, raw.s, raw.c.length + 400)) return;
+    if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
     // most members of that epoch reach the author only through whoever is a hub now.
@@ -1824,15 +1873,17 @@ export class GroupSession {
 
   private parkEdit(from: string, frame: GroupEditFrame): void {
     if (frame.e > this.epoch + GROUP_LIMITS.secrets) return;
-    this.waitingEdits = [...this.waitingEdits.filter(w => !(w.frame.s === frame.s && w.frame.e === frame.e && w.frame.n === frame.n && w.frame.v <= frame.v)), { from, frame }]
-      .slice(-GROUP_LIMITS.outlog);
+    this.expireWaiting();
+    this.waitingEdits = [...this.waitingEdits.filter(w => !(w.frame.s === frame.s && w.frame.e === frame.e && w.frame.n === frame.n && w.frame.v <= frame.v)),
+      { from, frame, at: this.now(), stranger: this.stranger(frame.s) }];
+    for (let i; (i = overflow(this.waitingEdits, GROUP_LIMITS.outlog)) >= 0;) this.waitingEdits.splice(i, 1);
     this.ask(from);
   }
 
-  private paced(paces: Map<string, AuthorPace>, author: string, bytes: number): boolean {
+  private paced(paces: Map<string, AuthorPace>, author: string, bytes: number, answer: boolean): boolean {
     let pace = paces.get(author);
-    if (!pace) paces.set(author, pace = new AuthorPace());
-    return pace.take(bytes, this.now());
+    if (!pace) paces.set(author, pace = new AuthorPace(paces === this.editPace ? AUTHOR_OWED.edits : AUTHOR_OWED.messages));
+    return pace.take(bytes, this.now(), answer);
   }
 
   private wholeSigned(raw: GroupMessageFrame): boolean {
@@ -1921,11 +1972,29 @@ export class GroupSession {
 
   private park(from: string, frame: GroupMessageFrame): void {
     if (frame.e > this.epoch + GROUP_LIMITS.secrets) return;
+    this.expireWaiting();
     if (this.waiting.some(w => w.frame.s === frame.s && w.frame.e === frame.e && w.frame.n === frame.n)) return;
-    this.waiting.push({ from, frame });
+    // Its signature says only that its key wrote it, and anyone can make a key; a member can sign frames for an epoch
+    // that never comes: neither takes the places of another member's frames (`overflow`), nor waits for good.
+    this.waiting.push({ from, frame, at: this.now(), stranger: this.stranger(frame.s) });
     this.waitingBytes += frame.c.length;
-    while (this.waiting.length > GROUP_LIMITS.waiting || this.waitingBytes > GROUP_LIMITS.waitingBytes) this.waitingBytes -= this.waiting.shift()!.frame.c.length;
+    for (let i; (i = overflow(this.waiting, GROUP_LIMITS.waiting, this.waitingBytes > GROUP_LIMITS.waitingBytes)) >= 0;) this.waitingBytes -= this.waiting.splice(i, 1)[0].frame.c.length;
     this.ask(from);
+  }
+
+  /** Not in the roster, nor in any of the last `secrets` commits: a key whose frames may be no member's. */
+  private stranger(key: string): boolean {
+    return !this.state.chain.slice(-GROUP_LIMITS.secrets).some(c => rosterHas(c.m, key));
+  }
+
+  /** Frames and edits that waited `waitingMs`: dropped, and a member's noted (`waitedInVain`). */
+  private expireWaiting(): void {
+    const now = this.now(), stale = (w: Waiting<unknown>) => now - w.at >= GROUP_LIMITS.waitingMs;
+    if (!this.waiting.some(stale) && !this.waitingEdits.some(stale)) return;
+    for (const w of this.waiting) if (stale(w) && !w.stranger) this.waitedInVain.set(w.frame.s, now);
+    this.waiting = this.waiting.filter(w => !stale(w));
+    this.waitingBytes = this.waiting.reduce((sum, w) => sum + w.frame.c.length, 0);
+    this.waitingEdits = this.waitingEdits.filter(w => !stale(w));
   }
 
   /** Whoever sent something I cannot read yet is ahead of me, or holds a secret I lack: ask, but not in a loop. */

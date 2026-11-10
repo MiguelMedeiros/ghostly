@@ -17,6 +17,7 @@
     "recent": "الأخيرة",
     "symbols": "الرموز"
   },
+  "chooseFiles": "اختر ملفات",
   "closeCamera": "إغلاق الكاميرا",
   "dhtTooLong": "أطول من أن يُرسل عبر DHT ({{bytes}} من {{max}} بايت). اختصره أو اتصل مباشرة؛ المسودة محفوظة.",
   "document": "مستند",
@@ -79,6 +80,7 @@
   "services": "الخدمات المشتركة",
   "servicesNeedApp": "يتطلب إضافة Ghostly للمتصفح أو تطبيق سطح المكتب",
   "servicesShared": "{{count}} مشتركة في هذه الدردشة",
+  "shareWaitsForEdit": "ما شاركته يُضاف عند انتهاء هذا التعديل.",
   "sharedTextFile": "نص مشارك",
   "skinTone": "لون البشرة",
   "takePhoto": "التقاط صورة",

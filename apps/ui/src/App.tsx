@@ -20,11 +20,13 @@ import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { useWakeOnReturn } from "./hooks/useWakeOnReturn";
+import { useChatRedial } from "./hooks/useChatRedial";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
+import { useStayConnected } from "./lib/stayConnected";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
@@ -36,6 +38,9 @@ import { groupRouteId } from "./lib/groups";
 import { sessionPeerKey } from "./lib/storage";
 import { useEngineValue } from "./lib/engineState";
 import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
+import { usePresence } from "./hooks/useOwnStatus";
+import { useIsLocked } from "./contexts/LockScreenContext";
+import { StatusPickerHost } from "./components/StatusPicker";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -97,7 +102,7 @@ function useProfileNameSync() {
  * native connections. From here, not from each page: a chat kept loaded off screen (on a call, running a mini-app) is
  * the one on screen again when it comes back, after a group or another chat let go of theirs.
  */
-function useOnScreenLink() {
+function useOnScreenLink(): string | null {
   const { pathname } = useLocation();
   const session = chatRouteSession(pathname);
   const groupId = groupRouteId(pathname);
@@ -117,6 +122,7 @@ function useOnScreenLink() {
     if (told.current) void engine.call("setActiveLink", { linkId: null }).catch(() => {});
     told.current = null;
   }, []);
+  return onScreen;
 }
 
 function useLoadedChats() {
@@ -218,10 +224,16 @@ export function App() {
   // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
   // file is on its way.
   useComputerAwake();
+  // Android: chats and groups stay connected with the app out of sight, while the person keeps it so.
+  useStayConnected();
   // Hide my IP from contacts turned on: the contacts' apps opened with it off close.
   useServiceWindowsHideIp();
+  // Whether the person is here, for the contacts who see it (WISP 401 § Presence and status).
+  usePresence(useIsLocked());
   const chats = useLoadedChats();
-  useOnScreenLink();
+  const onScreen = useOnScreenLink();
+  // The chat on screen that is not live keeps dialling by itself: nobody has to press Reconnect for it.
+  useChatRedial(onScreen?.startsWith("group:") ? null : onScreen);
   const mainRef = useRef<HTMLElement>(null);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
@@ -262,6 +274,7 @@ export function App() {
         </main>
         <InstallSteps />
         <TranslateDownloadFailure />
+        <StatusPickerHost />
       </div>
     );
   }
@@ -291,6 +304,7 @@ export function App() {
       {tabs && <MobileTabBar />}
       <InstallSteps />
       <TranslateDownloadFailure />
+      <StatusPickerHost />
     </div>
   );
 }

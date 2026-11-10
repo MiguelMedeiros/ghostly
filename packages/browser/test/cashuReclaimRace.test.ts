@@ -2,12 +2,13 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, engineText, type PaymentAdapter, type PaymentReview } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
-import { STORES, transact } from "../src/shared/idb";
+import { STORES, committed, store, transact, wrap } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
-import type { CashuPrepared, CashuWallet } from "../src/engine/wallet";
-import type { StoredLink, StoredPayment } from "../src/shared/types";
+import { openRow } from "../src/engine/sealedRows";
+import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src/engine/wallet";
+import type { PendingSwap, StoredLink, StoredPayment } from "../src/shared/types";
 // covers: payments.cashu.reclaim, payments.chat.reconcile
 
 /**
@@ -156,6 +157,70 @@ describe("Take it back racing a status check of the same payment", () => {
     expect(node["desk"].payment(payment.id)?.state).toBe("settled");
     expect(node["desk"].payment("req-1")?.state).toBe("settled");
     expect((await intentRepository.get(review.id))?.review.state).toBe("settled");
+  });
+});
+
+/**
+ * Take it back whose swap the mint made (its inputs read spent) while its answer was lost: the wallet keeps the redeem
+ * written down for `pollSwaps` and throws `SwapUnsettledError`, so the desk's own take-back is over.
+ */
+async function unsettledTakeBack(wallet: CashuWallet, mint: { spent: boolean }) {
+  let written!: PendingSwap;
+  const redeem = vi.spyOn(wallet, "receiveToken").mockImplementation(async (token, kind, memo, options) => {
+    mint.spent = true;
+    const record = options!.payment!(9, TEST_MINT);
+    written = { id: `swap-${crypto.randomUUID()}`, mint: TEST_MINT, kind: "receive", swap: { inputs: [] } as never, createdAt: Date.now(), attemptEndedAt: Date.now(), token,
+      tx: { id: `tx-${crypto.randomUUID()}`, mint: TEST_MINT, kind: kind!, amount: 9, fee: 1, note: memo, timestamp: Date.now() } as never, payment: record };
+    await wallet["putSwap"](written);
+    throw new SwapUnsettledError(written);
+  });
+  /** `pollSwaps` gets the mint's answer: the ecash and the record stored, then the chat told. */
+  const settle = async () => {
+    expect(await wallet["finishSwap"](written, [], [], true)).toBe(true);
+    expect(await wallet["tellSwap"](written, true)).toBe(true);
+    await committed((await store(STORES.swaps, "readwrite")).delete(written.id));
+  };
+  return { redeem, settle };
+}
+
+describe("Take it back whose answer from the mint was lost", () => {
+  beforeEach(async () => { await transact([STORES.swaps], (s) => { s[STORES.swaps].clear(); }); });
+
+  for (const via of ["the poll", "the contact's result frame"] as const) {
+    it(`a check by ${via} meanwhile leaves the request open and plays no paid sound; the payment ends taken back`, async () => {
+      const { node, events, review, payment, wallet, mint, link } = await setup();
+      const { settle } = await unsettledTakeBack(wallet, mint);
+      await expect(node.reclaimPayment({ paymentId: payment.id })).rejects.toThrow(SwapUnsettledError);
+      expect(node["desk"].payment(payment.id)?.state).toBe("pending");
+      if (via === "the poll") await node.reconcilePayment({ id: review.id });
+      else {
+        const check = vi.spyOn(node, "reconcilePayment");
+        await node["desk"].onPaymentResult(review.linkId!, { id: payment.id, ok: true });
+        await vi.waitFor(() => expect(check).toHaveBeenCalledOnce());
+        await check.mock.results[0]!.value;
+      }
+      expect(confirmed(events), "no paid sound or feedback for ecash being taken back").toEqual([]);
+      expect(node["desk"].payment("req-1")?.state, "the contact's request is still open").toBe("pending");
+      expect(node["desk"].payment(payment.id)?.state).toBe("pending");
+      expect((await intentRepository.get(review.id))?.review.state).not.toBe("settled");
+      expect(link.sendPayment, "the token being taken back never goes to the contact again").not.toHaveBeenCalled();
+      await settle();
+      expect(node["desk"].payment(payment.id)?.state).toBe("reclaimed");
+      expect((await intentRepository.get(review.id))?.review).toMatchObject({ state: "failed", error: TAKEN_BACK });
+      expect(await node.reconcilePayment({ id: review.id })).toMatchObject({ state: "failed", error: TAKEN_BACK });
+      expect(node["desk"].payment("req-1")?.state).toBe("pending");
+      expect((await openRow(STORES.payments, await wrap<StoredPayment | undefined>((await store(STORES.payments, "readonly")).get("req-1"))))?.state).toBe("pending");
+      expect(confirmed(events)).toEqual([]);
+    });
+  }
+
+  it("the chat's link opening meanwhile does not send the contact the token already taken back", async () => {
+    const { node, payment, wallet, mint, link, review } = await setup(stubLink({ supportsPayments: true }));
+    await unsettledTakeBack(wallet, mint);
+    await expect(node.reclaimPayment({ paymentId: payment.id })).rejects.toThrow(SwapUnsettledError);
+    vi.spyOn(node["desk"]["host"], "storeMessage").mockResolvedValue(undefined as never);
+    await node["desk"].replay(review.linkId!);
+    expect(link.sendPayment).not.toHaveBeenCalled();
   });
 });
 

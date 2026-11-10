@@ -2,7 +2,7 @@ import {
   ATPROTO_PROOF_COLLECTION, AtprotoProofError, atprotoProofRkey, checkAtprotoProofRecord, IdentityCheckUnavailable, isAtprotoDid, normalizeAtprotoHandle, shortAtprotoDid,
   verifyAtprotoRecordProof,
 } from "@ghostly/core";
-import type { IdentityFetch, IdentityProofProvider, InAppSigner, SignerContext } from "../contract";
+import { englishSay, type IdentityFetch, type IdentityProofProvider, type InAppSigner, type SignerContext } from "../contract";
 import { getBrowserHost } from "../../host";
 import { boundedIdentityFetch } from "../verify";
 import { chosenResolver } from "../domain";
@@ -67,10 +67,10 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       const w = await opening;
       try {
         const resolve = resolveOptions(uiFetch(), ctx.signal);
-        ctx.onProgress(`Looking up ${input.trim()}…`);
+        ctx.onProgress((ctx.say ?? englishSay)("progress.lookingUp", "Looking up {{account}}…", { account: input.trim() }));
         const account = await lookupAtprotoAccount(input, { ...resolve, normalize: normalizeAtprotoHandle });
         ctx.signal.throwIfAborted();
-        return await work({ platform: h.platform, window: w, account, access, signal: ctx.signal, resolve, onProgress: ctx.onProgress, fetch: options.oauthFetch });
+        return await work({ platform: h.platform, window: w, account, access, signal: ctx.signal, resolve, onProgress: ctx.onProgress, say: ctx.say, fetch: options.oauthFetch });
       } finally { w.close(); }
     })();
   }

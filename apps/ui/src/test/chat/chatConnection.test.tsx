@@ -166,6 +166,32 @@ describe("ChatConnection: what the header says", () => {
     });
   });
 
+  // The Linux Desktop with Hide my IP on and no HyperDHT relay: no WebRTC in WebKitGTK, its own Iroh and HyperDHT left
+  // out for contacts. Nothing can go live, yet the header said "retrying live", breathing, with Reconnect, for as long
+  // as the switch stayed on: the engine's dials each ended at once ("No transport both apps allow").
+  describe("with Hide my IP on and no transport this app can run", () => {
+    const onDht: Partial<LinkView> = { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved", pairing: { status: "ready", peerKey: "peer" } as Pairing,
+      availableTransports: [], runnableTransports: [], peerTransports: ["iroh/1", "hyperdht/1"] };
+    const reconnect = () => screen.queryByRole("button", { name: "Reconnect" });
+
+    it("says it is on the DHT, with no retry and no Reconnect, and why", () => {
+      banner(onDht, { settings: { relayOnly: true } });
+      expect(header()).toMatchObject({ kind: "dht", name: "On DHT", popover: "On DHT", dot: null, pulse: false });
+      expect(reconnect()).not.toBeInTheDocument();
+      expect(screen.getByTestId("connection-live-off")).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    });
+
+    it.each<[string, Partial<LinkView>, StatePatch]>([
+      ["a HyperDHT relay is set", { runnableTransports: ["hyperdht/1"] }, { settings: { relayOnly: true } }],
+      ["Hide my IP is off", {}, {}],
+    ])("retries live as before when %s", (_, more, state) => {
+      banner({ ...onDht, ...more }, state);
+      expect(header()).toMatchObject({ kind: "dht", name: "On DHT · retrying live", pulse: true });
+      expect(reconnect()).toBeInTheDocument();
+      expect(screen.queryByTestId("connection-live-off")).not.toBeInTheDocument();
+    });
+  });
+
   it("is back to what the connection says once the device is online again", () => {
     const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     banner({ pairing: ready() });
@@ -488,12 +514,30 @@ describe("ChatConnection: what the panel does", () => {
   it("in an app with no WebRTC (Linux Desktop), Automatic and the summary say what Automatic does there", () => {
     const link = { pairing: ready({ transport: "hyperdht/1" }), availableTransports: ["iroh/1", "hyperdht/1"] as LinkView["availableTransports"], peerTransports: all, transportAutomatic: true };
     banner(link);
-    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first: this app has no WebRTC");
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first");
     // The contact's app ranks WebRTC first: "both apps rank HyperDHT first" would be untrue.
     expect(connectionSummary(linkView(link), Date.now())?.why).toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
     expect(connectionSummary(linkView({ ...link, availableTransports: all, peerTransports: ["iroh/1", "hyperdht/1"] }), Date.now())?.why)
       .toBe("Automatic: the apps use HyperDHT, which both have; one of them has no WebRTC.");
     expect(connectionSummary(linkView({ ...link, availableTransports: all }), Date.now())?.why).toBe("Automatic: both apps rank HyperDHT first.");
+  });
+
+  it("in the web app with Iroh, Automatic says it puts Iroh first, and on WebRTC that it came back over Iroh and moved", () => {
+    const web = ["webrtc/1", "iroh/1"] as LinkView["availableTransports"];
+    const link = { pairing: ready({ transport: "webrtc/1" }), availableTransports: web, peerTransports: web, transportAutomatic: true };
+    banner(link);
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("title", "Automatic: The apps choose, Iroh first");
+    expect(connectionSummary(linkView(link), Date.now())?.why)
+      .toBe("Automatic: the apps put Iroh first, which is back almost at once, and move to WebRTC once connected, which is faster.");
+    // A contact with no Iroh: WebRTC first, as before.
+    expect(connectionSummary(linkView({ ...link, peerTransports: ["webrtc/1"] as LinkView["availableTransports"] }), Date.now())?.why)
+      .toBe("Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.");
+    // Fallback off: Automatic puts WebRTC first, as before (it would otherwise stay on Iroh's relay for good).
+    expect(connectionSummary(linkView({ ...link, transportFallback: false }), Date.now())?.why)
+      .toBe("Automatic: both apps rank WebRTC first, and a first pairing always uses WebRTC.");
+    // Left on Iroh's relay: WebRTC could not connect.
+    expect(connectionSummary(linkView({ ...link, pairing: ready({ transport: "iroh/1" }), transportRelayed: { relays: ["relay.test"] } }), Date.now())?.why)
+      .toBe("Automatic: a direct connection could not be made, so the chat goes through Iroh's relay. Relayed: relay.test sees which devices talk and when, never what they say.");
   });
 
   it("goes back to Automatic", async () => {

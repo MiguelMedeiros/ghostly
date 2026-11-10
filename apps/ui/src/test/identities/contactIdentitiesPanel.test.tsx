@@ -106,7 +106,8 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
+      // A reason the app does not know reads as its own line, never as the check's English.
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
@@ -237,6 +238,14 @@ describe("ContactIdentitiesPanel", () => {
       it("any other source as written", async () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
+      });
+
+      it("how a Nostr proof was checked, in Arabic", async () => {
+        const npub = "a".repeat(64);
+        const card = await backIn("ar", receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } }));
+        const how = card.querySelector("dl")!.querySelector("bdi")!;
+        expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+        expect(how).not.toHaveTextContent(/signature/);
       });
     });
 

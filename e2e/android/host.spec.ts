@@ -132,6 +132,7 @@ test("a share that started the app is not offered again when Android brings the 
   await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's process" }).not.toBe("");
   let page = await webViewPage(device, Number(pid));
   await expect(page.getByTestId("share-text")).toHaveText(text, { timeout: 120_000 });
+  await expect(page.getByTestId("share-next")).toContainText(text);
   await page.getByTestId("share-cancel").click();
   await expect(page.getByTestId("share-picker")).toBeHidden();
 

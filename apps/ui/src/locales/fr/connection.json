@@ -125,8 +125,7 @@
   "ms": "{{ms}} ms",
   "option": {
     "automatic": "Automatique",
-    "automaticHint": "Les apps choisissent, WebRTC d'abord",
-    "automaticHintNative": "Les apps choisissent, {{transport}} d'abord : cette app n'a pas WebRTC",
+    "automaticFirst": "Les apps choisissent, {{transport}} d'abord",
     "chosenNotInUse": "Choisi · non utilisé",
     "chosenWaiting": "Choisi · en attente",
     "contactLacks": "L'app de votre contact ne prend pas en charge {{transport}}",
@@ -215,6 +214,7 @@
     "automatic": "Automatique : les deux apps placent {{transport}} en premier.",
     "automaticNoWebrtc": "Automatique : les apps utilisent {{transport}}, que les deux ont ; l'une d'elles n'a pas WebRTC.",
     "automaticWebrtc": "Automatique : les deux apps placent WebRTC en premier, et un premier appairage utilise toujours WebRTC.",
+    "automaticWebrtcIroh": "Automatique : les apps mettent Iroh en premier, qui revient presque aussitôt, puis passent à WebRTC une fois connectées, qui est plus rapide.",
     "contactChose": "{{contact}} a choisi {{transport}} pour cette discussion.",
     "contactChoseUnnamed": "Votre contact a choisi {{transport}} pour cette discussion.",
     "fallback": "Vous avez choisi {{preferred}} pour cette discussion ; il n'est pas disponible pour l'instant, donc elle utilise {{transport}}.",

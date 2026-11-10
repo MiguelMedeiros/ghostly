@@ -1,0 +1,33 @@
+{
+  "availabilities": {
+    "available": "有空",
+    "away": "离开",
+    "busy": "忙碌",
+    "dnd": "请勿打扰"
+  },
+  "availability": "状态类型",
+  "clear": "清除状态",
+  "customLabel": "清除时间",
+  "dndHint": "消息照常送达，但没有声音和通知。来电仍会响铃。",
+  "emoji": "表情",
+  "emojiMore": "更多表情",
+  "end": "多久后清除",
+  "ends": {
+    "1h": "1 小时",
+    "30m": "30 分钟",
+    "4h": "4 小时",
+    "custom": "选择时间…",
+    "keep": "直到 {{time}}",
+    "never": "不清除",
+    "today": "今天",
+    "week": "本周"
+  },
+  "menuLabel": "你的状态：{{status}}。更改状态",
+  "past": "请选择晚于现在的时间。",
+  "placeholder": "你现在的状态是？",
+  "set": "设置状态",
+  "shared": "联系人会在你的名字旁看到它。",
+  "text": "状态文字",
+  "title": "状态",
+  "until": "直到 {{time}}"
+}
