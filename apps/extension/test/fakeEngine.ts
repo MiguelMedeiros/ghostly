@@ -1,5 +1,5 @@
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
-import type { RpcRequest } from "@ghostly/browser/shared/rpc";
+import type { AttentionEvent, RpcRequest } from "@ghostly/browser/shared/rpc";
 import { databaseName } from "@ghostly/browser/shared/idb";
 import type { StoredMessage, StoredService } from "@ghostly/browser/shared/types";
 import { mayReach } from "@ghostly/browser/engine/serviceAccess";
@@ -32,13 +32,15 @@ export interface FakeEngineControl {
   ready: Promise<void>;
   respond: (peer: string, service: string, init: EngineRequestInit) => Promise<EngineResponse>;
   /** The chats the peer's state lists (`getState().links`): what a contact shares, by name. */
-  links?: { peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
+  links?: { id?: string; peerPubKeyZ32: string; peerServices: { id: string; name: string }[] | null }[];
   /** The apps this peer shares (`getState().services`), which `setServiceEnabled` turns on and off as the engine's does. */
   services?: StoredService[];
   /** Per chat or group, the whole history `history` sends the client that asks for it; none sends nothing. */
   history?: Record<string, StoredMessage[]>;
   /** What the peer answers a page's call, as `EngineServer.handle` posts it; undefined: no answer. */
   answer?: (method: string, params: unknown) => Promise<unknown> | undefined;
+  /** Runs as a peer stops, before its stop is over: what the peer and its pages still do while it ends. */
+  onShutdown?: () => Promise<void>;
 }
 
 export function engineControl(): FakeEngineControl {
@@ -66,6 +68,8 @@ export class FakeEngineServer {
   readonly histories: { client: EngineClientSink; linkId: unknown }[] = [];
   readonly requests: { peer: string; service: string; init: EngineRequestInit }[] = [];
   shutdowns = 0;
+  /** Set by the host: what `attention` hands on while no page is attached (`EngineServer.unheardAttention`). */
+  unheardAttention?: (event: AttentionEvent) => void;
   /** The whole engine, as `EngineServer` says of itself: device-link-only mode is the other kind of peer (WISP 06). */
   readonly gated = false;
   readonly ready: Promise<void>;
@@ -88,7 +92,9 @@ export class FakeEngineServer {
     },
     shutdown: async () => {
       this.shutdowns++;
-      engineControl().log.push(`stop ${this.database}`);
+      const control = engineControl();
+      if (control.onShutdown) await control.onShutdown();
+      control.log.push(`stop ${this.database}`);
     },
     /** "Clear all data", the peer's part: as the engine's, it ends with the peer stopped (node.ts `clearProfileData`). */
     clearProfileData: async () => {
@@ -109,6 +115,13 @@ export class FakeEngineServer {
   attach(client: EngineClientSink, ...rest: unknown[]): void {
     this.attached.push(client);
     this.attachedWith.push(rest);
+  }
+
+  /** The peer's attention event, as `EngineServer` hands it on: to the pages attached, or to the host with none. */
+  attention(event: AttentionEvent): void {
+    const pages = this.attached.filter((client) => !this.detached.includes(client));
+    if (pages.length) for (const client of pages) client.post({ kind: "attention", event });
+    else this.unheardAttention?.(event);
   }
 
   async history(client: EngineClientSink, linkId: unknown): Promise<void> {

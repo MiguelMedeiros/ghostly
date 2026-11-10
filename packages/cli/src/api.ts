@@ -7,7 +7,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -351,7 +351,7 @@ const METHODS: Record<string, Method> = {
 
   async "chat.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
+    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group show");
@@ -369,7 +369,10 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
-    const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
+    // A one-shot leaves with its process, so by default it stays until the text went out. To a chat whose invite nobody
+    // took there is no one to send to: the text is kept and goes once they join. It sat 30 s, then answered `timeout`.
+    const unjoined = nobodyJoined(link);
+    const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" && !unjoined ? "sent" : "none");
     // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const replyTo = str(params, "reply");
@@ -386,7 +389,10 @@ const METHODS: Record<string, Method> = {
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
-    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
+    return {
+      chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}),
+      ...(unjoined && message?.delivery === "waiting" && { note: `Nobody joined this chat yet: the message goes once they join${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}` }),
+    };
   },
   /**
    * WISP 400 § Edits: the whole new text of one of my texts in a 1:1 chat. It shows here at once and reaches the contact
@@ -653,11 +659,13 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.disconnect"(ctx, params) {
     const link = chatOf(ctx, params);
-    if (params.hold === undefined) {
+    const minutes = params.hold === undefined ? undefined : num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    // `--hold 0` still ends a hold, one an older version put on a waiting invite too.
+    if (minutes !== 0) somebodyJoined(link);
+    if (minutes === undefined) {
       node(ctx).disconnect({ linkId: link.id });
       return chatJson(findChat(state(ctx).links, link.id));
     }
-    const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
     if (minutes > 0) noCallOn(ctx, link.id, "hold the chat");
     if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
     else await holdChat(ctx, link, minutes);
@@ -715,7 +723,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt), autoJoin: ctx.groupAuto.get() };
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0)), autoJoin: ctx.groupAuto.get() };
   },
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {

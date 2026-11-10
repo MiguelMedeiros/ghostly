@@ -317,6 +317,17 @@ export function startNamedChats(ctx: ApiContext, params: Params): void {
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
 
+/** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
+export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
+
+/**
+ * A chat whose invite nobody took yet has no session to close either: `chat disconnect` answered done with the chat at
+ * `connecting`, and `--hold` put the waiting invite on DHT only (a one-shot answered `pairing: error`).
+ */
+export function somebodyJoined(link: LinkView): void {
+  if (nobodyJoined(link)) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+}
+
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
  * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`. A chat whose invite someone else used
@@ -324,7 +335,7 @@ export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).l
  * then answered `timeout`, a code a bot retries).
  */
 export function inviteTaken(link: LinkView): void {
-  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+  somebodyJoined(link);
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
@@ -394,20 +405,27 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
  * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
  * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
  * listeners throw, and the wait went on to its timeout.
+ *
+ * `stopping` (a daemon's `ctx.stopping`): the daemon's stop ends it too, as a timeout with `details.reason:
+ * "daemon-stopped"`, for a wait whose command did something (`file send --wait`) and answers with what it knows. A
+ * wait that changes nothing is left to its connection's end, and its client asks it again (main.ts `READ_WAITS`).
  */
-export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
+export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string, stopping?: AbortSignal): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
+    const end = (error: unknown) => { clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); if (error) reject(error); };
+    const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
+    const timer = setTimeout(() => end(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)), ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
-      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
+      try { value = check(next); } catch (error) { end(error); return; }
       if (value === undefined) return;
-      clearTimeout(timer);
-      off();
+      end(null);
       resolve(value);
     });
+    if (stopping?.aborted) stopped();
+    else stopping?.addEventListener("abort", stopped, { once: true });
   });
 }
 

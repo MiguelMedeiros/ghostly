@@ -34,15 +34,15 @@ export interface WebOpenerOptions {
 }
 
 /**
- * An app the person did not close (its frame navigated, broke the protocol, or never started) says why in the console,
- * and its place says it stopped (WISP 1200 § the runner, step 7): it is not told apart from Close otherwise. One that
- * never started while the person is offline did not fail: its runner page never loaded.
+ * An app the person did not close (its frame navigated, broke the protocol, never started, or kept taking the focus)
+ * says why in the console, and its place says it stopped (WISP 1200 § the runner, step 7): it is not told apart from
+ * Close otherwise. One that never started while the person is offline did not fail: its runner page never loaded.
  */
 function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
   if (reason === "closed" || reason === "stopped") return null;
   console.warn(`[apps] ${title} stopped: ${reason}`);
   if (reason === "timeout" && navigator.onLine === false) return { why: "offline" };
-  return reason === "unresponsive" ? { why: "unresponsive" } : { why: "failed" };
+  return reason === "unresponsive" || reason === "focus" ? { why: reason } : { why: "failed" };
 }
 
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, openAgainLabel, errorText, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {

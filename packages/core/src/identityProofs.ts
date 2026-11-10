@@ -34,6 +34,8 @@ export const IDENTITY_MAX_EVIDENCE = 16 * 1024;
 export const IDENTITY_MAX_FRAME = 32 * 1024;
 /** Unanswered challenges a verifier keeps per conversation. */
 const MAX_CHALLENGES = 8;
+/** A challenge still open at `now` (seconds): a presentation for it is still taken. */
+const liveAt = (c: { issuedAt: number }, now: number) => c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW;
 /**
  * Proofs a verifier keeps from one contact. A newer proof of the same identity replaces the older one, and one no longer
  * standing (withdrawn, revoked, expired) gives its place to a new one; past that a presentation is refused before it is
@@ -403,6 +405,24 @@ export class IdentityExchange {
   }
   stop(): void { this.requested.clear(); this.peerProviders = undefined; }
 
+  /**
+   * The challenges whose window ended unanswered go, and with them their requests' lines still verifying: a contact
+   * whose app closed, or whose proof left its profile, before it presented tells this side nothing, and its line read
+   * "verifying" for good. No write when none ended.
+   */
+  async expire(): Promise<void> {
+    const now = this.now();
+    if (!this.options.storage.read().challenges.some(c => !liveAt(c, now))) return;
+    await this.options.storage.update(l => this.withoutExpired(l, now));
+  }
+  private withoutExpired(l: IdentityLedger, now: number): IdentityLedger {
+    const live = l.challenges.filter(c => liveAt(c, now));
+    if (live.length === l.challenges.length) return l;
+    // A request sent again (a reconnect) has a live challenge of the same id, whose line it shares.
+    const ended = new Set(l.challenges.filter(c => c.id !== undefined && !liveAt(c, now) && !live.some(x => x.id === c.id)).map(c => c.id!));
+    return [...ended].reduce((out, proof) => this.log(out, { type: "unanswered", side: "theirs", proof }), { ...l, challenges: live });
+  }
+
   /** Share a proof of this profile with this contact: now if connected, else when it next is. */
   async share(id: string, connected: boolean): Promise<void> {
     const local = await this.options.localProof(id);
@@ -557,9 +577,10 @@ export class IdentityExchange {
     const challenge: IdentityChallenge = { nonce: toBase64Url(randomBytes(32)), issuedAt: now, provider, id };
     // Saved before it is sent: a presentation for a nonce this side never saved is always refused.
     await this.options.storage.update(l => {
-      const live = l.challenges.filter(c => c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
-      if (live.length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
-      return this.log({ ...l, challenges: [...live, challenge] }, { type: "shared", side: "theirs", proof: id, provider });
+      if (l.challenges.filter(c => liveAt(c, now)).length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
+      // The request's line first, the ended challenges after: a line of this kind an ended one left verifying is
+      // taken over in place (its id and time stay), and only the other ended ones' lines go.
+      return this.withoutExpired(this.log({ ...l, challenges: [...l.challenges, challenge] }, { type: "shared", side: "theirs", proof: id, provider }), now);
     });
     this.send({ t: "idp-challenge", id, nonce: challenge.nonce, issuedAt: challenge.issuedAt });
   }
@@ -595,7 +616,7 @@ export class IdentityExchange {
     const id = statement.id;
     const scope = this.incomingScope();
     const now = this.now();
-    const challengeOf = (l: IdentityLedger) => l.challenges.find(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
+    const challengeOf = (l: IdentityLedger) => l.challenges.find(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && liveAt(c, now));
     const known = (l: IdentityLedger) => !!challengeOf(l);
     if (!known(this.options.storage.read())) throw new Error("Unknown or reused identity challenge");
     let verified: VerifiedIdentity | undefined;

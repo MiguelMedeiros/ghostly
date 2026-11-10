@@ -17,6 +17,7 @@
     "recent": "Recientes",
     "symbols": "Símbolos"
   },
+  "chooseFiles": "Elegir archivos",
   "closeCamera": "Cerrar cámara",
   "dhtTooLong": "Demasiado largo para la DHT ({{bytes}} de {{max}} bytes). Acórtalo o conéctate en vivo; el borrador se guarda.",
   "document": "Documento",

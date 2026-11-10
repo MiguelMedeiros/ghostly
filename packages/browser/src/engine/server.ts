@@ -1,6 +1,6 @@
 import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
-import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
+import type { AttentionEvent, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { MessagePage, StoredMessage } from "../shared/types";
 import { db } from "./db";
 import { errorLine, profileOpenFailure } from "../shared/idb";
@@ -45,6 +45,11 @@ export class EngineServer implements PeerServer {
   /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
+  /**
+   * An attention event while no client is attached to hear it: the host tells the person itself. The extension's peer
+   * runs with no tab open, and a message that came then showed nothing until Ghostly was opened.
+   */
+  unheardAttention?: (event: AttentionEvent) => void;
 
   /**
    * `keepNewest`: the start keeps each chat's and group's newest rows that many, from the whole histories it reads anyway,
@@ -54,7 +59,7 @@ export class EngineServer implements PeerServer {
     if (options.keepNewest) db.keepNewest(options.keepNewest);
     this.node = new GhostlyNode(
       {
-        onAttention: (event) => this.broadcast({kind:"attention", event}),
+        onAttention: (event) => (this.clients.size ? this.broadcast({kind:"attention", event}) : this.unheardAttention?.(event)),
         onState: (state) => this.broadcast({ kind: "state", state }),
         onMessages: (linkId, messages) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}); },
         onMessageChanges: (linkId, changes) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}); },

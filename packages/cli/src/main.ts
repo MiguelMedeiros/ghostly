@@ -272,11 +272,24 @@ async function session(g: Globals, options: RuntimeOptions, again = true): Promi
 }
 
 /**
- * `again`: a session of its own, for a read (`readOnly`) whose connection ended unanswered (`endedUnanswered`): the
- * daemon stopped or restarted under it. The read is asked once more there, through the daemon that answers now or on
- * the profile itself, and so is every call after it. It failed as a timeout told to check `ghostly chat history` for
- * a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as a daemon of an older
- * release (exit 1), while a command started a moment later answered.
+ * Waits that change nothing (`chat wait`, `file wait`): one a daemon that stopped left unanswered is asked once more,
+ * as a read is (`throughDaemon`), for the time it had left. They failed as a timeout told to check `ghostly chat
+ * history` for a message (exit 4) when a restart came while they waited.
+ */
+const READ_WAITS: ReadonlySet<string> = new Set(["chat.wait", "file.wait"]);
+
+/** `params` with the `timeout` (its own, or the daemon's default for `method`) less the `spentMs` already waited. */
+function waitLeft(method: string, params: Record<string, unknown>, spentMs: number): Record<string, unknown> {
+  const seconds = typeof params.timeout === "number" ? params.timeout : waitsFor(method, params);
+  return seconds === undefined ? params : { ...params, timeout: Math.max(1, Math.ceil(seconds - spentMs / 1000)) };
+}
+
+/**
+ * `again`: a session of its own, for a read (`readOnly`, or one of `READ_WAITS`) whose connection ended unanswered
+ * (`endedUnanswered`): the daemon stopped or restarted under it. The read is asked once more there, through the daemon
+ * that answers now or on the profile itself, and so is every call after it. It failed as a timeout told to check
+ * `ghostly chat history` for a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as
+ * a daemon of an older release (exit 1), while a command started a moment later answered.
  */
 function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Session {
   // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
@@ -298,11 +311,13 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
   const call = async (m: string, p?: unknown): Promise<unknown> => {
     if (next) return (await next).call(m, p);
+    const from = performance.now();
     try { return await first(m, p); }
     catch (error) {
-      if (!again || aborted || !endedUnanswered(error) || !readOnly(m, (p ?? {}) as Record<string, unknown>)) throw error;
+      const params = (p ?? {}) as Record<string, unknown>;
+      if (!again || aborted || !endedUnanswered(error) || !(readOnly(m, params) || READ_WAITS.has(m))) throw error;
       next ??= again();
-      try { return await (await next).call(m, p); }
+      try { return await (await next).call(m, READ_WAITS.has(m) ? waitLeft(m, params, performance.now() - from) : p); }
       catch (failure) {
         // The daemon asked once more went away as well: a read changed nothing, so it says so, and not to check a chat.
         // A listener refused again is one that does not prove itself, and is named so.
@@ -1202,7 +1217,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`); a daemon gone
     // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
     const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
-    const stop = () => { following.close(); process.exit(0); };
+    // A hook at work is given its time, then ended (`EventHandler.stop`): it never runs on after the listen.
+    const stop = stopper(async () => { following.close(); await handle.stop(); });
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
@@ -1216,10 +1232,11 @@ async function listenCommand(argv: string[]): Promise<void> {
   const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
-  const stop = stopper(async () => { await served.close(); await host.close(); });
+  // The hook first: one at work may still answer through this socket (`ghostly send`).
+  const stop = stopper(async () => { await handle.stop(); await served.close(); await host.close(); });
   quit = (code) => {
     setTimeout(() => process.exit(code), 20_000).unref();
-    void served.close().then(() => host.close()).finally(() => process.exit(code));
+    void handle.stop().then(() => served.close()).then(() => host.close()).finally(() => process.exit(code));
   };
   // Asked to stop over the socket (`daemon stop`, `daemon restart`, the profile cleared): the events stop with it, so
   // the listen says so and fails. An exit 0 read as "done": a service manager restarted nothing, and no line said why.
@@ -1340,8 +1357,10 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!spec.message) Object.assign(params, (await import("./buttons")).buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
-      // A one-shot leaves once its command is done: by default it stays until the message went out.
-      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
+      // A one-shot leaves once its command is done: by default it stays until the message went out (`send`'s default is
+      // the API's own, which knows a chat nobody joined yet) or the edit was confirmed.
+      if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
+      else if (spec.message) params.wait = s.mode === "one-shot" ? "confirmed" : "none";
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     } else {
       // A group has no receipts: `--wait sent` waits until an edge took it. None by default.

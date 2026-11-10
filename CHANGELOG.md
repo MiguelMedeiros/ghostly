@@ -4,6 +4,14 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.10.6
+
+### Security
+
+**Apps**
+
+- On the web, a mini-app beside a chat that keeps taking the keyboard from Ghostly's fields by script is now stopped, and its place says why.
+
 ## 1.10.5
 
 ### Security

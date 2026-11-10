@@ -81,7 +81,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `--profile <name>` or `GHOSTLY_PROFILE` | Run one command on another profile |
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
-| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice) |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings travel with it |
 
 Only one process opens a profile at a time.
 
@@ -150,8 +150,13 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
   says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
-  cursor moves past its event: it is not run again.
+  arguments, so a contact's text cannot reach the shell). A command that exits non-zero, or that a signal kills
+  ("--exec was killed by SIGKILL on event N"), is said on stderr and the cursor moves past its event: it is not run
+  again. With `--print`, the command's own stdout goes to listen's stderr, so stdout carries the JSON events only;
+  without `--print`, it is listen's stdout. One still running after a minute is said once on stderr (the events after
+  it wait). The command runs in a process group of its own: a stop (SIGTERM, SIGINT, Ctrl-C) gives a running command
+  5 s to end, then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before
+  its event, so the next start runs it again, never alongside the old one.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
@@ -198,7 +203,8 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ### Agent turns
 
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
-`group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
+`group.message` that mentions this profile or presses a button of a question it sent, becomes one `agent.turn` (a
+press on another member's question is not). A mention learned later (the message first
 came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
 reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
@@ -216,8 +222,9 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
-- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
-  act on it, not on the text, which is only the label.
+- `press` (`{messageId, button, label, by}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label. `by` is who pressed, as `button.pressed` says it: the chat, or
+  in a group the member's key, where any member can press.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name, the id
   their message is stored under) is under `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
@@ -292,9 +299,11 @@ within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a 
 once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
 sent, so the daemon does not act on it when it wakes. A read (`chat list`, `status` and the like) that a daemon
 stopping or restarting leaves unanswered is asked once more, through the daemon that runs then or on the profile
-itself; when that one goes away too it fails with `unavailable` (exit 1, `details.method`): a read changes nothing, so
-running it again is safe. Any other command it leaves unanswered may be done: it is a timeout (exit 4) with
-`details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+itself; so is a `chat wait` or `file wait`, for the time it had left. When that one goes away too it fails with
+`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. A `file send --wait`
+answers before the daemon stops, as `send --wait` does: a timeout (exit 4) with `details.reason: daemon-stopped`, its
+`chat`, `messageId`, the file's id (`file`) and how far it got. Any other command it leaves unanswered may be done: it
+is a timeout (exit 4) with `details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
@@ -357,8 +366,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   that came while it was down; any other invitation waits for `group accept` as before. `group auto` alone prints the
   setting, `group list` shows it as `autoJoin`, `group auto off` turns it off. There is no "from anyone": `on` needs a
   chat, named as for `call auto on --from` (its id, its contact's key or a label given here). It is kept in the
-  profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
-  whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
+  profile's `groups.json` (0600) with each chat's contact key, and a `profile backup` carries it to the restored copy:
+  removing the chat takes it off the list, and a chat whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
   the chat). Another contact's invitation under the same group id, come first, does not keep the owner's out: the
   owner's, kept beside it (`others` in `group show`), is the one taken and the other contact is told no, as long as the
   group held is only an invitation not answered yet; beside a group joined or accepted it waits for you. A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list

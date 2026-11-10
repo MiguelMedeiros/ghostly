@@ -457,6 +457,56 @@ describe("identity timeline, from the exchange", () => {
     expect(lastSharedWithMe(after)).toBe(firstAt);
   });
 
+  it("a share whose presentation never comes leaves no verifying line once its challenge expires", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    w.online.clear();
+    const lastFrame = (t?: string) => w.frames.filter(f => !t || f.t === t).reverse()[0];
+    const share = async () => {
+      const id = w.addProof();
+      await ab.share(id, true);
+      await ba.receive(lastFrame("idp-request"));
+      // The proof left Alice's profile before Bob's challenge came: her app marks it rejected and tells Bob nothing.
+      w.proofs.delete(id);
+      await ab.receive(lastFrame("idp-challenge"));
+      expect(lastFrame().t).toBe("idp-challenge");
+      return id;
+    };
+    const first = await share();
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: first, side: "theirs", state: "verifying" })]);
+    // Past the window: the next request takes the expired one's line over (one line per kind) and drops its challenge.
+    w.advance(IDENTITY_CHALLENGE_WINDOW + 1);
+    const second = await share();
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: second, side: "theirs", state: "verifying" })]);
+    expect(w.ledger(bob, alice).challenges.map(c => c.id)).toEqual([second]);
+    // With no further request, the periodic expire does the same; before the window it changes nothing.
+    await ba.expire();
+    expect(tl(w, bob, alice)).toHaveLength(1);
+    w.advance(IDENTITY_CHALLENGE_WINDOW + 1);
+    await ba.expire();
+    expect(tl(w, bob, alice)).toEqual([]);
+    expect(w.ledger(bob, alice).challenges).toEqual([]);
+  });
+
+  it("requests of a verifiable kind never presented keep the real verified line", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    // 8 requests a window (the challenge bound), each a fresh id never presented, for over an hour.
+    for (let round = 0; round < 13; round++) {
+      for (let i = 0; i < 8; i++) await ba.receive({ t: "idp-request", id: (round * 8 + i).toString(16).padStart(64, "0"), provider: "test" });
+      w.advance(IDENTITY_CHALLENGE_WINDOW + 1);
+    }
+    expect(tl(w, bob, alice)[0]).toEqual(expect.objectContaining({ proof: id, side: "theirs", state: "verified" }));
+    // The kind's one line still waits, on the last request; once its window ends, nothing does.
+    expect(tl(w, bob, alice).filter(e => e.state === "verifying")).toEqual([expect.objectContaining({ proof: (103).toString(16).padStart(64, "0") })]);
+    await ba.expire();
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ proof: id, side: "theirs", state: "verified" })]);
+    expect(w.ledger(bob, alice).challenges).toEqual([]);
+  });
+
   it("is not repeated when the request goes again at a reconnect, nor by a refresh", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));

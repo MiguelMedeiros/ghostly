@@ -17,6 +17,7 @@
     "recent": "最近使用",
     "symbols": "記号"
   },
+  "chooseFiles": "ファイルを選ぶ",
   "closeCamera": "カメラを閉じる",
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
   "document": "書類",
