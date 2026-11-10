@@ -536,6 +536,26 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", status: "x".repeat(40) })).toMatchObject({ status: "x".repeat(40) });
   });
 
+  // A one-shot `send` to a chat whose invite nobody took sat its whole 30 s and failed `timeout` (exit 4, which a bot
+  // retries: one more copy each time), though the text is kept and goes once the contact joins.
+  it("a one-shot's send to a chat nobody joined yet answers at once, waiting for them; a --wait given still waits", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "waiting" })];
+      const { ctx, node } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const state = node.getState();
+      node.getState = () => ({ ...state, links: [link("chat-one", { label: "Alice", inviteCode: "ghostly1-code", peerParticipationKey: undefined } as Partial<LinkView>)] }) as EngineState;
+      let answer: unknown;
+      void callApi(ctx, "chat.send", { chat: "Alice", text: "hi" }).then((a) => { answer = a; });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(answer).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "waiting", note: "Nobody joined this chat yet: the message goes once they join while this profile is online (`ghostly daemon --detach`)" });
+      const given = callApi(ctx, "chat.send", { chat: "Alice", text: "hi", wait: "sent", timeout: 5 }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await given).toMatchObject({ code: "timeout" });
+    } finally { vi.useRealTimers(); }
+  });
+
   it("send waits for the delivery it was asked for, and fails with the engine's words", async () => {
     const stored = [msg("me_1", 5, { sender: "me", delivery: "sending" })];
     const { ctx, emit } = fake(stored);
@@ -1216,6 +1236,23 @@ describe("a pending chat's invite code is a secret", () => {
     expect(JSON.stringify(printed)).not.toMatch(/ghostly1pendingsecret|ghostly-link|"SK"/);
     expect(printed.links.map((l) => l.inviteCode)).toEqual([undefined, "<hidden>", "<hidden>"]);
     expect(printed.groups[0]).toMatchObject({ entryLink: "<hidden>" });
+  });
+});
+
+// A chat or a group with no message yet answered `lastMessageAt: 0` (1970), where every other time not reached yet is null.
+describe("lastMessageAt", () => {
+  it("is null for a chat or a group with no message yet, which list after those with one", async () => {
+    const { ctx, node } = fake();
+    const state = node.getState();
+    node.getState = () => ({ ...state,
+      links: [link("chat-new", { createdAt: 5, inviteCode: "ghostly1x", pairing: { status: "waiting" } } as never), link("chat-old", { createdAt: 2, lastMessageAt: 40 }), link("chat-newer", { createdAt: 9 })],
+      groups: [{ ...group, id: "g-new" }, { ...group, id: "g-old", lastMessageAt: 40 }] });
+    const chats = (await callApi(ctx, "chat.list", {}) as { chats: { id: string; lastMessageAt: number | null }[] }).chats;
+    expect(chats.map((c) => [c.id, c.lastMessageAt])).toEqual([["chat-old", 40], ["chat-newer", null], ["chat-new", null]]);
+    expect(await callApi(ctx, "chat.get", { chat: "chat-new" })).toMatchObject({ lastMessageAt: null, liveSince: null, peerLastSeenAt: null });
+    const groups = (await callApi(ctx, "group.list", {}) as { groups: { id: string; lastMessageAt: number | null }[] }).groups;
+    expect(groups.map((g) => [g.id, g.lastMessageAt])).toEqual([["g-old", 40], ["g-new", null]]);
+    expect(await callApi(ctx, "group.get", { group: "g-new" })).toMatchObject({ lastMessageAt: null });
   });
 });
 

@@ -695,7 +695,23 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
-  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+  it("a contact's request that is never presented leaves the chat's timeline once its challenge ends, with no request after it", async () => {
+    const { engines, ledgers } = pair();
+    await clearStorage();
+    await engines.b.load();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    engines.b.start();
+    // A asks for a challenge and never presents (its app closed, or the proof left its profile): A's engine has no such share.
+    await engines.b.frame("chat", { t: "idp-request", id: "e".repeat(64), provider: "fake-key" });
+    expect(ledgers.b.timeline).toEqual([expect.objectContaining({ side: "theirs", state: "verifying" })]);
+    expect(ledgers.b.challenges).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(ledgers.b.timeline).toEqual([]);
+    expect(ledgers.b.challenges).toEqual([]);
+    engines.b.stop();
+  });
+
+  it("a proof removed while the contact is still checking it:the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
     const { engines, state, resolved, pkarr } = pair();
     await clearStorage();
     await engines.a.load(); await engines.b.load();
@@ -1209,6 +1225,9 @@ describe("per chat", () => {
       const { draftId, binding } = p.engines.a.begin({ provider: "ssh-github", subject: "new-contact" });
       const view = await p.engines.a.complete({ draftId, evidence: await sign(identityStatement(binding)) });
 
+      // Making the new contact's proof (`complete`) looked it up on the real clock, and the fake clock starts from that
+      // clock: the lookup can fall in t0's millisecond and count in the first hour. Count only the lookups from here on.
+      const before = lookups.length;
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
       const t0 = Date.now(), at = Math.floor(t0 / 1000);
       // Last checked 25 to 49 hours ago.
@@ -1227,12 +1246,12 @@ describe("per chat", () => {
       // A new contact shares a GitHub SSH proof.
       await p.engines.a.share({ linkId: "chat", id: view.id });
       for (let i = 0; i < 100 && !p.ledgers.b.received.some(r => r.id === view.id); i++) await vi.advanceTimersByTimeAsync(100);
-      const first = lookups.filter(l => l.at >= t0);
+      const first = lookups.slice(before);
       expect(p.ledgers.b.received.find(r => r.id === view.id), `${first.length} GitHub lookups in the first half hour, ${first.filter(l => !l.ok).length} refused`).toMatchObject({ status: "verified" });
       await vi.advanceTimersByTimeAsync(t0 + 48 * 60 * 60_000 - Date.now());
       p.engines.b.stop();
 
-      const hourly = Array.from({ length: 48 }, (_, h) => lookups.filter(l => l.at >= t0 + h * 3_600_000 && l.at < t0 + (h + 1) * 3_600_000).length);
+      const hourly = Array.from({ length: 48 }, (_, h) => lookups.slice(before).filter(l => l.at >= t0 + h * 3_600_000 && l.at < t0 + (h + 1) * 3_600_000).length);
       const seen = `GitHub lookups per hour: ${hourly.join(" ")}`;
       expect(lookups.filter(l => !l.ok), seen).toEqual([]);
       // The re-check's 30 an hour, and the new contact's one.

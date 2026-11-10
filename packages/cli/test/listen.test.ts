@@ -160,6 +160,21 @@ describe("agent turns", () => {
     expect(toTurn(other("message.edited", { chat: "c1", messageId: "m1", message: { id: "m1", text: "new", timestamp: 1, nick: null } }))).toBeNull();
     expect(toTurn(other("typing.started", { chat: "c1" }))).toBeNull();
   });
+
+  it("a member's press on a button of my question is a turn, with who pressed; a press on someone else's question is not", () => {
+    // `press` is there only when the question is this profile's (the engine's `buttonPress`).
+    const press = { messageId: "q1", button: "go", label: "Deploy" };
+    expect(toTurn(groupMessage("g1", "p1", "Deploy", { replyTo: { id: "q1", snippet: "Deploy to staging?", button: "go" }, press }))).toMatchObject({
+      source: "group.message", group: "g1", member: KEY, messageId: turnRef("g1", "p1"), press: { ...press, by: KEY }, untrusted: { text: "Deploy", name: "Carol", messageId: "p1" },
+    });
+    expect(toTurn(groupMessage("g1", "p2", "Deploy", { replyTo: { id: "q2", snippet: "Deploy to staging?", button: "go" } }))).toBeNull();
+    // A late mention's event is still the mention's turn; a press with no member key says so.
+    expect(toTurn({ ...groupMessage("g1", "p3", "Deploy", { press }), type: "group.mentioned" })).toBeNull();
+    expect(toTurn(groupMessage("g1", "p4", "Deploy", { press, member: undefined }))!.press).toEqual({ ...press, by: null });
+    // In a 1:1 chat every message is a turn; its press names the chat as `by`, as `button.pressed` does.
+    expect(toTurn(received("c1", "p5", "Deploy", { press }))).toMatchObject({ source: "message.received", chat: "c1", press: { ...press, by: "c1" } });
+    expect(toTurn(received("c1", "p6", "hi"))).not.toHaveProperty("press");
+  });
 });
 
 describe("hooks", () => {
@@ -396,6 +411,55 @@ describe("hooks", () => {
     } finally {
       stderr.mockRestore();
       bridge.close();
+    }
+  });
+
+  it("a hook still running after a while is said once on stderr", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => {}, exec: "sleep 0.6", execSlowMs: 150 });
+      const event = received("c1", "p", "slow");
+      handle(event);
+      await handle.idle();
+      const said = stderr.mock.calls.map(([text]) => String(text));
+      expect(said).toEqual([`ghostly: --exec still runs on event ${event.seq} (message.received) after 0 s: the events after it wait for it\n`]);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("a stop waits for a hook that ends in time, which moves the cursor; one that does not is ended, the cursor before its event", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor"), log = join(dir, "log");
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      // In time: the stop waits, the hook finishes, the cursor moves past its event, and the next event is not handed.
+      const quick = eventHandler({ types: [], print: false, write: () => {}, cursor, stopMs: 3000, exec: `sleep 0.3; echo "$GHOSTLY_EVENT_SEQ" >> '${log}'` });
+      const [first, second] = [received("c1", "p", "one"), received("c1", "p", "two")];
+      quick(first);
+      quick(second);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await quick.stop();
+      await quick.idle();
+      expect(readFileSync(log, "utf8")).toBe(`${first.seq}\n`);
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+      // Too long: ended with what it started (its sleep), said on stderr, the cursor where it was.
+      const slow = eventHandler({ types: ["message.received"], print: false, write: () => {}, cursor, stopMs: 200, exec: `sleep 20 & echo $! > '${log}.child'; wait; echo done >> '${log}'` });
+      const third = received("c1", "p", "three");
+      slow(third);
+      // An event after it that --type drops: the cursor does not pass the event the stop ended to keep it.
+      slow(other("typing.started", { chat: "c1" }));
+      while (!existsSync(`${log}.child`) || !readFileSync(`${log}.child`, "utf8").trim()) await new Promise((resolve) => setTimeout(resolve, 20));
+      const child = Number(readFileSync(`${log}.child`, "utf8").trim());
+      const started = Date.now();
+      await slow.stop();
+      expect(Date.now() - started).toBeLessThan(3000);
+      await slow.idle();
+      expect(() => process.kill(child, 0)).toThrow();
+      expect(readFileSync(log, "utf8")).toBe(`${first.seq}\n`);
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toContain(`ghostly: stopped while --exec ran on event ${third.seq} (message.received): ended it, and the event is handed again at the next start\n`);
+    } finally {
+      stderr.mockRestore();
     }
   });
 });

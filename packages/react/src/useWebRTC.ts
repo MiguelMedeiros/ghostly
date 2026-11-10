@@ -361,7 +361,7 @@ export function useWebRTC({
   }, []);
   /**
    * With "Hide my IP from contacts" on, a call needs media whose connections keep to the relay: one that would gather
-   * this device's own addresses (the Linux Desktop's call engine, which has its own STUN server) makes no call at all.
+   * this device's own addresses (`CallMedia.keepsToRelays` unset) makes no call at all.
    * Asked before the microphone is.
    */
   const assertKeepsToRelays = useCallback(() => {
