@@ -129,11 +129,27 @@ export function posterUrl(poster: string | undefined): string | undefined {
 const localPosters = new Map<string, Promise<{ url: string; width: number; height: number; duration: number } | null>>();
 const LOCAL_POSTERS_KEPT = 48;
 let posterQueue: Promise<unknown> = Promise.resolve();
+/** The bubbles that asked for each poster still waiting its turn. */
+const posterWanted = new WeakMap<Promise<unknown>, AbortSignal[]>();
 
-export function localPoster(id: string, read: () => Promise<Blob | null>): Promise<{ url: string; width: number; height: number; duration: number } | null> {
+/**
+ * File `id`'s poster, made here with `read` once its turn comes. When every bubble that asked for it went (`signal`:
+ * it left the screen) before its turn, nothing is read and it is null, and forgotten: flung past, 20 videos each read
+ * their whole file (up to 64 MiB on Desktop) and were decoded, and the one stopped on waited behind them.
+ */
+export function localPoster(id: string, read: () => Promise<Blob | null>, signal: AbortSignal): Promise<{ url: string; width: number; height: number; duration: number } | null> {
   const known = localPosters.get(id);
-  if (known) return known;
+  if (known) {
+    posterWanted.get(known)?.push(signal);
+    return known;
+  }
+  const wanted = [signal];
   const made = posterQueue.then(async () => {
+    posterWanted.delete(made);
+    if (wanted.every((asked) => asked.aborted)) {
+      if (localPosters.get(id) === made) localPosters.delete(id);
+      return null;
+    }
     const blob = await read().catch(() => null);
     if (!blob) return null;
     const frame = await readVideo(blob);
@@ -141,6 +157,7 @@ export function localPoster(id: string, read: () => Promise<Blob | null>): Promi
     return { url: URL.createObjectURL(frame.poster), width: frame.width, height: frame.height, duration: frame.duration };
   }).catch(() => null);
   posterQueue = made;
+  posterWanted.set(made, wanted);
   localPosters.set(id, made);
   if (localPosters.size > LOCAL_POSTERS_KEPT) {
     const [oldest, poster] = localPosters.entries().next().value!;

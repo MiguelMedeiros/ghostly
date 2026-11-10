@@ -12,6 +12,7 @@ import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
+import { fillNames } from "../lib/fillNodes";
 import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
@@ -206,8 +207,12 @@ export function CallOverlay({
       setDuration(0);
       return;
     }
+    // Counted on the monotonic clock from what had passed when the window started counting: the device's clock put
+    // forward or back mid-call moves the time of day, not the call's length. From the wall clock, an hour ahead read
+    // 1:00:06 six seconds in, and an hour back -1:-59:-54.
+    const from = performance.now() - Math.max(0, Date.now() - callStartedAt);
     const interval = setInterval(() => {
-      setDuration(Math.floor((Date.now() - callStartedAt) / 1000));
+      setDuration(Math.floor((performance.now() - from) / 1000));
     }, 1000);
     return () => clearInterval(interval);
   }, [callState, callStartedAt]);
@@ -232,11 +237,11 @@ export function CallOverlay({
   const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted, told?.own);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
-  // Sharing is never a surprise, to either side.
+  // Sharing is never a surprise, to either side. The contact's name its own <bdi>: "Ana (2)" keeps its brackets on its side in Arabic.
   const sharingNotice = callState !== "connected" ? null
-    : isScreenSharing && remoteIsScreenSharing ? t("calls.sharing.both", { name: peerName })
+    : isScreenSharing && remoteIsScreenSharing ? fillNames(t("calls.sharing.both"), { name: peerName })
     : isScreenSharing ? t("calls.sharing.you")
-    : remoteIsScreenSharing ? t("calls.sharing.peer", { name: peerName }) : null;
+    : remoteIsScreenSharing ? fillNames(t("calls.sharing.peer"), { name: peerName }) : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -330,13 +335,14 @@ export function CallOverlay({
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
           style={phone && !mini ? { top: `calc(${64 + Math.round(120 / selfAspect) + 16}px + env(safe-area-inset-top))` } : undefined}
-          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 w-max max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-2xl px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />
             <path d="M8 21h8M12 17v4" />
           </svg>
-          <span className="truncate">{sharingNotice}</span>
+          {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
+          <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
         </p>
       )}
 
@@ -552,12 +558,12 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
           if (kind !== "audioinput" && devicesOfKind.length === 0) return null;
           const options = [{ id: "", label: t("settings.media.systemDefault") }, ...devicesOfKind.map((d, n) => ({ id: d.id, label: d.label || `${t(KIND_NAME[kind])} ${n + 1}` }))];
           return (
-            <div key={kind} role="group" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
+            <div key={kind} role="radiogroup" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
               <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{t(KIND_NAME[kind])}</p>
               {options.map((option) => {
                 const chosen = devices.current[kind] === option.id;
                 return (
-                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
+                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} radio checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
                     icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={chosen ? "text-accent" : "invisible"}><path d="M5 12l5 5L20 7" /></svg>}
                     onClick={() => { setOpen(false); if (!chosen) devices.choose(kind, option.id); }}>
                     {option.label}
@@ -599,7 +605,9 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       onFocus={() => set("focus", true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) set("focus", false); }}
       onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
-      <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
+      {/* On two lines if need be: cut to one on a phone, "… desconectado. Usand…" never said what the call uses now. */}
+      {/* The device's name its own <bdi>: "HD Pro Webcam C920 (046d:082d)" reads as in the system's list, in Arabic too. */}
+      <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
           className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">

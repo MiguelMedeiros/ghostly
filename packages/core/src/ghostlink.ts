@@ -47,7 +47,7 @@ import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeen
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp, type PairedHttpBodies } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, STATUS_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { APP_RANGE_DATA_KIND, APP_RANGE_FRAMES, APP_RANGE_LIMITS, AppRanges, appRangeChunk, appRangeDataFrame, appRangeErrorFrame, decodeAppRangeData, encodeAppRangeData, readAppRangeFrame, type AppRangeTask } from "./pairedAppRanges";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
@@ -55,6 +55,7 @@ import { CONTACT_ASKER_FRAME, type ContactAskerFrame } from "./contactRecords";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
+import { STATUS_FRAME, StatusReceiver, StatusSender, type StatusState } from "./pairedStatus";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES, FILE_LIMITS, decodeFileData, encodeFileData } from "./chatFiles";
 import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT, PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
@@ -513,6 +514,11 @@ export interface GhostLinkEvents {
    */
   onPeerTyping?(typing: boolean, activity: TypingActivity | null): void;
   /**
+   * What the contact says of itself changed (`status/1`, WISP 401 § Presence and status): its presence, which ends with
+   * the session, and a status it set; only changes, never stored here.
+   */
+  onPeerStatus?(state: StatusState): void;
+  /**
    * The contact reacted to a message (`react/1`, WISP 401 § Reactions), already checked. True: confirm it (it was
    * taken: shown, kept for its message, or older than what is shown); false: not now, it comes again.
    */
@@ -681,6 +687,8 @@ export interface GhostLinkOptions {
   binaryFilesSupport?: boolean;
   /** Offer `typing/1` on paired sessions: say and show when either side is writing (1:1 chats, not group edges). */
   typingSupport?: boolean;
+  /** Offer `status/1` on paired sessions: say and show presence and a set status (1:1 chats, not group edges). */
+  statusSupport?: boolean;
   /** Offer `react/1` on paired sessions: reactions to messages (1:1 chats, not group edges). */
   reactionsSupport?: boolean;
   /** Offer `edit/1` on paired sessions: sent texts can be edited (1:1 chats, not group edges). */
@@ -925,6 +933,11 @@ export class GhostLink {
   /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
   private readonly typingSender = new TypingSender();
   private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
+  /** Presence and status on this session (`status/1`): this side's word (kept across sessions) and the contact's. */
+  private readonly statusSender = new StatusSender();
+  private readonly statusReceiver = new StatusReceiver(state => this.options.events?.onPeerStatus?.(state));
+  /** A status frame waiting for the send interval to pass. */
+  private statusTimer: ReturnType<typeof setTimeout> | null = null;
   /** Mini-apps on this session (`apps/1`): this side's open apps (kept across sessions), the peer's, the limits. */
   private readonly apps: AppSessions;
   /** The read lane on this session (`app-ranges/1`): what this side serves and what it asked; none of it outlives the session. */
@@ -1628,8 +1641,9 @@ export class GhostLink {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
     if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    // Held to a growing wait while the contact's mailbox still says DHT only after the reads one started (`peerLinkPacket`).
+    const read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence), ...(!read && { held: true }) });
   }
 
   /**
@@ -1638,14 +1652,19 @@ export class GhostLink {
    * room for the presence `peerMayHaveLeftDht` looks at, so the mailbox is read now and at the DHT pace for a while
    * here too. The offer is kept and answered, and the dial taken, once that read unblocks the stream. False when
    * something else blocks it (this side is DHT-only, the contact is not pinned, or the offer is not the contact's).
+   * A connection on a native endpoint (no `signal`) proves nothing yet: anyone who can dial the endpoint can open one,
+   * with any identities, and only the session it carries, which waits for this read, authenticates it. The reads it
+   * starts are held as a fresh link packet's are (`peerLinkPacket`); the connection is kept for them all the same.
    */
   private peerDialsFromDht(signal?: string): boolean {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht") return false;
     const credentials = this.options.pairing?.credentials;
     if (!credentials?.peerKey) return false;
     if (signal !== undefined && !verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, credentials.peerKey, true)) return false;
-    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined });
-    this.dht.expect(EXPECT_PEER_MS, true);
+    let read = true;
+    if (signal !== undefined) this.dht.expect(EXPECT_PEER_MS, true);
+    else read = this.dht.peerLinkPacket(EXPECT_PEER_MS);
+    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined, ...(!read && { held: true }) });
     return true;
   }
 
@@ -3538,6 +3557,7 @@ export class GhostLink {
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
     if (this.options.largeFilesSupport && this.options.binaryFilesSupport && this.channel?.binary) offered.push(FILES_BINARY_CAPABILITY);
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
+    if (this.options.statusSupport) offered.push(STATUS_CAPABILITY);
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
     if (this.options.wakeSupport) offered.push(WAKE_SESSION_CAPABILITY);
@@ -3593,6 +3613,31 @@ export class GhostLink {
   get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
   /** What the contact is doing now (typing, recording, thinking, and a bot's status), or null. */
   get peerTypingActivity(): TypingActivity | null { return this.typingReceiver.peerActivity; }
+  /** Both sides offer `status/1` on the open session: presence and a set status can be said and shown. */
+  get supportsStatus(): boolean { return !!this.options.params.profile && this.isDataLinkOpen && this.sessionCapabilities.agreed(STATUS_CAPABILITY); }
+  /** What the contact says of itself: presence while this session is live and it shares it, a status while it lasts. */
+  get peerStatus(): StatusState { return this.statusReceiver.peer; }
+  /**
+   * This side's presence and status (the whole state: `presence` left out when the person does not share it). Said on
+   * the live session once both sides offer `status/1`, at most one frame per few seconds; kept for every next session.
+   */
+  setStatus(state: StatusState): void {
+    this.statusSender.set(state);
+    this.flushStatus();
+  }
+  private flushStatus(): void {
+    if (this.statusTimer || !this.channel || !this.supportsStatus) return;
+    const next = this.statusSender.take();
+    if (!next) return;
+    if ("wait" in next) { this.statusTimer = setTimeout(() => { this.statusTimer = null; this.flushStatus(); }, next.wait); return; }
+    try { this.channel.send(JSON.stringify(next.frame)); } catch { this.statusSender.reset(); /* the next session says it */ }
+  }
+  /** The session ended: the contact is not online here any more, and the next session is owed this side's whole state. */
+  private endStatusSession(): void {
+    if (this.statusTimer) { clearTimeout(this.statusTimer); this.statusTimer = null; }
+    this.statusSender.reset();
+    this.statusReceiver.endSession();
+  }
   /** Both sides offer `wake/1` on the open session: push subscriptions can be shared (WISP 401 § Wake-up push). */
   get supportsWake(): boolean { return !!this.options.params.profile && this.isDataLinkOpen && this.sessionCapabilities.agreed(WAKE_SESSION_CAPABILITY); }
   /**
@@ -3984,6 +4029,11 @@ export class GhostLink {
       // A new session (a transport switch, a reconnect): the contact's reader cleared what this side said on the old
       // one, so a start still standing is said again (a frame said between the two sessions was lost).
       else this.resumeTyping();
+    }
+    if (changed.includes(STATUS_CAPABILITY)) {
+      // A new session, or the contact (or this side) offers it again: the whole state goes; off, presence ends here.
+      if (this.supportsStatus) this.flushStatus();
+      else this.endStatusSession();
     }
     if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
@@ -4396,6 +4446,7 @@ export class GhostLink {
           this.peerGroupsWereOn = false;
           this.leaveHangUp();
           this.typingSender.reset(); this.typingReceiver.clear();
+          this.endStatusSession();
           this.appsSuspended();
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch, this.bodiesOn(channel));
@@ -4527,6 +4578,11 @@ export class GhostLink {
           if (frame?.t === CONTACT_ASKER_FRAME) {
             const keys = this.participationKeys;
             if (keys && this.askerReceived.take()) this.options.events?.onContactAsker?.(frame, keys);
+            return;
+          }
+          if (frame?.t === STATUS_FRAME) {
+            // Only on the authenticated session with the pinned contact, and only once both said status/1.
+            if (this.supportsStatus) this.statusReceiver.receive(frame);
             return;
           }
           if (frame?.t === TYPING_FRAME) {
@@ -5102,6 +5158,7 @@ export class GhostLink {
     this.dropPeerSaid();
     this.sessionCapabilities.reset();
     this.typingSender.reset(); this.typingReceiver.clear();
+    this.endStatusSession();
     this.appsSuspended();
     this.emitFilesSession();
     this.peerGroupsWereOn = false;

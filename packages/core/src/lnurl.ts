@@ -2,6 +2,7 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { stripHidden } from "./text";
 
 /**
  * Paying a Lightning address or an LNURL: the payer's side of
@@ -155,7 +156,8 @@ export function findLightningDestination(text: string): { destination: Lightning
 }
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-const reason = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").slice(0, 200) : "");
+/** A server's own words on one line, bounded, with no character that hides text or reorders what follows it. */
+const reason = (value: unknown) => (typeof value === "string" ? stripHidden(value.replace(/\s+/g, " ")).slice(0, 200) : "");
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
 async function readBounded(response: Response, maxBytes: number): Promise<string> {
@@ -278,6 +280,12 @@ export function invoiceCallbackUrl(params: LnurlPayParams, amountSat: number, co
   return url.href;
 }
 
+/** A success action's link: HTTPS, bounded, and no user part ("https://www.paypal.com@evil.example" opens evil.example). */
+function successUrl(text: string): boolean {
+  if (!/^https:\/\//i.test(text) || text.length > LNURL_LIMITS.maxUrlLength) return false;
+  try { const url = new URL(text); return !url.username && !url.password; } catch { return false; }
+}
+
 /**
  * Checks the invoice a service answered with (LUD-06): the amount asked, a payment hash, not expired, and
  * a commitment to the metadata the person was shown: the `h` tag is its sha256, or the invoice carries the
@@ -296,7 +304,7 @@ export function parseInvoiceCallback(body: unknown, params: LnurlPayParams, amou
   const action = body.successAction;
   if (isRecord(action)) {
     if (action.tag === "message" && typeof action.message === "string") successAction = { tag: "message", message: reason(action.message) };
-    else if (action.tag === "url" && typeof action.url === "string" && /^https:\/\//i.test(action.url) && action.url.length <= LNURL_LIMITS.maxUrlLength) successAction = { tag: "url", description: reason(action.description), url: action.url };
+    else if (action.tag === "url" && typeof action.url === "string" && successUrl(action.url)) successAction = { tag: "url", description: reason(action.description), url: action.url };
   }
   return { invoice, successAction };
 }

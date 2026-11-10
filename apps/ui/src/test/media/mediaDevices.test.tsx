@@ -681,6 +681,21 @@ describe("the call window's device menu", () => {
     expect(screen.queryByTestId("call-devices-menu")).toBeNull();
   });
 
+  // One device of each kind is in use: a screen reader hears a radio group per kind, not checkboxes that sound as if
+  // several could be on.
+  it("reads each kind as a pick-one group: radios, the one in use checked", async () => {
+    const { user } = overlayWith(view());
+    await user.click(screen.getByTestId("call-devices"));
+    const menu = screen.getByTestId("call-devices-menu");
+
+    expect(within(menu).queryAllByRole("checkbox")).toEqual([]);
+    const picked = (kind: string) => within(within(menu).getByRole("radiogroup", { name: kind })).getAllByRole("radio")
+      .map((row) => [row.textContent, row.getAttribute("aria-checked")]);
+    expect(picked("Microphone")).toEqual([["System default", "false"], ["MacBook Pro Microphone", "false"], ["AirPods", "true"]]);
+    expect(picked("Camera")).toEqual([["System default", "true"], ["FaceTime HD Camera", "false"], ["Logitech C920", "false"]]);
+    expect(picked("Speaker")).toEqual([["System default", "true"], ["MacBook Pro Speakers", "false"], ["AirPods", "false"]]);
+  });
+
   it("has no speakers where none can be chosen", async () => {
     const { user } = overlayWith(view({ speakers: false }));
     await user.click(screen.getByTestId("call-devices"));

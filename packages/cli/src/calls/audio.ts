@@ -1,4 +1,4 @@
-import { FRAME_MS, frameBytes, frameSamples, PlaybackQueue, type CallRate } from "./pcm";
+import { FRAME_MS, frameBytes, frameSamples, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter } from "./rtp";
 
 /** The longest stall of the sender whose frames are still sent after it (see `catchUp`). */
@@ -38,6 +38,7 @@ export interface CallAudioOptions {
   onFrame(frame: Buffer): void;
   /** What the program wrote, to send (the call's own, kept from before the media existed); a new one if none. */
   queue?: PlaybackQueue;
+  /** The clock frames are sent by; the call's own (`monotonic`) if none. */
   now?: () => number;
 }
 
@@ -80,11 +81,11 @@ export class CallAudio {
   /** Frames sent and received, for `call list`. */
   sent = 0;
   received = 0;
-  /** When the last packet, RTP or RTCP, came from the contact (Date.now(); 0: none yet), for the call's watch. */
+  /** When the last packet, RTP or RTCP, came from the contact (on `now`, `monotonic` by default; 0: none yet), for the call's watch. */
   heardAt = 0;
 
   constructor(private readonly options: CallAudioOptions) {
-    const now = options.now ?? Date.now;
+    const now = options.now ?? monotonic;
     this.queue = options.queue ?? new PlaybackQueue(options.rate, now);
     this.writer = new RtpWriter(options.ssrc, options.payloadType);
     this.frame = frameBytes(options.rate);
@@ -96,7 +97,7 @@ export class CallAudio {
   /** Starts sending, a frame every 20 ms from now on. */
   start(): void {
     if (this.timer || this.stopped) return;
-    this.startedAt = (this.options.now ?? Date.now)();
+    this.startedAt = (this.options.now ?? monotonic)();
     this.ticks = 0;
     this.schedule();
   }
@@ -151,7 +152,7 @@ export class CallAudio {
   /** Handles one packet from the track. Exposed for tests. */
   receive(packet: Buffer): void {
     if (this.stopped) return;
-    this.heardAt = (this.options.now ?? Date.now)();
+    this.heardAt = (this.options.now ?? monotonic)();
     if (isRtcp(packet)) return;
     const rtp = parseRtp(packet);
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
@@ -217,7 +218,7 @@ export class CallAudio {
   }
 
   private schedule(): void {
-    const now = this.options.now ?? Date.now;
+    const now = this.options.now ?? monotonic;
     const due = this.startedAt + (this.ticks + 1) * FRAME_MS;
     this.timer = setTimeout(() => {
       if (this.stopped) return;
@@ -240,7 +241,7 @@ export class CallAudio {
    * rest of the call.
    */
   private catchUp(late: number): void {
-    const now = this.options.now ?? Date.now;
+    const now = this.options.now ?? monotonic;
     if (late > MAX_CATCH_UP_MS) {
       this.owed = late;
       this.kept = this.ahead;
@@ -260,7 +261,7 @@ export class CallAudio {
    */
   private drop(): void {
     if (this.owed <= 0) return;
-    if ((this.options.now ?? Date.now)() > this.owedUntil) { this.owed = 0; return; }
+    if ((this.options.now ?? monotonic)() > this.owedUntil) { this.owed = 0; return; }
     this.owed -= this.queue.skip(Math.min(this.owed, this.queue.queuedMs - this.kept));
   }
 }

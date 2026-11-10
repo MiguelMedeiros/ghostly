@@ -1,9 +1,10 @@
-import { useContext, useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useContext, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { usePhoneHeader } from "../../hooks/usePhoneHeader";
 import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
+import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
@@ -56,6 +57,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const back = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const { name, named } = contact;
+  // Open again under a stopped app: busy while it opens, and why it failed, for that stopped app only.
+  const [again, setAgain] = useState<{ of: unknown; busy?: boolean; error?: string } | null>(null);
 
   useEffect(() => {
     if (box.current) registerAppSlot(linkId, { box: box.current, sessionId, contact: { name, named } });
@@ -103,8 +106,39 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
     };
   }, [shown, linkId]);
 
+  // Stopped while shown (the watchdog, a takedown, its frame navigated): the focus was in its frame, gone with it, so it
+  // goes to Open again when offered, else in the panel as on open, and Escape still closes; never pulled from where the
+  // person went meanwhile.
+  const stopped = shown ? app?.stopped : undefined;
+  useEffect(() => {
+    if (!stopped) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const panel = root.current;
+    (panel?.querySelector<HTMLElement>("[data-testid=mini-app-open-again]") ?? (backNow.current ? back.current : panel))?.focus({ preventScroll: true });
+  }, [stopped]);
+
   // A stopped app (a takedown) has nothing left to stop: Close takes its message away.
   const close = () => { if (app?.stopped) setChatApp(linkId, null); else app?.running.stop(); };
+  const openAgain = () => {
+    if (!app || !appOpener || (again?.of === app.running && again.busy)) return;
+    const of = app.running;
+    setAgain({ of, busy: true });
+    // Opened with Run anyway (a version a store removed): again the same way, as the person chose.
+    appOpener(app.ref, linkId, { runAnyway: app.runAnyway === true }).then(() => {
+      setAgain(null);
+      // Its button went with the stopped message: the focus goes back into the panel, as on first open, unless the
+      // person went elsewhere meanwhile.
+      const panel = root.current;
+      const active = document.activeElement;
+      if (active && active !== document.body && !panel?.contains(active)) return;
+      (withBack ? back.current : panel)?.focus({ preventScroll: true });
+    }, (error: unknown) => {
+      console.warn(`[apps] ${title} did not open again`, error);
+      setAgain({ of, error: appErrorText(error, t) });
+    });
+  };
+  const againHere = again && again.of === app?.running ? again : null;
   // Back to the chat: the app keeps running, "Back to Chess" brings it back; a stopped one has nothing to come back to.
   const goBack = () => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }));
   // Only while its chat is the one on screen: a chat kept loaded off screen (App's `loaded`) leaves Back to the page.
@@ -169,11 +203,15 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       </p>}
       {/* Stopped by the watchdog: it may run fine once started again, and the person decides. */}
       {shown && app?.stopped?.why === "unresponsive" && appOpener && (
-        <button type="button" data-testid="mini-app-open-again" onClick={() => void appOpener(app.ref, linkId).catch((error: unknown) => console.warn(`[apps] ${title} did not open again`, error))}
-          className="mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        <button type="button" data-testid="mini-app-open-again" onClick={openAgain}
+          aria-busy={againHere?.busy || undefined} aria-disabled={againHere?.busy || undefined}
+          className="mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer aria-disabled:cursor-wait aria-disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           {t("apps.view.openAgain")}
         </button>
       )}
+      {shown && app?.stopped && againHere?.error && <p role="alert" data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
+        {againHere.error}
+      </p>}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
     </section>
   );

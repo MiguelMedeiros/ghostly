@@ -1262,14 +1262,80 @@ const NET_RULES_ID: &str = "ghostly-app-sandbox-net-1";
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const NET_RULES: &str = r#"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ghostly-app:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^https:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^wss:"},"action":{"type":"ignore-previous-rules"}}]"#;
 
-/// The rule list a window gets: its id and its JSON.
+/// The rule list of a window that shows a contact's app while Hide my IP from contacts is on (`viewer::open`):
+/// every HTTP(S) and WS(S) load blocked, so the window reaches no server but through its own origin
+/// (`ghostly-svc:`, served by the contact over the chat). Its CSP (`SERVICE_CSP_RELAY_ONLY`) says the same, but
+/// WebKitGTK does not apply a CSP to `<link rel=preconnect>`, which opens a connection to the server it names.
+/// One rule per scheme: WebKit refuses a `url-filter` with a disjunction (`|`), which WebKitGTK 2.52 reports as
+/// "Disjunctions are not supported yet" and the list does not compile.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
-fn rules_for(internet: bool) -> (&'static str, &'static str) {
-    if internet {
-        (NET_RULES_ID, NET_RULES)
-    } else {
-        (RULES_ID, RULES)
+const RELAY_ONLY_RULES_ID: &str = "ghostly-svc-relay-only-1";
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+const RELAY_ONLY_RULES: &str = r#"[{"trigger":{"url-filter":"^http:"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https:"},"action":{"type":"block"}},{"trigger":{"url-filter":"^ws:"},"action":{"type":"block"}},{"trigger":{"url-filter":"^wss:"},"action":{"type":"block"}}]"#;
+
+/// Which rule list a window gets. Each is compiled once and kept in its own slot (`slot`).
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Rules {
+    /// An app window (`RULES`).
+    App,
+    /// An app window whose app the person granted `internet` (`NET_RULES`).
+    Net,
+    /// A contact's app opened while Hide my IP was on (`RELAY_ONLY_RULES`).
+    RelayOnly,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+impl Rules {
+    /// How many there are: the size of each platform's cache of compiled lists.
+    const COUNT: usize = 3;
+
+    fn app(internet: bool) -> Rules {
+        if internet {
+            Rules::Net
+        } else {
+            Rules::App
+        }
     }
+
+    fn slot(self) -> usize {
+        self as usize
+    }
+
+    /// Its id and its JSON.
+    fn source(self) -> (&'static str, &'static str) {
+        match self {
+            Rules::App => (RULES_ID, RULES),
+            Rules::Net => (NET_RULES_ID, NET_RULES),
+            Rules::RelayOnly => (RELAY_ONLY_RULES_ID, RELAY_ONLY_RULES),
+        }
+    }
+}
+
+/// Adds a rule list to a window that is already built, on the main thread, then `done` there: how a contact's
+/// app window opened under Hide my IP gets `Rules::RelayOnly` (`viewer::open`), whose requests wait for it
+/// (`viewer::handle`). Linux keeps the compiled filter in the same store as the app windows'.
+#[cfg(all(any(target_os = "macos", target_os = "linux"), not(test)))]
+pub(crate) fn add_rules<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    rules: Rules,
+    done: impl FnOnce(Result<(), String>) + Send + 'static,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let store = window
+        .app_handle()
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Cache: {e}"))?
+        .join("app-filters");
+    window
+        .with_webview(move |platform| {
+            #[cfg(target_os = "linux")]
+            webkitgtk::add_rules(&platform.inner(), rules, &store, done);
+            #[cfg(target_os = "macos")]
+            webkit::add_rules(platform.inner(), rules, done);
+        })
+        .map_err(|e| format!("Window: {e}"))
 }
 
 /// The WebKit features an app window has off on macOS: `<link rel=preconnect>` (and in Early Hints), DNS
@@ -1303,56 +1369,94 @@ pub(crate) mod webkit {
     use std::sync::OnceLock;
     use tauri::{AppHandle, Runtime};
 
-    use super::{rules_for, OFF};
+    use super::{Rules, OFF};
 
     thread_local! {
-        /// Compiled once each, on the main thread, where WebKit wants them: [without, with] `internet`.
-        static RULE_LISTS: RefCell<[Option<Retained<WKContentRuleList>>; 2]> = const { RefCell::new([None, None]) };
+        /// Compiled once each, on the main thread, where WebKit wants them: one slot per `Rules`.
+        static RULE_LISTS: RefCell<[Option<Retained<WKContentRuleList>>; Rules::COUNT]> = const { RefCell::new([None, None, None]) };
+    }
+
+    type Compiled = Result<Retained<WKContentRuleList>, String>;
+
+    /// Compiles a rule list on the main thread and keeps it in its slot; then `done`, there, with it.
+    fn compile(rules: Rules, done: impl FnOnce(Compiled) + 'static) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return done(Err("not the main thread".into()));
+        };
+        let Some(store) = (unsafe { WKContentRuleListStore::defaultStore(mtm) }) else {
+            return done(Err("no rule list store".into()));
+        };
+        let (id, source) = rules.source();
+        let done = std::cell::Cell::new(Some(done));
+        let block =
+            block2::RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
+                let answer = match unsafe { Retained::retain(list) } {
+                    Some(list) => {
+                        RULE_LISTS
+                            .with(|slots| slots.borrow_mut()[rules.slot()] = Some(list.clone()));
+                        Ok(list)
+                    }
+                    None => Err(unsafe { error.as_ref() }
+                        .map(|e| e.localizedDescription().to_string())
+                        .unwrap_or_else(|| "rule list not compiled".into())),
+                };
+                if let Some(done) = done.take() {
+                    done(answer);
+                }
+            });
+        unsafe {
+            store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
+                Some(&NSString::from_str(id)),
+                Some(&NSString::from_str(source)),
+                Some(&block),
+            );
+        }
     }
 
     /// Compiles a window's rule list, once, and waits for it. Not on the main thread, where WebKit answers.
     pub fn compile_rules<R: Runtime>(app: &AppHandle<R>, internet: bool) -> Result<(), String> {
-        static COMPILED: [OnceLock<Result<(), String>>; 2] = [OnceLock::new(), OnceLock::new()];
-        let (id, rules) = rules_for(internet);
-        COMPILED[usize::from(internet)]
+        static COMPILED: [OnceLock<Result<(), String>>; Rules::COUNT] =
+            [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+        let rules = Rules::app(internet);
+        COMPILED[rules.slot()]
             .get_or_init(|| {
                 let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
                 app.run_on_main_thread(move || {
-                    let Some(mtm) = MainThreadMarker::new() else {
-                        let _ = tx.send(Err("not the main thread".into()));
-                        return;
-                    };
-                    let Some(store) = (unsafe { WKContentRuleListStore::defaultStore(mtm) }) else {
-                        let _ = tx.send(Err("no rule list store".into()));
-                        return;
-                    };
-                    let done = block2::RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
-                        let answer = match unsafe { Retained::retain(list) } {
-                            Some(list) => {
-                                RULE_LISTS.with(|slots| {
-                                    slots.borrow_mut()[usize::from(internet)] = Some(list)
-                                });
-                                Ok(())
-                            }
-                            None => Err(unsafe { error.as_ref() }
-                                .map(|e| e.localizedDescription().to_string())
-                                .unwrap_or_else(|| "rule list not compiled".into())),
-                        };
-                        let _ = tx.send(answer);
-                    });
-                    unsafe {
-                        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
-                            Some(&NSString::from_str(id)),
-                            Some(&NSString::from_str(rules)),
-                            Some(&done),
-                        );
-                    }
+                    compile(rules, move |answer| {
+                        let _ = tx.send(answer.map(|_| ()));
+                    })
                 })
                 .map_err(|e| e.to_string())?;
                 rx.recv_timeout(std::time::Duration::from_secs(10))
                     .map_err(|_| "rule list not compiled in time".to_string())?
             })
             .clone()
+    }
+
+    /// Adds a rule list to a web view already built (main thread): the one compiled before, or now. Its
+    /// configuration is a copy, but the user content controller in it is the web view's own, so a list added
+    /// there applies to every load after it, as the filter WebKitGTK adds to a built web view (`webkitgtk`).
+    pub fn add_rules(
+        webview: *mut std::ffi::c_void,
+        rules: Rules,
+        done: impl FnOnce(Result<(), String>) + 'static,
+    ) {
+        let Some(webview) = (unsafe { Retained::retain(webview as *mut AnyObject) }) else {
+            return done(Err("no web view".into()));
+        };
+        let add = move |list: &WKContentRuleList| -> Result<(), String> {
+            let config: Option<Retained<WKWebViewConfiguration>> =
+                unsafe { msg_send![&*webview, configuration] };
+            let config = config.ok_or("no configuration")?;
+            unsafe { config.userContentController().addContentRuleList(list) };
+            Ok(())
+        };
+        if let Some(list) = RULE_LISTS.with(|slots| slots.borrow()[rules.slot()].clone()) {
+            return done(add(&list));
+        }
+        compile(rules, move |answer| {
+            done(answer.and_then(|list| add(&list)))
+        });
     }
 
     /// The pointer lock an app asks for (mouse look), which WKWebView gives only when its UI delegate answers
@@ -1544,7 +1648,7 @@ pub(crate) mod webkit {
         let config = unsafe { WKWebViewConfiguration::new(mtm) };
         if guard.rules {
             let list = RULE_LISTS
-                .with(|slots| slots.borrow()[usize::from(internet)].clone())
+                .with(|slots| slots.borrow()[Rules::app(internet).slot()].clone())
                 .ok_or("rule list not compiled")?;
             unsafe { config.userContentController().addContentRuleList(&list) };
         }
@@ -1587,7 +1691,7 @@ fn app_settings(settings: &webkit2gtk::Settings, guard: Guard) {
 /// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
 #[cfg(all(target_os = "linux", not(test)))]
 mod webkitgtk {
-    use super::{rules_for, Guard};
+    use super::{Guard, Rules};
     use std::cell::RefCell;
     use std::path::Path;
     use webkit2gtk::glib::translate::{FromGlibPtrFull, ToGlibPtr};
@@ -1597,8 +1701,8 @@ mod webkitgtk {
     struct Filter(*mut ffi::WebKitUserContentFilter);
 
     thread_local! {
-        /// Made once each, on the GTK thread, where WebKitGTK answers: [without, with] `internet`.
-        static FILTERS: RefCell<[Option<Filter>; 2]> = const { RefCell::new([None, None]) };
+        /// Made once each, on the GTK thread, where WebKitGTK answers: one slot per `Rules`.
+        static FILTERS: RefCell<[Option<Filter>; Rules::COUNT]> = const { RefCell::new([None, None, None]) };
     }
 
     type Done = Box<dyn FnOnce(Result<(), String>)>;
@@ -1651,11 +1755,21 @@ mod webkitgtk {
         if !guard.rules {
             return done(Ok(()));
         }
-        let slot = usize::from(internet);
+        add_rules(webview, Rules::app(internet), store, done);
+    }
+
+    /// A rule list's filter added to the web view, now or once it is made; then `done`. Made once per `Rules`.
+    pub fn add_rules(
+        webview: &webkit2gtk::WebView,
+        rules: Rules,
+        store: &Path,
+        done: impl FnOnce(Result<(), String>) + 'static,
+    ) {
+        let slot = rules.slot();
         if let Some(filter) = FILTERS.with(|slots| slots.borrow()[slot].as_ref().map(|f| f.0)) {
             return done(add(webview, filter));
         }
-        let (rules_id, rules) = rules_for(internet);
+        let (rules_id, rules) = rules.source();
         let _ = std::fs::create_dir_all(store);
         let path = std::ffi::CString::new(store.to_string_lossy().as_bytes()).unwrap_or_default();
         let id = std::ffi::CString::new(rules_id).unwrap_or_default();
@@ -2713,9 +2827,91 @@ mod tests {
                 {"trigger": {"url-filter": "^wss:"}, "action": {"type": "ignore-previous-rules"}},
             ])
         );
-        assert_eq!(rules_for(false), (RULES_ID, RULES));
-        assert_eq!(rules_for(true), (NET_RULES_ID, NET_RULES));
+        assert_eq!(Rules::app(false).source(), (RULES_ID, RULES));
+        assert_eq!(Rules::app(true).source(), (NET_RULES_ID, NET_RULES));
         assert_ne!(RULES_ID, NET_RULES_ID);
+    }
+
+    /// A contact's app opened under Hide my IP: every HTTP(S) and WS(S) load blocked, preconnect included, which
+    /// WebKitGTK's CSP lets through (measured); its own origin (`ghostly-svc:`), and the inline, data: and blob:
+    /// content its policy allows, never matched. Its own list, compiled and kept apart from the app windows'.
+    #[test]
+    fn the_relay_only_rule_list_blocks_every_http_and_ws_load_but_never_the_apps_own_origin() {
+        let rules: Value = serde_json::from_str(RELAY_ONLY_RULES).unwrap();
+        assert_eq!(
+            rules,
+            json!([
+                {"trigger": {"url-filter": "^http:"}, "action": {"type": "block"}},
+                {"trigger": {"url-filter": "^https:"}, "action": {"type": "block"}},
+                {"trigger": {"url-filter": "^ws:"}, "action": {"type": "block"}},
+                {"trigger": {"url-filter": "^wss:"}, "action": {"type": "block"}},
+            ])
+        );
+        // What each filter matches, as WebKit reads it: `^scheme:`, anchored at the start, case-insensitive.
+        let schemes: Vec<String> = rules
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| {
+                let filter = rule["trigger"]["url-filter"].as_str().unwrap();
+                let scheme = filter.strip_prefix('^').unwrap().strip_suffix(':').unwrap();
+                assert!(scheme.chars().all(|c| c.is_ascii_lowercase()), "{filter}");
+                format!("{scheme}:")
+            })
+            .collect();
+        let blocked = |url: &str| {
+            let url = url.to_ascii_lowercase();
+            schemes
+                .iter()
+                .any(|scheme| url.starts_with(scheme.as_str()))
+        };
+        for out in [
+            "http://127.0.0.1:7862/",
+            "https://contact.example/p.png",
+            "HTTPS://contact.example/",
+            "ws://contact.example/live",
+            "wss://contact.example/live",
+        ] {
+            assert!(blocked(out), "{out}");
+        }
+        let own_origin = format!("{}://atlas.peer.ybndrfg8ejkmcpqx/", crate::viewer::SCHEME);
+        for own in [
+            own_origin.as_str(),
+            "data:image/png;base64,AAAA",
+            "blob:ghostly-svc://atlas.peer.ybndrfg8ejkmcpqx/1b4e28ba-2fa1-11d2-883f-0016d3cca427",
+            "about:blank",
+        ] {
+            assert!(!blocked(own), "{own}");
+        }
+        assert_eq!(
+            Rules::RelayOnly.source(),
+            (RELAY_ONLY_RULES_ID, RELAY_ONLY_RULES)
+        );
+        let all = [Rules::App, Rules::Net, Rules::RelayOnly];
+        let ids: std::collections::HashSet<_> = all.iter().map(|r| r.source().0).collect();
+        let slots: std::collections::HashSet<_> = all.iter().map(|r| r.slot()).collect();
+        assert_eq!((ids.len(), slots.len()), (Rules::COUNT, Rules::COUNT));
+        assert!(all.iter().all(|r| r.slot() < Rules::COUNT));
+    }
+
+    /// WebKit compiles no rule list whose `url-filter` has a disjunction (WebKitGTK 2.52.6: "Disjunctions are not
+    /// supported yet"), and a list that does not compile opens no window: every filter of every list names one
+    /// pattern, with no `|` and no group.
+    #[test]
+    fn no_rule_list_has_a_url_filter_with_a_disjunction() {
+        for rules in [Rules::App, Rules::Net, Rules::RelayOnly] {
+            let (id, source) = rules.source();
+            let list: Value = serde_json::from_str(source).unwrap();
+            let list = list.as_array().unwrap();
+            assert!(!list.is_empty(), "{id}");
+            for rule in list {
+                let filter = rule["trigger"]["url-filter"].as_str().unwrap();
+                assert!(
+                    !filter.contains('|') && !filter.contains('(') && !filter.contains(')'),
+                    "{id}: {filter}"
+                );
+            }
+        }
     }
 
     /// WebKit's switches are private, so a WebKit that renamed one would leave it on (`webkit::configuration`

@@ -119,6 +119,26 @@ describe("the argument parser", () => {
     expect(parseArgs(["-5"], { five: { type: "boolean", short: "5", description: "" } }, undefined, { command: "x", number: () => true })).toEqual({ positionals: [], options: { five: true } });
   });
 
+  // Before, `chat pay payee 1e3` paid 1,000 sats: an amount was read as JavaScript reads a number, so a typo of `2e3`
+  // for `23` paid 2,000, and `0x10` paid 16.
+  it("reads an amount and a number flag only as decimal digits, refusing 1e3, 0x10, 0b11 and 0o7", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, number: numberSlot(command) });
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const typed of ["1e3", "2E3", "0x10", "0b11", "0o7", " 21", "21 ", "+21", "1_000"]) {
+      for (const [name, argv] of [["chat pay", ["bob", typed]], ["chat request", ["bob", typed]], ["wallet receive", [typed]]] as const)
+        expect(() => params(name, [...argv]), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `<sats> takes a whole number from 1 up, not ${JSON.stringify(typed)}`));
+      for (const flag of ["amount", "max-fee"])
+        expect(() => params("pay", ["lnurl1x", `--${flag}`, typed]), `pay --${flag} ${typed}`).toThrow(new CliError("usage", `--${flag} takes a number, not ${JSON.stringify(typed)}`));
+    }
+    expect(params("chat pay", ["bob", "0021"])).toMatchObject({ amount: 21 });
+    expect(params("pay", ["lnurl1x", "--amount", "1000", "--max-fee", "0"])).toMatchObject({ amount: 1000, maxFee: 0 });
+    expect(parseArgs(["--left", "12.5"], COMMANDS["usage send"].options!).options).toEqual({ left: 12.5 });
+    expect(parseArgs(["--hold", "-5"], COMMANDS["chat disconnect"].options!).options).toEqual({ hold: -5 });
+  });
+
   it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
     const send = TEXT_COMMANDS.send, history = COMMANDS["chat history"];
     expect(() => parseArgs(["bob", "--wiat", "sent"], send.options, idSlot(send), { command: "send", text: true }))
@@ -533,6 +553,11 @@ describe("errors", () => {
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
     expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
+    // A mint that failed `pay`'s quote or `wallet faucet` (a 500, a closed socket) said only its own words ("internal
+    // error"): now it is named, with nothing paid and the next step, its words kept last. Its code is still `engine`.
+    const mint = { host: "testnut.cashu.space", reason: "internal error" };
+    expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
+    expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

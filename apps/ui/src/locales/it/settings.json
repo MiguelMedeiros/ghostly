@@ -182,6 +182,8 @@
   "sendTyping": "Invia indicatore di scrittura",
   "sendTypingHint": "I tuoi contatti vedono quando stai scrivendo. Se disattivato, vedi comunque il loro.",
   "setPassword": "Imposta password",
+  "sharePresence": "Mostra quando sono online",
+  "sharePresenceHint": "I contatti vedono un punto mentre usi Ghostly. Uno stato impostato si vede comunque.",
   "shareProfile": "Condividi il mio nome e la mia foto con i contatti",
   "shareProfileHint": "I tuoi contatti vedono il nome e la foto di questo profilo. Se disattivato, vedono “Contatto” e un motivo al loro posto.",
   "sourceCode": "Codice sorgente",

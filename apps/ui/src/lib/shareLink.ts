@@ -1,4 +1,5 @@
 import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
+import { findSecret } from "./parse/secrets";
 import { servicesPlatform } from "./platform";
 
 export type ShareOutcome = "shared" | "copied" | "cancelled";
@@ -24,8 +25,8 @@ export async function copyText(text: string): Promise<void> {
 }
 
 /**
- * Copies a secret (an invite, a device's link, a group's link, ecash): marked sensitive where the host can (the Android
- * app, whose copy preview then shows dots and whose keyboards keep no history of it), elsewhere as `copyText`. A
+ * Copies a secret (an invite, a device's link, a group's link, ecash): marked sensitive where the host can (the apps,
+ * whose clipboard histories and managers then keep no copy of it), elsewhere as `copyText`. A
  * refused sensitive copy throws: the caller shows the text to copy by hand rather than copy it unmarked.
  */
 export async function copySecret(text: string): Promise<void> {
@@ -33,6 +34,14 @@ export async function copySecret(text: string): Promise<void> {
   try { host = getBrowserHost(); } catch { /* none yet: the page copies */ }
   if (host?.copySecret) return host.copySecret(text);
   return copyText(text);
+}
+
+/**
+ * Copies a message's words (its Copy, an edit's earlier text in its details): as a secret when they hold one the
+ * composer would ask about (a Cashu token, a seed, a key), as plain text otherwise.
+ */
+export async function copyMessageText(text: string): Promise<void> {
+  return findSecret(text) ? copySecret(text) : copyText(text);
 }
 
 /**

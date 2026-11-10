@@ -6,6 +6,7 @@ import { Notice } from "./ui/Notice";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
+import { fillNames } from "../lib/fillNodes";
 import type { Translate } from "../locales/translate";
 
 const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
@@ -16,10 +17,12 @@ export function ChatHoldLine({ hold, name }: { hold: PeerHoldState; name: string
   if (hold.outstanding <= 0 && !hold.error) return null;
   return (
     <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border" role="status">
-      {hold.outstanding > 0 && <p className="m-0 truncate">{t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
-        count: hold.outstanding, name,
+      {/* The whole sentence, on two lines if need be: cut to one on a 320 px phone, it lost the quota at its end. */}
+      {/* The contact's name its own <bdi>: "Ana (2)" keeps its brackets on its side in Arabic. */}
+      {hold.outstanding > 0 && <p className="m-0 break-words">{fillNames(t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+        count: hold.outstanding,
         used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(hold.bytes / 1024 / 1024),
-        max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) })}</p>}
+        max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) }), { name })}</p>}
       {hold.error && <Notice testId="hold-error" problem={problemText(hold.error, t)} className="text-[11px]" />}
     </div>
   );

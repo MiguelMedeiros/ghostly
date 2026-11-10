@@ -83,6 +83,11 @@ export interface BrowserHost {
    */
   withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
   /**
+   * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
+   * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.
+   */
+  localAccessAllowed?(origin: string): Promise<boolean>;
+  /**
    * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
    * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
    */

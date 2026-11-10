@@ -1,5 +1,5 @@
 import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationStatus, useInvitationAnswer } from "./GroupInvitation";
@@ -9,6 +9,8 @@ import { PinIcon } from "./PinIcon";
 import { DeliveryIcon } from "./chat/DeliveryStatus";
 import { TypingText } from "./TypingIndicator";
 import { usePeerTypingActivity } from "../hooks/useTyping";
+import { presenceWords, usePeerPresence } from "../lib/presence";
+import { PeerStatusMark, PresenceDot } from "./PresenceMarks";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
@@ -16,7 +18,7 @@ import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
 import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow, othersName } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
 import { sameValue } from "../lib/sameValue";
@@ -245,7 +247,7 @@ export interface ChatRowProps {
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
 function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate): string {
   if (joiner && joiner !== p.peerPubKey) return t("chat.youJoined");
-  return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
+  return `${p.named ? othersName(p.label, t) : p.keyLabel} ${t("chat.joined")}`;
 }
 
 /**
@@ -287,6 +289,9 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
+  // The contact's presence and status (WISP 401 § Presence and status): one look-up in a map built once per state, and
+  // this row alone is drawn again when theirs changes (lib/presence.ts).
+  const presence = usePeerPresence(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
   // A payment of the contact's this app refused: the app's line, in the app's language (not the stored English).
   const refused = p.lastMessage && refusedRowText(p.lastMessage, t);
@@ -307,10 +312,11 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
         className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
       <RowOpen testId="chat-row-open" active={p.active} describedBy={previewId} reorders={!!p.reorder?.props["data-reorder-id"]}
-        label={rowLabel(t, p.named ? p.label : `${p.label} · ${p.keyLabel}`, [p.unread > 0 && t("sidebar.row.unread", { count: p.unread }), muted && t("sidebar.row.muted"), p.pinned && t("sidebar.row.pinned")])} />
+        label={rowLabel(t, p.named ? p.label : `${p.label} · ${p.keyLabel}`, [...presenceWords(t, presence), p.unread > 0 && t("sidebar.row.unread", { count: p.unread }), muted && t("sidebar.row.muted"), p.pinned && t("sidebar.row.pinned")])} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
+        <PresenceDot entry={presence} testId="chat-row-presence" />
         {p.syncing && (
           <span className="absolute -top-1 -start-1 w-5 h-5 flex items-center justify-center z-10">
             <svg className="animate-ghost-boo w-5 h-5" viewBox="0 0 64 64" aria-hidden="true">
@@ -323,7 +329,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           </span>
         )}
         {p.creator && (
-          <span className="absolute -bottom-0.5 -end-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-accent text-on-accent ring-2 ring-sidebar-bg z-10 group/star">
+          // The dot of a contact online takes the bottom corner: the star goes up to the top one.
+          <span data-testid="chat-row-creator" className={`absolute ${presence?.presence ? "-top-0.5" : "-bottom-0.5"} -end-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-accent text-on-accent ring-2 ring-sidebar-bg z-10 group/star`}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
             </svg>
@@ -336,8 +343,9 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       <RowText
         name={p.label}
         previewId={previewId}
-        // Compact: the working mark right after the name, before the identities.
-        marks={<>{p.density === "compact" && working}<ContactMarks peerKey={p.peerPubKey} /></>}
+        // Compact: the working mark right after the name, then the contact's status, before the identities. The status
+        // gives way before the name does; the row's button says it (rowLabel).
+        marks={<>{p.density === "compact" && working}<PeerStatusMark entry={presence} testId="chat-row-peer-status" hidden className="max-w-[50%] text-[13px] leading-5" /><ContactMarks peerKey={p.peerPubKey} /></>}
         nameClass={!p.named ? "text-text-muted italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
@@ -399,11 +407,17 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
 }, sameValue);
 
 /**
+ * A group as the chat list reads it (Sidebar): without who is typing, each member's presence and edge, and how a
+ * community is connected. They change all the time, and nothing in the list shows them.
+ */
+export type ListedGroup = Omit<GroupView, "members" | "typing" | "community"> & { members: Pick<GroupMemberView, "key" | "role" | "me" | "nick">[] };
+
+/**
  * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
  * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
  */
 export function GroupRow({ group, active, density, onOpen, drag }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void;
   /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
   drag?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
 }) {
@@ -426,7 +440,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
 }
 
 const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
+  group: ListedGroup; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;

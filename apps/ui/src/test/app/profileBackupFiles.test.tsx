@@ -5,6 +5,7 @@ import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { backUpToFile } from "../../lib/backupFile";
 import { openProfileBackup, profileBackupSizes, restoreOpenedBackup, type BackupOptions, type BackupProgress } from "../../lib/profileBackup";
+import { axeViolations } from "../axe";
 import { fakeEngine, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: backup.profile.file, backup.progress, backup.unprotected, profiles.delete, backup.light
@@ -64,6 +65,14 @@ describe("a profile backup's file", () => {
     await user.upload(screen.getByTestId("restore-file"), new File(["{}"], "real.ghostly-backup", { type: "application/json" }));
     await waitFor(() => expect(screen.getByTestId("restore-go")).toBeEnabled());
     expect(screen.queryByTestId("backup-error")).not.toBeInTheDocument();
+  });
+
+  it.each([["en", "Backup to restore"], ["ja", "復元するバックアップ"]] as const)("Restore's file picker is named for what it picks, in the app's language (%s)", async (language, name) => {
+    // Unnamed, it was read as the browser's own "Choose File", in the browser's language.
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />, { language });
+    await user.click(screen.getByTestId("restore-open"));
+    expect((await axeViolations(screen.getByTestId("profile-backups"))).filter((hit) => hit.startsWith("label:"))).toEqual([]);
+    expect(screen.getByLabelText(name)).toBe(screen.getByTestId("restore-file"));
   });
 
   it("shows what a backup is doing as it goes: the stage, the file, the bytes, then where it was saved", async () => {

@@ -182,6 +182,8 @@
   "sendTyping": "Send typing indicator",
   "sendTypingHint": "Contacts see when you're writing. Off, you still see theirs.",
   "setPassword": "Set password",
+  "sharePresence": "Share when I'm online",
+  "sharePresenceHint": "Contacts see a dot while you use Ghostly. A status you set shows either way.",
   "shareProfile": "Share my name and picture with contacts",
   "shareProfileHint": "Your contacts see this profile's name and picture. Off, they see “Contact” and a pattern instead.",
   "sourceCode": "Source code",

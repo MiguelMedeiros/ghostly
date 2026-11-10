@@ -255,7 +255,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
+      const app = await engine.call("appInstall", { stage: preview.stage, digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();

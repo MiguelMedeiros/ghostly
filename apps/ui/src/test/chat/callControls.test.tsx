@@ -433,6 +433,26 @@ describe("the call's clock", () => {
       vi.useRealTimers();
     }
   });
+
+  it("counts the time the call lasts when the device's clock is set forward or back meanwhile", () => {
+    vi.useFakeTimers();
+    try {
+      const hour = 60 * 60_000;
+      overlay({ callStartedAt: Date.now() - 4000 });
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:05");
+      // The clock is put an hour ahead (a phone fixing its time): the call is still 6 s old, not an hour.
+      vi.setSystemTime(Date.now() + hour);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:06");
+      // And two hours back: never a negative clock.
+      vi.setSystemTime(Date.now() - 2 * hour);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:07");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("a call ringing while you are on another (End and answer)", () => {

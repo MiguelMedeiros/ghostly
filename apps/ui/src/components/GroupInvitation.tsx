@@ -24,7 +24,7 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
  * What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. A
  * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too, or one waiting for its members' updates.
  */
-export function invitationStatus(group: GroupView, t: Translate): string {
+export function invitationStatus(group: Pick<GroupView, "invitation" | "profile">, t: Translate): string {
   const invitation = group.invitation!;
   return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
     : invitation.stage === "full" ? t("group.join.full") : invitation.stage === "blocked" ? t("group.join.blocked") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
@@ -79,7 +79,7 @@ export function focusPastRow(next: HTMLElement | null, pressed: Element | null, 
  * chat list row), the row's open button. A Decline that takes the invitation away (its row, or its page going home)
  * hands the focus to the next row of the list.
  */
-export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
+export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Problem | null>(null);

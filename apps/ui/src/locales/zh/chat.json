@@ -319,12 +319,28 @@
     "off": "此聊天已关闭：在“接收”中开启一种方式",
     "offOrOld": "你的联系人在此聊天中关闭了付款，或需要更新 Ghostly"
   },
+  "pictureHiddenIp": "隐藏 IP 开启时不显示",
   "pinned": {
     "bar": "置顶消息",
     "info": "每个聊天只有一条置顶消息，所有成员可见。新的置顶会替换旧的。在社区中，只有管理员可以置顶。",
     "notHere": "不在此设备上",
     "pin": "置顶",
     "unpin": "取消置顶"
+  },
+  "presence": {
+    "availability": {
+      "away": "离开",
+      "busy": "忙碌",
+      "dnd": "请勿打扰"
+    },
+    "dot": {
+      "away": "在线，离开",
+      "busy": "在线，忙碌",
+      "dnd": "在线，请勿打扰",
+      "idle": "在线，空闲",
+      "online": "在线"
+    },
+    "status": "状态：{{status}}"
   },
   "preview": {
     "arkAddress": "Ark 地址",

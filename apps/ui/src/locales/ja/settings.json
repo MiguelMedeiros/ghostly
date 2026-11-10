@@ -182,6 +182,8 @@
   "sendTyping": "入力中の表示を送信",
   "sendTypingHint": "入力中であることが連絡先に表示されます。オフでも相手の表示は見えます。",
   "setPassword": "パスワードを設定",
+  "sharePresence": "オンライン中であることを共有",
+  "sharePresenceHint": "Ghostly を使っている間、連絡先に点が表示されます。設定したステータスはどちらの場合も表示されます。",
   "shareProfile": "名前と写真を連絡先と共有",
   "shareProfileHint": "連絡先にはこのプロフィールの名前と写真が表示されます。オフにすると「連絡先」と模様が代わりに表示されます。",
   "sourceCode": "ソースコード",

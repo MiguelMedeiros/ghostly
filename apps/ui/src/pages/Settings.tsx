@@ -34,6 +34,8 @@ import { servicesPlatform } from "../lib/platform";
 import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
+import { useSharePresence } from "../hooks/useOwnStatus";
+import { setSharePresence } from "../lib/ownStatus";
 import { Select } from "../components/ui/Select";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
@@ -157,6 +159,7 @@ export function Settings() {
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
   const sendTyping = useSendTyping();
+  const sharePresence = useSharePresence();
 
   // Which section the address names (`/settings/appearance`); an old address (`/settings/advanced`) leads to its new place.
   const params = useParams();
@@ -725,6 +728,9 @@ export function Settings() {
         </Row>
         <Row label={t("settings.sendTyping")} hint={t("settings.sendTypingHint")} testId="settings-send-typing-row">
           <Switch testId="settings-send-typing" label={t("settings.sendTyping")} checked={sendTyping} onChange={(on) => void setSendTyping(on).catch(() => {})} />
+        </Row>
+        <Row label={t("settings.sharePresence")} hint={t("settings.sharePresenceHint")} testId="settings-share-presence-row">
+          <Switch testId="settings-share-presence" label={t("settings.sharePresence")} checked={sharePresence} onChange={(on) => void setSharePresence(on).catch(() => {})} />
         </Row>
         <Row label={t("settings.publicProfiles")} hint={t("settings.publicProfilesHint")} info={t("settings.publicProfilesInfo")} testId="settings-public-profiles-row">
           <Switch testId="settings-public-profiles" label={t("settings.publicProfiles")} checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />

@@ -2,7 +2,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } f
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
-import { displaySourceOf } from "@ghostly/browser/proofs/displaySource";
 import { useDialogFocus } from "../../hooks/useDismiss";
 import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
@@ -16,6 +15,7 @@ import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
 import { useContactFace } from "./contactFace";
 import { PeerAvatar } from "../Avatar";
+import { PeerPresenceLine } from "../PresenceMarks";
 import { AvatarOpener } from "../AvatarViewer";
 import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
@@ -27,6 +27,7 @@ import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
+import { sourceWords } from "../../lib/providerWords";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -78,11 +79,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={photo} name={name} testId="chat-identities-avatar"
-            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg">
-            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} />
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg [--ring:var(--theme-panel-header)]">
+            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
             <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
+            <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
           </div>
         </div>
@@ -206,21 +209,6 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
 }
 
 /**
- * Who wrote a name, in the app's language where the provider's words are fixed (a key's user ID is its holder's own, a
- * sign-in provider may not have checked the email): a caveat to act on. Any other source is shown as written.
- */
-function nameSource(provider: string, source: string, t: Translate): string {
-  const known = displaySourceOf(provider, source);
-  if (!known) return source;
-  if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
-  if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
-  const signer = { provider: known.provider };
-  return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerified", signer)
-    : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverified", signer)
-    : t("identities.contact.sourceSigned", signer);
-}
-
-/**
  * A contact's card turned over: what it proves and how (their own key, or a provider that says so), when this app
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
@@ -249,7 +237,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
               : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : nameSource(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
+            {card.name && <span className="id-card-back-meta id-card-back-meta-whole" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : sourceWords(r.provider, r.display?.source ?? r.verified.display?.source ?? "", t) })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
@@ -257,13 +245,13 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.proves")}</dt>
           <dd>{card.attested ? (r.verified.attester ? fillNames(t("identities.contact.attested"), { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
           <dt>{t("identities.contact.how")}</dt>
-          <dd><bdi>{r.verified.source}</bdi></dd>
+          <dd><bdi>{sourceWords(r.provider, r.verified.source, t)}</bdi></dd>
           <dt>{t("identities.contact.checked")}</dt>
           <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t, "proof") }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">

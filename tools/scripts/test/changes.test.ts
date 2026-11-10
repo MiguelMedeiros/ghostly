@@ -177,11 +177,11 @@ Ghostly next.
     const at = (release: string, version: string) =>
       parseFragment("docs/changelog/unreleased/x.md", `---\nsection: Fixed\nrelease: ${release}\n---\n- A.\n`, version);
     const out = (release: string, version: string, next: string) =>
-      new RegExp(`release: ${release.replace(".", "\\.")}" is out \\(package\\.json is ${version.replace(/\./g, "\\.")}\\): drop the line, or name the release that ships it, such as ${next.replace(".", "\\.")}`);
-    expect(at("1.10", "1.10.2").problems).toEqual([expect.stringMatching(out("1.10", "1.10.2", "1.11"))]);
-    expect(at("1.9", "1.10.2").problems).toEqual([expect.stringMatching(out("1.9", "1.10.2", "1.11"))]);
-    expect(at("0.1", "1.10.2").problems).toEqual([expect.stringMatching(out("0.1", "1.10.2", "1.11"))]);
-    expect(at("1.10", "1.10.0").problems).toEqual([expect.stringMatching(out("1.10", "1.10.0", "1.11"))]);
+      `release: ${release}" is out (package.json is ${version}): drop the line, or name the release that ships it, such as ${next}`;
+    expect(at("1.10", "1.10.2").problems).toEqual([expect.stringContaining(out("1.10", "1.10.2", "1.11"))]);
+    expect(at("1.9", "1.10.2").problems).toEqual([expect.stringContaining(out("1.9", "1.10.2", "1.11"))]);
+    expect(at("0.1", "1.10.2").problems).toEqual([expect.stringContaining(out("0.1", "1.10.2", "1.11"))]);
+    expect(at("1.10", "1.10.0").problems).toEqual([expect.stringContaining(out("1.10", "1.10.0", "1.11"))]);
     // The next minor or major is still to come, and a patch from here holds it.
     expect(at("1.11", "1.10.2")).toMatchObject({ release: "1.11", problems: [] });
     expect(at("2.0", "1.10.2")).toMatchObject({ release: "2.0", problems: [] });

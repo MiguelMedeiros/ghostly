@@ -673,6 +673,13 @@ html[data-standalone="true"] {
   font-size: 11px;
 }
 
+/* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
+.call-mini .call-notice-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .call-mini .call-preview {
   top: 8px;
   right: 8px;
@@ -924,7 +931,9 @@ html[data-standalone="true"] {
     z-index: 60;
     width: 100%;
     max-height: min(82dvh, calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 1rem));
-    margin: 0;
+    /* A dialog that caps its width (the invite QR, New wallet on a phone on its side) stands in the middle, not on the
+       left edge with the page showing beside it. */
+    margin: 0 auto;
     overflow-y: auto;
     border-width: 1px 0 0;
     border-radius: 18px 18px 0 0;
@@ -991,6 +1000,49 @@ html[data-standalone="true"] {
     padding-top: calc(1.5rem + env(safe-area-inset-top));
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
     overflow-y: auto;
+  }
+}
+
+/* A connected call on a phone on its side (320-480 px high, 320-350 in a browser): the avatars and names are centred in
+   the window, and an avatar over its name (96 + 16 + 28 px, the ring 12 px out) ran into the buttons along its bottom,
+   names over Camera, Devices and Share screen. The avatars are smaller and the buttons (still 56 or 64 px) sit lower.
+   With your side beside the contact's (a voice call, no picture of yours at the top right) each side is a row, its
+   name beside it; the contact alone keeps its name under the avatar, below your picture. At 320 px they stay above
+   212 px down, ring and all, and the buttons start at 232. */
+@media (max-height: 480px) {
+  :not(.call-mini) > .call-controls {
+    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+
+  :not(.call-mini) > .call-sides {
+    align-items: center;
+  }
+
+  :not(.call-mini) > .call-sides .call-peer {
+    gap: 4px;
+  }
+
+  :not(.call-mini) > .call-sides:has(> .call-self) .call-peer {
+    flex-direction: row;
+    gap: 12px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar {
+    width: 72px;
+    height: 72px;
+  }
+
+  :not(.call-mini) > .call-sides .call-avatar span {
+    font-size: 1.5rem;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  :not(.call-mini) > .call-sides .call-self .call-avatar span {
+    font-size: 1.125rem;
   }
 }
 
@@ -1614,6 +1666,21 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-inline-start:8px;font-size:9px}
+
+/* A picture opened large (AvatarViewer.tsx) is a portal on the body, outside #root's side insets: a phone on its side
+   keeps the picture and its Close clear of the notch and the rounded corners, at the end the page's direction puts it. */
+.picture-viewer-area {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (width < 48rem) {
+  .picture-viewer-area { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+.picture-viewer-close {
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+}
+[dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
 
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {

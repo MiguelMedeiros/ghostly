@@ -231,4 +231,14 @@ describe("the invoice callback", () => {
     expect(action({ tag: "url", url: "https://ln.example.com/r", description: 7 })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "" });
     expect(action(["message"])).toBeUndefined();
   });
+
+  it("refuses a success URL with a user part, and keeps no direction control or invisible character in the service's words", () => {
+    const pr = testInvoice({ sats: 21, descriptionHash: metadataHash });
+    const action = (successAction: unknown) => parseInvoiceCallback({ pr, successAction }, params, 21).successAction;
+    expect(action({ tag: "url", description: "Your receipt", url: "https://www.paypal.com@evil.example/receipt" })).toBeUndefined();
+    expect(action({ tag: "url", url: "https://user:pass@ln.example.com/r" })).toBeUndefined();
+    expect(action({ tag: "url", url: "https://ln.example.com/r/a@b" })).toEqual({ tag: "url", url: "https://ln.example.com/r/a@b", description: "" });
+    expect(action({ tag: "url", description: "Receipt ‮", url: "https://ln.example.com/r" })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "Receipt " });
+    expect(action({ tag: "message", message: "Tha​nks ⁦for⁩ ‮paying" })).toEqual({ tag: "message", message: "Thanks for paying" });
+  });
 });

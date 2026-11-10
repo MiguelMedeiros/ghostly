@@ -182,6 +182,8 @@
   "sendTyping": "发送正在输入提示",
   "sendTypingHint": "联系人会看到你正在输入。关闭后，你仍能看到他们的。",
   "setPassword": "设置密码",
+  "sharePresence": "分享我的在线状态",
+  "sharePresenceHint": "你使用 Ghostly 时，联系人会看到一个圆点。你设置的状态无论如何都会显示。",
   "shareProfile": "与联系人分享我的名字和头像",
   "shareProfileHint": "你的联系人会看到此个人资料的名字和头像。关闭后，他们只会看到“联系人”和一个图案。",
   "sourceCode": "源代码",

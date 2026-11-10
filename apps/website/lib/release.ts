@@ -3,7 +3,7 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.10.3";
+export const VERSION = "1.10.6";
 
 /** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
 export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
@@ -46,6 +46,21 @@ export function downloads(version: string) {
     chromeStore: "https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf",
   };
 }
+
+/** The site's page on installing the Android app, and its full address, which the desktop's QR code carries to a phone. */
+export const ANDROID_PAGE = "/android";
+export const ANDROID_PAGE_URL = `https://ghostly.tools${ANDROID_PAGE}`;
+
+/**
+ * The SHA-256 fingerprint of the certificate every release APK is signed with
+ * (the upload key, docs/ANDROID.md). It is public: Android checks each update
+ * against it, and a reader compares it with `apksigner verify --print-certs`.
+ * Read from the 1.10.1 release APK's v2 signature block on 2026-11-08.
+ */
+export const ANDROID_CERT_SHA256 = "DE:9A:AB:A1:32:50:BC:4B:0D:22:0F:17:95:F2:32:FC:A1:52:31:B0:51:61:8F:A4:87:D4:C0:39:26:CE:09:50";
+
+/** The oldest Android the app installs on: minSdkVersion 26 in apps/desktop/tauri.android.conf.json. */
+export const ANDROID_MIN = "8.0";
 
 /** The release the site offers, for the finale. */
 export const RELEASE_URL = releaseUrl(VERSION);

@@ -176,6 +176,16 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-card-usdt-testnet").querySelector("[data-testid=wallet-card-network]")).toHaveTextContent("Testnet");
   });
 
+  it("shows a shared balance's number on one card only: Lightning through the mints says it uses Cashu's, its back keeps the amount", async () => {
+    const { user } = open();
+    expect(card("cashu-mainnet")).toHaveTextContent("1,000 sats");
+    expect(card("lightning-mainnet")).toHaveTextContent("Uses your Cashu balance");
+    expect(card("lightning-mainnet")).not.toHaveTextContent("1,000");
+    await user.click(card("lightning-mainnet"));
+    // Turned over, it is the only card shown: what it can spend, as before.
+    expect(within(screen.getByTestId("payment-back")).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+  });
+
   it("starts on the card used last time, on its network's tab", () => {
     rememberRail("peer", "arkade:testnet");
     open();

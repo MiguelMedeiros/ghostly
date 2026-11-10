@@ -29,6 +29,7 @@ import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
@@ -378,7 +379,8 @@ function ReplyAction({ onReply }: { onReply: () => void }) {
 
 const IMAGE_URL_RE =
   /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
-const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
+/** The whole message, as the other picture links: words after the link would show on neither side under a picture. */
+const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\/\S+$/i;
 /** A Wayback Machine capture of a GIF: `/web/`, an optional timestamp (and `im_`/`id_`), then the archived http(s) URL. */
 const WAYBACK_GIF_PATH_RE = /^\/web\/(?:\d{1,14}(?:im_|id_)?\/)?https?:\/\/[^/?#\s]+\/[^?#\s]*\.gif$/i;
 
@@ -860,9 +862,9 @@ export function MessageBubble(props: MessageBubbleProps) {
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
-  const { message, peerAck = 0, selection } = props;
+  const { message, selection } = props;
   // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
-  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const acked = ackedBy(props);
   const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
   return (
     <SameBubble
@@ -879,12 +881,30 @@ export function MessageBubble(props: MessageBubbleProps) {
 
 const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
-/** The same bubble to draw: see `MessageBubble`. */
-function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+/** What both comparisons below read alike: everything a bubble draws with but its acknowledgement and reactions' names. */
+function sameShown(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
+}
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.names === b.names && sameShown(a, b);
+}
+
+/** Whether the contact's acknowledgement covers this message of mine: what `MessageBubble` draws of `peerAck`. */
+const ackedBy = ({ message, peerAck = 0 }: MessageBubbleProps) => message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+
+/**
+ * The same `MessageBubble` to draw again, for a list that keeps its rows from drawing when nothing of them changed
+ * (`memo(MessageBubble, sameMessageRow)`). As `sameBubble`, callbacks only by whether they are there, so the list's
+ * callbacks must do what the list says when called (one function for its life, or one closing over the row's values),
+ * not what it said when the row was last drawn. `reactionName` by identity: the names it answers are drawn.
+ */
+export function sameMessageRow(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return ackedBy(a) === ackedBy(b) && a.reactionName === b.reactionName && sameShown(a, b);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -962,6 +982,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [revealed, setRevealed] = useState<string | null>(null);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
@@ -1024,9 +1045,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
-  const contentType = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const detected = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const linked = detected === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // Hide my IP from contacts: a picture link someone else chose is never read, as a contact's public profile pictures
+  // are not (engine/publicProfiles.ts): its server would learn this device's address. It stays a link that says why.
+  const hiddenIp = linked !== null && relayOnly && (!isMe || !!message.forwarded) && !needsNoClick(linked);
+  const contentType = hiddenIp ? "text" : detected;
   // The picture this bubble shows, if it shows one (a card or a system line never does).
-  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  const picture = hiddenIp ? null : linked;
   // Whether a picture waits for Show picture: a contact's, or a copy of one I forwarded (mine here, never asked for).
   const asks = picture !== null && (!isMe || !!message.forwarded) && revealed !== picture && !needsNoClick(picture);
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
@@ -1407,6 +1433,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
             <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
+            {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />

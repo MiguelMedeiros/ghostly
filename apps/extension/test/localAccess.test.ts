@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settle, type FakeWorld } from "./fakeChrome";
+import { webLocalFetch, type LocalFetch } from "@ghostly/core";
 import { resetEngine } from "./fakeEngine";
-import { bootExtension, useProfile } from "./extension";
+import { bootExtension, engine, useProfile } from "./extension";
 
 // covers: services.add, services.stop, app.clear-data, profiles.delete
 
@@ -127,6 +128,62 @@ describe("removing the last app at a local address", () => {
     await (await host()).forgetLocalAccess!("http://127.0.0.1:3400");
     expect(world.callsTo("permissions.remove")).toEqual([]);
     expect([...world.hostAccess]).toEqual(["http://127.0.0.1/*"]);
+  });
+});
+
+describe("a contact's request to a shared local app", () => {
+  let fetched: string[];
+  beforeEach(() => {
+    fetched = [];
+    vi.stubGlobal("fetch", async (url: string) => { fetched.push(String(url)); return new Response("ok"); });
+  });
+
+  /**
+   * What the offscreen peer reaches the app with, in the offscreen document (which has `chrome.runtime` alone): the
+   * `localFetch` it gave the engine, or the engine's own.
+   */
+  const reach = (url: string) => world.within("offscreen", () => ((engine().options as { localFetch?: LocalFetch }).localFetch ?? webLocalFetch)({ url, method: "GET", headers: [], body: null, signal: new AbortController().signal }));
+
+  it("is refused for an app that came with a restored profile, though Chrome holds its host for another profile", async () => {
+    // Another profile shares an app at localhost:8080: Chrome's permission for localhost is every port's, every profile's.
+    world.hostAccess.add("http://localhost/*");
+    await shareIn("ghostly", "http://localhost:9000");
+    await expect(reach("http://localhost:9000/secret")).rejects.toThrow();
+    await expect(reach("http://localhost:8080/")).rejects.toThrow();
+    expect(fetched).toEqual([]);
+  });
+
+  it("is served once the person allows that address in this browser, and only that address", async () => {
+    await shareIn("ghostly", "http://localhost:9000");
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    expect((await reach("http://localhost:9000/notes")).status).toBe(200);
+    await expect(reach("http://localhost:9001/")).rejects.toThrow();
+    expect(fetched).toEqual(["http://localhost:9000/notes"]);
+  });
+
+  it("is refused once Chrome's permission for the host is taken back", async () => {
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    world.hostAccess.delete("http://localhost/*");
+    await expect(reach("http://localhost:9000/")).rejects.toThrow();
+    expect(fetched).toEqual([]);
+  });
+
+  it("is refused in a profile other than the one that allowed it", async () => {
+    useProfile(world, WORK, [WORK]);
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    useProfile(world, "", [WORK]);
+    await expect(reach("http://localhost:9000/")).rejects.toThrow();
+    expect(fetched).toEqual([]);
+  });
+
+  it("is refused after Clear all data, whatever comes back with a restore", async () => {
+    await shareIn("ghostly", "http://localhost:9000");
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    await unshareIn("ghostly");
+    await (await host()).releaseUnusedLocalAccess!();
+    world.hostAccess.add("http://localhost/*");
+    await shareIn("ghostly", "http://localhost:9000");
+    await expect(reach("http://localhost:9000/")).rejects.toThrow();
   });
 });
 

@@ -38,7 +38,7 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { memo, useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
 import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -53,9 +53,10 @@ import { useCallDevices } from "../hooks/useCallDevices";
 import { preferredDevice } from "../lib/mediaDevices";
 import { CallMediaProblem } from "../components/CallMediaProblem";
 import { useSettings } from "../contexts/SettingsContext";
-import { MessageBubble } from "../components/MessageBubble";
+import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -64,8 +65,9 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
-import { handOverCall, takeHandedCall } from "../lib/lockedRing";
+import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
+import { othersName } from "../lib/groups";
 import { callEventText, callLineId, callsBlockedText, callsWaitForLive } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
@@ -87,7 +89,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { servicesPlatform, type WalletNetwork } from "../lib/platform";
@@ -102,8 +104,11 @@ import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useSameValue } from "../hooks/useSameValue";
+import { useHandler } from "../hooks/useHandler";
+import { useEngineValue } from "../lib/engineState";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
+import { PeerPresenceLine } from "../components/PresenceMarks";
 import { TransportLine } from "../components/TransportTimeline";
 import { timelineMerger, type TimelineRow } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
@@ -183,6 +188,14 @@ function removableForEveryone(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
+/**
+ * A message row, drawn again only when what it shows changes: the page is drawn again for much that changes no row (a
+ * message arriving, a pin, the composer), and each of the 100 to 150 rows it draws was drawn with it. Its callbacks count
+ * only by whether they are there: the page's own are one function each for its life (`useHandler`), and the rest close
+ * over the row's message and setters.
+ */
+const MessageRow = memo(MessageBubble, sameMessageRow);
+
 export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnlock = false }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
@@ -210,7 +223,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const {
     messages,
     status,
-    lastSync,
     sendMessage,
     techInfo,
     peerAck,
@@ -346,8 +358,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
-  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
+  // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
+  const ringing = ringingCall(webrtc.ringingOffer);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), ringing.ts);
   // The no-path note outlives this page (lib/callNoPath.ts): a chat off screen is let go once its call ends. It goes
   // when closed, or when the chat's next call starts.
   useEffect(() => { if (webrtc.noPath) setCallNoPath(sessionId, true); }, [webrtc.noPath, sessionId]);
@@ -356,10 +369,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
-  const incomingHasVideo = (() => {
-    if (!incomingCallSignal) return false;
-    return signalHasVideo(parseCallSignal(incomingCallSignal));
-  })();
+  const incomingHasVideo = ringing.video;
 
   const paired = session?.profile === "paired-chat/1";
   // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
@@ -367,7 +377,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot. With Hide my IP on,
-  // media that cannot keep to the relay (the Linux Desktop's) makes no call at all, live or not: that first.
+  // media that cannot keep to the relay makes no call at all, live or not: that first.
   const callsBlocked = webrtc.relayOnlyCallsOff ? t("calls.relayOnlyOff")
     : paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
@@ -446,30 +456,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    *
    * A message of mine still waiting to be sent (Cancel sending) is the engine's to send: it goes from the chat only
    * once the engine took the delete. One refused (limited mode) stays, and the rejection says why under it.
+   *
+   * This and the other actions of a message row are one function each for the page's life, doing what the page says when
+   * pressed: a row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an earlier draw.
    */
-  const forgetMessage = useCallback(
-    async (messageId: string, waiting = false): Promise<void> => {
-      if (waiting) {
-        if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
-        deleteMessage(messageId);
-        return;
-      }
+  const forgetMessage = useHandler(async (messageId: string, waiting = false): Promise<void> => {
+    if (waiting) {
+      if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
-      if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
-    },
-    [deleteMessage, platform, peerKey],
-  );
-
-  /**
-   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
-   * refused (limited mode) rejects, and the bubble says why under it.
-   */
-  const removeForEveryone = async (messageId: string): Promise<void> => {
-    if (!chatLink) return;
-    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
-    if (result.error) throw new Error(result.error);
+      return;
+    }
     deleteMessage(messageId);
-  };
+    if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
+  });
 
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
@@ -515,6 +514,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // (the extension's pages), the rest is asked for while the chat is open.
   const chatLinkId = chatLink?.id;
   useEffect(() => (chatLinkId ? engine.keepWhole(chatLinkId) : undefined), [chatLinkId]);
+
+  /**
+   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
+   * refused (limited mode) rejects, and the bubble says why under it.
+   */
+  const removeForEveryone = useHandler(async (messageId: string): Promise<void> => {
+    if (!chatLink) return;
+    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
+    if (result.error) throw new Error(result.error);
+    deleteMessage(messageId);
+  });
+
   // Saved messages: kept on this device, never sent; the Saved view lists them.
   const savedHere = useSavedIn(chatLink?.id);
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
@@ -560,10 +571,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   /**
    * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
    * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
+   * Kept while this page is away (the Share to… picker, another chat: lib/keptEdits.ts), so it is open again on return,
+   * also before the chat's messages are read again (none yet): it is looked for in them once they are.
    */
-  const [chosenEdit, setEditing] = useState<ChatMessage | null>(null);
-  const editing = chosenEdit && heldOriginal(chosenEdit, quoteIndex) ? chosenEdit : null;
-  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing]);
+  const [chosenEdit, setEditing] = useKeptEdit<ChatMessage>(sessionId);
+  const editing = chosenEdit && (!messages.length || heldOriginal(chosenEdit, quoteIndex)) ? chosenEdit : null;
+  useEffect(() => { if (chosenEdit && !editing) setEditing(null); }, [chosenEdit, editing, setEditing]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
@@ -636,7 +649,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCodeCopied(false);
     setMenuOpen(false);
     setReplyingTo(null);
-    setEditing(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
@@ -724,12 +736,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // The name in the lines that have a twin of mine ("You reacted…", a reply's "You", "You chose WebRTC"): a contact
+  // named as the app calls me is quoted there (`othersName`).
+  const lineName = useMemo(() => othersName(shownName, t), [shownName, t]);
   // What the now-playing bar names, for a voice message from here that plays on in another chat.
-  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
-  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts).
+  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: lineName, contact: true }), [sessionId, lineName]);
+  // The Android app keeps the call going out of sight, with its "Call with …" notification (lib/callService.ts): no
+  // name in it while the app lock is on.
   useCallService(
     callHoldsService(callState, webrtc.localStream) ? { name: shownName, video: !webrtc.isVideoOff && !webrtc.isScreenSharing } : null,
     webrtc.hangUp,
+    settings.lockScreen.enabled && !!settings.lockScreen.passwordHash,
   );
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
@@ -737,14 +754,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId, incomingCallSignal);
+    const video = takeHandedCall(sessionId, ringing.signal);
     if (video !== undefined) webrtc.acceptCall(video);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
@@ -762,6 +779,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
   const goingCards = useMemo(() => goingCardCount(cardEntries(cardRows)), [cardRows]);
   useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
+  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
+  const react = useHandler((messageId: string, emoji: string) => {
+    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
+  });
+  const reactionName = useCallback((by: string) => by === "peer" ? lineName : by.slice(0, 8), [lineName]);
+  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
+  const pin = paired ? chatLink?.pin : undefined;
+  const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
+    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
+  });
+  const pinRow = useHandler((message: ChatMessage) => pinMessage(message.id, replyTarget(message) === pin?.id));
+  const saveRow = useHandler((messageId: string) => {
+    if (chatLink?.id) void setSaved(chatLink.id, messageId, savedHere.has(messageId)).catch(() => {});
+  });
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -789,17 +820,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
-  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
-  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
-  const react = (messageId: string, emoji: string) => {
-    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
-  };
-  const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
-  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
-  const pin = paired ? chatLink?.pin : undefined;
-  const pinMessage = (messageId: string | undefined, remove = false) => {
-    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
-  };
+  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? lineName : undefined;
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -888,7 +909,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
             className="relative w-10 h-10 max-md:w-9 max-md:h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
-            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" presence={paired} />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
@@ -959,6 +980,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 )}
               </button>
               </h1>
+              {/* The contact's status (WISP 401 § Presence and status), and the dot's words for a screen reader; a phone shows the emoji. */}
+              {paired && <PeerPresenceLine peerKey={params.peerPubKeyB64} testId="chat-presence" className="max-w-[40%] text-xs max-md:[&_bdi]:sr-only" />}
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
@@ -1151,22 +1174,22 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {(() => {
             const drawn = timeline.slice(rowWindow.from, rowWindow.to);
             const draw = (row: (typeof drawn)[number]) => row.kind === "transport"
-              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={lineName} />
               : row.kind === "identity"
-              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={lineName}
                 onOpen={e => {
                   // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
                   if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
                   setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
                 }} />
               : (
-              <MessageBubble
+              <MessageRow
                 key={row.message.id}
                 message={row.message}
                 peerAck={peerAck}
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
-                contactName={isAnonymous ? "" : shownName}
+                contactName={isAnonymous ? "" : lineName}
                 onDelete={() => forgetMessage(row.message.id, row.message.sender === "me" && row.message.delivery === "waiting")}
                 onDeleteForEveryone={paired && chatLink && removableForEveryone(row.message) ? () => removeForEveryone(row.message.id) : undefined}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
@@ -1179,9 +1202,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 linkId={paired ? chatLink?.id : undefined}
                 // The same: a compatibility chat has no room for a reaction.
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
-                onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+                onPin={paired && replyTarget(row.message) ? () => pinRow(row.message) : undefined}
                 pinned={!!pin && replyTarget(row.message) === pin.id}
-                onSave={chatLink?.id ? () => void setSaved(chatLink.id, row.message.id, savedHere.has(row.message.id)).catch(() => {}) : undefined}
+                onSave={chatLink?.id ? () => saveRow(row.message.id) : undefined}
                 saved={savedHere.has(row.message.id)}
                 reactionName={reactionName}
                 highlight={search.highlight(row.message.id)}
@@ -1357,7 +1380,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <TechInfoSection title={t("chat.tech.sync")}>
             <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
             <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
-            <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
+            <LastSyncRow peerKey={params.peerPubKeyB64} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
@@ -1450,6 +1473,13 @@ function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported"
       {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
     </div>
   );
+}
+
+/** The tech panel's last sync, read where it shows: each poll of the open chat draws this row, not the page. */
+function LastSyncRow({ peerKey }: { peerKey: string }) {
+  const { t, language } = useI18n();
+  const lastSync = useEngineValue((state) => state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.lastSyncAt || null);
+  return <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />;
 }
 
 function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {

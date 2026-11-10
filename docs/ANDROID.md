@@ -8,7 +8,7 @@ It is not the whole Desktop yet. Left out on Android, and why (`#[cfg(desktop)]`
 
 ## Install it
 
-Each release attaches the APK, and the download panel on [ghostly.tools](https://ghostly.tools/#download) offers it to an Android phone: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. Check it, then install it:
+Each release attaches the APK, and the download panel on [ghostly.tools](https://ghostly.tools/#download) offers it, with a QR code on a computer, and [ghostly.tools/android](https://ghostly.tools/android) says how to install it: `ghostly-<version>-android-arm64.apk`, signed with Ghostly's upload key, and listed in `SHA256SUMS.txt` like the other downloads. The upload key's certificate has the SHA-256 fingerprint `DE:9A:AB:A1:32:50:BC:4B:0D:22:0F:17:95:F2:32:FC:A1:52:31:B0:51:61:8F:A4:87:D4:C0:39:26:CE:09:50` (`apksigner verify --print-certs` prints it; the site's `ANDROID_CERT_SHA256` in `apps/website/lib/release.ts` is the same). Check it, then install it:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS.txt

@@ -117,10 +117,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Android 15 always. Nightly also Android 11 (API 30), below Android 12, where the system behaves otherwise in
-  # places the specs touch (Back on the root screen finishes the activity instead of moving the task back; no
-  # notification permission to grant): minSdk is 26 (apps/desktop/gen/android/app/build.gradle.kts). Not on pull
-  # requests, where a second emulator would double the lane's minutes.
+  # Android 15. Not Android 11 (API 30) for now, though it is below Android 12, where the system behaves otherwise in
+  # places the specs touch (Back on the root screen, no notification permission): its google_apis image ships
+  # WebView 83, below the app's minimum (MainActivity.kt MIN_WEBVIEW, 111), so the app showed its update screen and
+  # every spec failed, every night. It comes back with a WebView of 111 or later on that emulator. The harness
+  # refuses such a device at once (e2e/android/support/webview.ts).
   e2e:
     name: Android e2e (API ${{ matrix.api-level }}, x86_64)
     needs: apk
@@ -129,7 +130,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: ${{ fromJSON(github.event_name == 'schedule' && '[35, 30]' || '[35]') }}
+        api-level: [35]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

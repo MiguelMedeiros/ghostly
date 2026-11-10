@@ -182,6 +182,8 @@
   "sendTyping": "Enviar indicador de digitação",
   "sendTypingHint": "Seus contatos veem quando você está escrevendo. Desligado, você ainda vê o deles.",
   "setPassword": "Definir senha",
+  "sharePresence": "Compartilhar quando estou online",
+  "sharePresenceHint": "Os contatos veem um ponto enquanto você usa o Ghostly. Um status que você definir aparece de qualquer forma.",
   "shareProfile": "Compartilhar meu nome e foto com contatos",
   "shareProfileHint": "Seus contatos veem o nome e a foto deste perfil. Desligado, veem “Contato” e um padrão no lugar.",
   "sourceCode": "Código fonte",

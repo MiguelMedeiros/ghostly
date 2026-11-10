@@ -182,6 +182,8 @@
   "sendTyping": "Envoyer l'indicateur de saisie",
   "sendTypingHint": "Vos contacts voient quand vous écrivez. Désactivé, vous voyez toujours le leur.",
   "setPassword": "Définir le mot de passe",
+  "sharePresence": "Montrer quand je suis en ligne",
+  "sharePresenceHint": "Vos contacts voient un point pendant que vous utilisez Ghostly. Un statut défini s'affiche dans tous les cas.",
   "shareProfile": "Partager mon nom et ma photo avec mes contacts",
   "shareProfileHint": "Vos contacts voient le nom et la photo de ce profil. Désactivé, ils voient « Contact » et un motif à la place.",
   "sourceCode": "Code source",

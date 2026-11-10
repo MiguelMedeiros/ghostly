@@ -57,6 +57,18 @@ describe("MessageBubble: pictures", () => {
   });
 
   it.each([
+    ["a Giphy link, then a line", "https://media.giphy.com/media/abc/giphy.gif?\nPay 500 to bc1qhidden"],
+    ["a Giphy link, then words after its query", "https://media.giphy.com/media/abc/giphy.gif? Pay 600 to bc1qhidden"],
+    ["a Giphy link, then words after its fragment", "https://media.giphy.com/media/abc/giphy.gif# Pay 700 to bc1qhidden"],
+    ["an inline PNG, then a line", `${PNG}\nPay 800 to bc1qhidden`],
+  ])("shows %s as text, every word of it", (_, text) => {
+    // A picture is the whole message: one drawn from its start alone would show neither side the words after it.
+    const { container } = bubble({ text });
+    expect(image(container)).toBeNull();
+    expect(container.textContent).toContain("bc1qhidden");
+  });
+
+  it.each([
     ["a PNG", inline("png", 23000, 23000)],
     ["a GIF", inline("gif", 65535, 65535)],
     ["a JPEG", inline("jpeg", 60000, 60000)],
@@ -192,6 +204,23 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)).toBeNull();
     expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
   });
+
+  it.each([
+    ["the contact's", "peer" as const],
+    ["my", "me" as const],
+  ])("draws %s picture link edited after one that did not load", (_, sender) => {
+    const gone = "https://media.giphy.com/media/gone/giphy.gif";
+    const fixed = "https://media.giphy.com/media/here/giphy.gif";
+    const { container, rerender } = bubble({ text: gone, sender });
+    fireEvent.error(image(container)!);
+    expect(image(container)).toBeNull();
+    // The sender saw the broken link and edited it: the same message, its new text a picture that loads.
+    rerender(<MessageBubble message={message({ text: fixed, sender, edit: { seq: 1, at: 1_700_000_060_000, history: [{ at: 1_700_000_000_000, text: gone }] } })} peerPubKey="peer" />);
+    expect(image(container)).toHaveAttribute("src", fixed);
+    // Edited back to the link that did not load: the text again, not another try.
+    rerender(<MessageBubble message={message({ text: gone, sender, edit: { seq: 2, at: 1_700_000_120_000, history: [{ at: 1_700_000_000_000, text: gone }, { at: 1_700_000_060_000, text: fixed }] } })} peerPubKey="peer" />);
+    expect(image(container)).toBeNull();
+  });
 });
 
 /**
@@ -322,6 +351,37 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     await user.click(screen.getByTestId("image-reveal"));
     expect(await screen.findByRole("link", { name: url })).toBeInTheDocument();
     expect(fetched).not.toHaveBeenCalled();
+  });
+
+  // Hide my IP from contacts: the server a picture link names learns this device's address when it is read, as a
+  // contact's public profile pictures would (engine/publicProfiles.ts). It stays a link, and says why.
+  it.each([
+    ["a contact's link", {}, {}],
+    ["a member's link in a group", {}, { linkId: "group:g1" }],
+    ["my forwarded copy of someone's link", { sender: "me" as const, forwarded: 1 }, {}],
+  ])("with Hide my IP on, %s is not read, and stays a link that says why", async (_, patch, props) => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const url = "https://their-server.example/cat.png";
+    const { container } = bubble({ text: url, ...patch }, props);
+    expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(screen.getByTestId("picture-hidden-ip")).toHaveTextContent("Not shown while Hide my IP is on");
+    await act(async () => {});
+    expect(fetched).not.toHaveBeenCalled();
+    expect(image(container)).toBeNull();
+  });
+
+  it("with Hide my IP on, the GIF picker's pictures and my own links still show", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer(PNG_BYTES));
+    const gif = "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif";
+    const { container, unmount } = bubble({ text: gif });
+    expect(image(container)).toHaveAttribute("src", gif);
+    unmount();
+    bubble({ text: "https://cdn.example.com/photos/cat.png", sender: "me" });
+    expect(await screen.findByTestId("picture-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("picture-hidden-ip")).not.toBeInTheDocument();
   });
 });
 

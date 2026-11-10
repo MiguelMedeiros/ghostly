@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -321,6 +322,32 @@ test.describe("a voice message on a phone", () => {
 });
 
 /**
+ * An audio file (not a voice note) in the chat, which none of the screens above shows: its Play took taps on 36 × 36 px
+ * and its Save on 32 × 32, beside a voice note's Play on 44. Bob's file is played and paused, so the speed pill shows too.
+ */
+test("on a phone a received audio file's Play, speed pill and Save are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:files.audio.play"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("audio-phone-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("audio-phone-bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+
+  await bob.page.getByTestId("file-input").setInputFiles(fileURLToPath(new URL("../support/audio-fixtures/ghost-tune.mp3", import.meta.url)));
+  const received = chat(alice).getByTestId("audio-bubble").last();
+  await expect(received.getByTestId("audio-play")).toBeEnabled({ timeout: 30_000 });
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await received.getByTestId("audio-play").click();
+  await expect(received).toHaveAttribute("data-state", "paused");
+  await expect(received.getByTestId("voice-speed")).toBeVisible();
+  await expect(received.getByTestId("audio-save")).toBeVisible();
+  await received.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("audio-file-paused.png") });
+
+  const small = (await smallTargets(page)).filter((target) => /audio-|voice-speed/.test(target.name)).map((target) => `${target.name} ${target.width}×${target.height} (${target.stops})`);
+  expect(small, "an audio file's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
  * Settings' on/off switches, in every section and on the Profile page, on a phone: 48 × 24 px drawn, and a tap landed on
  * 64 × 40 px of it, short of the 44 the rest of the app gives a thumb.
  */
@@ -445,6 +472,44 @@ test("on a phone the chat's search bar takes taps on 44 px and keeps room for th
     expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${label}: search bar controls under 44 × 44 px`).toEqual([]);
     expect((await page.getByTestId("chat-search-input").boundingBox())!.width, `${label}: the search field's width`).toBeGreaterThanOrEqual(64);
     await page.screenshot({ path: testInfo.outputPath(`chat-search-${language}-${width}.png`) });
+    await page.getByTestId("chat-search-close").click();
+    await expect(page.getByTestId("chat-search")).toHaveCount(0);
+  }
+});
+
+/**
+ * A chat's search bar on a 320 px phone once its count shows: "Nenhum resultado" beside the field and the four 44 px
+ * buttons left the field 12 px wide in Portuguese (it 18, fr 27, es 28, en 50). The count goes on a line of its own under
+ * the field, in every language, and the buttons keep their 44 px.
+ */
+test("on a 320 px phone the chat's search field keeps room for the words once the count shows, in every language", { tag: ["@feature:app.mobile-layout", "@feature:chat.search", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(4 * 60_000);
+  const [alice, bob] = await Promise.all([peer("search-count-alice", { mobile: true, viewport: { width: 320, height: 640 } }), peer("search-count-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "find this word");
+  await expect(chat(alice).getByText("find this word")).toBeVisible();
+  const { page } = alice;
+  const field = page.getByTestId("chat-search-input"), count = page.getByTestId("chat-search-count");
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"] as const) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await page.getByTestId("chat-options").click();
+    await page.getByTestId("chat-search-open").click();
+    await field.fill("zzqx nothing here");
+    await expect(count).toHaveText(/\S/);
+    await expect(page.getByTestId("chat-search-older")).toBeDisabled();
+    expect(await field.evaluate((el) => el.clientWidth), `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
+    const fieldBox = (await field.boundingBox())!, countBox = (await count.boundingBox())!;
+    expect(countBox.y, `${language}: the count is under the field`).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+    const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
+    expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${language}: search bar controls under 44 × 44 px`).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), `${language}: nothing wider than the screen`).toBeLessThanOrEqual(320);
+    await page.screenshot({ path: testInfo.outputPath(`chat-search-count-${language}-320.png`) });
     await page.getByTestId("chat-search-close").click();
     await expect(page.getByTestId("chat-search")).toHaveCount(0);
   }
