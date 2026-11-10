@@ -24,7 +24,7 @@
   "readRelaysRelayOnly": "Hide my IP is on: this app reads and writes through these relays only, never the DHT directly.",
   "relayOnly": "Hide my IP from contacts",
   "relayOnlyHint": "Calls and chats go through your TURN server only.",
-  "relayOnlyInfo": "Contacts see your TURN server, never your IP. If it fails, nothing goes direct: calls fail, chats wait. Calls are off in the Linux app.",
+  "relayOnlyInfo": "Contacts see your TURN server, never your IP. If it fails, nothing goes direct: calls fail, chats wait.",
   "relays": "Pkarr relays",
   "relaysHint": "One per line. They only see signed, encrypted packets.",
   "relaysInfoDirect": "Contacts on the web and in the extension cannot reach the Mainline DHT and read through relays, so this app writes to them too.",
