@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useRef,
   type ReactNode,
@@ -24,6 +25,7 @@ import {
   type LockScreenSettings,
   type NotificationSettings,
 } from "../lib/settings";
+import { applyTextSize, type TextSize } from "../lib/textSize";
 import { getRandomGhostName } from "../lib/storage";
 import { cleanOwnName } from "../lib/ownName";
 
@@ -38,6 +40,7 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
+  updateTextSize: (size: TextSize) => void;
   updateChatListCollapsed: (collapsed: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
@@ -144,6 +147,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, chatListDensity }));
   }, []);
 
+  const updateTextSize = useCallback((textSize: TextSize) => {
+    setSettings((prev) => ({ ...prev, textSize }));
+  }, []);
+
   const updateChatListCollapsed = useCallback((chatListCollapsed: boolean) => {
     setSettings((prev) => ({ ...prev, chatListCollapsed }));
   }, []);
@@ -167,6 +174,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
   }, [settings.reduceMotion]);
+
+  // Before the page is drawn: a chat opened at Huge is never drawn once at the default size first.
+  useLayoutEffect(() => applyTextSize(settings.textSize), [settings.textSize]);
 
   const randomizeNickname = useCallback(() => {
     const randomName = getRandomGhostName();
@@ -196,6 +206,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateReduceMotion,
         updateChatListDensity,
+        updateTextSize,
         updateChatListCollapsed,
         updateCheckForUpdates,
         updateLinkPreviews,

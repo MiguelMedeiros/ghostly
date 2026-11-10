@@ -53,10 +53,10 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
         </span>
       )}
       <span className="block px-2.5 py-2">
-        {site ? <span className="block text-[12px] text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
-          : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block text-[12px] text-text-secondary" />}
-        {preview.t && <span className="block text-[13.5px] font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
-        {preview.d && <span className="block text-[12.5px] text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
+        {site ? <span className="block chat-text-preview-site text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+          : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block chat-text-preview-site text-text-secondary" />}
+        {preview.t && <span className="block chat-text-preview-title font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
+        {preview.d && <span className="block chat-text-preview-description text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
         <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>

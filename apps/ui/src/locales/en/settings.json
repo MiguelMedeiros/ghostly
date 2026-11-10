@@ -173,6 +173,7 @@
     "stayConnected": "background, battery, keep alive, connected",
     "storage": "space, disk, quota",
     "systemNotices": "alerts, banners, notices",
+    "textSize": "font, zoom, bigger, smaller, letters, accessibility",
     "turn": "NAT, firewall, calls",
     "updates": "upgrade, new version",
     "version": "build, release",
@@ -219,6 +220,17 @@
   },
   "storageUsed": "Storage used",
   "systemNotifications": "System notifications",
+  "textSize": "Text size",
+  "textSizeHint": "Messages, the message field and the chat list, on this device",
+  "textSizePreview": "Hi! Is this easy to read?",
+  "textSizePreviewReply": "Yes, much better 👍",
+  "textSizes": {
+    "default": "Default",
+    "huge": "Huge",
+    "large": "Large",
+    "larger": "Larger",
+    "small": "Small"
+  },
   "theme": "Theme",
   "themes": {
     "dark": "Dark",

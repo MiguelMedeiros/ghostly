@@ -44,7 +44,7 @@ describe("formatting", () => {
 
   it("leaves big emoji, pictures and money as they were", () => {
     const { container, unmount } = bubble("👻");
-    expect(container.querySelector(".text-\\[42px\\]")).toHaveTextContent("👻");
+    expect(container.querySelector(".chat-text-emoji")).toHaveTextContent("👻");
     unmount();
     bubble("https://media.giphy.com/media/abc123/200w");
     expect(screen.queryByTestId("message-text")).toBeNull();

@@ -1271,6 +1271,36 @@ html .toast-place.toast-place-page[data-at="top"] {
 @container message-list (width < 22rem) { .sender-avatar { display: none; } }
 
 /*
+ * Settings → Text size (lib/textSize.ts): the chat's words at `--chat-text-scale` times their size, their lines with
+ * them, so a bubble grows with its text and nothing is cut. Each says its old px size over 16 in rem: at the browser's
+ * default text size it is that size, and the browser's own text size reaches it too. Icons, the chat's header, the
+ * tabs and the times beside a message keep their size. The message field is in composer/composer.css.
+ */
+:root { --chat-text-scale: 1; }
+.chat-text-message { font-size: calc(14.2rem / 16 * var(--chat-text-scale)); line-height: calc(19rem / 16 * var(--chat-text-scale)); }
+.chat-text-emoji { font-size: calc(42rem / 16 * var(--chat-text-scale)); line-height: calc(50rem / 16 * var(--chat-text-scale)); }
+.chat-text-link { font-size: calc(14rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+/* A member's name over their message. */
+.chat-text-nick { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); line-height: calc(22rem / 16 * var(--chat-text-scale)); }
+/* "Forwarded", "Not confirmed" over a message; "Translated from…" under one. */
+.chat-text-mark { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+/* A quoted message (chat/ReplyQuote.tsx), in a reply and over the message field. */
+.chat-text-quote-name { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-quote { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(18rem / 16 * var(--chat-text-scale)); }
+.chat-text-quote-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(15rem / 16 * var(--chat-text-scale)); }
+/* A link's preview card (LinkPreviewBubble.tsx): its lines' height is a share of their size. */
+.chat-text-preview-site { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-preview-title { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-preview-description { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+/* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
+.chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* The chat list's rows (ChatRow.tsx). */
+.chat-text-row-name { font-size: calc(15rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+.chat-text-row-preview { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+
+/*
  * The list's size comes from the chat's column (it is a flex item that scrolls), never from its rows. Said so, a
  * keystroke that lays the composer out again no longer makes Chromium paint every row of a long chat once more.
  */

@@ -168,7 +168,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       <div className="contact-row relative flex items-baseline gap-2">
         <span className="flex flex-1 min-w-0 items-center gap-1.5">
           {/* In its own direction, on the box that cuts it: a Latin name in Arabic is cut at its end, not its start. */}
-          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
+          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate chat-text-row-name ${nameClass}`}>{name}</span>
           {marks}
         </span>
         {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
@@ -180,7 +180,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
         {/* The last message in its own direction: an English one in the Arabic app, cut at its own end. */}
-        <p id={previewId} dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
+        <p id={previewId} dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 chat-text-row-preview">{preview}</p>
         {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
       </div>
     </div>
