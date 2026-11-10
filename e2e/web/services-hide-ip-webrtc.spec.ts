@@ -58,6 +58,8 @@ const CASES: Record<string, string> = {
   "a page in UTF-16 by another name": `twice("/u16");`,
   "a page whose UTF-16 charset hides behind a quoted one": `twice("/u16-quoted");`,
   "a page whose UTF-16 charset is spelled with an escape": `twice("/u16-escaped");`,
+  "a UTF-16 page framing a page of its origin that says no charset": `twice("/u16-parent");`,
+  "a UTF-16 page with a page of its origin as an object": `twice("/u16-parent-object");`,
   "an ISO-2022-JP page whose escape hides the guard": `twice("/jis");`,
   "a page made ISO-2022-JP by its meta, with an escape before the guard": `twice("/jis-meta");`,
   "a shadow tree made by setHTMLUnsafe": `document.body.appendChild(document.createElement("div")).setHTMLUnsafe(SHADOW);`,
@@ -94,6 +96,11 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
     if (path === "/u16") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16 };
     // The same, said in ways a browser reads as UTF-16 through MIME's quoted strings.
     if (path === "/u16-quoted") return { headers: [["content-type", `text/html; foo="x;charset=utf-8";charset=unicode`]], body: utf16 };
+    // A UTF-16 page (refused) framing a page of its origin sent with no charset: that page takes the framing page's.
+    const utf16le = (text: string) => new Uint8Array(Buffer.from(text, "utf16le"));
+    if (path === "/u16-parent") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16le(`<!doctype html><iframe src="/u16-child"></iframe>`) };
+    if (path === "/u16-parent-object") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16le(`<!doctype html><object data="/u16-child" type="text/html"></object>`) };
+    if (path === "/u16-child") return { headers: [["content-type", "text/html"]], body: utf16 };
     // ISO-2022-JP: an escape in a leading comment turns the decoder to two-byte text, which the guard after it would
     // be read as; the page turns it back and closes the comment before its own script. By the header, or by a meta.
     const jis = (meta: string) => new Uint8Array([...`<!--~$B-->~(B-->${meta}<script src="/go.js"></script>`].map((char) => (char === "~" ? 0x1b : char.charCodeAt(0))));

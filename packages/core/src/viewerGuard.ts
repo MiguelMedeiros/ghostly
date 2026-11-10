@@ -157,6 +157,13 @@ export const VIEWER_GUARD_CSP = "frame-src 'self'; object-src 'self'; require-tr
 /** Refuses every script of a page the guard cannot be put first in. */
 const NO_SCRIPTS_CSP = "script-src 'none'";
 
+/**
+ * The same for a page of markup (HTML, XML, SVG, or a type not known), which can frame others: no frames either. A page
+ * of its origin framed with no charset of its own takes the framing page's (UTF-16, ISO-2022-JP), where the guard put
+ * first in it would read as text. A PDF or a picture keeps its frames (a browser shows those in one).
+ */
+const NO_SCRIPTS_OR_FRAMES_CSP = "script-src 'none'; frame-src 'none'; object-src 'none'";
+
 /** The `Sec-Fetch-Dest` (a request's `destination`) of a page: the ones the guard goes into. */
 const DOCUMENT_DESTINATIONS = new Set(["document", "iframe", "frame", "object", "embed", "fencedframe"]);
 
@@ -257,12 +264,15 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   // escapes switch the decoder to two-byte text): the guard's bytes would not read as a script there. Every `charset=` counts, and a type with a quote or a backslash in it is not read at all
   // (a browser reads quoted strings, which can hide a charset or spell one with escapes): none of these runs scripts.
   // A name no browser knows falls back to an encoding that reads them.
-  const unreadable = [...type.matchAll(/charset\s*=\s*"?([^";\s]+)/g)].some(([, label]) => {
+  const unreadable = [...type.matchAll(/(?:^|;)\s*charset\s*=\s*"?([^";\s]+)/g)].some(([, label]) => {
     try { return /^(utf-16|iso-2022-jp$)/.test(new TextDecoder(label).encoding); } catch { return false; }
   });
-  const html = type.split(";")[0].trim() === "text/html" && !unreadable && !/["\\]/.test(type);
+  const essence = type.split(";")[0].trim();
+  const html = essence === "text/html" && !unreadable && !/["\\]/.test(type);
+  const markup = essence === "" || /html|xml|svg/.test(essence);
+  const refused: [string, string] = ["content-security-policy", markup ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP];
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
-  const noScripts = () => ({ headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP] as [string, string]], body });
+  const noScripts = () => ({ headers: [...out, refused], body });
   if (!html || encoded) return noScripts();
 
   const iterator = body[Symbol.asyncIterator]();
@@ -284,7 +294,7 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   // there. The escape is how ISO-2022-JP (the one stateful encoding a browser decodes, by the header or by a `<meta>`
   // the page has after the guard) turns to two-byte text; a page has no other use for one in a comment or the doctype.
   if ((head[0] === 0xfe && head[1] === 0xff) || (head[0] === 0xff && head[1] === 0xfe) || head.subarray(0, offset).includes(0x1b)) {
-    return { headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP]], body: resumed(head) };
+    return { headers: [...out, refused], body: resumed(head) };
   }
   // Nothing to run in an empty answer (a HEAD, a 304): it stays empty.
   if (done && head.length === 0) return { headers: out, body: resumed(head) };

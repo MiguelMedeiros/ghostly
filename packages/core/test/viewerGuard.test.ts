@@ -90,43 +90,49 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
   });
 
   it("lets a page it cannot be put in run no script, and leaves what is not a page as it was", async () => {
+    // A page of markup runs no frames either: one of its origin with no charset would read in the page's (UTF-16...).
+    const REFUSED = "script-src 'none'; frame-src 'none'; object-src 'none'";
     const noScripts = async (headers: HeaderList, text: string | Uint8Array, destination: string | null = "iframe") => {
       const answer = await guardViewerAnswer(headers, (async function* () { yield typeof text === "string" ? utf8Encode(text) : text; })(), destination);
       return { policies: policies(answer.headers), text: await read(answer.body).catch(() => "binary") };
     };
     const svg = "<svg xmlns='http://www.w3.org/2000/svg'><script>x()</script></svg>";
-    expect(await noScripts([["content-type", "image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, "script-src 'none'"], text: svg });
-    expect((await noScripts([], "<p>untyped")).policies).toContain("script-src 'none'");
-    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "gzip"]], "zipped")).policies).toContain("script-src 'none'");
-    expect((await noScripts([["content-type", "text/html; charset=UTF-16LE"]], "<\0p\0")).policies).toContain("script-src 'none'");
-    expect((await noScripts([["content-type", "text/html"]], new Uint8Array([0xff, 0xfe, 0x3c, 0]))).policies).toContain("script-src 'none'");
+    expect(await noScripts([["content-type", "image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, REFUSED], text: svg });
+    expect((await noScripts([], "<p>untyped")).policies).toContain(REFUSED);
+    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "gzip"]], "zipped")).policies).toContain(REFUSED);
+    expect((await noScripts([["content-type", "text/html; charset=UTF-16LE"]], "<\0p\0")).policies).toContain(REFUSED);
+    expect((await noScripts([["content-type", "text/html"]], new Uint8Array([0xff, 0xfe, 0x3c, 0]))).policies).toContain(REFUSED);
     // UTF-16 by its other names, as a browser resolves them; a name no browser knows is read as an ASCII-compatible one.
     for (const charset of ["unicode", "ucs-2", "csunicode", "iso-10646-ucs-2", "unicodefeff", "unicodefffe", "\"UTF-16BE\""]) {
-      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<\0p\0")).policies, charset).toContain("script-src 'none'");
+      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<\0p\0")).policies, charset).toContain(REFUSED);
     }
+    // A PDF or a picture keeps its frames (a browser shows one in a frame), only its scripts are refused.
+    expect((await noScripts([["content-type", "application/pdf"]], "%PDF-1.7")).policies).toEqual([VIEWER_GUARD_CSP, "script-src 'none'"]);
+    // A parameter named otherwise is not a charset (`xcharset=unicode`): the page is read as UTF-8 and guarded.
+    expect(await noScripts([["content-type", "text/html; xcharset=unicode"]], "<p>hi")).toMatchObject({ text: `${TAG}<p>hi` });
     // A charset hidden in a quoted string, or spelled with an escape: a browser reads those, so no script runs.
     for (const type of ['text/html; foo="x;charset=utf-8";charset=unicode', 'text/html; charset="uni\\code"', 'text/html; charset="utf-8"', "text/html; charset=utf-8; charset=unicode"]) {
-      expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toContain("script-src 'none'");
+      expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toContain(REFUSED);
     }
     // ISO-2022-JP: by the header, or an escape before the guard's place (how a `<meta>` after it would reach the guard).
     const esc = (text: string) => new Uint8Array([...text].map((char) => (char === "~" ? 0x1b : char.charCodeAt(0))));
     for (const charset of ["iso-2022-jp", "csiso2022jp"]) {
-      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).toContain("script-src 'none'");
+      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).toContain(REFUSED);
     }
     for (const page of ["<!--~$B-->~(B--><meta charset=iso-2022-jp><p>hi", "<!doctype html ~$B>~(B><p>hi"]) {
-      expect((await noScripts([["content-type", "text/html"]], esc(page))).policies, page).toContain("script-src 'none'");
+      expect((await noScripts([["content-type", "text/html"]], esc(page))).policies, page).toContain(REFUSED);
     }
     // One after the guard's place cannot change how the guard reads.
-    expect((await noScripts([["content-type", "text/html"]], esc("<!doctype html><p>~$B~(B"))).policies).not.toContain("script-src 'none'");
+    expect((await noScripts([["content-type", "text/html"]], esc("<!doctype html><p>~$B~(B"))).policies).not.toContain(REFUSED);
     for (const charset of ["utf-8", "windows-1252", "no-such-name"]) {
-      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).not.toContain("script-src 'none'");
+      expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).not.toContain(REFUSED);
     }
     // Two types: a browser renders the last (an SVG, whose script would run with the guard's text beside it, not run).
-    expect(await noScripts([["content-type", "text/html"], ["Content-Type", "image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, "script-src 'none'"], text: svg });
-    expect(await noScripts([["content-type", "text/html, image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, "script-src 'none'"], text: svg });
-    expect((await noScripts([["content-type", "text/html"], ["content-type", "text/html"]], "<p>twice")).policies).toContain("script-src 'none'");
-    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity"], ["content-encoding", "gzip"]], "zipped")).policies).toContain("script-src 'none'");
-    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity, br"]], "zipped")).policies).toContain("script-src 'none'");
+    expect(await noScripts([["content-type", "text/html"], ["Content-Type", "image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, REFUSED], text: svg });
+    expect(await noScripts([["content-type", "text/html, image/svg+xml"]], svg)).toEqual({ policies: [VIEWER_GUARD_CSP, REFUSED], text: svg });
+    expect((await noScripts([["content-type", "text/html"], ["content-type", "text/html"]], "<p>twice")).policies).toContain(REFUSED);
+    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity"], ["content-encoding", "gzip"]], "zipped")).policies).toContain(REFUSED);
+    expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity, br"]], "zipped")).policies).toContain(REFUSED);
     // A script, a picture, a worker: not a page; only the policy goes along.
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched"), ).toMatchObject({ text: `${TAG}<p>fetched` });
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched", "empty")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "<p>fetched" });
