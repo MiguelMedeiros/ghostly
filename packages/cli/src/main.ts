@@ -207,7 +207,7 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
-  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list", "status.get",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -232,6 +232,10 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
   "saved.add", "saved.remove",
+  // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
+  // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
+  // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
+  "status.set", "status.clear",
 ]);
 
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
