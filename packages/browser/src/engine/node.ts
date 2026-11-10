@@ -44,6 +44,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_MESSAGE_GONE, FORWARD_TARGETS, copyForForward, forwardError, forwardKind, type ForwardResult } from "./forwards";
+import { STATUS_IDLE_AFTER_MS, liveStatus, personStatus, type PersonStatus, type Presence, type StatusState } from "@ghostly/core";
 import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
@@ -877,6 +878,8 @@ export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
   "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage", "chatsFound",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+  // Presence and a set status: a settings write and a word on live sessions (none in limited mode), as typing.
+  "setPresence", "setOwnStatus", "clearOwnStatus", "getOwnStatus",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
   // the Saved page stayed blank with no word and Save did nothing (agents#1694).
   "savedMessages", "saveMessage",
@@ -992,6 +995,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly walletFeedbackIds = new Set<string>();
   /** `cue`: a finer sound the page plays instead of the event's own when its category is on (apps/ui/src/lib/cues.ts). */
   private feedback(type: AttentionEvent["type"], id: string, linkId?: string, mention = false, cue?: AttentionCue) {
+    // Do not disturb (WISP 401 § Presence and status): messages, mentions and reactions come quietly; calls still ring.
+    if ((type === "message" || type === "reaction") && this.doNotDisturb) return;
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
@@ -2290,6 +2295,7 @@ export class GhostlyNode implements EngineImplementation {
     const stored = await db.getSettings();
     const fresh = Object.keys(stored).length === 0;
     this.settings = { ...DEFAULT_SETTINGS, ...stored };
+    this.armOwnStatusEnd();
     // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
     this.settings.relays = currentRelays(this.settings.relays);
     this.relays?.setRelays(this.settings.relays);
@@ -2816,6 +2822,8 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionTimers.clear();
     for (const timer of this.pinTimers.values()) clearTimeout(timer);
     this.pinTimers.clear();
+    for (const timer of [this.idleTimer, this.ownStatusTimer, ...this.peerStatusTimers.values()]) clearTimeout(timer);
+    this.peerStatusTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     void this.enrollment?.cancel().catch(() => {});
@@ -6263,6 +6271,90 @@ export class GhostlyNode implements EngineImplementation {
     else this.groups.setTyping(groupId, false);
   }
 
+  /** The longest a timer waits (a later end is waited for in steps). */
+  private static readonly TIMER_MAX_MS = 2 ** 31 - 1;
+  /** This profile's presence as the pages last said it (`setPresence`): none before their first word. */
+  private ownPresence: Presence | undefined;
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Ends this profile's status at its `until`. */
+  private ownStatusTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Per chat: when the contact's status ends, so its view is drawn again without it. */
+  private readonly peerStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** WISP 401 § Presence and status: `active` at a page's word, `idle` 10 minutes after the last one (or at a page's). */
+  setPresence({ presence }: { presence: Presence }): void {
+    if (presence !== "active" && presence !== "idle") return;
+    clearTimeout(this.idleTimer);
+    if (presence === "active") this.idleTimer = setTimeout(() => this.setPresence({ presence: "idle" }), STATUS_IDLE_AFTER_MS);
+    if (presence === this.ownPresence) return;
+    this.ownPresence = presence;
+    this.sayStatus();
+  }
+
+  /** A status checked as a contact would read it: one already over is none. Said at once, then saved. */
+  async setOwnStatus({ status }: { status: PersonStatus }): Promise<void> {
+    const clean = liveStatus(personStatus(status));
+    if (!clean) return this.clearOwnStatus();
+    this.settings = { ...this.settings, ownStatus: clean };
+    this.ownStatusChanged();
+    await db.putSettings(this.settings);
+  }
+
+  async clearOwnStatus(): Promise<void> {
+    if (!this.settings.ownStatus) return;
+    const { ownStatus: _cleared, ...settings } = this.settings;
+    this.settings = settings;
+    this.ownStatusChanged();
+    await db.putSettings(this.settings);
+  }
+
+  getOwnStatus(): { presence?: Presence; status?: PersonStatus; sharePresence: boolean } {
+    const status = liveStatus(this.settings.ownStatus);
+    return { ...(this.ownPresence ? { presence: this.ownPresence } : {}), ...(status ? { status } : {}), sharePresence: this.settings.sharePresence !== false };
+  }
+
+  /** While this profile's status says Do not disturb: messages make no sound and no notice here. */
+  private get doNotDisturb(): boolean { return liveStatus(this.settings.ownStatus)?.availability === "dnd"; }
+
+  /** What this side says: presence only while shared, the status while it lasts. */
+  private statusToSay(): StatusState {
+    const status = liveStatus(this.settings.ownStatus);
+    return { ...(this.ownPresence && this.settings.sharePresence !== false ? { presence: this.ownPresence } : {}), ...(status ? { status } : {}) };
+  }
+
+  /** Every 1:1 chat's link keeps it and says it where both sides offer `status/1` (a group edge never). */
+  private sayStatus(): void {
+    const state = this.statusToSay();
+    for (const live of this.links.values()) if (live.stored.profile && !live.stored.group) live.link?.setStatus(state);
+  }
+
+  private ownStatusChanged(): void {
+    this.armOwnStatusEnd();
+    this.sayStatus();
+    this.emitState();
+  }
+
+  private armOwnStatusEnd(): void {
+    clearTimeout(this.ownStatusTimer);
+    const until = this.settings.ownStatus?.until;
+    if (until === undefined) return;
+    this.ownStatusTimer = setTimeout(() => {
+      if (liveStatus(this.settings.ownStatus)) this.armOwnStatusEnd();
+      else void this.clearOwnStatus().catch(() => {});
+    }, Math.min(Math.max(until - Date.now(), 0), GhostlyNode.TIMER_MAX_MS));
+  }
+
+  private redrawAtStatusEnd(linkId: string, until: number | undefined): void {
+    clearTimeout(this.peerStatusTimers.get(linkId));
+    this.peerStatusTimers.delete(linkId);
+    if (until === undefined || until <= Date.now()) return;
+    this.peerStatusTimers.set(linkId, setTimeout(() => {
+      this.peerStatusTimers.delete(linkId);
+      if (until > Date.now()) this.redrawAtStatusEnd(linkId, until);
+      else this.emitState();
+    }, Math.min(until - Date.now() + 1, GhostlyNode.TIMER_MAX_MS)));
+  }
+
   /**
    * A call's signaling: read the contact's record fast, for its `_call`. A compatibility chat's only: a paired chat's
    * signals go only over its live session (WISP 601), so a read finds nothing for the call, and its data link keeps
@@ -7082,6 +7174,8 @@ export class GhostlyNode implements EngineImplementation {
     const settings: Partial<Settings> = rest;
     // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
     delete settings.backupReminders;
+    // This profile's status is set and cleared only through `setOwnStatus`, which checks it.
+    delete settings.ownStatus;
     const wasOnline = this.networkOn;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.
@@ -7163,6 +7257,13 @@ export class GhostlyNode implements EngineImplementation {
       else this.settings.sendTyping = false;
       await db.putSettings(this.settings);
       if (settings.sendTyping === false) { for (const live of this.links.values()) live.link?.setTyping(false); this.groups.stopTyping(); }
+    }
+    // Share when I'm online: absent means on; either way every live contact hears it at once (WISP 401 § Presence and status).
+    if (settings.sharePresence !== undefined) {
+      if (settings.sharePresence !== false) delete this.settings.sharePresence;
+      else this.settings.sharePresence = false;
+      await db.putSettings(this.settings);
+      this.sayStatus();
     }
     // Automatic downloads and serving group files (WISP 503): absent means on, as kept.
     for (const key of ["autoDownloads", "serveFiles"] as const) {
@@ -8644,6 +8745,7 @@ export class GhostlyNode implements EngineImplementation {
       binaryFilesSupport: true,
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,
+      statusSupport: !stored.group,
       reactionsSupport: this.options.reactions !== false,
       // 1:1 chats only, as typing. `ghostly-test-no-edit` makes this app an older one for the e2e.
       editSupport: !GhostlyNode.testNoEdit(),
@@ -8955,6 +9057,8 @@ export class GhostlyNode implements EngineImplementation {
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
         // Presence, not a message: only the state shows it, nothing is stored or counted.
         onPeerTyping: () => this.emitState(),
+        // So are presence and a set status; a status that ends leaves the view when it does.
+        onPeerStatus: state => { this.emitState(); this.redrawAtStatusEnd(linkId, state.status?.until); },
         // Taken (shown, older than what is shown, or waiting for its message) is confirmed; no room left is not.
         onReaction: async reaction => (await this.reactions.receive(linkId, "peer", reaction)) !== "dropped",
         onReactionReceipt: n => this.reactionReceipt(linkId, n),
@@ -9005,6 +9109,9 @@ export class GhostlyNode implements EngineImplementation {
       }, () => this.links.get(linkId) === live),
     });
     const link = live.link;
+    // Kept by the link across its sessions: said on each one whose contact offers status/1 (a new link says none).
+    const said = stored.profile && !stored.group ? this.statusToSay() : {};
+    if (said.presence || said.status) link.setStatus(said);
     // The chat may be on screen already: a new chat's page opens it while the engine is still saving it, before this
     // link exists, so `setActiveLink` found none to tell (the inviter read its contact every 30 s in the background).
     if (linkId === this.activeLinkId) link.setChatActive(true);
@@ -10094,6 +10201,8 @@ export class GhostlyNode implements EngineImplementation {
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
+      ...(stored.profile && !stored.group && live.link?.peerStatus?.presence ? { peerPresence: live.link.peerStatus.presence } : {}),
+      ...(stored.profile && !stored.group && live.link?.peerStatus?.status ? { peerStatus: live.link.peerStatus.status } : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
