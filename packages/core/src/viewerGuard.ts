@@ -242,7 +242,7 @@ const LOOK_BYTES = 64 * 1024;
  * in every frame itself (the web runner): the contact's policies take the guard's hash
  * (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
  * that is HTML gets the guard first in it; one the guard cannot be put in (another type, more than one type, a
- * compressed or UTF-16 body) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
+ * compressed or UTF-16 body, a type with a quote or a backslash in it) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
  */
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value) : value]);
@@ -253,11 +253,13 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   const types = values("content-type");
   const type = types.length === 1 && !types[0].includes(",") ? types[0] : "";
   // UTF-16 by any of its names (`unicode`, `ucs-2`, `csunicode`...), resolved as a browser does: the guard's bytes would
-  // not read as a script there. A name no browser knows falls back to an encoding that reads them.
-  const label = /;\s*charset\s*=\s*"?([^";\s]+)/.exec(type)?.[1];
-  let utf16 = false;
-  try { utf16 = label !== undefined && new TextDecoder(label).encoding.startsWith("utf-16"); } catch { /* unknown label */ }
-  const html = type.split(";")[0].trim() === "text/html" && !utf16;
+  // not read as a script there. Every `charset=` counts, and a type with a quote or a backslash in it is not read at all
+  // (a browser reads quoted strings, which can hide a charset or spell one with escapes): none of these runs scripts.
+  // A name no browser knows falls back to an encoding that reads them.
+  const utf16 = [...type.matchAll(/charset\s*=\s*"?([^";\s]+)/g)].some(([, label]) => {
+    try { return new TextDecoder(label).encoding.startsWith("utf-16"); } catch { return false; }
+  });
+  const html = type.split(";")[0].trim() === "text/html" && !utf16 && !/["\\]/.test(type);
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, ["content-security-policy", NO_SCRIPTS_CSP] as [string, string]], body });
   if (!html || encoded) return noScripts();

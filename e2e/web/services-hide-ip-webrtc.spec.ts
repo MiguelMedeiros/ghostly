@@ -56,6 +56,8 @@ const CASES: Record<string, string> = {
   "the window that frames it": `attempt(() => parent.RTCPeerConnection);`,
   "a page sent as two types": `twice("/two-types");`,
   "a page in UTF-16 by another name": `twice("/u16");`,
+  "a page whose UTF-16 charset hides behind a quoted one": `twice("/u16-quoted");`,
+  "a page whose UTF-16 charset is spelled with an escape": `twice("/u16-escaped");`,
   "a shadow tree made by setHTMLUnsafe": `document.body.appendChild(document.createElement("div")).setHTMLUnsafe(SHADOW);`,
   "a shadow tree made by Document.parseHTMLUnsafe": `document.body.append(document.adoptNode(Document.parseHTMLUnsafe(SHADOW).body.firstElementChild));`,
   "a shadow tree written by document.write": `document.write(SHADOW);`,
@@ -86,7 +88,11 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
     if (path === "/slow") return { headers: page, body: html(""), wait: 700 };
     if (path === "/first") return { headers: page, body: html("") };
     // UTF-16LE under a name the Encoding Standard gives it: the guard's UTF-8 bytes would not read as a script there.
-    if (path === "/u16") return { headers: [["content-type", "text/html; charset=unicode"]], body: new Uint8Array(Buffer.from(`<!doctype html><script src="/go.js"></script>`, "utf16le")) };
+    const utf16 = new Uint8Array(Buffer.from(`<!doctype html><script src="/go.js"></script>`, "utf16le"));
+    if (path === "/u16") return { headers: [["content-type", "text/html; charset=unicode"]], body: utf16 };
+    // The same, said in ways a browser reads as UTF-16 through MIME's quoted strings.
+    if (path === "/u16-quoted") return { headers: [["content-type", `text/html; foo="x;charset=utf-8";charset=unicode`]], body: utf16 };
+    if (path === "/u16-escaped") return { headers: [["content-type", `text/html; charset="uni\\code"`]], body: utf16 };
     // HTML by the first type and an SVG by the last, which is the one a browser renders.
     if (path === "/two-types") return { headers: [["content-type", "text/html"], ["content-type", "image/svg+xml"]], body: `<svg xmlns="http://www.w3.org/2000/svg"><script href="/go.js"/></svg>` };
     return { headers: [["content-type", "text/plain"]], body: "" };
