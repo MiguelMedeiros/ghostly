@@ -59,8 +59,9 @@
   resize: none;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 15px;
-  line-height: 22px;
+  /* 15px and 22px at the default text size, larger or smaller with Settings → Text size (index.css). */
+  font-size: calc(15rem / 16 * var(--chat-text-scale));
+  line-height: calc(22rem / 16 * var(--chat-text-scale));
   /* A message wraps: the field never scrolls sideways. Right to left, WebKitGTK kept a few pixels of sideways overflow
      in the empty field once the window narrowed with the chat open, and drew both scrollbars across it. */
   overflow-x: hidden;
@@ -78,6 +79,14 @@
   .composer-icon-button { width: 44px; height: 44px; }
   .composer-textarea { min-height: 44px; padding: 11px 4px; }
   .composer-row > .voice-bar { border-radius: 24px; }
+}
+/* A phone's or a tablet's fields are 16px at least (index.css), or iOS zooms into one on focus: the message's field too,
+   at a Small text size, and larger with a larger one. */
+@media (max-width: 767px), (pointer: coarse) {
+  .composer-textarea {
+    font-size: max(16px, calc(15rem / 16 * var(--chat-text-scale))) !important;
+    line-height: max(22px, calc(22rem / 16 * var(--chat-text-scale)));
+  }
 }
 /* A narrow chat column (a phone held upright, or the chat list dragged wide): the message keeps the room around the
    buttons. The + and the smiley stay 44 px wide, as every control a thumb presses on a phone; on a 320 px phone the

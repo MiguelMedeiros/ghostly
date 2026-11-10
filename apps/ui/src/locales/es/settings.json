@@ -173,6 +173,7 @@
     "stayConnected": "segundo plano, batería, mantener activo, conectado",
     "storage": "espacio, disco, cuota",
     "systemNotices": "alertas, banners, avisos",
+    "textSize": "fuente, letra, zoom, más grande, más pequeño, accesibilidad",
     "turn": "NAT, cortafuegos, llamadas",
     "updates": "actualizar, nueva versión",
     "version": "compilación, versión",
@@ -219,6 +220,17 @@
   },
   "storageUsed": "Almacenamiento usado",
   "systemNotifications": "Notificaciones del sistema",
+  "textSize": "Tamaño del texto",
+  "textSizeHint": "Mensajes, el campo de mensaje y la lista de chats, en este dispositivo",
+  "textSizePreview": "¡Hola! ¿Se lee bien?",
+  "textSizePreviewReply": "Sí, mucho mejor 👍",
+  "textSizes": {
+    "default": "Predeterminado",
+    "huge": "Enorme",
+    "large": "Grande",
+    "larger": "Más grande",
+    "small": "Pequeño"
+  },
   "theme": "Tema",
   "themes": {
     "dark": "Oscuro",

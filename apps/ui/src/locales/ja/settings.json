@@ -173,6 +173,7 @@
     "stayConnected": "バックグラウンド, バッテリー, 常時接続, 接続",
     "storage": "容量、ディスク、割り当て",
     "systemNotices": "アラート、バナー、お知らせ",
+    "textSize": "フォント, ズーム, 拡大, 縮小, 文字, アクセシビリティ",
     "turn": "NAT、ファイアウォール、通話",
     "updates": "アップグレード、新しいバージョン",
     "version": "ビルド、リリース",
@@ -219,6 +220,17 @@
   },
   "storageUsed": "使用中のストレージ",
   "systemNotifications": "システム通知",
+  "textSize": "文字サイズ",
+  "textSizeHint": "メッセージ、入力欄、チャット一覧（このデバイスのみ）",
+  "textSizePreview": "こんにちは！読みやすいですか？",
+  "textSizePreviewReply": "はい、ずっと読みやすいです 👍",
+  "textSizes": {
+    "default": "標準",
+    "huge": "特大",
+    "large": "大",
+    "larger": "さらに大",
+    "small": "小"
+  },
   "theme": "テーマ",
   "themes": {
     "dark": "ダーク",

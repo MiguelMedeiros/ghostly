@@ -478,7 +478,7 @@ describe("MessageBubble: text", () => {
 
   it("shows a message of only emoji big", () => {
     bubble({ text: "🎉👻" });
-    expect(screen.getByText("🎉👻")).toHaveClass("text-[42px]");
+    expect(screen.getByText("🎉👻")).toHaveClass("chat-text-emoji");
   });
 
   // Families, flags and skin tones are 4-11 UTF-16 units each: the limit counts the emoji a person sees.
@@ -486,12 +486,12 @@ describe("MessageBubble: text", () => {
     // The emoji panel's keycaps and the flags of England, Scotland and Wales (tag sequences) are emoji too.
     ["a keycap", "1️⃣"], ["keycaps", "#️⃣*️⃣0️⃣"], ["the flag of England", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"], ["the flags of Scotland and Wales", "🏴󠁧󠁢󠁳󠁣󠁴󠁿🏴󠁧󠁢󠁷󠁬󠁳󠁿"]])("shows %s big", (_, text) => {
     bubble({ text });
-    expect(screen.getByText(text)).toHaveClass("text-[42px]");
+    expect(screen.getByText(text)).toHaveClass("chat-text-emoji");
   });
 
   it.each([["words with an emoji", "nice 🎉"], ["too many emoji", "🎉🎉🎉🎉🎉🎉🎉"], ["seven families", "👨‍👩‍👧‍👦".repeat(7)], ["digits", "2026"], ["a hash and digits", "#1"]])("shows %s at the normal size", (_, text) => {
     bubble({ text });
-    expect(screen.getByText(text)).not.toHaveClass("text-[42px]");
+    expect(screen.getByText(text)).not.toHaveClass("chat-text-emoji");
   });
 
   it("names the contact on their messages, from the message or the chat", () => {

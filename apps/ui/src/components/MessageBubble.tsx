@@ -274,7 +274,7 @@ function UnconfirmedMark() {
   const { t } = useI18n();
   return (
     <div data-testid="message-unconfirmed" title={t("chat.unconfirmed.hint")}
-      className="text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      className="chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
       <span>{t("chat.unconfirmed.label")}</span>
       <span className="sr-only">{t("chat.unconfirmed.hint")}</span>
     </div>
@@ -288,7 +288,7 @@ function ForwardedMark({ hops }: { hops?: number }) {
   if (!label) return null;
   return (
     <div data-testid="message-forwarded" data-many={label === "chat.forward.many" || undefined}
-      className="flex items-center gap-1 text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      className="flex items-center gap-1 chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
       <ForwardGlyph size={13} />
       <span>{t(label)}</span>
     </div>
@@ -325,7 +325,7 @@ function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage[
  */
 function TranslatedMark({ translation }: { translation: ShownTranslation }) {
   const { t, dir } = useI18n();
-  const quiet = "text-[11px] leading-[16px] text-text-primary/65";
+  const quiet = "chat-text-note text-text-primary/65";
   if (translation.long) {
     return (
       <div dir={dir} className={`mt-[2px] ${quiet}`}>
@@ -355,7 +355,7 @@ function TranslatedMark({ translation }: { translation: ShownTranslation }) {
 function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
   const { t, language, dir } = useI18n();
   return (
-    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] chat-text-note text-text-primary/65 italic">
       <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
       <span aria-hidden="true"> · </span>
       <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
@@ -1113,7 +1113,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   if (refusedPayment) {
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
-        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <span>{refusedLine(refusedPayment, t)}</span>
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
@@ -1133,7 +1133,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
-        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -1172,7 +1172,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system ${
             isMissed
               ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
@@ -1199,7 +1199,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nickRun = <bdi>{nick}</bdi>;
   const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
+    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px]`}>
       {author && onOpenAuthor && !choosing
         ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
         : nickRun}
@@ -1387,7 +1387,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // a contact's picture waits for a click.
           <div className="clearfix">
             <button type="button" data-testid="image-reveal" onClick={() => setRevealed(picture)}
-              className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
+              className="chat-text-link text-link underline decoration-dotted cursor-pointer break-all text-start">
               {t("chat.showPicture", { host: hostOf(message.text.trim()) })}
             </button>
             {timestampEl}
@@ -1421,7 +1421,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : bigEmoji ? (
           <div className="clearfix">
-            <span className="text-[42px] leading-[50px] block text-center py-[2px]">
+            <span className="chat-text-emoji block text-center py-[2px]">
               {message.text}
             </span>
             {timestampEl}
@@ -1431,7 +1431,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
-            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="chat-text-message wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
             {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
