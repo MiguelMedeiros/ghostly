@@ -613,6 +613,9 @@
     "paste": "Paste",
     "scan": "Scan"
   },
+  "sentEcash": {
+    "title": "Sent in a deleted chat"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Setting up your Mainnet wallets…",

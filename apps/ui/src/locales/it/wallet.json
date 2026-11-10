@@ -613,6 +613,9 @@
     "paste": "Incolla",
     "scan": "Scansiona"
   },
+  "sentEcash": {
+    "title": "Inviato in una chat eliminata"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creo i tuoi portafogli Mainnet…",
