@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CARRIED_DEFER_MS, SIGNAL_FRESH_MS, SIGNAL_PROVEN_MS, CarriedTransport, DiscoveryBudgetError, createIdentity, createRelayPayload, groupSignalFrame, parseRelayPayload, readGroupSignal,
+  CARRIED_DEFER_MS, SIGNAL_FRESH_MS, SIGNAL_PROVEN_MS, SIGNAL_REPLY_MS, CarriedTransport, DiscoveryBudgetError, createIdentity, createRelayPayload, groupSignalFrame, parseRelayPayload, readGroupSignal,
   type GhostRecord, type Identity, type PkarrTransport, type SignedPacket,
 } from "../src";
 // covers: groups.protocol.signals
@@ -152,6 +152,32 @@ describe("an edge's packets, carried by members beside the relays", () => {
     relays.failPublish = null;
     await vi.advanceTimersByTimeAsync(2_000);
     expect(relays.publishes).toEqual([records("offer")]);
+  });
+
+  // An edge to a member who left, beside members who stayed: the link tries its packet again each time the relays' budget
+  // says it frees a request. Each try was signed again and handed to two members, who could not pass it on: an idle web
+  // app with two such edges sent ~56 frames (35 KB) a minute over its live edges.
+  it("hands members the same records once while the relays' budget holds them back, not at every try", async () => {
+    const { me, relays, state, transport } = edge(2, false);
+    relays.failPublish = new DiscoveryBudgetError(1_000);
+    for (let i = 0; i < 10; i++) {
+      await expect(transport.publish(me, records("here"))).rejects.toBeInstanceOf(DiscoveryBudgetError);
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(state.carried).toHaveLength(1);
+    // Something new to say (an offer) goes to members at once.
+    await expect(transport.publish(me, records("offer"))).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    expect(state.carried).toHaveLength(2);
+    expect(transport.latest()).toBe(state.carried[1]);
+    // The same records a while later are handed again, fresh for a member who comes back.
+    await vi.advanceTimersByTimeAsync(SIGNAL_REPLY_MS);
+    await expect(transport.publish(me, records("offer"))).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    expect(state.carried).toHaveLength(3);
+    // The relays take the very packet members got.
+    relays.failPublish = null;
+    await transport.publish(me, records("offer"));
+    expect(state.carried).toHaveLength(3);
+    expect(relays.packets.get(me.pubKeyZ32)!.timestampMicros).toBe(parseRelayPayload(me.pubKeyZ32, state.carried[2]).timestampMicros);
   });
 
   it("answers the next read with a carried packet, without a request, and tells the edge to look", async () => {
