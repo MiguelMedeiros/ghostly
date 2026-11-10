@@ -7,7 +7,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, cleanName, dhtOnly, findChat, findGroup, groupOf, groupPrefixed, inviteTaken, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -659,11 +659,13 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.disconnect"(ctx, params) {
     const link = chatOf(ctx, params);
-    if (params.hold === undefined) {
+    const minutes = params.hold === undefined ? undefined : num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    // `--hold 0` still ends a hold, one an older version put on a waiting invite too.
+    if (minutes !== 0) somebodyJoined(link);
+    if (minutes === undefined) {
       node(ctx).disconnect({ linkId: link.id });
       return chatJson(findChat(state(ctx).links, link.id));
     }
-    const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
     if (minutes > 0) noCallOn(ctx, link.id, "hold the chat");
     if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
     else await holdChat(ctx, link, minutes);
