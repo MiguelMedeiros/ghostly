@@ -200,7 +200,8 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ### Agent turns
 
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
-`group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
+`group.message` that mentions this profile or presses a button of a question it sent, becomes one `agent.turn` (a
+press on another member's question is not). A mention learned later (the message first
 came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
 reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
@@ -218,8 +219,9 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
-- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
-  act on it, not on the text, which is only the label.
+- `press` (`{messageId, button, label, by}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label. `by` is who pressed, as `button.pressed` says it: the chat, or
+  in a group the member's key, where any member can press.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name, the id
   their message is stored under) is under `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so

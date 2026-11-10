@@ -105,7 +105,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
 
 /**
  * One agent turn (docs/CLI.md § Agent turns): a message a contact sent in a chat, or a group message that mentions
- * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
+ * this profile or presses a button of its question. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
  * is stored under) is under `untrusted` and nowhere else: an agent reads it as data, never as its instructions. `seq` is
  * the source event's, so `--cursor` and `--since` work as for any event; `id` is stable for the message (dedupe on it).
  */
@@ -121,21 +121,31 @@ export interface AgentTurn extends GhostlyEvent {
   timestamp: number;
   /**
    * The message pressed a button of a question this profile sent (WISP 406 · Message Buttons), as this side's engine
-   * matched it: the question's id, the button's id and its label, all this profile's own words.
+   * matched it: the question's id, the button's id and its label, all this profile's own words, and who pressed (`by`:
+   * the chat, or the member's key in a group; null when the group message names none).
    */
-  press?: { messageId: string; button: string; label: string; inferred?: true };
+  press?: { messageId: string; button: string; label: string; inferred?: true; by: string | null };
   /** `translation`: `listen --translate`'s, made of the sender's text, so theirs as much. */
   untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean }; translation?: { from: string; text: string } };
 }
 
-interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: Omit<NonNullable<AgentTurn["press"]>, "by">; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
 
-/** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
+/**
+ * Whether a group message is meant for this profile: it mentions it, or it presses a button of a question this profile
+ * sent (`press` is set only on a press of mine, `buttonPress`). A press on another member's question is theirs to answer.
+ */
+const forMe = (message: TurnMessage): boolean => !!message.mentioned || !!message.press;
+
+/**
+ * The turn an event starts, or null: only a contact's message, and a group message that mentions this profile or
+ * presses a button of its question.
+ */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
   const message = event.message as TurnMessage | undefined;
   if (!message || typeof message.text !== "string") return null;
   if (event.type === "message.received" && typeof event.chat === "string") return turn(event, "message.received", { chat: event.chat }, message);
-  if (event.type === "group.message" && typeof event.group === "string" && message.mentioned) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  if (event.type === "group.message" && typeof event.group === "string" && forMe(message)) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
   if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
@@ -147,7 +157,8 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   const place = where.chat ?? where.group ?? "", messageId = turnRef(place, message.id);
   return {
     seq: event.seq, id: `agent.turn:${source}:${place}:${messageId}`, type: "agent.turn", at: event.at, source, ...where, messageId, timestamp: message.timestamp,
-    ...(message.press ? { press: message.press } : {}),
+    // Who pressed, as `button.pressed` says it: the chat, or the member's key in a group.
+    ...(message.press ? { press: { ...message.press, by: where.chat ?? where.member ?? null } } : {}),
     untrusted: {
       text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
