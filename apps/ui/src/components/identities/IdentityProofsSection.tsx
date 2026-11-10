@@ -18,6 +18,7 @@ import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
+import { localProvider } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
 
@@ -102,13 +103,15 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
+  /** The proof's provider in the app's language: its removal steps and their lines too. */
+  const localOf = (id: string) => { const provider = providerOf(id); return provider && localProvider(provider, t); };
   const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };  /**
    * Removes a proof: first what its provider published, when it can take that down (an AT Protocol record, after a
    * fresh approval on the person's server), then the proof itself, which withdraws it and publishes the revocation.
    * Called straight from the click: the provider may open a window. `withRecord` false skips the first step.
    */
   const remove = (p: IdentityProofView, withRecord = true) => {
-    const unpublish = withRecord ? providerOf(p.provider)?.unpublish : undefined;
+    const unpublish = withRecord ? localOf(p.provider)?.unpublish : undefined;
     const controller = new AbortController(); removeAbort.current = controller;
     // The card says it is revoking once that starts: while an approval is awaited, nothing is revoked yet.
     if (unpublish) setTakingDown(p.id); else setRevoking(p.id);
@@ -204,7 +207,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
               {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}

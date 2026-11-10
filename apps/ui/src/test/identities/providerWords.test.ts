@@ -1,14 +1,37 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newIdentityBinding, identityStatement } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider } from "@ghostly/browser/proofs/contract";
+import { BITCOIN_WALLET_GUIDES } from "@ghostly/browser/proofs/bitcoinWallets";
+import type { ExternalToolSigner, IdentityProofProvider, PublishSigner } from "@ghostly/browser/proofs/contract";
 import { OIDC_PROVIDERS } from "@ghostly/browser/proofs/oidc/providers";
 import { builtInIdentityProvider } from "@ghostly/browser/proofs/load";
+import { SCRIPT_NAMES } from "@ghostly/browser/proofs/providers/bitcoin";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { localProvider, providerSay } from "../../lib/providerWords";
 import { translateWith } from "../../locales/translate";
 import { LOCALES, lookup } from "../i18n/locales";
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
+/** An Ed25519 did:key (the all-zero seed's, from the did:key spec's test vectors): resolved on the device. */
+const DID_KEY = "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
+
+const PROOFS = join(fileURLToPath(import.meta.url), "../../../../../../packages/browser/src/proofs");
+/** The source files whose `say(key, english)` lines each built-in provider says. */
+const SAYERS: Record<string, readonly string[]> = {
+  "providers/ssh.ts": ["ssh", "ssh-github", "ssh-gitlab"],
+  "providers/domain.ts": ["domain"], "providers/nostr.ts": ["nostr"], "providers/bitcoin.ts": ["bitcoin"], "providers/openpgp.ts": ["openpgp"],
+  "providers/oidc.ts": ["oidc"], "providers/did.ts": ["did"], "providers/atproto.ts": ["atproto"], "atproto/oauth.ts": ["atproto"],
+  "providers/pubky.ts": ["pubky"], "pubky.ts": ["pubky"],
+};
+
+/** Every `say("key", "english"…)` with a literal key, per provider that says it. */
+function sayCalls(): { id: string; key: string; english: string }[] {
+  return Object.entries(SAYERS).flatMap(([file, ids]) =>
+    [...readFileSync(join(PROOFS, file), "utf8").matchAll(/(?:\bsay|englishSay\))\("([\w.-]+)",\s*("(?:[^"\\]|\\.)*")/g)]
+      .flatMap(([, key, english]) => ids.map((id) => ({ id, key: key!, english: JSON.parse(english!) as string }))));
+}
 
 /** A language whose dictionary has some of the SSH key provider's lines, and none of the others'. */
 const t = translateWith({
@@ -134,6 +157,50 @@ describe("a provider's words in the app's language", () => {
       // A name is the same in every language.
       expect(localProvider(provider("openpgp"), ar).signers[0]!.label).toBe("gpg");
     });
+  });
+
+  it("says a built-in provider's steps, preview and progress in Portuguese with the app in pt", async () => {
+    const pt = translateWith(LOCALES.pt, "pt");
+    const domain = localProvider(provider("domain"), pt);
+    const statement = identityStatement(newIdentityBinding({ provider: "domain", subject: "example.com", validitySeconds: 86400 }).binding);
+    const steps = (domain.signers[0] as PublishSigner<unknown>).instructions(statement).steps;
+    expect(steps[0]!.text).toBe(lookup("pt", "identities.providers.domain.dns.name")!.replace(/\{\{domain\}\}/g, "example.com"));
+    expect(steps[0]!.text).toContain("example.com");
+    expect(steps[1]!.text).toBe(lookup("pt", "identities.providers.domain.dns.value"));
+    const preview = await localProvider(provider("did"), pt).subject.preview!(DID_KEY, { signal: new AbortController().signal });
+    expect(preview.facts[0]!.label).toBe("Método");
+    expect(providerSay(provider("pubky"), pt)("progress.writing", "Writing the proof to your homeserver…")).toBe(lookup("pt", "identities.providers.pubky.progress.writing"));
+  });
+
+  it("says a line in English when the app's language has no words for it", () => {
+    const pt = structuredClone(LOCALES.pt) as unknown as { identities: { providers: { domain: { dns: Record<string, string> } } } };
+    delete pt.identities.providers.domain.dns.value;
+    const domain = localProvider(provider("domain"), translateWith(pt, "pt"));
+    const statement = identityStatement(newIdentityBinding({ provider: "domain", subject: "example.com", validitySeconds: 86400 }).binding);
+    const steps = (domain.signers[0] as PublishSigner<unknown>).instructions(statement).steps;
+    expect(steps[1]!.text).toBe("Value (one string, exactly as shown):");
+    expect(steps[0]!.text).not.toContain("Open the DNS settings");
+  });
+
+  /**
+   * The English a provider passes to `say` is what a language without the line shows, and en/identities.json is what
+   * translators work from: the two must not drift. Read from the sources, so a line on a path no test walks counts too.
+   */
+  it("has every line a built-in provider says in English, word for word, under identities.providers.<id>", () => {
+    const said = sayCalls();
+    expect(said.length).toBeGreaterThan(60);
+    const drift = said.filter(({ id, key, english }) => lookup("en", `identities.providers.${id}.${key}`) !== english)
+      .map(({ id, key }) => `${id}.${key}`);
+    expect(drift).toEqual([]);
+    // The wallets' own steps, said under wallets.<id>.
+    const wallets = BITCOIN_WALLET_GUIDES.flatMap((g) => [
+      ...g.steps.map((text, i) => [`wallets.${g.id}.step${i + 1}`, text]),
+      ...(g.testnet ? [[`wallets.${g.id}.testnet`, g.testnet]] : []),
+      ...(g.note ? [[`wallets.${g.id}.note`, g.note]] : []),
+    ]);
+    expect(wallets.filter(([key, text]) => lookup("en", `identities.providers.bitcoin.${key}`) !== text).map(([key]) => key)).toEqual([]);
+    // An address type's name, said under a key built at run time (`scripts.${type}`), which sayCalls cannot read.
+    expect(Object.entries(SCRIPT_NAMES).filter(([type, name]) => lookup("en", `identities.providers.bitcoin.scripts.${type}`) !== name).map(([type]) => type)).toEqual([]);
   });
 
   it("lists OpenID Connect's issuers as configured now, not as they were when first shown", () => {

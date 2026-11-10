@@ -45,7 +45,7 @@ describe("a counted string", () => {
     expect([0, 2, 1234].map((count) => ar("identities.profile.followers", { count: formatAmount(count, "ar") }))).toEqual(["لا متابعين", "متابعان", "1,234 متابعًا"]);
     // Every counted Identities string has Arabic's dual, 3-10 and 11-99 forms.
     const counted = [...flatten(LOCALES.en.identities, "identities")].filter(([, text]) => (text as string).includes("{{count}}")).map(([key]) => key);
-    expect(counted.length).toBe(17);
+    expect(counted.length).toBe(18);
     const same = counted.filter((key) => new Set([2, 3, 11].map((count) => ar(key as "identities.add.days", { count, contact: "c", time: "t" }).replace(/\d+/, ""))).size < 3);
     expect(same).toEqual([]);
   });
