@@ -71,6 +71,22 @@ function lightOf(group: StoredGroup, kept: readonly string[]): GroupLight {
  */
 const markOf = (light: string): string => bytesToHex(sha256(utf8ToBytes(light))).slice(0, 32);
 
+/**
+ * Whether `light` was written while its record held what it holds now (its `of`), by this build or by one from before
+ * a field of `lightOf` was kept there: that build's mark is over the record's fields without it. A field added to
+ * `lightOf` later needs its line here, or every row written before is dropped at the first load after the update.
+ */
+function marks(light: GroupLight, now: GroupLight, of: string): boolean {
+  if (light.of === undefined || light.of === of) return true;
+  // Before the members' edits were kept here: a row of this build always has them, `[]` for none.
+  if (light.relayEdits) return false;
+  const { relayEdits: _edits, ...before } = now;
+  if (light.of === markOf(JSON.stringify(before))) return true;
+  // Before the hubs and the members' apps were: a row of a build from since has its hubs, if the record had any.
+  const { hubs: _hubs, large: _large, ...older } = before;
+  return !light.hubs && !light.large && light.of === markOf(JSON.stringify(older));
+}
+
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
   return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
@@ -122,9 +138,9 @@ export class GroupRows {
       }
       // Written with the record and each time `came` changed since: a mark taken back (`unmark`) stays back.
       if (live.came) group.came = live.came; else delete group.came;
-      const recorded = group.large ?? [], of = markOf(JSON.stringify(lightOf(group, recorded)));
+      const recorded = group.large ?? [], now = lightOf(group, recorded), of = markOf(JSON.stringify(now));
       // Else an app from before took a pin, a deletion, other hubs or an edit since, from the record: the record counts.
-      const light = lights.get(group.id), fresh = light && (light.of === undefined || light.of === of) ? light : undefined;
+      const light = lights.get(group.id), fresh = light && marks(light, now, of) ? light : undefined;
       if (fresh) {
         if (fresh.pin) group.pin = fresh.pin; else delete group.pin;
         if (fresh.removedIds.length) group.removedIds = fresh.removedIds; else delete group.removedIds;
