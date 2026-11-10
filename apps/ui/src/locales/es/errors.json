@@ -639,10 +639,9 @@
     "usdtRevertedNext": "No se enviaron tokens; el gas se gastó."
   },
   "relayOnly": {
+    "appInBrowserInfo": "En un navegador, esta app podría mostrar tu IP a sus servidores. La app de escritorio la abre de forma segura. O desactiva Ocultar mi IP.",
     "appInExtension": "La app de un contacto no se abre aquí con Ocultar mi IP activado",
-    "appInExtensionNext": "El navegador podría mostrar tu IP a los servidores de la app. Desactiva Ocultar mi IP para abrirla.",
     "appInWeb": "La app de un contacto no se abre en la web con Ocultar mi IP activado",
-    "appInWebNext": "El navegador podría mostrar tu IP a los servidores de la app. Ábrela en la app de escritorio, o desactiva Ocultar mi IP.",
     "keepsTurn": "Ocultar mi IP necesita este servidor TURN",
     "keepsTurnNext": "Desactívalo primero y luego quita el servidor.",
     "needsTurn": "Primero añade un servidor TURN",

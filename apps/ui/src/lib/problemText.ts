@@ -17,6 +17,8 @@ export interface Problem {
   next?: string;
   /** The error as it was thrown, for the ⓘ: only when the title does not already say all of it. */
   detail?: string;
+  /** Why, in the app's language, behind the same ⓘ: what the short title leaves out (errorText's `info`). */
+  info?: string;
   tone: ProblemTone;
 }
 

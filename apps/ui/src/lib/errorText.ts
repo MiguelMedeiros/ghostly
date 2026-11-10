@@ -27,10 +27,15 @@ interface Rule {
   reason?: "next" | "title";
   /** The error as it was thrown goes to the detail behind the ⓘ too: what it names (a member, an epoch) is for whoever debugs. */
   detail?: true;
+  /** Why, in the language, behind the ⓘ: the line stays short (a rule with no `reason` only). */
+  info?: TranslationKey;
 }
 
-/** An error in three parts: a title, maybe a next line, and the English behind the ⓘ when part of it is not said. */
-export interface ErrorParts { title: string; next?: string; detail?: string }
+/**
+ * An error in parts: a title, maybe a next line, and behind the ⓘ the why in the language (`info`) and the English when
+ * part of it is not said (`detail`).
+ */
+export interface ErrorParts { title: string; next?: string; detail?: string; info?: string }
 
 const exact = (text: string, key: TranslationKey, next?: TranslationKey): Rule => ({ match: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), key, ...(next && { next }) });
 
@@ -719,10 +724,10 @@ const RULES: readonly Rule[] = [
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
-  // A contact's app the extension does not open while it is on (apps/extension/src/background.ts, RELAY_ONLY_REFUSED).
-  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", next: "errors.relayOnly.appInExtensionNext" },
-  // The same on the web, which points to the Desktop app (apps/web/src/host.ts, RELAY_ONLY_REFUSED).
-  { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", next: "errors.relayOnly.appInWebNext" },
+  // A contact's app the extension and the web app do not open while it is on (apps/extension/src/background.ts and
+  // apps/web/src/host.ts, RELAY_ONLY_REFUSED): one short line, and why, with the desktop app that opens it, behind the ⓘ.
+  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", info: "errors.relayOnly.appInBrowserInfo" },
+  { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", info: "errors.relayOnly.appInBrowserInfo" },
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").
@@ -898,7 +903,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const groups = { ...found.groups };
     const params = rule.params ? rule.params(groups, t) : groups;
     const fixed = rule.next ? t(rule.next, params) : undefined;
-    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }) };
+    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }), ...(rule.info && { info: t(rule.info, params) }) };
     const reason = reasonLine(groups.reason ?? "", t);
     const detail = reason === undefined ? { detail: raw } : {};
     if (rule.reason === "title" && reason) return { title: reason, ...(fixed && { next: fixed }) };

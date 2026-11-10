@@ -639,10 +639,9 @@
     "usdtRevertedNext": "No tokens were sent; the gas was spent."
   },
   "relayOnly": {
+    "appInBrowserInfo": "In a browser, this app could show its servers your IP. The desktop app opens it safely. Or turn Hide my IP off.",
     "appInExtension": "A contact's app does not open here while Hide my IP is on",
-    "appInExtensionNext": "The browser could show the app's servers your IP. Turn Hide my IP off to open it.",
     "appInWeb": "A contact's app does not open on the web while Hide my IP is on",
-    "appInWebNext": "The browser could show the app's servers your IP. Open it in the desktop app, or turn Hide my IP off.",
     "keepsTurn": "Hide my IP needs this TURN server",
     "keepsTurnNext": "Turn it off first, then remove the server.",
     "needsTurn": "Add a TURN server first",
