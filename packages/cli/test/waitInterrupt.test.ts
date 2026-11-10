@@ -65,10 +65,12 @@ describe("a wait on a terminal, and Ctrl-C", { timeout: 120_000 }, () => {
     expect(history.messages.map((m) => m.text)).toContain("kept on Ctrl-C");
   });
 
-  it("a one-shot that waits by default, with no --wait (file send), says so too; Ctrl-C says the file still goes", async () => {
+  // A one-shot's own default waits are in "knows the waits a one-shot does by default" below: on this chat, which nobody
+  // joined, a file send without --wait answers at once.
+  it("a one-shot file send that waits says so too; Ctrl-C says the file still goes", async () => {
     const path = join(dir, "notes.txt");
     writeFileSync(path, "kept on Ctrl-C\n");
-    const send = start(["file", "send", "solo", path], onTty);
+    const send = start(["file", "send", "solo", path, "--wait", "sent"], onTty);
     await said(send, "ghostly: waiting for it to go out to solo (up to 300 s; Ctrl-C stops waiting, it still goes)\n");
     send.child.kill("SIGINT");
     expect(await send.exited(15_000)).toBe(130);
