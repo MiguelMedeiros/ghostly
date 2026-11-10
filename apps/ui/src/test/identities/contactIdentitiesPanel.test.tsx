@@ -239,6 +239,14 @@ describe("ContactIdentitiesPanel", () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
       });
+
+      it("how a Nostr proof was checked, in Arabic", async () => {
+        const npub = "a".repeat(64);
+        const card = await backIn("ar", receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } }));
+        const how = card.querySelector("dl")!.querySelector("bdi")!;
+        expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+        expect(how).not.toHaveTextContent(/signature/);
+      });
     });
 
     it("checks again on request, but not what was withdrawn or revoked", async () => {
