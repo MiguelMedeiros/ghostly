@@ -70,7 +70,7 @@ afterEach(() => {
 
 function chatPanel() {
   windowIs(false);
-  const view = renderApp(<div className="chat-pane"><div className="chat-column" />
+  const view = renderApp(<div className="chat-pane"><div className="chat-column"><textarea aria-label="Message" /></div>
     <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" /></div>);
   act(() => fakeEngine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1" })] }));
   return view;
@@ -325,5 +325,43 @@ describe("an app the watchdog stopped", () => {
     await act(() => open(REF, "link-1"));
     act(() => started[0]!.stop("protocol"));
     expect(screen.queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
+  });
+});
+
+// An app that kept taking the keyboard by script was stopped by the page (`holdFocus`): its place says why in one line.
+describe("an app stopped for taking the keyboard", () => {
+  const FOCUS = "Chess was stopped: it kept taking the keyboard";
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+  afterEach(() => { setAppOpener(null); });
+
+  it("in a chat: the panel says why, offers no Open again, and the message field keeps the focus", async () => {
+    setAppOpener(open);
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    const field = screen.getByRole("textbox", { name: "Message" });
+    act(() => field.focus());
+    act(() => started[0]!.stop("focus"));
+    const app = screen.getByTestId("mini-app");
+    expect(within(app).getByRole("status")).toHaveTextContent(FOCUS);
+    expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
+    expect(chatApp("link-1")?.stopped).toEqual({ why: "focus" });
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("alone: its layer says why, with no Open again", async () => {
+    const en = translateWith(locales.en, "en");
+    open = webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", openAgainLabel: () => "Open again", stoppedLabel: (title, takedown) => takedownText(title, takedown, en) });
+    await open(REF, null);
+    started[0]!.stop("focus");
+    const app = screen.getByTestId("mini-app");
+    expect(within(app).getByRole("status")).toHaveTextContent(FOCUS);
+    expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
+  });
+
+  it("has its line in every language", () => {
+    const lines = (Object.keys(locales) as (keyof typeof locales)[]).map((lang) => takedownText("Chess", { why: "focus" }, translateWith(locales[lang], lang)));
+    for (const line of lines) expect(line).toContain("Chess");
+    expect(new Set(lines).size).toBe(lines.length);
+    expect(lines).toContain(FOCUS);
   });
 });

@@ -190,6 +190,7 @@
     "resumeSharing": "ファイルを共有中",
     "sharingWith": "{{name}} とファイルを共有中",
     "stoppedFailed": "{{title}} が動作を停止したため閉じました。繰り返し起きる場合は発行者に知らせてください。",
+    "stoppedFocus": "{{title}} を停止しました: キーボードを何度も奪おうとしました",
     "stoppedOffline": "オフラインのため {{title}} を開始できませんでした。接続してからもう一度開いてください。",
     "stoppedRemoved": "{{title}} を停止しました: {{store}} がこのバージョンを削除しました",
     "stoppedRevoked": "{{title}} を停止しました: 発行者がこのバージョンを取り消しました",
