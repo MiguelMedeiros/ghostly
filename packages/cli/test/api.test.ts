@@ -1239,6 +1239,23 @@ describe("a pending chat's invite code is a secret", () => {
   });
 });
 
+// A chat or a group with no message yet answered `lastMessageAt: 0` (1970), where every other time not reached yet is null.
+describe("lastMessageAt", () => {
+  it("is null for a chat or a group with no message yet, which list after those with one", async () => {
+    const { ctx, node } = fake();
+    const state = node.getState();
+    node.getState = () => ({ ...state,
+      links: [link("chat-new", { createdAt: 5, inviteCode: "ghostly1x", pairing: { status: "waiting" } } as never), link("chat-old", { createdAt: 2, lastMessageAt: 40 }), link("chat-newer", { createdAt: 9 })],
+      groups: [{ ...group, id: "g-new" }, { ...group, id: "g-old", lastMessageAt: 40 }] });
+    const chats = (await callApi(ctx, "chat.list", {}) as { chats: { id: string; lastMessageAt: number | null }[] }).chats;
+    expect(chats.map((c) => [c.id, c.lastMessageAt])).toEqual([["chat-old", 40], ["chat-newer", null], ["chat-new", null]]);
+    expect(await callApi(ctx, "chat.get", { chat: "chat-new" })).toMatchObject({ lastMessageAt: null, liveSince: null, peerLastSeenAt: null });
+    const groups = (await callApi(ctx, "group.list", {}) as { groups: { id: string; lastMessageAt: number | null }[] }).groups;
+    expect(groups.map((g) => [g.id, g.lastMessageAt])).toEqual([["g-old", 40], ["g-new", null]]);
+    expect(await callApi(ctx, "group.get", { group: "g-new" })).toMatchObject({ lastMessageAt: null });
+  });
+});
+
 describe("settings", () => {
   it("hide credentials unless asked, and change only what the CLI manages", async () => {
     const { ctx, node } = fake();
