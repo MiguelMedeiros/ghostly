@@ -26,6 +26,7 @@
     "title": "Ti aspetta"
   },
   "notCopied": "Non copiato",
+  "quotedName": "«{{name}}»",
   "save": "Salva",
   "size": {
     "b": "{{n}} B",

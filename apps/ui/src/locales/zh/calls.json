@@ -28,6 +28,7 @@
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",
   "mediaDenied": "无法使用麦克风或摄像头",
+  "mediaDeniedAndroid": "请在 Android 设置中允许 Ghostly 使用麦克风(和相机)。",
   "mediaDeniedNext": "请在浏览器或系统设置中允许。",
   "mediaUnavailable": "未找到麦克风或摄像头",
   "mediaUnavailableNext": "请连接一个，或关闭正在使用它的应用。",

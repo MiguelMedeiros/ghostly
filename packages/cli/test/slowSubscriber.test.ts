@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it } from "vitest";
+import { callApi } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
 import { MAX_UNREAD, serve, type Host } from "../src/host";
 // covers: headless.daemon
@@ -33,7 +34,7 @@ async function served(name: string, hub: ReturnType<typeof fakeHub>["hub"]) {
   const s = await serve(host);
   const sockets: Socket[] = [];
   s.server.on("connection", (socket) => sockets.push(socket));
-  return { ...s, sockets, path: join(dir, "daemon.sock") };
+  return { ...s, host, sockets, path: join(dir, "daemon.sock") };
 }
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
@@ -121,6 +122,44 @@ describe.skipIf(process.platform === "win32")("a subscriber that stops reading",
       expect(answers.get(1)?.result).toMatchObject({ subscribed: true });
       expect(answers.get(2)?.error?.code).toBe("bad_request");
       client.destroy();
+    } finally { await s.close(); }
+  });
+
+  it("a since that is not a whole number from 0 is refused as events.replay refuses it, and subscribes nothing", async () => {
+    const journal = Array.from({ length: 4 }, (_, i) => ({ seq: i + 1, id: `e${i + 1}`, type: "message.received", at: 0, text: "hi" }) as GhostlyEvent);
+    const { hub, listeners } = fakeHub(journal);
+    const s = await served("since", hub);
+    try {
+      const subscribe = async (params: Record<string, unknown>) => {
+        const client = connect(s.path);
+        const messages: { id?: number; result?: { lastSeq: number }; error?: { code: string; message: string }; event?: GhostlyEvent }[] = [];
+        createInterface({ input: client }).on("line", (line) => messages.push(JSON.parse(line)));
+        client.write(JSON.stringify({ id: 1, method: "events.subscribe", params }) + "\n");
+        while (!messages.some((m) => m.id === 1)) await turn();
+        await turn();
+        const subscribed = listeners.size;
+        client.destroy();
+        while (listeners.size) await turn();
+        return { answer: messages.find((m) => m.id === 1)!, events: messages.filter((m) => m.event).map((m) => m.event!.seq), subscribed };
+      };
+      for (const since of ["0", "412", true, -3, 2.5, {}, [1]]) {
+        const { answer, events, subscribed } = await subscribe({ since });
+        expect(answer.error?.code, JSON.stringify(since)).toBe("bad_request");
+        expect(answer.error?.message).toBe("since must be a whole number from 0 to 9007199254740991");
+        expect(events, JSON.stringify(since)).toEqual([]);
+        expect(subscribed, JSON.stringify(since)).toBe(0);
+      }
+      // Left out or null: from now, as before.
+      for (const params of [{}, { since: null }]) {
+        const { answer, events, subscribed } = await subscribe(params);
+        expect(answer.result).toMatchObject({ subscribed: true, lastSeq: 4 });
+        expect(events).toEqual([]);
+        expect(subscribed).toBe(1);
+      }
+      expect((await subscribe({ since: 2 })).events).toEqual([3, 4]);
+      // events.replay takes the same check: a fractional since was a replay from the next whole seq.
+      for (const since of ["0", -3, 2.5]) await expect(callApi(s.host.ctx, "events.replay", { since })).rejects.toMatchObject({ code: "bad_request", message: "since must be a whole number from 0 to 9007199254740991" });
+      await expect(callApi(s.host.ctx, "events.replay", { since: 2 })).resolves.toMatchObject({ events: [{ seq: 3 }, { seq: 4 }], lastSeq: 4 });
     } finally { await s.close(); }
   });
 });

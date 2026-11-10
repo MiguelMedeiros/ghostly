@@ -20,7 +20,7 @@ import { format } from "node:util";
 import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
-  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownNameOption, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
   startingDaemon,
   type ProfilePaths,
 } from "./profiles";
@@ -207,7 +207,7 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
-  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list", "status.get",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -232,6 +232,10 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "group.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
   "saved.add", "saved.remove",
+  // This profile's status: kept here, and said only on a live session (WISP 401 § Presence and status), never on a
+  // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
+  // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
+  "status.set", "status.clear",
 ]);
 
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
@@ -272,11 +276,24 @@ async function session(g: Globals, options: RuntimeOptions, again = true): Promi
 }
 
 /**
- * `again`: a session of its own, for a read (`readOnly`) whose connection ended unanswered (`endedUnanswered`): the
- * daemon stopped or restarted under it. The read is asked once more there, through the daemon that answers now or on
- * the profile itself, and so is every call after it. It failed as a timeout told to check `ghostly chat history` for
- * a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as a daemon of an older
- * release (exit 1), while a command started a moment later answered.
+ * Waits that change nothing (`chat wait`, `file wait`): one a daemon that stopped left unanswered is asked once more,
+ * as a read is (`throughDaemon`), for the time it had left. They failed as a timeout told to check `ghostly chat
+ * history` for a message (exit 4) when a restart came while they waited.
+ */
+const READ_WAITS: ReadonlySet<string> = new Set(["chat.wait", "file.wait"]);
+
+/** `params` with the `timeout` (its own, or the daemon's default for `method`) less the `spentMs` already waited. */
+function waitLeft(method: string, params: Record<string, unknown>, spentMs: number): Record<string, unknown> {
+  const seconds = typeof params.timeout === "number" ? params.timeout : waitsFor(method, params);
+  return seconds === undefined ? params : { ...params, timeout: Math.max(1, Math.ceil(seconds - spentMs / 1000)) };
+}
+
+/**
+ * `again`: a session of its own, for a read (`readOnly`, or one of `READ_WAITS`) whose connection ended unanswered
+ * (`endedUnanswered`): the daemon stopped or restarted under it. The read is asked once more there, through the daemon
+ * that answers now or on the profile itself, and so is every call after it. It failed as a timeout told to check
+ * `ghostly chat history` for a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as
+ * a daemon of an older release (exit 1), while a command started a moment later answered.
  */
 function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Session {
   // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
@@ -298,11 +315,13 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
   const call = async (m: string, p?: unknown): Promise<unknown> => {
     if (next) return (await next).call(m, p);
+    const from = performance.now();
     try { return await first(m, p); }
     catch (error) {
-      if (!again || aborted || !endedUnanswered(error) || !readOnly(m, (p ?? {}) as Record<string, unknown>)) throw error;
+      const params = (p ?? {}) as Record<string, unknown>;
+      if (!again || aborted || !endedUnanswered(error) || !(readOnly(m, params) || READ_WAITS.has(m))) throw error;
       next ??= again();
-      try { return await (await next).call(m, p); }
+      try { return await (await next).call(m, READ_WAITS.has(m) ? waitLeft(m, params, performance.now() - from) : p); }
       catch (failure) {
         // The daemon asked once more went away as well: a read changed nothing, so it says so, and not to check a chat.
         // A listener refused again is one that does not prove itself, and is named so.
@@ -476,7 +495,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
     translate,
   }],
-  ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
+  ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
@@ -693,7 +712,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       noMoreThan(1, parsed.positionals, "profile create <name> [--use] [--name <shown name>] [--force]");
       // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
       // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
-      const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
+      const shownName = parsed.options.name === undefined ? undefined : checkShownNameOption(parsed.options.name as string);
       const force = parsed.options.force === true;
       if (shownName) (await import("./secretGuard")).guardText(shownName, force, "name", "set it");
       const paths = createProfile(g.home, name);
@@ -731,7 +750,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "set": {
       noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       const params: Record<string, unknown> = {};
-      if (parsed.options.name !== undefined) params.name = parsed.options.name;
+      // Checked before the profile opens, so a bad --name is a usage error naming it; the engine takes it as given.
+      if (parsed.options.name !== undefined) {
+        checkShownNameOption(parsed.options.name as string);
+        params.name = parsed.options.name;
+      }
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
       if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
       if (parsed.options.force === true) params.force = true;
@@ -1198,7 +1221,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`); a daemon gone
     // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
     const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
-    const stop = () => { following.close(); process.exit(0); };
+    // A hook at work is given its time, then ended (`EventHandler.stop`): it never runs on after the listen.
+    const stop = stopper(async () => { following.close(); await handle.stop(); });
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
@@ -1212,10 +1236,11 @@ async function listenCommand(argv: string[]): Promise<void> {
   const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
-  const stop = stopper(async () => { await served.close(); await host.close(); });
+  // The hook first: one at work may still answer through this socket (`ghostly send`).
+  const stop = stopper(async () => { await handle.stop(); await served.close(); await host.close(); });
   quit = (code) => {
     setTimeout(() => process.exit(code), 20_000).unref();
-    void served.close().then(() => host.close()).finally(() => process.exit(code));
+    void handle.stop().then(() => served.close()).then(() => host.close()).finally(() => process.exit(code));
   };
   // Asked to stop over the socket (`daemon stop`, `daemon restart`, the profile cleared): the events stop with it, so
   // the listen says so and fails. An exit 0 read as "done": a service manager restarted nothing, and no line said why.
@@ -1335,15 +1360,11 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
   if (!spec.message) Object.assign(params, (await import("./buttons")).buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
-    if (spec.target === "chat") {
-      // A one-shot leaves once its command is done: by default it stays until the message went out.
-      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
-      if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
-    } else {
-      // A group has no receipts: `--wait sent` waits until an edge took it. None by default.
-      if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
-      if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
-    }
+    // The wait is the API's own when none is given: a one-shot's in a chat stays until the message went out or the edit
+    // was confirmed, but not on a chat nobody joined yet. A group has no receipts: `--wait sent` waits until an edge took
+    // it. None by default.
+    if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
+    if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     return s.call(spec.method, params);
   }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
 }

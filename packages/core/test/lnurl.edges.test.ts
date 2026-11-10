@@ -206,6 +206,21 @@ describe("the invoice callback", () => {
     expect(parseInvoiceCallback({ pr: rawInvoice("lnbc210n", [[P, new Uint8Array(32)], [H, metadataHash]]) }, params, 21).invoice.amountSat).toBe(21);
   });
 
+  it("writes the amounts of an invoice that asks another amount the same way whatever the process's language (the app matches it)", () => {
+    const pr = testInvoice({ sats: 1_234_567, descriptionHash: metadataHash });
+    const anyAmount = rawInvoice("lnbc", [[P, new Uint8Array(32)], [H, metadataHash]]);
+    // A process whose own language writes 21.000 (a browser in German, Portuguese...): what toLocaleString() picks then.
+    const own = Number.prototype.toLocaleString;
+    Number.prototype.toLocaleString = function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) { return own.call(this, locales ?? "de-DE", options); };
+    try {
+      expect((21_000).toLocaleString()).toBe("21.000");
+      expect(() => parseInvoiceCallback({ pr }, params, 21_000)).toThrow("The invoice asks for 1,234,567 sats, not the 21,000 sats you chose");
+      expect(() => parseInvoiceCallback({ pr: anyAmount }, params, 21_000)).toThrow("The invoice asks for any amount, not the 21,000 sats you chose");
+    } finally {
+      Number.prototype.toLocaleString = own;
+    }
+  });
+
   it("keeps a success message sanitized and bounded, and refuses other success URLs", () => {
     const pr = testInvoice({ sats: 21, descriptionHash: metadataHash });
     const action = (successAction: unknown) => parseInvoiceCallback({ pr, successAction }, params, 21).successAction;
@@ -215,5 +230,15 @@ describe("the invoice callback", () => {
     expect(action({ tag: "url", url: `https://ln.example.com/${"r".repeat(LNURL_LIMITS.maxUrlLength)}` })).toBeUndefined();
     expect(action({ tag: "url", url: "https://ln.example.com/r", description: 7 })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "" });
     expect(action(["message"])).toBeUndefined();
+  });
+
+  it("refuses a success URL with a user part, and keeps no direction control or invisible character in the service's words", () => {
+    const pr = testInvoice({ sats: 21, descriptionHash: metadataHash });
+    const action = (successAction: unknown) => parseInvoiceCallback({ pr, successAction }, params, 21).successAction;
+    expect(action({ tag: "url", description: "Your receipt", url: "https://www.paypal.com@evil.example/receipt" })).toBeUndefined();
+    expect(action({ tag: "url", url: "https://user:pass@ln.example.com/r" })).toBeUndefined();
+    expect(action({ tag: "url", url: "https://ln.example.com/r/a@b" })).toEqual({ tag: "url", url: "https://ln.example.com/r/a@b", description: "" });
+    expect(action({ tag: "url", description: "Receipt ‮", url: "https://ln.example.com/r" })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "Receipt " });
+    expect(action({ tag: "message", message: "Tha​nks ⁦for⁩ ‮paying" })).toEqual({ tag: "message", message: "Thanks for paying" });
   });
 });

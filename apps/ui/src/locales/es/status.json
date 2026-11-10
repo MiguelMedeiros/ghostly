@@ -1,0 +1,33 @@
+{
+  "availabilities": {
+    "available": "Disponible",
+    "away": "Ausente",
+    "busy": "Ocupado",
+    "dnd": "No molestar"
+  },
+  "availability": "Disponibilidad",
+  "clear": "Borrar estado",
+  "customLabel": "Borrar a las",
+  "dndHint": "Los mensajes llegan sin sonido ni aviso. Las llamadas siguen sonando.",
+  "emoji": "Emoji",
+  "emojiMore": "Más emojis",
+  "end": "Borrar después de",
+  "ends": {
+    "1h": "1 hora",
+    "30m": "30 minutos",
+    "4h": "4 horas",
+    "custom": "Elegir una hora…",
+    "keep": "Hasta las {{time}}",
+    "never": "No borrar",
+    "today": "Hoy",
+    "week": "Esta semana"
+  },
+  "menuLabel": "Tu estado: {{status}}. Cambiar estado",
+  "past": "Elige una hora posterior a ahora.",
+  "placeholder": "¿Cuál es tu estado?",
+  "set": "Poner un estado",
+  "shared": "Tus contactos lo ven junto a tu nombre.",
+  "text": "Texto del estado",
+  "title": "Estado",
+  "until": "hasta las {{time}}"
+}

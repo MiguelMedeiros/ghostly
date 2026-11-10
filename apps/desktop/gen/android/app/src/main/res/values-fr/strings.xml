@@ -3,6 +3,9 @@
     <string name="channel_transfers">Transferts de fichiers</string>
     <string name="transfer_title">Envoi et réception de fichiers</string>
     <string name="transfer_text">Ghostly continue jusqu\'à ce qu\'ils soient arrivés.</string>
+    <string name="channel_connection">Connexion</string>
+    <string name="connection_title">Ghostly est connecté</string>
+    <string name="connection_text">Vos discussions et groupes restent connectés en arrière-plan.</string>
     <string name="channel_calls">Appels</string>
     <string name="call_title">Appel avec %1$s</string>
     <string name="call_public">Appel en cours</string>

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 
 /**
@@ -23,15 +24,25 @@ const HEADERS = { authorization: 'Authorization', ttl: 'TTL', urgency: 'Urgency'
 const FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/
 
 /**
- * `tracked`: addresses whose counts are kept at most. Past it, the ones idle for a minute go first, then the oldest:
- * a full table forgets a count rather than turn away every newcomer.
+ * `perMinute`: requests a minute from one address. `perEndpoint`: forwards a minute to one subscription (its endpoint
+ * and VAPID key), from all addresses together: a contact wakes it once per message every 5 minutes at most and twice a
+ * minute while calling, so 30 is fifteen contacts calling it at once, and no pool of addresses wakes it more. A forward
+ * the push service refuses (a 4xx other than 429) wakes nothing and is not counted there.
+ * `tracked`: addresses, and subscriptions apart, whose counts are kept at most. Past it, the ones idle for a minute go
+ * first, then the oldest: a full table forgets a count rather than turn away every newcomer.
  * `requestMs`: how long a client has to send a whole request (headers and body) before the connection is closed.
  */
-export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30, tracked: 10_000, requestMs: 15_000 }
+export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30, perEndpoint: 30, tracked: 10_000, requestMs: 15_000 }
 /** RFC 8292's `vapid t=<JWT>, k=<key>`: a request without one is not a Web Push the relay would forward. */
 const VAPID = /^vapid t=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+, ?k=[A-Za-z0-9_-]+$/
 
 const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+
+/**
+ * The endpoint as the push service receives it, so one subscription is one count however it is spelt: no fragment
+ * (`fetch` never sends one) and no empty `?`. The rest `URL` already writes one way (host case, a default port, `./`).
+ */
+const asSent = url => { url.hash = ''; if (!url.search) url.search = ''; return url }
 
 /** The request to forward, or a reason it is refused. */
 export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAULT_LIMITS.bodyBytes } = {}) {
@@ -39,7 +50,7 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   try { request = JSON.parse(text) } catch { return { error: 'Not JSON' } }
   const { endpoint, headers, body } = request ?? {}
   let url
-  try { url = new URL(endpoint) } catch { return { error: 'No endpoint' } }
+  try { url = asSent(new URL(endpoint)) } catch { return { error: 'No endpoint' } }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
@@ -58,7 +69,10 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   }
   const authorization = Object.entries(forwarded).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
-  return { endpoint: url.href, headers: forwarded, body: bytes }
+  // The subscription it wakes: a push service refuses a key the subscription was not made with, so another key wakes
+  // nothing. Hashed, so the relay's table holds no endpoint and an entry weighs the same however long the URL.
+  const subscription = createHash('sha256').update(`${url.href} ${authorization.split('k=').pop()}`).digest('base64')
+  return { endpoint: url.href, headers: forwarded, body: bytes, subscription }
 }
 
 /**
@@ -77,6 +91,12 @@ export function failure (error) {
  * above U+00FF) or with undici's invalid-argument code (a control character). A network failure is a `TypeError`
  * `fetch failed` with its cause.
  */
+/**
+ * Whether the push service refused the request for what it is (400, 401, 403, 404, 410, 413…): delivered nowhere. Its
+ * 429 is not one (it is swamped, the request may be fine), nor a 5xx (the push may have gone).
+ */
+const refusedPush = status => status >= 400 && status < 500 && status !== 429
+
 const refusedByFetch = error => error instanceof TypeError && (!('cause' in error) || error.cause?.code === 'UND_ERR_INVALID_ARG')
 
 /**
@@ -147,13 +167,46 @@ export function refusalLog (log) {
   return { total, refuse: count, flush }
 }
 
-export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
-  const { bodyBytes, perMinute, tracked, requestMs } = { ...DEFAULT_LIMITS, ...limits }
-  // The JSON around a body of `bodyBytes`: base64url is a third longer, and the headers add a few KB.
-  const requestBytes = bodyBytes * 2
+/**
+ * Counts of the last minute by key, at most `perMinute` each, for at most `tracked` keys. `take` counts one for a key
+ * and says whether it was under its limit; a newcomer to a full table drops the idle (a scan at most once a second),
+ * else the entry seen longest ago.
+ */
+function minuteCounts (perMinute, tracked) {
   const recent = new Map()
   let pruned = 0
-  const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
+  const prune = now => { pruned = now; for (const [key, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(key) }
+  return {
+    size: () => recent.size,
+    prune,
+    take: (key, now) => {
+      if (recent.size >= tracked && !recent.has(key) && now - pruned >= 1000) prune(now)
+      if (recent.size >= tracked && !recent.has(key)) recent.delete(recent.keys().next().value)
+      const times = (recent.get(key) ?? []).filter(t => now - t < 60_000)
+      if (times.length >= perMinute) return false
+      times.push(now)
+      // Last in the map's order: the first entry is always the one seen longest ago.
+      recent.delete(key)
+      recent.set(key, times)
+      return true
+    },
+    /** Gives back the one `take` counted for a key at `now` (nothing if the table has forgotten it since). */
+    giveBack: (key, now) => {
+      const times = recent.get(key)
+      const at = times?.indexOf(now) ?? -1
+      if (at >= 0) times.splice(at, 1)
+    },
+  }
+}
+
+export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
+  const { bodyBytes, perMinute, perEndpoint, tracked, requestMs } = { ...DEFAULT_LIMITS, ...limits }
+  // The JSON around a body of `bodyBytes`: base64url is a third longer, and the headers add a few KB.
+  const requestBytes = bodyBytes * 2
+  const addresses = minuteCounts(perMinute, tracked)
+  // Apart from the addresses: however many send to one subscription, it gets `perEndpoint` a minute through this relay.
+  const subscriptions = minuteCounts(perEndpoint, tracked)
+  const prune = now => { addresses.prune(now); subscriptions.prune(now) }
   const refusals = refusalLog(log)
   // A line per status and per cause a minute, like refusals: one per forward would grow the log with the traffic.
   const forwards = countedLog(log, 'forwarded')
@@ -177,10 +230,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
     const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
-    // An operator's check (curl, a monitor): up, with counts since the start, and nothing about any client.
+    // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
+    // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
+    // someone. The operator has them in the log.
     if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-      res.end(JSON.stringify({ ok: true, forwarded: forwards.total(), failed: failures.total(), refused: refusals.total(), tracked: recent.size }))
+      res.end(JSON.stringify({ ok: true }))
       return
     }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
@@ -194,16 +249,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
     }
-    const now = Date.now()
-    // A newcomer to a full table: the idle go (a scan at most once a second), else the oldest entry.
-    if (recent.size >= tracked && !recent.has(ip) && now - pruned >= 1000) prune(now)
-    if (recent.size >= tracked && !recent.has(ip)) recent.delete(recent.keys().next().value)
-    const times = (recent.get(ip) ?? []).filter(t => now - t < 60_000)
-    if (times.length >= perMinute) return refuse('rate', 429, { error: 'Too many' })
-    times.push(now)
-    // Last in the map's order: the first entry is always the one seen longest ago.
-    recent.delete(ip)
-    recent.set(ip, times)
+    if (!addresses.take(ip, Date.now())) return refuse('rate', 429, { error: 'Too many' })
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
@@ -218,9 +264,15 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       const request = readRelayRequest(Buffer.concat(chunks).toString('utf8'), { hosts, bodyBytes })
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
+      // Counted only for a request it would forward: a refused one wakes nobody.
+      const taken = Date.now()
+      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
       forwarding++
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        // The push service refused the request itself (a token it does not accept, a subscription gone, a malformed
+        // push): it woke nobody, so the subscription's count is given back and only the sender's address has spent one.
+        if (refusedPush(response.status)) subscriptions.giveBack(request.subscription, taken)
         forwards.count(response.status)
         answer(200, { status: response.status })
       } catch (error) {
@@ -239,7 +291,10 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     server.once('error', error => { clearInterval(pruning); reject(error) })
     server.listen(port, host, () => resolve({
       port: server.address().port,
-      tracked: () => recent.size,
+      tracked: () => addresses.size(),
+      endpoints: () => subscriptions.size(),
+      /** Counts since the start, for the process that runs it (never served). */
+      stats: () => ({ forwarded: forwards.total(), failed: failures.total(), refused: refusals.total(), tracked: addresses.size() }),
       /** Open connections, a request in them or not. */
       clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
       // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the

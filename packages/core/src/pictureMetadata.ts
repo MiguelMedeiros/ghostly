@@ -230,13 +230,28 @@ function stripWebp(b: Uint8Array): Uint8Array[] {
 
 // HEIF (HEIC, AVIF): its Exif and XMP are items of the `meta` box whose bytes sit elsewhere in the file. They are
 // overwritten with zeros where they are, so no offset in the file moves, and so are the bodies of `free` and `skip`
-// boxes (an editor's leftovers), their headers kept. A part this does not know, at the top or in `meta` (a video
-// track, an XML box, a `uuid` box), or a picture's bytes inside a `free` or `skip` box, refuses the picture.
+// boxes (an editor's leftovers), their headers kept. The item properties (`iprp`'s `ipco`) that say what the picture
+// is about rather than how it is drawn are zeroed the same way: they stay where they are, as `ipma` points at them by
+// position. A part this does not know, at the top, in `meta` or among the properties (a video track, an XML box, a
+// `uuid` box, camera parameters), or a picture's bytes inside a `free` or `skip` box, refuses the picture.
 
 const HEIF_TOP = new Set(["ftyp", "meta", "mdat", "free", "skip"]);
 const HEIF_META = new Set(["hdlr", "dinf", "pitm", "iloc", "iinf", "iref", "iprp", "idat", "grpl", "free", "skip"]);
 /** Items that hold metadata: Exif, and XMP (or any other document) as a MIME item. */
 const HEIF_METADATA_ITEMS = new Set(["Exif", "mime", "uri "]);
+/**
+ * Item properties that only draw the picture: the codec's configuration (HEVC, AV1, AVC, VVC, JPEG, JPEG 2000,
+ * uncompressed and its components, layered HEVC with its operating points and layers), the size (`ispe`), the bits
+ * per channel (`pixi`), colour (`colr`, its light levels and display volumes `clli`, `mdcv`, `cclv`, `amve`), geometry
+ * (`irot`, `imir`, `clap`, `pasp`, `rloc`, `iscl`), what an auxiliary image is (`auxC`: alpha, depth, a gain map), and
+ * AV1's operating point and layers (`a1op`, `a1lx`).
+ */
+const HEIF_DRAWS = new Set([
+  "hvcC", "av1C", "avcC", "vvcC", "jpgC", "j2kH", "uncC", "cmpd", "lhvC", "oinf", "tols", "lsel",
+  "ispe", "pixi", "colr", "clli", "mdcv", "cclv", "amve", "irot", "imir", "clap", "pasp", "rloc", "iscl", "auxC", "a1op", "a1lx",
+]);
+/** Item properties about the picture: its user description (name, description, tags), accessibility text, creation and modification times, TAI clock and timestamp; and `free`, `skip`. */
+const HEIF_ABOUT = new Set(["udes", "altt", "crtt", "mdft", "taic", "itai", "free", "skip"]);
 
 interface Box { type: string; start: number; body: number; end: number }
 
@@ -292,8 +307,21 @@ function stripHeif(b: Uint8Array): Uint8Array[] {
     if (HEIF_METADATA_ITEMS.has(text(b, at + 2, 4))) metadata.add(id);
   }
 
-  /** `free` and `skip` boxes, at the top and in `meta`: their bodies go as zeros. */
-  const space = [...top, ...children].filter((box) => box.type === "free" || box.type === "skip");
+  // The item properties: one `ipco`, and the `ipma` that associate them with items.
+  const iprp = one("iprp"), properties: Box[] = [];
+  if (iprp) {
+    const held = boxes(b, iprp.body, iprp.end);
+    const ipco = held.filter((box) => box.type === "ipco");
+    check(ipco.length === 1 && held.every((box) => box.type === "ipco" || box.type === "ipma"));
+    properties.push(...boxes(b, ipco[0]!.body, ipco[0]!.end));
+    check(properties.every((box) => HEIF_DRAWS.has(box.type) || HEIF_ABOUT.has(box.type)));
+  }
+
+  /** `free` and `skip` boxes, at the top and in `meta`, and the properties about the picture: their bodies go as zeros. */
+  const space = [
+    ...[...top, ...children].filter((box) => box.type === "free" || box.type === "skip"),
+    ...properties.filter((box) => HEIF_ABOUT.has(box.type)),
+  ];
 
   // Where their bytes are (iloc), overwritten in a copy.
   const out = b.slice();

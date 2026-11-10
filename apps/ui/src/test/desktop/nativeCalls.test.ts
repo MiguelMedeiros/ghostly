@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking, settings.network.relay-only
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -42,7 +42,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
-const { callRtcConfig } = await import("@ghostly/core");
+const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { CallRelayError } = await import("@ghostly/react");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
@@ -314,9 +315,38 @@ describe("the RTCPeerConnection stand-in", () => {
   it("hands Rust the profile's own ICE servers (a TURN server), not the apps' built-in STUN ones", () => {
     const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "test-credential" };
     const pc = new NativePeerConnection(callRtcConfig([turn]));
-    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }] });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: false });
     expect(ownIceServers(callRtcConfig())).toEqual([]);
     expect(ownIceServers({})).toEqual([]);
+  });
+
+  it("with Hide my IP from contacts on, keeps the call to the relay: Rust is told, and the call hook may place it", () => {
+    const turn = { urls: ["stun:stun.example.org", "turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" };
+    const pc = new NativePeerConnection(callRtcConfig([turn], { relayOnly: true }));
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: true });
+    // What the call hook checks before the microphone (`assertKeepsToRelays`), and when the switch goes on mid-call.
+    expect(nativeCallMedia().keepsToRelays).toBe(true);
+    expect(keepsToRelays(pc as unknown as RTCPeerConnection)).toBe(true);
+  });
+
+  it("with Hide my IP from contacts on, a call Rust could not keep to the relay is the relay not answering, and other failures stay as they are", async () => {
+    const relayOnly = callRtcConfig([{ urls: "turns:turn.example.org:5349", username: "ghost", credential: "test-credential" }], { relayOnly: true });
+    // No TURN server Rust can use: the call was not opened.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_open") throw "Hide my IP: no TURN server this app can use"; });
+    const unopened = new NativePeerConnection(relayOnly);
+    await expect(unopened.createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    await unopened.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(unopened.createAnswer()).rejects.toMatchObject({ problem: "relay" });
+    expect(commands()).not.toContain("native_call_offer");
+    expect(commands()).not.toContain("native_call_answer");
+    // A TURN server that gave no relay candidate: no description.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer" || command === "native_call_answer") throw "Hide my IP: the TURN server gave no relay candidate"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    const answering = new NativePeerConnection(relayOnly);
+    await answering.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(answering.createAnswer()).rejects.toBeInstanceOf(CallRelayError);
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer") throw "No microphone"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBe("No microphone");
   });
 
   it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {
@@ -424,6 +454,36 @@ describe("the RTCPeerConnection stand-in", () => {
     const late: number[] = [];
     levels.own((level) => late.push(level));
     expect(late).toEqual([0.1]);
+  });
+
+  it("asks Rust for the levels only while a ring listens: a video call, which draws none, is told none", async () => {
+    // Rust says a level at nearly every reading while someone speaks, an eval each: 20 a second for no ring.
+    const levelCommands = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_call_levels").map(([, args]) => args);
+    const pc = new NativePeerConnection({});
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    // A ring that listens before Rust has the call waits for it.
+    const stopEarly = levels.peer(() => {});
+    expect(levelCommands()).toEqual([]);
+    await pc.createOffer();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }]);
+    stopEarly();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+    // Both rings back (the camera off again): asked once, and let go once the last stops.
+    const stopPeer = levels.peer(() => {});
+    const stopOwn = levels.own(() => {});
+    stopPeer();
+    expect(levelCommands()).toHaveLength(3);
+    stopOwn();
+    expect(levelCommands().slice(2)).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+
+    // A video call: no ring ever listens, and Rust starts with none to say.
+    tauri.invoke.mockClear();
+    const video = new NativePeerConnection({});
+    video.addTrack((await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks()[0]);
+    await video.createOffer();
+    expect(levelCommands()).toEqual([]);
   });
 
   it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {

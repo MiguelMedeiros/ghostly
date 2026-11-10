@@ -276,6 +276,17 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(screen.queryByTestId("device-add-failed")).toBeNull();
     expect(screen.getByTestId("device-add-again")).toBeInTheDocument();
   }, 20_000);
+
+  it("refused while the profile moves to another device: says something else is changing the devices, not that it failed", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => { throw new Error("enroll-busy: The profile is moving. Try again after it."); });
+    engine.on("deviceHandoffVerifier", () => undefined);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-error")).toHaveTextContent("Something else is changing your devices. Try again in a moment.");
+    expect(screen.queryByTestId("device-add-code")).toBeNull();
+  }, 20_000);
 });
 
 describe("I already use Ghostly", () => {

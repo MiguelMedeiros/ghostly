@@ -26,6 +26,7 @@
     "title": "بانتظارك"
   },
   "notCopied": "لم يُنسخ",
+  "quotedName": "«{{name}}»",
   "save": "حفظ",
   "size": {
     "b": "{{n}} بايت",

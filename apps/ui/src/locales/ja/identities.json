@@ -120,6 +120,7 @@
     "showProfile": "公開プロフィールを表示",
     "since": "開始",
     "sourceKeyserver": "所有者が keys.openpgp.org で確認したメール：鍵サーバーによる確認で、Ghostly によるものではありません",
+    "sourceNostrSignature": "Nostr の署名（NIP-01、BIP-340）",
     "sourceSigned": "{{provider}} の署名",
     "sourceSignedEmailUnverified": "{{provider}} の署名。メールは {{provider}} が未確認",
     "sourceSignedEmailVerified": "{{provider}} の署名。メールは {{provider}} が確認済み",
@@ -360,6 +361,454 @@
     "pictureMiss": "プロフィール写真は表示されません: {{reason}}。",
     "sourceAsked": "{{time}}に {{from}} に問い合わせました。問い合わせにより、このサーバーにこの端末の IP アドレスが伝わりました。",
     "sourceFound": "{{time}}に {{from}} から読み込みました。アカウント自身の記述で、証明の一部ではありません。問い合わせにより、このサーバーにこの端末の IP アドレスが伝わりました。"
+  },
+  "providers": {
+    "atproto": {
+      "description": "Bluesky（AT Protocol）のアカウントを管理していることを証明します。サーバーで承認すると、Ghostly がアカウントのリポジトリにレコードを 1 つ公開します。リポジトリのほかの内容と同じく公開されるため、このアカウントが Ghostly の証明を作ったことは誰にでも見えますが、誰と共有したかは見えません。連絡先はログインせずに確認できます。",
+      "limits": "アカウントの鍵で署名されます。この鍵は通常サーバーが保管しています。証明するのはアカウントの管理であり、あなたが誰かではありません。ハンドルは、それがアカウントを指し返している間だけ表示されます。",
+      "privacy": "連絡先のアプリは、PLC ディレクトリ（または did:web のホスト）にアカウントのドキュメントを、あなたのサーバーにレコードを、DNS-over-HTTPS リゾルバーまたはハンドルのウェブサイトにハンドルを問い合わせます。そのため、これらにはこのアカウントが確認されたことが伝わります。",
+      "progress": {
+        "approve": "開いたウィンドウで {{server}} で承認してください…",
+        "deleting": "{{server}} のレコードを削除しています…",
+        "lookingUp": "{{account}} を検索しています…",
+        "publishing": "{{server}} に証明を公開しています…"
+      },
+      "signers": {
+        "atproto-oauth": {
+          "action": "サーバーで続ける",
+          "description": "サーバーのログインページを開きます。Ghostly が求めるのは自分の証明レコードの作成と削除だけで、投稿、メッセージの閲覧、プロフィールの編集は求めません。",
+          "fields": {
+            "handle": {
+              "help": "Bluesky のハンドル、独自ドメインを使っていればそのドメイン、または DID。",
+              "label": "ハンドル"
+            }
+          },
+          "label": "あなたのサーバー（Bluesky または他の PDS）"
+        },
+        "atproto-oauth-full": {
+          "action": "サーバーで続ける（フルアクセス）",
+          "description": "Ghostly の権限を制限できないサーバー向けに、アカウント全体へのアクセスを求めます。サーバーが範囲を絞ったログインやレコードの書き込みを拒否したときに、Ghostly が提案します。それでも Ghostly が書き込むのはこのレコード 1 つだけで、アクセス権はすぐに返します。",
+          "fields": {
+            "handle": {
+              "help": "Bluesky のハンドル、独自ドメインを使っていればそのドメイン、または DID。",
+              "label": "ハンドル"
+            }
+          },
+          "label": "あなたのサーバー、フルアクセス（古いサーバー向け）"
+        }
+      },
+      "subject": {
+        "label": "アカウント（DID）"
+      },
+      "summary": "Bluesky サーバーにレコードを公開",
+      "unpublish": {
+        "description": "サーバー上のレコードも削除します。サーバーから承認を求められます。"
+      }
+    },
+    "bitcoin": {
+      "description": "Bitcoin アドレスの背後にある鍵で署名できることを証明します。ウォレットで証明文に署名し、署名を貼り付けてください。",
+      "label": "Bitcoin アドレス",
+      "limits": "残高、過去の支払い、支払う意思は証明しません。",
+      "paste": {
+        "label": "署名",
+        "placeholder": "smp… (BIP-322) またはウォレットが表示する base64 の署名"
+      },
+      "privacy": "何も伝わりません。署名はこの端末で確認され、ブロックチェーンは参照しません。共有した連絡先にはアドレスが伝わります。",
+      "scripts": {
+        "p2pkh": "レガシー (1…)",
+        "p2sh": "ネスト SegWit (3…)",
+        "p2tr": "Taproot (bc1p…)",
+        "p2wpkh": "ネイティブ SegWit (bc1q…)",
+        "p2wsh": "スクリプト / マルチシグ (P2WSH)",
+        "witness-unknown": "将来の SegWit バージョン"
+      },
+      "signers": {
+        "bitcoin-core": {
+          "description": "従来のメッセージ署名：従来型の 1… アドレス専用です。"
+        },
+        "coldcard": {
+          "description": "BIP-322 メッセージ署名。"
+        },
+        "electrum": {
+          "description": "従来のメッセージ署名：従来型の 1… アドレス専用です。"
+        },
+        "other": {
+          "description": "BIP-322 メッセージ署名。",
+          "label": "その他のウォレット"
+        },
+        "sparrow": {
+          "description": "BIP-322 メッセージ署名。"
+        },
+        "trezor": {
+          "description": "従来のメッセージ署名：従来型の 1… アドレス専用です。"
+        }
+      },
+      "steps": {
+        "address": "このアドレスで:",
+        "cannotSign": "{{wallet}} は {{type}} アドレスに Ghostly が受け付ける形式で署名できません。BIP-322 で署名できるウォレットを使ってください。",
+        "cannotSignTry": "{{wallet}} は {{type}} アドレスに Ghostly が受け付ける形式で署名できません。{{others}}、または BIP-322 で署名できる別のウォレットを試してください。",
+        "command": "コマンドライン:",
+        "commandTestnet": "コマンドライン (-signet、-testnet4、-regtest のいずれかを付けてください):",
+        "either": "{{a}} または {{b}}",
+        "limits": "これはこのアドレスで署名できることを示します。残高、過去の支払い、支払う意思は示しません。",
+        "statement": "この宣言を、改行を加えずに 1 行のまま、そのとおりに署名してください:",
+        "testnet": "テストネットワーク: {{how}}"
+      },
+      "subject": {
+        "help": "証明すること：この署名を作った人が、署名した時点でこのアドレスの背後にある鍵で署名できたこと。アドレスに残高があること（現在も過去も）は証明しません。過去に送金や受け取りをしたことも証明しません。あなたに支払うことや、このアドレスから使うことも証明しません。",
+        "label": "Bitcoin アドレス",
+        "placeholder": "bc1q…（テストネットでは tb1…）"
+      },
+      "summary": "自分のウォレットでメッセージに署名",
+      "wallets": {
+        "bitcoin-core": {
+          "step1": "Bitcoin Core はレガシー形式でのみ、レガシーアドレス (メインネットでは 1…、テストネットワークでは m… または n…) のメッセージに署名します。Receive タブで Base58 (Legacy) タイプを選ぶか、`getnewaddress \"\" legacy` で作成してください。",
+          "step2": "GUI: File → Sign message… を開き、アドレスと宣言を貼り付け、Sign Message を押して署名をコピーします。",
+          "step3": "コマンドライン: bitcoin-cli signmessage \"<アドレス>\" '<宣言>' (シングルクォートで宣言のダブルクォートがそのまま保たれます)。",
+          "testnet": "-signet、-testnet4、-regtest のいずれかを付けて起動し、bitcoin-cli にも同じオプションを付けます。"
+        },
+        "coldcard": {
+          "note": "古いファームウェアはレガシー形式でのみ署名し (Ghostly はレガシーの 1… アドレスでそれを受け付けます)、メッセージの長さと文字に制限があります。",
+          "step1": "お使いのファームウェア用の COLDCARD の BIP-322 ガイドに従ってください。機種により MicroSD、NFC、QR のいずれかで、そのアドレスの 1 つで宣言に署名します。",
+          "step2": "Ghostly が表示するとおりの宣言と、証明するアドレスを渡します。",
+          "step3": "作成された署名を Ghostly に貼り付けます。"
+        },
+        "electrum": {
+          "step1": "Electrum はレガシー形式で署名し、Ghostly はそれをレガシーの 1… アドレス (テストネットワークでは m…/n…) でのみ受け付けます。既定の bc1… ウォレットでは別のウォレットが必要です。",
+          "step2": "Addresses タブ (View → Show Addresses) でアドレスを右クリック → Sign/verify message を選びます。",
+          "step3": "Message に宣言を貼り付けて Sign をクリックし、Signature をコピーして Ghostly に貼り付けます。",
+          "testnet": "Electrum を --testnet または --signet で起動します。"
+        },
+        "other": {
+          "step1": "ウォレットで「メッセージに署名」(Sign message) を探してください。形式を聞かれたら BIP-322 を選びます。",
+          "step2": "証明するアドレスで、Ghostly が表示するとおりの宣言に署名します。",
+          "step3": "ネスト SegWit アドレス (3…、テストネットワークでは 2…) には完全な BIP-322 署名 (ful… で始まります) が必要です。",
+          "step4": "署名を Ghostly に貼り付けます。一致しなければすぐに知らせます。"
+        },
+        "sparrow": {
+          "note": "Sparrow の BIP322 (Simple) はソフトウェアウォレット専用です。接続したハードウェアウォレットは Standard (Electrum) 形式で署名し、Ghostly はそれをレガシーの 1… アドレスでのみ受け付けます。",
+          "step1": "アドレスを持つウォレットを開き、Tools → Sign/Verify Message を選びます。",
+          "step2": "Address: 証明するアドレスを貼り付けます。",
+          "step3": "Message: Ghostly が表示する宣言をそのまま貼り付けます。",
+          "step4": "Format: bc1q… または bc1p… アドレス (テストネットワークでは tb1…) には BIP322 (Simple)。レガシーの 1… アドレスには Standard (Electrum)。",
+          "step5": "Sign Message を押し、Signature 全体 (smp… で始まります) をコピーして Ghostly に貼り付けます。",
+          "testnet": "Tools → Restart In → Testnet または Signet を選び、そのネットワークのウォレットを使います。"
+        },
+        "trezor": {
+          "step1": "Trezor はレガシー形式でメッセージに署名します。Ghostly は Legacy アカウント (1…) のアドレスでそれを受け付けます。",
+          "step2": "Legacy アカウントを開き、メニューから Sign & verify を選びます。",
+          "step3": "Message に宣言を貼り付け、アドレスを選んで Sign を押し、デバイスで確認してから、署名を Ghostly にコピーします。"
+        }
+      }
+    },
+    "did": {
+      "description": "分散型識別子（W3C DID）を管理していることを証明します。DID ドキュメントに載っている鍵で証明文に署名するか、did:web なら did.json の隣に公開してください。",
+      "file": {
+        "check": "その後「確認」を押します。証明を使っている間、ファイルは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "content": "内容はこのとおりにしてください:",
+        "create": "Web サーバーの did.json の隣にこのファイルを作成してください:",
+        "serve": "HTTPS でちょうどそのアドレスから、リダイレクトなしで、ブラウザーが読めるようこのヘッダーを付けて配信してください (did.json にも必要です):"
+      },
+      "limits": "DID を誰が管理しているかは証明しません。証明を追加した人がその鍵のどれか（またはそのウェブサイト）を持っていたことだけを示します。",
+      "paste": {
+        "label": "JWS または署名",
+        "placeholder": "eyJhbGciOi… または 16 進の署名"
+      },
+      "preview": {
+        "document": "ドキュメント",
+        "domain": "ドメイン",
+        "key": "鍵",
+        "keyIsIdentifier": "{{method}}、鍵が識別子です",
+        "keys": "鍵",
+        "method": "メソッド",
+        "noKeys": "署名できる鍵なし: 代わりに公開してください",
+        "notUsable": "使用不可",
+        "relay": "リレー",
+        "unusable": "{{count}} 個の鍵: 別の曲線、または authentication でも assertionMethod でもありません",
+        "unusableOne": "1 個の鍵: 別の曲線、または authentication でも assertionMethod でもありません"
+      },
+      "privacy": "did:key と did:jwk：何も伝わりません。この端末で確認されます。did:web：連絡先のアプリは DNS-over-HTTPS リゾルバーにドメインを問い合わせ、did.json をダウンロードするため、ウェブサーバーには連絡先の IP アドレスが見えます。did:dht：連絡先の Pkarr リレー（相手のネットワーク設定）のどれか 1 つに、どの DID が調べられたかが伝わります。",
+      "service": {
+        "add": "did.json の \"service\" リストにこのエントリーを追加してください:",
+        "addAt": "did.json ({{url}}) の \"service\" リストにこのエントリーを追加してください:",
+        "check": "その後「確認」を押します。エントリーを削除すると、各連絡先の次の確認でこの証明が取り下げられます。"
+      },
+      "signers": {
+        "file": {
+          "description": "did:web のみ：did.json の隣に小さなファイルをアップロードします。連絡先のアプリは両方をあなたのサーバーからダウンロードします。",
+          "label": "did.json の隣にファイルを公開"
+        },
+        "service": {
+          "description": "did:web のみ：did.json の service リストに項目を 1 つ追加します。連絡先のアプリはそこから読み取ります。",
+          "label": "did.json に service を追加"
+        },
+        "sign": {
+          "description": "DID ドキュメントに authentication または assertionMethod として載っている鍵で証明文に署名し、JWS か署名そのものを貼り付けます。秘密鍵が Ghostly に入ることはありません。",
+          "label": "DID の鍵で署名"
+        }
+      },
+      "steps": {
+        "anyKey": "authentication または assertionMethod に記載された鍵",
+        "jose": "jose (Node.js 20 以降) で JWS を作る場合: これを sign.mjs として保存し、{{curve}} の秘密鍵の JWK ファイルを渡して実行します。",
+        "noble": "@noble/curves (Node.js) で生の署名を作る場合: これを sign.mjs として保存し、16 進の {{curve}} 秘密鍵を渡して実行します。",
+        "openssl": "または OpenSSL 3 と PEM 形式の {{curve}} 鍵で:",
+        "paste": "表示された内容を貼り付けてください: コンパクト JWS ({{alg}}、アタッチまたはデタッチ)、または 16 進か base64 の署名。DID に複数の鍵がある場合は、先頭に鍵の id を書けます: #key-1 <署名>。",
+        "sign": "{{key}} の秘密鍵でこの宣言に署名してください。1 行で、末尾に改行はありません:"
+      },
+      "subject": {
+        "help": "did:key、did:jwk、did:dht、did:web。連絡先には DID 全体と、署名した鍵が見えます。",
+        "placeholder": "did:key:z6Mk… または did:web:example.com"
+      },
+      "summary": "did:key、did:jwk、did:dht、did:web"
+    },
+    "domain": {
+      "description": "ドメイン名を管理していることを証明します。DNS TXT レコードか、そのウェブサイト上のファイルを 1 回公開してください。連絡先のアプリは共有時に確認し、後で再確認できます。",
+      "dns": {
+        "name": "レジストラまたは DNS ホストで {{domain}} の DNS 設定を開き、この名前で TXT レコードを追加してください。ドメインを自動で付け足すホストでは、{{domain}} より前の部分だけを入力してください。",
+        "public": "証明を使っている間、レコードは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "ttl": "レコードの削除がすぐ反映されるよう、TTL を 300 秒以下にしてください。その後「確認」を押します。DNS の変更が反映されるまで数分かかることがあります。",
+        "value": "値 (表示どおりの 1 つの文字列):"
+      },
+      "https": {
+        "check": "その後「確認」を押します。証明を使っている間、ファイルは公開されたままです。削除すると、各連絡先の次の確認でこの証明が取り下げられます。",
+        "content": "内容はこのとおりにしてください:",
+        "file": "{{domain}} の Web サーバーにこのファイルを作成してください:",
+        "serve": "HTTPS でちょうどそのアドレスから、リダイレクトなし (www へのリダイレクトも不可) で、ブラウザーが読めるようこのヘッダーを付けて配信してください:"
+      },
+      "label": "ドメイン",
+      "limits": "ドメインを誰が運営しているかは証明しません。証明を追加した人がそのドメインで公開できたことだけを示します。",
+      "nip05": {
+        "approve": "署名ツールで Ghostly の本人確認の宣言を承認してください。"
+      },
+      "privacy": "DNS：連絡先のアプリは設定で選んだ DNS-over-HTTPS リゾルバー（既定は Quad9。届かないときは Quad9、Cloudflare、Google の次のもの）にレコードを問い合わせるため、リゾルバーにはそのドメインが確認されたことが伝わります。ウェブサイトまたは NIP-05：リゾルバーにはドメインが伝わり、ドメインのウェブサーバーには連絡先の IP アドレスが見えます。",
+      "signers": {
+        "dns": {
+          "description": "DNS ホストで TXT レコードを追加します。連絡先のアプリは DNS-over-HTTPS リゾルバーで確認します。",
+          "label": "DNS TXT レコード"
+        },
+        "https": {
+          "description": "ウェブサイトに小さなファイルをアップロードします。連絡先のアプリはあなたのサーバーからダウンロードします。",
+          "label": "ウェブサイト上のファイル"
+        },
+        "nip05-nip07": {
+          "description": "NIP-05 を使用中ですか？ドメインの nostr.json がドメイン自身として示す Nostr 鍵で署名します。新しいレコードは不要です。",
+          "fields": {
+            "domain": {
+              "help": "その /.well-known/nostr.json で、「_」（ドメイン自身）にこの Nostr 鍵が指定されている必要があります。",
+              "label": "ドメイン"
+            }
+          },
+          "label": "NIP-05 とブラウザ拡張機能"
+        },
+        "nip05-nip46": {
+          "description": "NIP-05 を使用中ですか？ドメインの nostr.json がドメイン自身として示す Nostr 鍵で署名します。新しいレコードは不要です。",
+          "fields": {
+            "bunker": {
+              "label": "署名ツールの接続リンク"
+            },
+            "domain": {
+              "help": "その /.well-known/nostr.json で、「_」（ドメイン自身）にこの Nostr 鍵が指定されている必要があります。",
+              "label": "ドメイン"
+            }
+          },
+          "label": "NIP-05 とリモート署名ツール"
+        }
+      },
+      "subject": {
+        "help": "あなたが管理するドメインまたはサブドメイン。alice.example.com の証明は alice.example.com に公開します。",
+        "label": "ドメイン"
+      },
+      "summary": "DNS レコードまたはサイト上のファイル"
+    },
+    "nostr": {
+      "approve": "署名ツールで Ghostly の本人確認の宣言を承認してください。",
+      "description": "Nostr 鍵を持っていることを証明します。署名ツールが証明文に署名し、鍵がツールの外に出ることはありません。",
+      "privacy": "何も伝わりません。署名はこの端末で確認されます。証明がリレーに公開されることはありません。",
+      "signers": {
+        "nip07": {
+          "description": "このブラウザの Nostr 拡張機能で承認してください。",
+          "label": "ブラウザ拡張機能（NIP-07）"
+        },
+        "nip46": {
+          "description": "署名アプリの bunker:// リンクを貼り付け、アプリで承認してください。",
+          "fields": {
+            "bunker": {
+              "label": "署名ツールの接続リンク"
+            }
+          },
+          "label": "リモート署名ツール（NIP-46）"
+        }
+      },
+      "subject": {
+        "label": "公開鍵"
+      },
+      "summary": "Nostr の署名ツールで 1 回署名"
+    },
+    "oidc": {
+      "description": "Google、Microsoft、Apple、GitLab、Twitch でログインします。プロバイダーが署名付きトークンで、アカウントがあなたのものだと Ghostly に保証します。",
+      "label": "プロバイダーのアカウント",
+      "limits": "あなたが持つ鍵ではなく、プロバイダーによる証明です。連絡先はその企業を信頼することになります。",
+      "privacy": "連絡先のアプリはプロバイダーの公開鍵を（たとえば www.googleapis.com から）ダウンロードします。プロバイダーには、どこかのアプリがログインを確認したことは分かりますが、誰のものかは分かりません。連絡先にはアカウントの識別子と、あなたが共有を選んだ情報が見えます。",
+      "signIn": "開いたウィンドウで {{provider}} にサインインしてください。",
+      "signers": {
+        "oidc-account": {
+          "description": "トークンに含まれるのは、プロバイダーでのアカウント識別子だけです。",
+          "label": "ログイン：アカウントだけを共有"
+        },
+        "oidc-email": {
+          "description": "プロバイダーが提供していれば、メールアドレスも加えます。",
+          "label": "ログイン：アカウントとメールを共有"
+        },
+        "oidc-profile": {
+          "description": "プロバイダーが提供していれば、メールアドレスと名前またはユーザー名も加えます。",
+          "label": "ログイン：アカウント、メール、名前を共有"
+        }
+      },
+      "subject": {
+        "help": "連絡先には、そのプロバイダーでのあなたのアカウント識別子と、追加を選んだ情報が見えます。GitLab は直接所属しているグループも加えます。Apple はメールを Ghostly に渡しません。",
+        "label": "プロバイダー"
+      },
+      "summary": "Google、Microsoft、Apple… でログイン"
+    },
+    "openpgp": {
+      "description": "OpenPGP 鍵を持っていることを証明します。gpg で証明文に署名し（YubiKey も使えます）、結果を貼り付けてください。",
+      "label": "OpenPGP 鍵",
+      "limits": "鍵を持っていても、そのユーザー ID にある名前やメールの証明にはなりません。",
+      "lookupLabel": "keys.openpgp.org でメールを確認",
+      "paste": {
+        "signed": "署名済みの宣言",
+        "signedAndKey": "署名済みの宣言と公開鍵"
+      },
+      "privacy": "何も伝わりません。署名はこの端末で確認されます。keys.openpgp.org に問い合わせるのは、鍵の取得元として選んだときか、メールの確認を求めたときだけです。",
+      "signers": {
+        "gpg": {
+          "description": "gpg で署名し、表示された内容を公開鍵ごと貼り付けます。何も問い合わせません。"
+        },
+        "gpg-keys-openpgp-org": {
+          "description": "gpg で署名して署名を貼り付けます。その後 Ghostly が keys.openpgp.org から公開鍵を取得するため、keys.openpgp.org にはどの鍵が調べられたかが伝わります。",
+          "label": "gpg、鍵は keys.openpgp.org から"
+        }
+      },
+      "steps": {
+        "card": "YubiKey などの OpenPGP カードでは、gpg がカードの PIN を、カードが求める場合はタッチも求めます。シェルがない場合は、下の宣言をテキストファイルに保存し、そのファイルに署名してください。",
+        "save": "宣言をファイルに保存してください (1 行で、末尾に改行はありません):",
+        "sign": "署名して、表示された内容をすべてコピーしてください:",
+        "signExport": "署名して公開鍵をエクスポートし、表示された内容をすべてコピーしてください:"
+      },
+      "subject": {
+        "help": "主鍵の完全なフィンガープリント。鍵を持っていても、そのユーザー ID にある名前やメールの証明にはなりません。",
+        "label": "鍵のフィンガープリント",
+        "placeholder": "16 進数 40 文字（gpg --fingerprint で表示）"
+      },
+      "summary": "gpg で署名して結果を貼り付け"
+    },
+    "pubky": {
+      "approval": {
+        "googleNote": "Passport が Google で作ったアイデンティティは、Google と Passport の両方で復元します。どちらか一方だけではできません。",
+        "passport": "ブラウザーで承認 (Pubky Passport)",
+        "passportAbout": "Pubky Passport を開きます。Passport のアイデンティティがまだない場合は「Google で続ける」が表示され、作成できます。",
+        "qrNote": "このコードはあなたのリクエストです。自分でスキャンし、共有しないでください。",
+        "ring": "または Pubky Ring でスキャン"
+      },
+      "description": "Pubky 鍵を持っていることを証明します。Pubky Ring または Pubky Passport でリクエストを 1 つ承認すると、Ghostly がホームサーバーに小さな証明ファイルを書き込みます。連絡先のアプリは、あなたの鍵自身のレコードをたどってそれを読み取ります。",
+      "limits": "ファイルはホームサーバー上にあるため、その運営者も書き込めます。鍵を誰が持っているかの証明にはなりません。",
+      "privacy": "連絡先のアプリは Pubky の Pkarr リレー（pkarr.pubky.org、pkarr.pubky.app）からあなたの鍵のレコードを読み取り、DNS-over-HTTPS リゾルバー（届かないときは次のリゾルバー。問い合わせ先は公開アドレスのポート 443 だけ）でホームサーバーのアドレスを調べ、ホームサーバーから証明ファイルを読み取ります。ホームサーバーには連絡先の IP アドレスが見えます。",
+      "progress": {
+        "approved": "承認されました。Pubky が許可した内容を確認しています…",
+        "deleting": "ホームサーバーから証明ファイルを削除しています…",
+        "popupBlocked": "ブラウザーが Passport のウィンドウをブロックしました。Ghostly のポップアップを許可してもう一度ボタンを押すか、Pubky Ring でコードをスキャンしてください。",
+        "writing": "ホームサーバーに証明を書き込んでいます…"
+      },
+      "signers": {
+        "pubky-auth": {
+          "action": "続ける",
+          "description": "リクエストは 1 つです。ブラウザの Pubky Passport で承認するか、Pubky Ring で読み取ってください。Ghostly が求めるのは、ホームサーバーの新しいフォルダーに小さなファイルを 1 つ書き込む権限だけです。",
+          "label": "Pubky Ring または Pubky Passport"
+        }
+      },
+      "subject": {
+        "help": "承認すると Pubky Ring または Passport から届きます。",
+        "label": "Pubky 鍵"
+      },
+      "summary": "Pubky Ring または Passport で承認",
+      "unpublish": {
+        "description": "ホームサーバー上の証明ファイルも削除します。Ghostly はアクセス権を残していないため、Pubky Ring または Passport でもう一度承認が必要です。"
+      }
+    },
+    "ssh": {
+      "description": "FIDO セキュリティキーを含め、SSH 鍵を持っていることを証明します。ssh-keygen で証明文に 1 回署名し、署名を貼り付けてください。",
+      "label": "SSH 鍵",
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "privacy": "何も伝わりません。署名はこの端末で確認されます。鍵のフィンガープリントにより、共有したすべてのチャットが結び付きます。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "OpenSSH の ssh-keygen（8.1 以降）で署名します。鍵ファイル、ssh-agent、FIDO セキュリティキーが使えます。"
+        }
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      },
+      "subject": {
+        "help": "公開鍵（.pub ファイルの 1 行）。連絡先にはそのフィンガープリントが見えます。",
+        "label": "公開鍵",
+        "placeholder": "ssh-ed25519 AAAA…（または SHA256:…）"
+      },
+      "summary": "ssh-keygen で 1 回署名"
+    },
+    "ssh-github": {
+      "description": "GitHub アカウントが公開している SSH 鍵を持っていることを証明します。ssh-keygen で証明文に 1 回署名してください。GitHub へのログインは不要です。",
+      "label": "GitHub（SSH 鍵）",
+      "limits": "GitHub へのログインは証明しません。アカウントに登録された鍵があなたのものであることだけを、登録されている間だけ示します。",
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "privacy": "連絡先のアプリは、共有時と再確認のたびに api.github.com にこのアカウントの公開 SSH 鍵を問い合わせます。GitHub にはそのアカウントが調べられたことと、問い合わせ元の IP アドレスが伝わります。追加するときのこのアプリの問い合わせも同様です。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "GitHub アカウントに登録されている SSH 鍵で署名します（Settings → SSH keys）。"
+        }
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      },
+      "subject": {
+        "label": "GitHub ユーザー名"
+      },
+      "summary": "GitHub アカウントに登録された鍵"
+    },
+    "ssh-gitlab": {
+      "description": "GitLab アカウントが公開している SSH 鍵を持っていることを証明します。ssh-keygen で証明文に 1 回署名してください。GitLab へのログインは不要です。",
+      "label": "GitLab（SSH 鍵）",
+      "limits": "GitLab へのログインは証明しません。アカウントに登録された鍵があなたのものであることだけを、登録されている間だけ示します。",
+      "paste": {
+        "label": "SSH 署名"
+      },
+      "privacy": "連絡先のアプリは、共有時と再確認のたびに gitlab.com にこのアカウントの公開 SSH 鍵を問い合わせます。GitLab にはそのアカウントが調べられたことと、問い合わせ元の IP アドレスが伝わります。追加するときのこのアプリの問い合わせも同様です。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "GitLab アカウントに登録されている SSH 鍵で署名します（Settings → SSH keys）。"
+        }
+      },
+      "steps": {
+        "orSave": "または、この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。",
+        "paste": "表示された署名を -----BEGIN SSH SIGNATURE----- から -----END SSH SIGNATURE----- まですべて貼り付けてください。秘密鍵がコンピューターから出ることはありません。",
+        "run": "ターミナル (macOS、Linux、Windows では Git Bash/WSL) でこれを実行してください。鍵が ~/.ssh/id_ed25519 でない場合は -f の後のパスを変えてください。秘密鍵が ssh-agent やセキュリティキーにある場合は .pub のパスでも動きます。",
+        "save": "この宣言をファイルに保存して ssh-keygen -Y sign -n {{namespace}} -f <鍵> <ファイル> を実行し、書き出された <ファイル>.sig を貼り付けてください。"
+      },
+      "subject": {
+        "label": "GitLab ユーザー名",
+        "placeholder": "ユーザー名"
+      },
+      "summary": "GitLab アカウントに登録された鍵"
+    }
   },
   "received": {
     "checked": "{{category}} · {{time}} に確認",

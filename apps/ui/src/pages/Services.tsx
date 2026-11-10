@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { useStoredSessions } from "../hooks/useStoredSessions";
 import { listShownSessions } from "../lib/storage";
@@ -13,7 +13,7 @@ import { useFocusLanding } from "../hooks/useFocusLanding";
 import { Toast } from "../components/ui/Toast";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
-import { problemLine } from "../lib/problemText";
+import { problemLine, problemText, type Problem } from "../lib/problemText";
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
 /**
@@ -89,7 +89,8 @@ export function Services() {
     if (!open) setLanding((was) => (was && "sharing" in was ? { shared: was.sharing } : { cancelled: true }));
   };
   const [error, setError] = useState("");
-  const [openError, setOpenError] = useState("");
+  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ.
+  const [openError, setOpenError] = useState<Problem | null>(null);
   // Share waits on the host's permission (Chrome's prompt, Desktop's dialog): pressed again meanwhile, it added the app twice.
   const sharing = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -174,9 +175,9 @@ export function Services() {
                   // 51 px past a 375 px phone's edge, its start cut off in Arabic. The whole label is in the title.
                   <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
                     className="flex items-center max-w-full min-w-0" onClick={() => {
-                      setOpenError("");
-                      if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
+                      setOpenError(null);
+                      if (!platform.features.openServices) { setOpenError({ tone: "error", title: t("services.openNeedsApp") }); return; }
+                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemText(e, t)));
                     }}>
                     {before && <span className="whitespace-pre">{before}</span>}
                     <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
@@ -186,7 +187,7 @@ export function Services() {
               })}
             </Row>
           ))}
-        {openError && <Block><Notice tone="error">{openError}</Notice></Block>}
+        {openError && <Block><Notice problem={openError} /></Block>}
       </Section>
     </Page>
   );
@@ -199,10 +200,19 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   // Remove asks first, as an app store's Remove does: contacts may be using the app. The question takes the place of
   // the button, the focus goes to its Cancel, and Cancel or Escape gives it back to Remove.
   const [asking, setAsking] = useState(false), [asked, setAsked] = useState(false);
+  // An address not yet allowed on this device (one that came with a restored or moved profile): its contacts are
+  // refused until the person allows it here, from this click.
+  const [needsAccess, setNeedsAccess] = useState(false), [checked, setChecked] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void platform.localAccessNeeded?.(service.target).then((needed) => { if (live) setNeedsAccess(needed); }, () => {});
+    return () => { live = false; };
+  }, [platform, service.target, checked]);
   const granted = service.sharedWith ?? [];
   const reached = granted.length;
-  const shared = service.enabled && online && reached > 0;
-  const status = shared ? (reached === 1 ? t("services.status.sharedOne") : t("services.status.sharedCount", { count: reached }))
+  const shared = service.enabled && online && reached > 0 && !needsAccess;
+  const status = needsAccess ? t("errors.app.localAddress")
+    : shared ? (reached === 1 ? t("services.status.sharedOne") : t("services.status.sharedCount", { count: reached }))
     : !service.enabled ? t("services.status.stopped")
     : reached === 0 ? t("services.status.notShared")
     : t("services.status.offline");
@@ -222,6 +232,7 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
           {service.requests > 0 && <span className="text-text-muted">{t("services.requestCount", { count: service.requests })}</span>}
         </span>}>
+          {needsAccess && <Button variant="primary" data-testid="service-allow" onClick={() => void platform.allowLocalAccess?.(service.target).catch(() => {}).finally(() => setChecked((n) => n + 1))}>{t("settings.media.allow")}</Button>}
           <Button onClick={() => setShowPeople(!showPeople)} data-testid="service-people" aria-expanded={showPeople}>{showPeople ? t("services.peopleDone") : t("services.people")}</Button>
           <Switch label={t("services.shareNamed", { app: service.name })} testId="service-sharing" checked={service.enabled} onChange={(on) => void platform.setServiceEnabled(service.id, on)} />
           {!asking && <button type="button" aria-label={t("services.removeNamed", { app: service.name })} title={t("services.remove")} autoFocus={asked} onClick={() => { setAsking(true); setAsked(true); }} className="grid place-items-center w-10 h-10 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt transition-colors cursor-pointer">

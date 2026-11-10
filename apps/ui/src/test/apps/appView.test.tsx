@@ -300,9 +300,10 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     const app = screen.getByTestId("mini-app");
     expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
     expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
-    // Back as the chat header's Back right under it: 36 px only under 340 px.
+    // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
+    // still 44 × 44 px there (`.tap-target`).
     const back = within(app).getByTestId("mini-app-back");
-    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9");
+    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9", "tap-target");
     expect(back).not.toHaveClass("w-9");
   });
 
@@ -576,6 +577,16 @@ describe("opening an app from the Apps page", () => {
       expect(takeOpenRequest("link-1")).toBeUndefined();
       requestOpenInChat("link-1", { app: installed("chat"), options: { runAnyway: true } });
       expect(takeOpenRequest("link-1")).toMatchObject({ options: { runAnyway: true } });
+      expect(takeOpenRequest("link-1")).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an open request is still dropped after a minute when the device's clock went back", () => {
+    vi.useFakeTimers();
+    try {
+      requestOpenInChat("link-1", { app: installed("chat") });
+      vi.setSystemTime(Date.now() - 60 * 60_000);
+      vi.advanceTimersByTime(2 * 60_000);
       expect(takeOpenRequest("link-1")).toBeUndefined();
     } finally { vi.useRealTimers(); }
   });

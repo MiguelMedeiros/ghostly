@@ -349,6 +349,15 @@
       "hint": "Aggiungi di nuovo questo dispositivo dal dispositivo che usi ora.",
       "title": "I tuoi dispositivi sono cambiati mentre questo era spento"
     },
+    "removeHere": {
+      "button": "Rimuovi questo profilo da qui",
+      "confirm": "Scrivi {{name}} per confermare",
+      "first": "Un profilo vuoto prende il suo posto qui.",
+      "go": "Rimuovi",
+      "hint": "Le sue chat, chiavi e portafogli vengono cancellati da questo dispositivo. Gli altri tuoi dispositivi mantengono il profilo.",
+      "removing": "Rimozione…",
+      "title": "Rimuovere {{name}} da questo dispositivo?"
+    },
     "title": {
       "moving": "Ci siamo quasi",
       "releasing": "Spostamento su un altro dispositivo",

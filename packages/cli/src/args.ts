@@ -16,6 +16,12 @@ export interface OptionSpec {
   choices?: readonly string[];
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
+
+/**
+ * A number as typed on the command line, in decimal digits only (`21`, `-5`, `12.5`); NaN for any other word.
+ * `Number()` alone read `1e3` as 1,000, `0x10` as 16 and `" 21"` as 21: `chat pay bob 2e3`, a typo of 23, paid 2,000.
+ */
+export const decimalNumber = (value: string): number => /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
 /**
  * The command a line is parsed for, as its unknown options name it: `send`, whether text comes on its line, and which
  * positionals take a number (`<sats>`): there a word like `-5` is that number, refused as one, not an unknown option.
@@ -100,7 +106,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       }
       if (option.type === "number") {
         // Number("") and Number(" ") are 0: an unset variable must not read as 0 and be acted on.
-        const number = value.trim() === "" ? NaN : Number(value);
+        const number = decimalNumber(value);
         if (!Number.isFinite(number)) throw new CliError("usage", `--${name} takes a number, not ${JSON.stringify(value)}`);
         options[name] = number;
       } else if (option.type === "list") {

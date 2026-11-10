@@ -76,6 +76,29 @@ export class NotSent {
 const TURN_MS = 30_000;
 /** The newest messages deleted here an outbox keeps from going (`Outbox.cancel`); their rows are long gone by the oldest. */
 const KEPT_CANCELLED = 1_000;
+/**
+ * How far past a whole window ahead a stored deadline may be before it counts as set by a clock that went back since
+ * (`Outbox.pastDeadline`): the wall clock and the monotonic one drift apart a little in a session.
+ */
+const DEADLINE_SKEW_MS = 60_000;
+/** The longest delay a timer keeps: past it (about 24.8 days) `setTimeout` fires at once, in Node and in browsers. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+/**
+ * A clock in ms that keeps counting while the machine is suspended, where the platform has one apart from the wall
+ * clock: Linux's boot time (`os.uptime()` reads `CLOCK_BOOTTIME`) for Node on Linux. Node's monotonic clock there
+ * (`CLOCK_MONOTONIC`, what `performance.now()` reads) stands still in a suspend, so a session that slept and a wall
+ * clock set forward looked the same to `Outbox.clock`. On macOS Node's monotonic clock counts sleep already, and a
+ * browser or Android's WebView has no such clock: none there (`Outbox.clock` counts the time it ran).
+ */
+export function bootClock(): (() => number) | undefined {
+  const host = (globalThis as { process?: { platform?: string; getBuiltinModule?: (id: string) => unknown } }).process;
+  if (host?.platform !== "linux" || typeof host.getBuiltinModule !== "function") return undefined;
+  const os = host.getBuiltinModule("node:os") as { uptime?: () => number } | undefined;
+  const uptime = os?.uptime;
+  if (typeof uptime !== "function") return undefined;
+  return () => uptime() * 1000;
+}
+
 /** The most rows a new message's look reads one by one (`Outbox.look`), where the store cannot read them in one go. */
 const KNOWN_ROWS = 16;
 
@@ -107,8 +130,18 @@ const oldestFirst = (a: StoredMessage, b: StoredMessage) => a.timestamp - b.time
 export class Outbox {
   /** Sent, awaiting a receipt. */
   private receipts = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Queued: when it is looked at again, how far along the backoff, since when. */
-  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number }>();
+  /**
+   * Queued: when it is looked at again, how far along the backoff, since when. `at` and `since` are on the monotonic
+   * clock (`monotonic`): they live only in this session, and a step of the device clock must not move them. Read by the
+   * wall clock, a clock set back an hour after a text was queued handed it to store-and-forward an hour late, not at
+   * its first check past a minute (`holdAfterMs`). `wallSince`: the same moment by the wall clock (`waitedOut`).
+   */
+  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number; wallSince: number }>();
+  /**
+   * Stored deadlines (`resendUntil`) found further ahead than a whole window after the device clock went back, each
+   * with the deadline it is held to in this session: a window from when it was found so (`pastDeadline`).
+   */
+  private deadlines = new Map<string, { stored: number; until: number }>();
   private attempts = new Map<string, number>();
   private busy = new Set<string>();
   /**
@@ -165,14 +198,65 @@ export class Outbox {
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
   private readonly now: () => number;
+  private readonly monotonic: () => number;
+  /** A clock that counts a suspend (`bootClock`), where the platform has one. */
+  private readonly boot?: () => number;
+  /** The wall, monotonic and boot clocks when this outbox began: `clock` counts on from there. */
+  private readonly origin: { wall: number; monotonic: number; boot?: number };
   constructor(private store: OutboxStore,
     private send: (message: StoredMessage) => Promise<string | null | NotSent>,
     private timeoutMs: number | ((message: StoredMessage) => number) = 20_000,
     private pendingUntil?: (message: StoredMessage) => number | undefined,
-    options: { resender?: Resender; policy?: Partial<ResendPolicy>; now?: () => number } = {}) {
+    options: {
+      resender?: Resender; policy?: Partial<ResendPolicy>; now?: () => number; monotonic?: () => number;
+      /** Default `bootClock()`; null: none. */
+      boot?: (() => number) | null;
+    } = {}) {
     this.resender = options.resender ?? { ready: () => true };
     this.policy = { ...RESEND_POLICY, ...options.policy };
     this.now = options.now ?? Date.now;
+    this.monotonic = options.monotonic ?? (() => performance.now());
+    this.boot = options.boot === undefined ? bootClock() : options.boot ?? undefined;
+    this.origin = { wall: this.now(), monotonic: this.monotonic(), boot: this.boot?.() };
+  }
+
+  /**
+   * The time a stored deadline (`resendUntil`, set by the wall clock) is judged by: the wall clock, never ahead of the
+   * time that passed since this session began. A clock set forward 8 days failed every queued text at its next check,
+   * as not confirmed within 7 days, a few seconds after it was written. The time that passed counts a suspend where a
+   * clock says so (`bootClock`): a laptop asleep 9 days fails a text queued before at its first check after the wake,
+   * where it went on a week of the machine awake. Elsewhere it is the time the session ran.
+   */
+  private clock(): number {
+    let passed = this.monotonic() - this.origin.monotonic;
+    if (this.boot && this.origin.boot !== undefined) passed = Math.max(passed, this.boot() - this.origin.boot);
+    return Math.min(this.now(), this.origin.wall + passed);
+  }
+
+  /**
+   * Queued a minute (`holdAfterMs`), so it may be handed to store-and-forward: by the monotonic clock or by the wall
+   * clock, whichever counts more. A clock set back must not delay it (the monotonic clock counts), and a suspend must
+   * not either: on Linux and Android the monotonic clock stands still in one, and a text queued before a night asleep
+   * waited out its minute again after the wake. A clock set forward hands it over at its next check: harmless, a text to
+   * an away contact goes there anyway.
+   */
+  private waitedOut(wait: { since: number; wallSince: number }): boolean {
+    return Math.max(this.monotonic() - wait.since, this.now() - wait.wallSince) >= this.policy.holdAfterMs;
+  }
+
+  /**
+   * Its window to go is over (`resendUntil`, by `clock`). A deadline further ahead than a whole window was set before
+   * the device clock went back: it counts a window from the moment it is found so, as `DhtDelivery` bounds its times,
+   * not for as long as the clock went back. The row keeps what was stored.
+   */
+  private pastDeadline(message: StoredMessage): boolean {
+    const stored = message.resendUntil;
+    if (stored === undefined) return false;
+    const now = this.clock(), held = this.deadlines.get(message.id);
+    let until = held?.stored === stored ? held.until : stored;
+    if (until > now + this.policy.windowMs + DEADLINE_SKEW_MS) until = now + this.policy.windowMs;
+    if (until !== stored) this.deadlines.set(message.id, { stored, until }); else this.deadlines.delete(message.id);
+    return until <= now;
   }
 
   /** `messages`: the chat's history as the caller just read it (a start has), so it is not read a second time. */
@@ -188,7 +272,10 @@ export class Outbox {
       const until = this.pendingUntil?.(message);
       if (until && until > this.now()) {
         await this.store.update(message.id, "sent");
-        this.track(message.id, until - this.now());
+        // The deadline was stamped by the clock as it was then. One further ahead than a receipt is ever awaited was set
+        // before the clock went back (an NTP step, a wrong date set right): it counts one window from now, as the DHT
+        // path counts its own copy (`DhtDelivery.clock()`), not for as long as the clock went back.
+        this.track(message.id, Math.min(until - this.now(), this.receiptWindow(message)));
       } else if (until !== undefined) await this.expired(message);
       else await this.queue(message, "Not confirmed before the app closed. It is sent again, under the same ID, once your contact is reachable.");
     }
@@ -334,7 +421,7 @@ export class Outbox {
       const row = this.stillUnsent.get(id) ?? await this.one(id);
       if (!row || !toGo(row)) continue;
       this.stillUnsent.set(id, row);
-      if ((row.resendUntil ?? Infinity) <= this.now() || this.resender.via(row) !== "pkarr") continue;
+      if (this.pastDeadline(row) || this.resender.via(row) !== "pkarr") continue;
       parked.push(id);
       from = Math.min(from, timestamp);
     }
@@ -349,11 +436,11 @@ export class Outbox {
    * receipt and nothing waiting read the chat's whole history for nothing, twice (the link says it is open in two
    * ways): 600 ms of a daemon's time per reconnect at 10,000 messages (agents#2468).
    */
-  private async held(): Promise<StoredMessage[]> {
+  private async held(id?: string): Promise<StoredMessage[]> {
     this.looks++;
     const at = this.writes ? undefined : this.stamp;
     try {
-      const messages = await this.look();
+      const messages = await this.look(id);
       if (at !== undefined && !messages.some(m => this.unknown(m))) this.seen = at;
       return messages;
     } finally { this.looked++; }
@@ -411,8 +498,15 @@ export class Outbox {
 
   /** A waiting file is said on the link, after the older messages passed by that can go now. False: the link cannot carry it. */
   private async fileGoes(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
-    // Not yet: it is looked at again as a queued text is, so a file alone in the chat does not wait for the next link.
-    if (!this.resender.ready(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return false; }
+    if (!this.resender.ready(message)) {
+      // Its offer is on the DHT floor already, or cannot go there: only the live link takes it, and the link's opening
+      // looks (`flush({ reopened })`). It is held with no check of its own: each one read the chat's whole history every
+      // five minutes for as long as the contact was away, and could not send it (60 reads an hour for 10 such files).
+      if (message.fileOnFloor) { this.holdUnchecked(message.id); return false; }
+      // Not yet: it is looked at again as a queued text is, so a file alone in the chat does not wait for the next link.
+      if (!this.waiting.get(message.id)?.timer) this.schedule(message.id);
+      return false;
+    }
     if (passed) await this.catchUp(passed);
     // The link closed under this look: it stays where it is, and keeps a check of its own (the one that brought it
     // here cleared its timer as it fired), so a link that comes back without a look at the chat does not leave it behind.
@@ -587,9 +681,12 @@ export class Outbox {
     // (delivered, failed or handed over meanwhile) has nothing to check: a timer that fired during the look a contact
     // back to n queued texts began read the chat's whole history for each text that look had delivered.
     if (!this.waiting.has(id) || this.waiting.get(id)?.timer || this.receipts.has(id)) return;
-    const messages = await this.store.read(), message = messages.find(m => m.id === id);
+    // The rows this outbox holds, by id, where it knows them all (`held`): a text waiting for an away contact read the
+    // chat's whole history at each check and could not send it, 36 reads an hour for three texts (720,000 rows at
+    // 20,000 messages) for as long as the contact stayed away.
+    const messages = await this.held(id), message = messages.find(m => m.id === id);
     if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
-    const soon = this.now() + this.policy.backoffMs[0], taken: string[] = [];
+    const soon = this.monotonic() + this.policy.backoffMs[0], taken: string[] = [];
     let until = message.timestamp;
     for (const m of messages) {
       const wait = this.waiting.get(m.id);
@@ -614,8 +711,8 @@ export class Outbox {
   private waitsOn(message: StoredMessage): boolean {
     const wait = this.waiting.get(message.id);
     return !!wait && (message.delivery === "queued" || message.delivery === "waiting") && message.via !== "hold"
-      && (message.resendUntil ?? Infinity) > this.now() && !this.resender.ready(message)
-      && !(this.resender.divert && this.now() - wait.since >= this.policy.holdAfterMs);
+      && !this.pastDeadline(message) && !this.resender.ready(message)
+      && !(this.resender.divert && this.waitedOut(wait));
   }
 
   /**
@@ -680,13 +777,13 @@ export class Outbox {
     // The chat can carry it but an older text has not left this device: it waits behind that one as read, where it
     // was read again, sent to `transmitNow`, read there again with the unsent one, for each text waiting at each look.
     if (read?.wireId && this.unsent.size && !this.unsent.has(id) && !this.receipts.has(id) && (read.delivery === "queued" || read.delivery === "waiting")
-      && read.via !== "hold" && (read.resendUntil ?? Infinity) > this.now() && this.resender.ready(read)) {
+      && read.via !== "hold" && !this.pastDeadline(read) && this.resender.ready(read)) {
       if (passed) await this.catchUp(passed);
       if (!this.busy.has(id) && await this.behindUnsent(read)) { await this.waitBehind(read); return true; }
     }
     const message = await this.one(id);
     if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return true; }
-    if ((message.resendUntil ?? Infinity) <= this.now()) {
+    if (this.pastDeadline(message)) {
       if (message.delivery === "waiting") { this.forget(id); await this.store.update(id, "failed", `Your contact was not reachable within ${days(this.policy.windowMs)}. It was not sent; Retry sends it.`); }
       else await this.fail(id, `Not confirmed within ${days(this.policy.windowMs)}.`);
       return true;
@@ -700,7 +797,7 @@ export class Outbox {
     // The look in progress left the ones behind it unread (`parkedBehind`): it waits for its check even if the chat changed meanwhile.
     if (this.parked.has(id)) { if (!wait?.timer) this.schedule(id); return false; }
     if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
-    if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return true; }
+    if (this.resender.divert && wait && this.waitedOut(wait) && await this.resender.divert(message)) { this.forget(id); return true; }
     // A flush between two checks leaves the backoff where it was.
     if (!wait?.timer) this.schedule(id);
     return false;
@@ -750,9 +847,9 @@ export class Outbox {
   }
 
   private async queue(message: StoredMessage, reason: string): Promise<void> {
-    const now = this.now(), until = message.resendUntil ?? now + this.policy.windowMs;
+    const until = message.resendUntil ?? this.now() + this.policy.windowMs;
     const sent = this.attempts.get(message.id) ?? 0;
-    if (until <= now) return this.fail(message.id, `${reason} Not confirmed within ${days(this.policy.windowMs)}.`);
+    if (this.pastDeadline({ ...message, resendUntil: until })) return this.fail(message.id, `${reason} Not confirmed within ${days(this.policy.windowMs)}.`);
     if (sent >= this.policy.maxAttempts) return this.fail(message.id, `${reason} Sent ${sent} times without a receipt.`);
     // A row already queued as it would be (a start finds them so) is not written again: on the engine a write marks
     // the chat's history changed, and the CLI host's start then read each such chat whole.
@@ -775,12 +872,20 @@ export class Outbox {
 
   private schedule(id: string): void {
     if (this.cancelled.has(id)) return;
-    const wait = this.waiting.get(id) ?? { step: 0, since: this.now(), at: 0 };
+    const wait = this.waiting.get(id) ?? { step: 0, since: this.monotonic(), wallSince: this.now(), at: 0 };
     if (wait.timer) clearTimeout(wait.timer);
     const delay = this.policy.backoffMs[Math.min(wait.step, this.policy.backoffMs.length - 1)];
-    wait.at = this.now() + delay;
+    wait.at = this.monotonic() + delay;
     wait.timer = setTimeout(() => { wait.timer = undefined; wait.step++; void this.turn(() => this.check(id)).catch(() => {}); }, delay);
     this.waiting.set(id, wait);
+  }
+
+  /** Held, so a look reads its row by id (`look`), with no timer: nothing but a look at the chat sends it. */
+  private holdUnchecked(id: string): void {
+    if (this.cancelled.has(id)) return;
+    const wait = this.waiting.get(id);
+    if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
+    if (!wait) this.waiting.set(id, { step: 0, since: this.monotonic(), wallSince: this.now(), at: 0 });
   }
 
   private forget(id: string): void {
@@ -789,8 +894,14 @@ export class Outbox {
     const wait = this.waiting.get(id);
     if (wait?.timer) clearTimeout(wait.timer);
     this.waiting.delete(id);
+    this.deadlines.delete(id);
     this.attempts.delete(id);
     this.sentUnder.delete(id);
+  }
+
+  /** How long a receipt is awaited for this message when it goes now. */
+  private receiptWindow(message: StoredMessage): number {
+    return typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message);
   }
 
   private track(id: string, duration: number): void {
@@ -805,7 +916,7 @@ export class Outbox {
         if (message?.via === "pkarr") await this.expired(message);
         else await this.requeue(id, "No receipt received yet.");
       }).catch(() => {});
-    }, duration);
+    }, Math.min(Math.max(duration, 0), MAX_TIMER_MS));
     this.receipts.set(id, timer);
   }
   private clear(id: string): void { const timer = this.receipts.get(id); if (timer) clearTimeout(timer); this.receipts.delete(id); }

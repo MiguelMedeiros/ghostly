@@ -28,6 +28,7 @@
   "incomingAudio": "Llamada de voz entrante...",
   "incomingVideo": "Videollamada entrante...",
   "mediaDenied": "Sin acceso al micrófono o la cámara",
+  "mediaDeniedAndroid": "Permite el micrófono (y la cámara) en los ajustes de Android para Ghostly.",
   "mediaDeniedNext": "Permítelos en los ajustes del navegador o del sistema.",
   "mediaUnavailable": "No hay micrófono ni cámara",
   "mediaUnavailableNext": "Conecta uno, o cierra la app que lo usa.",

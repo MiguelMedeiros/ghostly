@@ -2,6 +2,7 @@ import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
 import { formatAmount } from "./amount";
 import { english } from "./english";
+import { SERVICE_LOCKED } from "./serviceWindows";
 
 /*
  * An error said in the app's language. The engine, the platform layer and the extension throw plain English (they
@@ -27,10 +28,15 @@ interface Rule {
   reason?: "next" | "title";
   /** The error as it was thrown goes to the detail behind the ⓘ too: what it names (a member, an epoch) is for whoever debugs. */
   detail?: true;
+  /** Why, in the language, behind the ⓘ: the line stays short (a rule with no `reason` only). */
+  info?: TranslationKey;
 }
 
-/** An error in three parts: a title, maybe a next line, and the English behind the ⓘ when part of it is not said. */
-export interface ErrorParts { title: string; next?: string; detail?: string }
+/**
+ * An error in parts: a title, maybe a next line, and behind the ⓘ the why in the language (`info`) and the English when
+ * part of it is not said (`detail`).
+ */
+export interface ErrorParts { title: string; next?: string; detail?: string; info?: string }
 
 const exact = (text: string, key: TranslationKey, next?: TranslationKey): Rule => ({ match: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), key, ...(next && { next }) });
 
@@ -275,6 +281,10 @@ const RULES: readonly Rule[] = [
   exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
   exact("Iroh relay unreachable", "errors.transport.irohUnreachable", "errors.transport.irohUnreachableNext"),
+  // A contact's Iroh relay this device does not dial (irohWeb.ts, apps/desktop paired_transport.rs): not a public https
+  // one nor one of the person's own, or, with Hide my IP from contacts on, not one of theirs.
+  exact("The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"),
+  exact("The contact is not on one of this profile's Iroh relays", "errors.transport.irohNotOwnRelay", "errors.transport.irohNotOwnRelayNext"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
@@ -354,7 +364,8 @@ const RULES: readonly Rule[] = [
   { match: /^The Lightning fee \((?<fee>\d+) sats\) is too high$/, key: "errors.pay.feeTooHigh" },
   exact("Nothing to take back", "errors.pay.nothingToTakeBack"),
   exact("The federation has not answered yet: try again in a moment", "errors.pay.federationSilent"),
-  exact("Nothing to reclaim", "errors.pay.nothingToReclaim"),
+  // The Cashu side of Take it back: said in the button's words, as the Fedimint side above.
+  exact("Nothing to reclaim", "errors.pay.nothingToTakeBack"),
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
@@ -446,6 +457,9 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) did not answer with a pay request$/, key: "errors.lnurl.noPayRequest" },
   { match: /^(?<domain>\S+) did not answer with an invoice$/, key: "errors.lnurl.noInvoice" },
   exact("The invoice the service answered with has already expired", "errors.lnurl.invoiceExpired"),
+  // An invoice for another amount than the one chosen, or for any amount (lnurl.ts parseInvoiceCallback): nothing was
+  // paid; the amounts the service and the person named go behind the ⓘ.
+  { match: /^The invoice asks for (?:any amount|[\d,]+ sats), not the [\d,]+ sats you chose$/, key: "wallet.lightning.mismatch", next: "errors.lnurl.mismatchNext", detail: true },
 
   // Groups (packages/core/src/groupSession.ts and groupCommunity.ts, packages/browser/src/engine/groups.ts and
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
@@ -559,6 +573,8 @@ const RULES: readonly Rule[] = [
   { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
   { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", reason: "next" },
   { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", reason: "next" },
+  // A Receive, or a chat request, on a Lightning card connected without invoice lookup (paymentAdapters/providers/lightningService.ts).
+  { match: /^(?<label>.+?) cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed$/, key: "errors.wallet.noLookup", next: "errors.wallet.noLookupNext" },
   { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
   { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
   { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent", reason: "next" },
@@ -624,6 +640,59 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
   { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // Why a contact's proof failed this app's check, the first time or on the daily re-check (verify.ts, the providers'
+  // verify(), core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. The account,
+  // host or domain stays a value; an address or status code goes behind the ⓘ.
+  { match: /^(?<forge>GitHub|GitLab) has no account (?<login>\S+)$/, key: "errors.proof.noAccount", next: "errors.proof.noAccountNext" },
+  { match: /^(?<host>\S+) is limiting lookups; check again later$/, key: "errors.proof.hostLimiting", next: "errors.proof.laterNext" },
+  { match: /^(?<domain>\S+) answered \d{3}$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^(?<domain>\S+) answered with a redirect; the file must be served at exactly https:\/\/\S+$/, key: "errors.proof.hostRedirect", next: "errors.proof.redirectNext", detail: true },
+  exact("The record is no longer in the account's repository", "errors.proof.recordGone"),
+  exact("The account is no longer on its server", "errors.proof.accountGone"),
+  exact("The account's DID is not registered, or was deactivated", "errors.proof.didGone"),
+  { match: /^The account's DID no longer resolves: .+$/, key: "errors.proof.didNoResolve", detail: true },
+  exact("The account's DID could not be resolved", "errors.proof.didUnresolved", "errors.proof.laterNext"),
+  exact("This DID is deactivated: its owner retired it", "errors.proof.didDeactivated"),
+  exact("The proof file is not on the homeserver", "errors.proof.pubkyFileGone"),
+  exact("The file on the homeserver is not this proof", "errors.proof.pubkyFileOther"),
+  exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
+  exact("The homeserver of this Pubky key has no records on the Pkarr relays", "errors.proof.pubkyHomeserverNoRecords"),
+  exact("This Pubky key names no homeserver", "errors.proof.pubkyNoHomeserver"),
+  { match: /^Signed by another (?:Nostr|SSH) key$/, key: "errors.proof.otherKey" },
+  exact("Invalid Nostr signature", "errors.proof.badSignature"),
+  exact("The evidence is for another identity", "errors.proof.otherIdentity"),
+  exact("This app cannot verify this kind of identity", "errors.proof.unsupportedKind"),
+  exact("The proof lasts longer than this kind of identity allows", "errors.proof.tooLong"),
+  exact("Offline: this identity cannot be checked now", "errors.proof.offline"),
+  exact("The proof is dated in the future", "errors.proof.future"),
+  exact("The proof key did not sign this conversation's challenge", "errors.proof.challenge"),
+  exact("Its owner revoked this proof", "errors.proof.revoked"),
+  exact("The proof has expired", "errors.proof.expired"),
+  exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
+  exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
+  exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
+  exact("Your contact could not verify it", "errors.proof.contactRefused"),
+  // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
+  // did.ts, domain.ts, core didDht.ts, engine/identities.ts): a host, resolver or relay down says nothing about the proof,
+  // so it reads as that and "try again later", never as the proof fallback's "couldn't be verified" (agents#3781). The
+  // host stays a value; an address the contact chose, a status code or a resolver's name goes behind the ⓘ.
+  { match: /^(?<domain>\S+) could not be reached: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The (?:account's server|homeserver) \(?(?<domain>[^\s()]+)\)? could not be reached$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext" },
+  { match: /^The (?:account's server|homeserver) (?<domain>\S+) was not contacted: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<domain>\S+) answered \d{3}$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<host>\S+) answers on port \d+; only port 443 is contacted$/, key: "errors.proof.homeserverPort", detail: true },
+  { match: /^The account's server \((?<host>\S+)\) did not send the record$/, key: "errors.proof.serverNoRecord", next: "errors.proof.laterNext" },
+  { match: /^Unexpected answer from (?<host>\S+)$/, key: "errors.proof.hostBadAnswer", next: "errors.proof.laterNext" },
+  { match: /^(?<domain>\S+) could not be reached\. It must serve https:\/\/\S+ over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?<domain>\S+) answered with a redirect; it must serve exactly https:\/\/\S+$/, key: "errors.proof.hostRedirect", next: "errors.proof.redirectNext", detail: true },
+  { match: /^(?<domain>\S+) answered \d{3} for https:\/\/\S+$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) (?:could not resolve \S+|sent an unusable answer|sent an answer that is too large)$/, key: "errors.proof.resolverFailed", next: "errors.proof.resolverNext", detail: true },
+  { match: /^No Pkarr relay (?:answered for this did:dht|to ask)$/, key: "errors.relays.noneAnswered", next: "errors.relays.noneAnsweredNext", detail: true },
+  { match: /^Hide my IP from contacts is on: \S+, a server your contact chose, was not contacted$/, key: "errors.proof.hiddenIpNotContacted", detail: true },
+  // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
+  { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
+  { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
   exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),
@@ -656,8 +725,12 @@ const RULES: readonly Rule[] = [
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
-  // A contact's app the extension does not open while it is on (apps/extension/src/background.ts, RELAY_ONLY_REFUSED).
-  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", next: "errors.relayOnly.appInExtensionNext" },
+  // A contact's app the extension and the web app do not open while it is on (apps/extension/src/background.ts and
+  // apps/web/src/host.ts, RELAY_ONLY_REFUSED): one short line, and why, with the desktop app that opens it, behind the ⓘ.
+  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", info: "errors.relayOnly.appInBrowserInfo" },
+  { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", info: "errors.relayOnly.appInBrowserInfo" },
+  // A contact's app the profile's lock overtook while it opened on the web (apps/web/src/host.ts): it showed nothing.
+  exact(SERVICE_LOCKED, "errors.services.lockedBeforeOpen", "errors.services.lockedBeforeOpenNext"),
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").
@@ -694,6 +767,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   testMintOnMainnet: "errors.engine.testMintOnMainnet",
   realMintOnTestnet: "errors.engine.realMintOnTestnet",
   mintHoldsSats: "errors.engine.mintHoldsSats",
+  mintFailedQuote: "errors.engine.mintFailedQuote",
+  mintFailedFaucet: "errors.engine.mintFailedFaucet",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -754,6 +829,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   lastMint: "errors.engine.lastMintNext",
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
+  mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
@@ -762,7 +839,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -829,7 +906,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const groups = { ...found.groups };
     const params = rule.params ? rule.params(groups, t) : groups;
     const fixed = rule.next ? t(rule.next, params) : undefined;
-    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }) };
+    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }), ...(rule.info && { info: t(rule.info, params) }) };
     const reason = reasonLine(groups.reason ?? "", t);
     const detail = reason === undefined ? { detail: raw } : {};
     if (rule.reason === "title" && reason) return { title: reason, ...(fixed && { next: fixed }) };

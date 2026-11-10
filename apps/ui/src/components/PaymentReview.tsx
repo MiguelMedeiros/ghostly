@@ -1,6 +1,6 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import { focusInPlace, focusLost, working } from "../lib/focus";
-import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
+import {parseEngineError,walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
 import {formatAt} from '../lib/time';
@@ -14,11 +14,17 @@ import { Notice } from "./ui/Notice";
 
 
 /**
+ * Gone out: submitted or settled, or failed only after it went (the contact refused it, or it was taken back, and its
+ * sats came back). A refusal can beat Approve's answer over a live link; the payment's bubble says how it ended then.
+ */
+const wentOut=(review:Review)=>review.state==='submitted'||review.state==='settled'||(review.state==='failed'&&(!!review.returned||parseEngineError(review.error??'')?.code==='paymentTakenBack'));
+
+/**
  * A payment before it goes out, and its status after: the amount, the fee, the destination, and which money it is.
  * Test money says so and goes on Approve; real money says so, and Approve first asks once more, in words, before
  * anything is sent. Nothing leaves the wallet until that confirmation. `onSent`, when given, is called once an approved
- * payment has gone out (submitted or settled), so a chat's sheet can close and leave its status to the chat's bubble;
- * one that failed, or whose outcome is not known, stays here with its error.
+ * payment has gone out (`wentOut`: even when it came back already), so a chat's sheet can close and leave its status
+ * to the chat's bubble; one that failed before it went, or whose outcome is not known, stays here with its error.
  */
 export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
  const {t}=useI18n();
@@ -31,7 +37,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  const shown=token?formatTokenAmount(review.amount,review.decimals,t.language):formatAmount(review.amount, t.language);
  const run=async(action:()=>Promise<Review>,key:NonNullable<typeof running>):Promise<Review|null>=>{if(busy)return null;setRunning(key);setError(null);try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?problemText(e, t):{tone:'error',title:t('payments.review.error.update')});return null;}finally{setRunning(null);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
- const approve=()=>void run(()=>wallet.approvePayment(review.id,real),'approve').then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
+ const approve=()=>void run(()=>wallet.approvePayment(review.id,real),'approve').then(next=>{setConfirming(false);if(next&&wentOut(next))onSent?.();});
  // Busy, not disabled, while it works: a disabled button drops the keys to the page, and they stay there on a refusal.
  const press=(key:NonNullable<typeof running>)=>running===key?working(true):{disabled:busy};
  const button='rounded-lg px-3 py-2 max-md:min-h-11 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 data-[loading]:opacity-80 data-[loading]:cursor-progress';

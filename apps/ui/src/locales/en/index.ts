@@ -36,6 +36,7 @@ import services from "./services.json";
 import settings from "./settings.json";
 import share from "./share.json";
 import sidebar from "./sidebar.json";
+import status from "./status.json";
 import tabs from "./tabs.json";
 import translate from "./translate.json";
 import updates from "./updates.json";
@@ -77,6 +78,7 @@ export default {
   settings,
   share,
   sidebar,
+  status,
   tabs,
   translate,
   updates,

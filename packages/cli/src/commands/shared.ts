@@ -2,7 +2,7 @@ import { closeSync, openSync, readSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
-import type { OptionSpec, Parsed } from "../args";
+import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
 
@@ -93,9 +93,9 @@ export function refs(values: unknown, flag: string, what: string): void {
  * number from 1 up, not -5`, a number as typed, other words quoted. Before: "Not an amount in sats: \"-5\"".
  */
 export function sats(value: string | undefined): number {
-  const n = Number(value);
-  if (!value || !Number.isSafeInteger(n) || n <= 0) {
-    const shown = /^-?\d+(\.\d+)?$/.test(value ?? "") ? value : JSON.stringify(value);
+  const n = decimalNumber(value ?? "");
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    const shown = Number.isNaN(n) ? JSON.stringify(value) : value;
     throw new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`);
   }
   return n;
@@ -395,7 +395,7 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
 }
 
 /** How the time flags say the dates they take (`--next`, `--resets`, `--also`'s `@`). */
-const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
+export const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
 
 /** An ISO date with no time, which `Date.parse` alone reads as UTC midnight: `2026-09-30`, `2026-09`. */
 const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;

@@ -12,8 +12,12 @@
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
+    "notSent": "Votre message « {{text}} » n’a pas été envoyé",
+    "notSentCount": "{{count}} messages non envoyés",
     "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
-    "rowMoved": "Maintenant à la place {{place}} sur {{count}}"
+    "rowMoved": "Maintenant à la place {{place}} sur {{count}}",
+    "waiting": "Votre message « {{text}} » attend que votre contact soit en ligne",
+    "waitingCount": "{{count}} messages en attente que votre contact soit en ligne"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -316,12 +320,28 @@
     "off": "Désactivé dans cette discussion : activez un moyen dans Accepter",
     "offOrOld": "Votre contact a désactivé les paiements dans cette discussion, ou doit mettre à jour Ghostly"
   },
+  "pictureHiddenIp": "Non affichée : Masquer mon IP est activé",
   "pinned": {
     "bar": "Message épinglé",
     "info": "Un message épinglé par discussion, vu par tous ses membres. Un nouveau remplace l’ancien. Dans une communauté, seul l’admin épingle.",
     "notHere": "Absent de cet appareil",
     "pin": "Épingler",
     "unpin": "Désépingler"
+  },
+  "presence": {
+    "availability": {
+      "away": "Absent",
+      "busy": "Occupé",
+      "dnd": "Ne pas déranger"
+    },
+    "dot": {
+      "away": "En ligne, absent",
+      "busy": "En ligne, occupé",
+      "dnd": "En ligne, ne pas déranger",
+      "idle": "En ligne, inactif",
+      "online": "En ligne"
+    },
+    "status": "Statut : {{status}}"
   },
   "preview": {
     "arkAddress": "Adresse Ark",
@@ -495,6 +515,7 @@
     "limit": "Les messages vocaux durent au plus {{minutes}} minutes",
     "message": "Message vocal",
     "micDenied": "Pas d'accès au micro. Autorisez-le dans les réglages du navigateur ou du système.",
+    "micDeniedAndroid": "Pas d'accès au micro. Autorisez-le quand Android le demande, ou pour Ghostly dans les réglages d'Android.",
     "micUnavailable": "Aucun micro trouvé. Branchez-en un, ou fermez l'app qui l'utilise.",
     "micUnsupported": "Ce navigateur ne peut pas enregistrer de messages vocaux.",
     "pause": "Mettre le message vocal en pause",

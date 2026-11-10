@@ -6,6 +6,7 @@ import { LightningService, readLightningJournal, type LightningEvents, type Ligh
 import { sourceKey } from "./sources";
 import { awayFrom } from "../away";
 import { breezDatabaseInUse } from "./breezDatabases";
+import { nwc, nwcWalletName } from "./nwcProvider";
 import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
 
@@ -77,6 +78,30 @@ export async function loadLightningCards(network: WalletMode, label: (providerId
 
 const cashuCard = (now: number): StoredLightningCard => ({ id: CASHU_CARD, name: SHORT[CASHU_MINT_SOURCE], providerId: CASHU_MINT_SOURCE, key: CASHU_CARD, createdAt: now });
 const shortName = (providerId: string, label: (providerId: string) => string) => SHORT[providerId] ?? label(providerId);
+
+/** At most this many characters of the wallet's own name go into a new card's name. */
+const ALIAS_IN_NAME = 20;
+
+/**
+ * A new card's name: the wallet's own name, then its source's short name ("Alby Hub (NWC)"), or the short name alone.
+ * An NWC wallet's name leaves out "via <relay host>" (the card's subtitle shows it). A longer name is cut where a word
+ * ends, with "…", never in the middle of a word.
+ */
+export function defaultCardName(providerId: string, alias: string | undefined, short: string): string {
+  const own = (alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "").replace(/\s+/g, " ").trim();
+  return own ? `${cutAtWord(own, ALIAS_IN_NAME)} (${short})` : short;
+}
+
+/** `text` in at most `max` UTF-16 units (the unit `rename` counts), cut after a whole word with "…" when longer. */
+function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let head = text.slice(0, max - 1);
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  // A head that ends right before a space is whole words already; otherwise drop the word it cut, unless it is the only one.
+  const space = text[head.length] === " " ? head.length : head.lastIndexOf(" ");
+  const kept = (space > 0 ? head.slice(0, space) : head).replace(/[\s,;:·–—-]+$/u, "");
+  return `${kept || head}…`;
+}
 
 export interface LightningCardsHost {
   descriptors: () => readonly LightningProviderDescriptor[];
@@ -194,7 +219,7 @@ export class LightningCards {
       try { await service.sources.set(providerId, values); }
       catch (error) { await service.stop(); throw error; }
       finally { this.adding = undefined; }
-      card.name = this.freeName(service.view.alias ? `${service.view.alias.slice(0, 20)} (${shortName(providerId, this.label)})` : shortName(providerId, this.label));
+      card.name = this.freeName(defaultCardName(providerId, service.view.alias, shortName(providerId, this.label)));
       const receive = this.receivingId === CASHU_CARD ? id : this.stored.receive;
       // The mints' card of a network with no mints is not shown and holds nothing: a card of the person's own takes its
       // place, as the one source did before cards (a Cashu wallet made later does not bring it back).

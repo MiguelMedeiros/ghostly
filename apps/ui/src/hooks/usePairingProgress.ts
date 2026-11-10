@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
+import type { LinkView } from "@ghostly/browser/shared/types";
 import { contactArrived, deriveStage, pairingView, reportedProgress, stepIndex, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
 import { loadSettings } from "../lib/settings";
 import { playSound, warmSound } from "../lib/sounds";
@@ -47,16 +48,27 @@ export interface PairingPresence {
 }
 
 /**
+ * What the pairing reads of a link. The rest changes all the time with nothing of it here (each poll, the contact typing,
+ * the last message's time), and the open chat that shows the pairing was drawn again, its message rows too, on each.
+ */
+const pairingLink = (link: LinkView | undefined) => link && {
+  id: link.id, createdAt: link.createdAt, status: link.status, dataLink: link.dataLink, pairing: link.pairing, pairingProgress: link.pairingProgress,
+  discoveryError: link.discoveryError, peerOnline: link.peerOnline, peerParticipationKey: link.peerParticipationKey, textDelivery: link.textDelivery,
+  dhtDelivery: link.dhtDelivery && { peerMode: link.dhtDelivery.peerMode },
+};
+
+/**
  * The pairing progress of the paired chat with `peerKey`, and whether its scene is on. Only a chat's first
  * pairing gets the scene: a contact already paired reconnects under the header's connection control. The
  * scene's "connected" moment comes with one short sound, unless sounds are off, or `muted` for this chat.
  */
 export function usePairingProgress(peerKey: string | undefined, { inviter, enabled, createdAt, muted = false }: { inviter: boolean; enabled: boolean; createdAt?: number; muted?: boolean }): PairingPresence {
   const t = useT();
-  // The chat's link and the online switch, compared by content: the whole state drew the chat on every engine state.
+  // What it reads of the chat's link, and the online switch, compared by content: the whole state drew the chat on every
+  // engine state, and the whole link on each poll of it.
   const { loaded, link, online } = useEngineValue((state) => ({
     loaded: !!state,
-    link: peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
+    link: pairingLink(peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined),
     online: state?.settings.online ?? true,
   }));
   const reported = reportedProgress(link);

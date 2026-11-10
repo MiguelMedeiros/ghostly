@@ -120,7 +120,7 @@ The contract:
 
 | Part | What |
 |---|---|
-| In | Each `message.received`, and each `group.message` that mentions the agent, starts one turn: `ghostly listen --turns` makes it one `agent.turn` event. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
+| In | Each `message.received`, and each `group.message` that mentions the agent or presses a button of its question, starts one turn: `ghostly listen --turns` makes it one `agent.turn` event. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
 | Allowlist | Per contact and per group (`listen --from <chat>`, `--group <group>`), checked before the agent wakes. Anyone else's message is kept in the chat and never reaches the agent. |
 | Data, not instructions | The connector hands the agent a contact's text as quoted data, under `untrusted` in the turn, never in a command's arguments. It cannot stop a model from being persuaded, so the agent that answers has no tools ([Safe setup](#safe-setup)); real payments keep `--confirm-real`, given only by the wallet's owner. |
 | Out | `send` (with `--reply`), `typing --kind thinking --status "<text>"` while the agent works, `file send --voice` for a voice note, `file send` for a file, `react`. |

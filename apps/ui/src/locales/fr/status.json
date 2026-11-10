@@ -1,0 +1,33 @@
+{
+  "availabilities": {
+    "available": "Disponible",
+    "away": "Absent",
+    "busy": "Occupé",
+    "dnd": "Ne pas déranger"
+  },
+  "availability": "Disponibilité",
+  "clear": "Effacer le statut",
+  "customLabel": "Effacer à",
+  "dndHint": "Les messages arrivent sans son ni notification. Les appels sonnent toujours.",
+  "emoji": "Emoji",
+  "emojiMore": "Plus d'emoji",
+  "end": "Effacer après",
+  "ends": {
+    "1h": "1 heure",
+    "30m": "30 minutes",
+    "4h": "4 heures",
+    "custom": "Choisir une heure…",
+    "keep": "Jusqu'à {{time}}",
+    "never": "Ne pas effacer",
+    "today": "Aujourd'hui",
+    "week": "Cette semaine"
+  },
+  "menuLabel": "Votre statut : {{status}}. Changer de statut",
+  "past": "Choisissez une heure après maintenant.",
+  "placeholder": "Quel est votre statut ?",
+  "set": "Définir un statut",
+  "shared": "Vos contacts le voient à côté de votre nom.",
+  "text": "Texte du statut",
+  "title": "Statut",
+  "until": "jusqu'à {{time}}"
+}

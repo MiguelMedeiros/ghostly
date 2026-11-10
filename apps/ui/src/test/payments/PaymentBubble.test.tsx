@@ -40,6 +40,13 @@ it.each([
   ["⚡ 1.000 sats", false, "pt", "⚡ Enviou para você 1.000 sats"],
   // Written by a device whose own language uses other digits.
   ["⚡ ١٬٠٠٠ sats", false, "pt", "⚡ Enviou para você 1.000 sats"],
+  ["⚡ Requested ২১,০০০ test sats", false, "pt", "⚡ Pediu a você 21.000 sats de teste"],
+  ["⚡ Requested २१,००० test sats", false, "pt", "⚡ Pediu a você 21.000 sats de teste"],
+  ["⚡ ၂၁,၀၀၀ sats", false, "pt", "⚡ Enviou para você 21.000 sats"],
+  ["⚡ ༢༡,༠༠༠ sats", false, "pt", "⚡ Enviou para você 21.000 sats"],
+  ["⚡ ๒๑,๐๐๐ sats", false, "pt", "⚡ Enviou para você 21.000 sats"],
+  // Safari in Switzerland groups with a right single quotation mark.
+  ["⚡ Requested 21’000 test sats", true, "pt", "⚡ Você pediu 21.000 sats de teste"],
   ["Requested 2100 test sats on Ark", false, "pt", "⚡ Pediu a você 2.100 sats de teste"],
   ["⚡ Requested 5,000 sats from the group", true, "es", "⚡ Pediste 5000 sats"],
   ["1 test sats on Fedimint", true, "pt", "⚡ Você enviou 1 sat de teste"],

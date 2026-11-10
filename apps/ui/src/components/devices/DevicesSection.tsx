@@ -47,9 +47,9 @@ export function DevicesSection() {
   const [removed, setRemoved] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const [secret, setSecret] = useState<{ busy?: boolean; done?: boolean; error?: Problem }>({});
-  const newSecret = async () => {
+  const newSecret = async (fromOffer = false) => {
     setSecret({ busy: true });
-    try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
+    try { await engine.call("deviceNewSecret"); setSecret({ done: true }); if (fromOffer) setAnswered({}); }
     catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? said(key, t) : problemText(cause, t) }); }
   };
   // What the engine refused of "Not now" on the secret offer and of "Let <device> try again": said under each.
@@ -105,6 +105,18 @@ export function DevicesSection() {
   // its key: two devices may have the same name.
   const stopped = view?.secretOffer?.key ? devices.find((device) => !device.self && device.key === view.secretOffer!.key) : undefined;
   const waiting = listNamesFor(view?.waiting?.map((w) => w.name) ?? [], language);
+  // Not now or a new secret on the takeover's offer: its row goes at the next read, with the button that had the keyboard
+  // focus. Once it is gone, the focus goes to the stopped device's row (Move to, else its ⋮), else to Add a device.
+  const [answered, setAnswered] = useState<{ key?: string } | null>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const offered = !!view?.secretOffer;
+  useEffect(() => {
+    if (!answered || offered) return;
+    setAnswered(null);
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected) return;
+    if (answered.key && devices.some((device) => device.key === answered.key)) setRefocus(answered.key);
+    else addButton.current?.focus();
+  }, [answered, offered, devices]);
   // The handoff keeps the name the device had when it started: the set has its name after a Rename.
   const handoffDevice = handoff ? devices.find((device) => device.key === handoff.key)?.name || handoff.device : "";
   return (
@@ -112,7 +124,7 @@ export function DevicesSection() {
       {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
       <Row testId={full ? "device-add-full" : undefined} label={t("devices.section.lead")} hint={full ? t("devices.section.full") : t("devices.section.leadHint")}
         info={full ? t("devices.section.fullInfo") : t("devices.section.info")}>
-        <Button data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
+        <Button ref={addButton} data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
       </Row>
       {/* The other way round: this device, with a profile from another device. Offered while this profile has no other device. */}
       {canSwitch && view && devices.length <= 1 && !view.foreignSet && (
@@ -148,8 +160,8 @@ export function DevicesSection() {
           {view.secretOffer.lost && <Button data-testid="device-secret-offer-lost" onClick={() => setLost(true)}>{t("devices.remove.lost")}</Button>}
           {stopped
             ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{fillNames(t("devices.secret.removeOffer"), { device: stopped.name })}</Button>
-            : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>}
-          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss"))}>{t("devices.secret.notNow")}</Button>
+            : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret(true)}>{t("devices.secret.button")}</Button>}
+          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss").then(() => setAnswered({ key: stopped?.key })))}>{t("devices.secret.notNow")}</Button>
         </Row>
       )}
       {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
