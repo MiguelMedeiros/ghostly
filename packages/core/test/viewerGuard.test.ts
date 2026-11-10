@@ -104,6 +104,10 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     for (const charset of ["unicode", "ucs-2", "csunicode", "iso-10646-ucs-2", "unicodefeff", "unicodefffe", "\"UTF-16BE\""]) {
       expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<\0p\0")).policies, charset).toContain("script-src 'none'");
     }
+    // A charset hidden in a quoted string, or spelled with an escape: a browser reads those, so no script runs.
+    for (const type of ['text/html; foo="x;charset=utf-8";charset=unicode', 'text/html; charset="uni\\code"', 'text/html; charset="utf-8"', "text/html; charset=utf-8; charset=unicode"]) {
+      expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toContain("script-src 'none'");
+    }
     for (const charset of ["utf-8", "windows-1252", "no-such-name"]) {
       expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<p>hi")).policies, charset).not.toContain("script-src 'none'");
     }
