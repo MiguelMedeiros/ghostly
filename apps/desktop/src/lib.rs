@@ -140,6 +140,7 @@ macro_rules! commands {
             commands::bitcoind_rpc,
             commands::call_service,
             commands::close_service_windows,
+            commands::connection_service,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,

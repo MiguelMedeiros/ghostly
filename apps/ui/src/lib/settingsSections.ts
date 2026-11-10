@@ -55,9 +55,9 @@ export function sectionInView(boxes: readonly SectionBox[], line: number, viewBo
 /**
  * What a setting needs to be there at all: several profiles, an updater, wake-up push, wake-ups turned on (the online
  * notice rides on the subscription), calls' devices, translation (a `VITE_TRANSLATE` Desktop build,
- * lib/translateSettings.ts).
+ * lib/translateSettings.ts), the Android app (staying connected in the background).
  */
-export type SettingNeeds = "profiles" | "updates" | "wake" | "wakeOn" | "media" | "translate";
+export type SettingNeeds = "profiles" | "updates" | "wake" | "wakeOn" | "media" | "translate" | "android";
 
 /** One option the menu's search finds, by its row's label or by other words people look for it by. */
 export interface SettingEntry {
@@ -90,6 +90,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "notifications", label: "settings.systemNotifications", words: "settings.searchWords.systemNotices" },
   { section: "notifications", label: "pwa.wake", words: "settings.searchWords.wake", needs: "wake" },
   { section: "notifications", label: "pwa.wakeOnline", needs: "wakeOn" },
+  { section: "notifications", label: "settings.stayConnected", words: "settings.searchWords.stayConnected", needs: "android" },
   { section: "media", label: "settings.media.microphone", words: "settings.searchWords.microphone", needs: "media" },
   { section: "media", label: "settings.media.camera", words: "settings.searchWords.camera", needs: "media" },
   { section: "media", label: "settings.media.speaker", words: "settings.searchWords.speaker", needs: "media" },
