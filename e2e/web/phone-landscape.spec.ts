@@ -184,8 +184,12 @@ test("a phone on its side: an open select's list stays clear of the notch", { ta
   await expect(select).toBeVisible();
   const pane = (await page.locator("[data-page-body]").boundingBox())!;
   await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
-  await page.mouse.wheel(0, 150);
-  await expect(select).toBeInViewport({ ratio: 1 });
+  // Scrolled until it is whole on screen, a wheel step at a time: Appearance grew (Text size and its samples, #6128),
+  // and a fixed 150 px no longer reaches it.
+  await expect(async () => {
+    await page.mouse.wheel(0, 150);
+    await expect(select).toBeInViewport({ ratio: 1, timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
   const options = await optionsOf(select);
   const list = page.locator(`[id="${await select.getAttribute("aria-controls")}"]`);
   await expect(list).toHaveAttribute("data-placement", /.+/);
