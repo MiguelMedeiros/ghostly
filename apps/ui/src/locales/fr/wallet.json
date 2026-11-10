@@ -137,6 +137,7 @@
       "needsKey": "Clé requise",
       "noFederation": "Aucune fédération",
       "noSource": "Aucune source",
+      "shared": "Utilise votre solde {{name}}",
       "unavailable": "Indisponible"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "EVM local · token de test",
       "usdtSepolia": "Sepolia · token de test"
     },
+    "sameBalance": "Même solde que votre carte {{name}}",
     "status": {
       "away": "Ailleurs",
       "checkSettings": "Vérifiez les réglages",
@@ -873,6 +875,22 @@
       "github": "Il demande une connexion GitHub, donc Ghostly ne le fait pas pour vous.",
       "login": "Il demande une connexion, donc Ghostly ne le fait pas pour vous."
     }
+  },
+  "total": {
+    "away": "Sur {{device}}, hors du total",
+    "federation": "Ecash détenu par la fédération",
+    "info": "Le total n'additionne que les soldes que Ghostly a pu lire à l'instant. Une carte illisible reste en dehors, et Testnet n'est jamais ajouté à Mainnet.",
+    "label": "Soldes",
+    "mint": "Ecash détenu par vos mints",
+    "none": "Non configuré",
+    "ready": "Disponible maintenant",
+    "shared": "Même solde que {{name}}, compté une fois",
+    "title": "D'où vient le solde",
+    "total": "Total",
+    "uncounted": "{{count}} cartes hors du total",
+    "uncounted_one": "{{count}} carte hors du total",
+    "unknown": "Illisible pour l'instant, hors du total",
+    "waiting": "{{amount}} {{unit}} pas encore disponibles"
   },
   "ui": {
     "amountIn": "Montant en {{unit}}",
