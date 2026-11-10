@@ -948,8 +948,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               {/* The one way to rename the chat: a button, so the keyboard reaches it too. Inside the screen's heading,
-                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
-              <h1 ref={headingRef} tabIndex={-1} className="m-0 flex min-w-0 text-[15px] font-normal leading-tight outline-none">
+                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab.
+                  On a phone the name has its room first: it does not shrink beside the status's emoji, which gives way
+                  (PeerPresenceLine's `emojiOnPhone`), and is cut only when it alone is wider than the row. */}
+              <h1 ref={headingRef} tabIndex={-1} className={`m-0 flex min-w-0 ${phoneHeader ? "shrink-0 max-w-full" : ""} text-[15px] font-normal leading-tight outline-none`}>
               <button
                 type="button"
                 ref={nameRef}

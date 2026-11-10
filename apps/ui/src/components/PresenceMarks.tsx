@@ -62,11 +62,20 @@ export function PeerStatusMark({ entry, testId, hidden = false, className = "" }
 }
 
 /**
+ * A phone's emoji alone, whole or not shown: a line of `text-xs` (16 px) high that wraps, its empty `::before` first
+ * and no gap after it, so an emoji with no room left goes to the second line, which `overflow-hidden` cuts away.
+ */
+const GIVES_WAY = "max-md:h-4 max-md:flex-wrap max-md:gap-0 max-md:overflow-hidden max-md:before:h-full max-md:before:content-['']";
+
+/**
  * The contact's presence and status in words beside their name (the chat's header, the contact panel): the dot's words
  * for a screen reader only (the dot is on the picture), and the status shown. Nothing while they say nothing.
  * `emojiOnPhone`: a phone shows the status's emoji alone, its text for a screen reader (the chat's header).
  * With nothing to see (online with no status, or on such a phone a status with no emoji), the line is out of the row's
  * flow: an empty item still took the row's gap from the name beside it, 4 px of a long name on a 390 px phone.
+ * On such a phone the emoji shows whole or not at all, in the room the name leaves it (the header gives the name its
+ * room first): the line is one line high and wraps, behind an empty first item (its `::before`), so an emoji wider
+ * than what is left goes to a second line, cut away, rather than half drawn or over the buttons beside it.
  */
 export function PeerPresenceLine({ peerKey, testId, className = "", emojiOnPhone = false }: { peerKey?: string; testId: string; className?: string; emojiOnPhone?: boolean }) {
   const { t } = useI18n();
@@ -75,7 +84,7 @@ export function PeerPresenceLine({ peerKey, testId, className = "", emojiOnPhone
   const shown = statusText(t, entry);
   if (!tone && !shown) return null;
   // Each class whole in the source, for Tailwind to find it.
-  const unseen = !shown ? "sr-only" : !emojiOnPhone ? "" : entry?.status?.emoji ? "max-md:[&_bdi]:sr-only" : "max-md:[&_bdi]:sr-only max-md:sr-only";
+  const unseen = !shown ? "sr-only" : !emojiOnPhone ? "" : entry?.status?.emoji ? `max-md:[&_bdi]:sr-only ${GIVES_WAY}` : "max-md:[&_bdi]:sr-only max-md:sr-only";
   return (
     <span data-testid={testId} className={`flex min-w-0 items-center gap-1 ${unseen} ${className}`}>
       {tone && <span data-testid={`${testId}-presence`} className="sr-only">{presenceLabel(t, tone)}</span>}

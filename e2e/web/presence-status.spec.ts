@@ -7,8 +7,8 @@ import { pair } from "../support/paired";
  * idle while his page is hidden, gone when his session ends. The status he sets in the account menu's picker (an
  * availability, an emoji, a text and an end) shows beside his name until he clears it or it ends. With Share when I'm
  * online off there is no dot, and his status still shows. Alice's Do not disturb lets a message in with no sound and
- * no notice. On a phone in Arabic the header keeps his whole name, his status text isolated in its own direction (not
- * yet on a 320 px phone: the last test, known to fail).
+ * no notice. On a phone, in Arabic and in English, the header keeps his whole name, his status's emoji giving way
+ * first, and his status text isolated in its own direction.
  */
 test.describe.configure({ timeout: 4 * 60_000 });
 
@@ -302,28 +302,31 @@ test("with Do not disturb a message arrives with no sound and no notice, and the
 });
 
 /**
- * The names e2e/web/chat-header-phone.spec.ts checks, with the narrowest phone each fits beside the status's emoji.
- * The Arabic name: 390, not that spec's 375. Its width is the system's Arabic font's: 131 px on GitHub's runner, a few
- * less on One and Omarchy, and the name has 128 px at 375 beside the emoji (131 with no status). Whole beside the emoji
- * there is a font's luck; the status giving way first is the 320 px test's (known to fail) below.
+ * The names e2e/web/chat-header-phone.spec.ts checks, with the narrowest phone each is whole on beside the status. The
+ * Arabic name is 131 px wide in GitHub's runner's Arabic font (a few less on One and Omarchy): at 375 px there is room
+ * for it whole, not for it and the emoji (it had 128 px beside the emoji), so the emoji gives way there.
  */
-const NAMES: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["عبد الرحمن الفارسي", 390]];
+const NAMES: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["عبد الرحمن الفارسي", 375]];
 const PHONES = [{ width: 402, height: 874 }, { width: 390, height: 844 }, { width: 375, height: 667 }, { width: 320, height: 568 }];
+const LANGUAGES = [
+  { language: "ar", called: "Arabic", dir: "rtl", words: "متصل، مشغول" },
+  { language: "en", called: "English", dir: "ltr", words: "Online, busy" },
+] as const;
 
-/** Alice on a phone in Arabic, with Bob busy at lunch: what her chat's header shows of him. */
-async function phoneInArabic(peer: (name: string, options?: PeerOptions) => Promise<Peer>) {
+/** Alice on a phone in `language`, with Bob busy at lunch: what her chat's header shows of him. */
+async function phoneIn(peer: (name: string, options?: PeerOptions) => Promise<Peer>, { language, dir }: (typeof LANGUAGES)[number]) {
   const bob = await peer("bob");
   const alice = await peer("alice", { mobile: true, viewport: { width: 390, height: 844 } });
   await pair(bob, alice);
   await setStatus(bob, { availability: "Busy", emoji: "🍕", text: "At lunch with the whole team today", end: "4 hours" });
   const page = alice.page, name = page.getByTestId("chat-name"), at = seen(alice);
   await expect(at.headEmoji).toHaveText("🍕", { timeout: 20_000 });
-  await page.evaluate(() => {
+  await page.evaluate((language) => {
     const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
-    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
-  });
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+  }, language);
   await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await expect(page.locator("html")).toHaveAttribute("dir", dir);
   // A new session after the reload: Bob says his whole state again.
   await expect(at.headEmoji).toHaveText("🍕", { timeout: 90_000 });
   const rename = async (to: string) => {
@@ -333,54 +336,47 @@ async function phoneInArabic(peer: (name: string, options?: PeerOptions) => Prom
     await box.press("Enter");
     await expect(name).toHaveText(to);
   };
-  /** The name against what it holds (cut with an ellipsis when `shown` < `whole`), and whether the status overlaps it. */
+  /**
+   * The name against what it holds (cut with an ellipsis when `shown` < `whole`), whether the status overlaps it, and
+   * the emoji: drawn whole inside the status's line, or gone under it (given way), never half drawn.
+   */
   const line = () => name.evaluate((el) => {
     const status = document.querySelector("[data-testid=chat-presence]")!.getBoundingClientRect();
+    const mark = document.querySelector("[data-testid=chat-presence-status-emoji]")!.getBoundingClientRect();
     const box = el.getBoundingClientRect();
-    return { shown: el.clientWidth, whole: el.scrollWidth, overlap: box.left < status.right && status.left < box.right };
+    const inside = mark.left >= status.left - 0.5 && mark.right <= status.right + 0.5 && mark.top >= status.top - 0.5 && mark.bottom <= status.bottom + 0.5;
+    const emoji = inside ? "whole" : mark.top >= status.bottom - 0.5 ? "away" : "partly";
+    return { shown: el.clientWidth, whole: el.scrollWidth, overlap: box.left < status.right && status.left < box.right, emoji };
   });
   return { page, at, rename, line };
 }
 
-test("on a phone in Arabic the chat's header keeps the contact's whole name beside their status, its text isolated", { tag: ["@feature:chat.status.shown", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
-  const { page, at, rename, line } = await phoneInArabic(peer);
-  await expect(at.headWords).toHaveText("متصل، مشغول");
-  await expect(at.headDot).toHaveAttribute("data-tone", "busy");
-  // The text: in a <bdi dir=auto> of its own, laid out by its own letters (for a screen reader only on a phone: the emoji shows).
-  await expect(at.headText).toHaveJSProperty("tagName", "BDI");
-  await expect(at.headText).toHaveAttribute("dir", "auto");
-  await expect(at.headText).toHaveText("At lunch with the whole team today");
-  expect(await at.headText.evaluate((el) => getComputedStyle(el).direction)).toBe("ltr");
+for (const lang of LANGUAGES) {
+  test(`on a phone in ${lang.called} the chat's header keeps the contact's whole name, their status's emoji giving way first`, { tag: ["@feature:chat.status.shown", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+    const { page, at, rename, line } = await phoneIn(peer, lang);
+    await expect(at.headWords).toHaveText(lang.words);
+    await expect(at.headDot).toHaveAttribute("data-tone", "busy");
+    // The text: in a <bdi dir=auto> of its own, laid out by its own letters (for a screen reader only on a phone: the emoji shows).
+    await expect(at.headText).toHaveJSProperty("tagName", "BDI");
+    await expect(at.headText).toHaveAttribute("dir", "auto");
+    await expect(at.headText).toHaveText("At lunch with the whole team today");
+    expect(await at.headText.evaluate((el) => getComputedStyle(el).direction)).toBe("ltr");
 
-  // Each name beside the emoji, never under it, on each phone of 375 px and more (320 px: the next test), and whole
-  // from the narrowest phone it fits.
-  for (const [shown, narrowest] of NAMES) {
-    await rename(shown);
-    for (const phone of PHONES) {
-      if (phone.width < 375) continue;
-      await page.setViewportSize(phone);
-      const room = await line();
-      if (phone.width >= narrowest) expect(room.whole, `"${shown}" at ${phone.width}px: ${JSON.stringify(room)}`).toBeLessThanOrEqual(room.shown);
-      expect(room.overlap, `"${shown}" at ${phone.width}px: ${JSON.stringify(room)}`).toBe(false);
-      await expect(at.headEmoji).toBeVisible();
+    // Each name beside the status, never under it, on each phone; whole from the narrowest phone it fits. The emoji
+    // shows whole or not at all, and is gone before the name is cut.
+    for (const [shown, narrowest] of NAMES) {
+      await rename(shown);
+      for (const phone of PHONES) {
+        await page.setViewportSize(phone);
+        const room = await line(), said = `"${shown}" at ${phone.width}px: ${JSON.stringify(room)}`;
+        if (phone.width >= narrowest) expect(room.whole, said).toBeLessThanOrEqual(room.shown);
+        expect(room.overlap, said).toBe(false);
+        expect(room.emoji, said).not.toBe("partly");
+        if (room.whole > room.shown) expect(room.emoji, said).toBe("away");
+        // A short name leaves the emoji its room from 375 px.
+        if (shown === "Cérebro (Mac)" && phone.width >= 375) expect(room.emoji, said).toBe("whole");
+        if (shown === NAMES[2][0]) await page.screenshot({ path: testInfo.outputPath(`phone-${lang.language}-${phone.width}.png`) });
+      }
     }
-  }
-  await page.setViewportSize({ width: 375, height: 667 });
-  await page.screenshot({ path: testInfo.outputPath("phone-arabic-375.png") });
-});
-
-/*
- * Known to fail: on a 320 px phone a contact's status takes the room "Cérebro (Mac)" needs (83 of its 97 px; with no
- * status set, while the contact is online, it has them all): the header's status (apps/ui/src/pages/Chat.tsx, the `PeerPresenceLine`
- * beside the name) does not give way before the name, as the chat list's does. Once it does, this passes: take
- * `test.fail` away.
- */
-test("on a 320 px phone in Arabic a contact's status gives way before their name", { tag: ["@feature:chat.status.shown", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
-  test.fail(true, "the header's status takes the name's room at 320 px (Chat.tsx PeerPresenceLine)");
-  const { page, rename, line } = await phoneInArabic(peer);
-  await rename("Cérebro (Mac)");
-  await page.setViewportSize({ width: 320, height: 568 });
-  await page.screenshot({ path: testInfo.outputPath("phone-arabic-320.png") });
-  const room = await line();
-  expect(room.whole, `"Cérebro (Mac)" at 320px: ${JSON.stringify(room)}`).toBeLessThanOrEqual(room.shown);
-});
+  });
+}

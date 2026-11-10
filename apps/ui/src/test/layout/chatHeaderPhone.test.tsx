@@ -79,6 +79,33 @@ describe("a chat's header on a phone", () => {
     expect(document.activeElement).toBe(control);
   });
 
+  it("gives the name its room before the status's emoji: it does not shrink beside it, and is cut only alone", async () => {
+    viewport(375, 667);
+    const { engine } = openChat();
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" }, peerPresence: "active", peerStatus: { emoji: "🍕", text: "At lunch" } } as never)] });
+    const emoji = await screen.findByTestId("chat-presence-status-emoji");
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toContainElement(screen.getByTestId("chat-name"));
+    // The heading keeps its whole width (`shrink-0`) up to the row's (`max-w-full`), where the name is cut at its end.
+    expect(heading).toHaveClass("shrink-0", "max-w-full", "min-w-0");
+    expect(screen.getByTestId("chat-name")).toHaveClass("min-w-0", "truncate");
+    // The emoji is in the line beside it, which gives way (wraps out of sight) when the name leaves it no room.
+    const line = screen.getByTestId("chat-presence");
+    expect(line).toContainElement(emoji);
+    expect(heading).not.toContainElement(emoji);
+    expect(line).toHaveClass("min-w-0", "max-md:flex-wrap", "max-md:overflow-hidden");
+  });
+
+  it("wider than a phone, the name shrinks with what is beside it, as before", async () => {
+    viewport(1024, 768);
+    openChat();
+    const name = await screen.findByTestId("chat-name");
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toContainElement(name);
+    expect(heading).not.toHaveClass("shrink-0");
+    expect(heading).not.toHaveClass("max-w-full");
+  });
+
   it("wider than a phone, every button is in the header as before", async () => {
     viewport(1024, 768);
     openChat();
