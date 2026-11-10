@@ -1201,13 +1201,14 @@ describe("relay transport: reads of an invite this side just made go over a spen
   // past it. The third invite's key was read once, then not until the minute freed: the joiner's knock 48 s late, and
   // join to live 60 s against 2.6 and 4.6 s for the first two.
   const invite = createIdentity(), gone = createIdentity(), goneToo = createIdentity(), other = createIdentity();
+  const invites = Array.from({ length: 3 }, () => createIdentity());
   function counting() {
     const log: { key: string; method: string; host: string }[] = [];
     const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       const key = url.pathname.slice(1);
       log.push({ key, method: init?.method ?? "GET", host: url.host });
-      const peer = [invite, gone, goneToo].find((p) => p.pubKeyZ32 === key) ?? other;
+      const peer = [invite, gone, goneToo, ...invites].find((p) => p.pubKeyZ32 === key) ?? other;
       return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(peer, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch });
     const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
@@ -1246,6 +1247,17 @@ describe("relay transport: reads of an invite this side just made go over a spen
     expect(await went(() => relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }))).toBe(true);
     for (const host of ["a.test", "b.test"]) expect(log.filter((r) => r.host === host).length).toBeLessThanOrEqual(REQUESTS_PER_MINUTE + allowance);
     expect(await went(departed(relay, gone.pubKeyZ32))).toBe(false);
+  });
+
+  it("reads every invite together a few times past the limit: a contact that just restarted is still read", async () => {
+    // A web profile with 150 chats added from old sessions (each an invite of this side's, awaited from that start) had
+    // their reads take the chats' allowance at every refill: a live contact's reads after a reload went once a minute,
+    // and the chat came back in 2 to 7 min against 41 to 69 s.
+    const { relay, log, went } = counting();
+    await spendBoth(relay);
+    for (let i = 0; i < AWAITED_READS; i++) for (const key of invites) await went(() => relay.resolve(key.pubKeyZ32, { urgent: false, awaited: true }));
+    expect(log.slice(2 * REQUESTS_PER_MINUTE)).toHaveLength(AWAITED_READS);
+    expect(await went(departed(relay, gone.pubKeyZ32))).toBe(true);
   });
 
   it("has its reads back a minute on, once the minute frees", async () => {
