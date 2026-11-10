@@ -84,6 +84,8 @@ const FAILURE_KEYS: Record<string, TranslationKey> = {
   elsewhere: "devices.fail.elsewhere", full: "devices.fail.full", replaced: "devices.fail.replaced", failed: "devices.fail.failed",
   "in-use": "devices.fail.inUse", loading: "devices.fail.loading", offline: "devices.fail.offline", set: "devices.fail.set", typo: "devices.fail.typo", update: "devices.fail.update",
   "not-ghostly": "devices.fail.notGhostly", damaged: "devices.fail.damaged", chat: "devices.fail.chat", "home-screen": "devices.join.homeScreen",
+  // Add a device while the profile moves or the set changes: as a Remove or a Rename then.
+  busy: "devices.remove.fail.busy",
 };
 
 export const failureKey = (reason: EnrollFailure | string): TranslationKey => FAILURE_KEYS[reason] ?? "devices.fail.failed";
