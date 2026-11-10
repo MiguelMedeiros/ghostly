@@ -332,15 +332,18 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
 }
 
 /**
- * How long a mint that could not be loaded stays so for the payment poll's reads: the payments of one round at a gone
- * mint share its failure, instead of each loading it again (three requests each).
+ * How long a mint that could not be loaded stays so for the payment poll's reads, then twice as long after each failed
+ * load up to `MINT_FAILED_CAP_MS`: the payments of one round at a gone mint share its failure, instead of each loading
+ * it again (three requests each), and so do payments made at different times, whose own backoffs are out of step.
  */
 export const MINT_FAILED_MS = 5_000;
+export const MINT_FAILED_CAP_MS = 600_000;
 
 export class CashuWallet {
   private readonly wallets = new Map<string, Promise<Wallet>>();
-  /** When the load in `wallets` of a mint failed: it is tried again once `MINT_FAILED_MS` passed. */
-  private readonly failedLoads = new Map<string, number>();
+  /** The mints whose load in `wallets` failed: the payment poll's reads try them again at `mintAsk`'s pace. */
+  private readonly failedLoads = new Set<string>();
+  private readonly mintAsk = new AskBackoff(MINT_FAILED_MS, MINT_FAILED_CAP_MS);
   private readonly names = new Map<string, string>();
   private readonly infos = new Map<string, MintInfoView>();
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -2004,16 +2007,20 @@ export class CashuWallet {
     return out;
   }
 
+  /** Whether the payment poll's reads at this mint may ask it now: its last load did not fail, or its next try came. */
+  mintDue(mint: string, now: number): boolean {
+    return !this.failedLoads.has(mint) || this.mintAsk.due(mint, now);
+  }
+
   // -- storage -----------------------------------------------------------------
 
   /**
    * A mint's loaded wallet. A failed load is tried again by the next caller, unless that one takes `recentFailure`
-   * (a payment's reads in the poll): a load failed within `MINT_FAILED_MS` is its answer too.
+   * (a payment's reads in the poll): a failed load is its answer too until the mint's next try (`mintAsk`).
    */
   private wallet(mint: string, recentFailure = false): Promise<Wallet> {
-    const failed = this.failedLoads.get(mint);
     let wallet = this.wallets.get(mint);
-    if (failed !== undefined && !(recentFailure && Date.now() - failed < MINT_FAILED_MS)) wallet = undefined;
+    if (this.failedLoads.has(mint) && !(recentFailure && !this.mintAsk.due(mint, Date.now()))) wallet = undefined;
     if (!wallet) {
       const loading = (async () => {
         const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
@@ -2025,7 +2032,11 @@ export class CashuWallet {
       wallet = loading;
       this.failedLoads.delete(mint);
       this.wallets.set(mint, loading);
-      loading.catch(() => { if (this.wallets.get(mint) === loading) this.failedLoads.set(mint, Date.now()); });
+      loading.then(() => this.mintAsk.forget(mint), () => {
+        if (this.wallets.get(mint) !== loading) return;
+        this.failedLoads.add(mint);
+        this.mintAsk.missed(mint, Date.now());
+      });
     }
     return wallet;
   }

@@ -613,6 +613,9 @@
     "paste": "Colar",
     "scan": "Escanear"
   },
+  "sentEcash": {
+    "title": "Enviado em uma conversa excluída"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Criando suas carteiras na Mainnet…",

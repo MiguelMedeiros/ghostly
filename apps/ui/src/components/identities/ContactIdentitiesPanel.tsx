@@ -16,6 +16,7 @@ import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
 import { useContactFace } from "./contactFace";
 import { PeerAvatar } from "../Avatar";
+import { PeerPresenceLine } from "../PresenceMarks";
 import { AvatarOpener } from "../AvatarViewer";
 import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
@@ -78,11 +79,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={photo} name={name} testId="chat-identities-avatar"
-            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg">
-            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} />
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg [--ring:var(--theme-panel-header)]">
+            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
             <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
+            <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
           </div>
         </div>
@@ -207,11 +210,13 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
 
 /**
  * Who wrote a name, in the app's language where the provider's words are fixed (a key's user ID is its holder's own, a
- * sign-in provider may not have checked the email): a caveat to act on. Any other source is shown as written.
+ * sign-in provider may not have checked the email): a caveat to act on. A Nostr proof's check is said the same way.
+ * Any other source is shown as written.
  */
 function nameSource(provider: string, source: string, t: Translate): string {
   const known = displaySourceOf(provider, source);
   if (!known) return source;
+  if (known.kind === "nostr-signature") return t("identities.contact.sourceNostrSignature");
   if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
   if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
   const signer = { provider: known.provider };
@@ -257,7 +262,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.proves")}</dt>
           <dd>{card.attested ? (r.verified.attester ? fillNames(t("identities.contact.attested"), { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
           <dt>{t("identities.contact.how")}</dt>
-          <dd><bdi>{r.verified.source}</bdi></dd>
+          <dd><bdi>{nameSource(r.provider, r.verified.source, t)}</bdi></dd>
           <dt>{t("identities.contact.checked")}</dt>
           <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>

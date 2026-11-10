@@ -327,6 +327,21 @@
     "pin": "置顶",
     "unpin": "取消置顶"
   },
+  "presence": {
+    "availability": {
+      "away": "离开",
+      "busy": "忙碌",
+      "dnd": "请勿打扰"
+    },
+    "dot": {
+      "away": "在线，离开",
+      "busy": "在线，忙碌",
+      "dnd": "在线，请勿打扰",
+      "idle": "在线，空闲",
+      "online": "在线"
+    },
+    "status": "状态：{{status}}"
+  },
   "preview": {
     "arkAddress": "Ark 地址",
     "bitcoinAddress": "₿ 比特币地址",

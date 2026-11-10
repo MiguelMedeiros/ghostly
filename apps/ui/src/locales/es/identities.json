@@ -120,6 +120,7 @@
     "showProfile": "Mostrar perfil público",
     "since": "Desde",
     "sourceKeyserver": "correo confirmado a keys.openpgp.org por su dueño: la comprobación es del servidor de claves, no de Ghostly",
+    "sourceNostrSignature": "Firma de Nostr (NIP-01, BIP-340)",
     "sourceSigned": "firmado por {{provider}}",
     "sourceSignedEmailUnverified": "firmado por {{provider}}; correo no verificado por {{provider}}",
     "sourceSignedEmailVerified": "firmado por {{provider}}; correo verificado por {{provider}}",
@@ -363,18 +364,56 @@
   },
   "providers": {
     "atproto": {
+      "description": "Demuestra que controlas una cuenta de Bluesky (AT Protocol): apruébalo en tu servidor y Ghostly publica un registro en el repositorio de tu cuenta. Es público, como el resto de tu repositorio: cualquiera puede ver que esta cuenta hizo una prueba de Ghostly, pero no con quién la compartes. Los contactos la comprueban sin iniciar sesión.",
+      "limits": "Firmada con la clave de tu cuenta, que suele tener tu servidor. Prueba el control de la cuenta, no quién eres; el usuario solo se muestra mientras apunte de vuelta a la cuenta.",
+      "privacy": "La app de tu contacto pide el documento de tu cuenta al directorio PLC (o a tu host de did:web), el registro a tu servidor y tu usuario a su resolvedor DNS-over-HTTPS o al sitio web de tu usuario, así que todos ellos saben que se comprobó esta cuenta.",
       "progress": {
         "approve": "Aprueba en {{server}} en la ventana que se abrió…",
         "deleting": "Borrando el registro en {{server}}…",
         "lookingUp": "Buscando {{account}}…",
         "publishing": "Publicando la prueba en {{server}}…"
+      },
+      "signers": {
+        "atproto-oauth": {
+          "action": "Continuar en tu servidor",
+          "description": "Abre la página de inicio de sesión de tu servidor. Ghostly solo pide crear y borrar sus propios registros de prueba: nunca publicar, leer tus mensajes ni editar tu perfil.",
+          "fields": {
+            "handle": {
+              "help": "Tu usuario de Bluesky, tu propio dominio si usas uno, o tu DID.",
+              "label": "Usuario"
+            }
+          },
+          "label": "Tu servidor (Bluesky u otro PDS)"
+        },
+        "atproto-oauth-full": {
+          "action": "Continuar en tu servidor (acceso completo)",
+          "description": "Pide acceso a toda tu cuenta, para servidores que no pueden limitar el permiso de Ghostly. Ghostly lo sugiere cuando tu servidor rechaza el inicio de sesión más limitado o la escritura del registro. Aun así, Ghostly solo escribe este registro y devuelve el acceso enseguida.",
+          "fields": {
+            "handle": {
+              "help": "Tu usuario de Bluesky, tu propio dominio si usas uno, o tu DID.",
+              "label": "Usuario"
+            }
+          },
+          "label": "Tu servidor, acceso completo (servidores antiguos)"
+        }
+      },
+      "subject": {
+        "label": "Cuenta (DID)"
+      },
+      "summary": "Publica un registro en tu servidor de Bluesky",
+      "unpublish": {
+        "description": "También borra el registro de tu servidor: tu servidor te pide que lo apruebes."
       }
     },
     "bitcoin": {
+      "description": "Demuestra que puedes firmar con la clave de una dirección Bitcoin: tu billetera firma la declaración y tú pegas la firma.",
+      "label": "Dirección Bitcoin",
+      "limits": "No prueba un saldo, un pago pasado ni que fueras a pagar.",
       "paste": {
         "label": "Firma",
         "placeholder": "smp… (BIP-322) o la firma base64 que muestra tu cartera"
       },
+      "privacy": "Nada: la firma se comprueba en este dispositivo, sin consultar la blockchain. Los contactos con quienes la compartes conocen la dirección.",
       "scripts": {
         "p2pkh": "heredada (1…)",
         "p2sh": "SegWit anidado (3…)",
@@ -382,6 +421,27 @@
         "p2wpkh": "SegWit nativo (bc1q…)",
         "p2wsh": "script / multifirma (P2WSH)",
         "witness-unknown": "versión futura de SegWit"
+      },
+      "signers": {
+        "bitcoin-core": {
+          "description": "Firma de mensaje heredada: solo para direcciones heredadas 1…"
+        },
+        "coldcard": {
+          "description": "Firma de mensaje BIP-322."
+        },
+        "electrum": {
+          "description": "Firma de mensaje heredada: solo para direcciones heredadas 1…"
+        },
+        "other": {
+          "description": "Firma de mensaje BIP-322.",
+          "label": "Otra billetera"
+        },
+        "sparrow": {
+          "description": "Firma de mensaje BIP-322."
+        },
+        "trezor": {
+          "description": "Firma de mensaje heredada: solo para direcciones heredadas 1…"
+        }
       },
       "steps": {
         "address": "Con esta dirección:",
@@ -394,6 +454,12 @@
         "statement": "Firma exactamente esta declaración, como una sola línea, sin añadir un salto de línea:",
         "testnet": "Redes de prueba: {{how}}"
       },
+      "subject": {
+        "help": "Prueba: quien hizo esta firma podía firmar con la clave de esta dirección cuando firmó. No prueba que la dirección tenga saldo, ahora o alguna vez. No prueba que enviara o recibiera ningún pago pasado. No prueba que fuera a pagarte, ni a gastar desde esta dirección.",
+        "label": "Dirección Bitcoin",
+        "placeholder": "bc1q… (tb1… en redes de prueba)"
+      },
+      "summary": "Firma un mensaje en tu propia billetera",
       "wallets": {
         "bitcoin-core": {
           "step1": "Bitcoin Core firma mensajes solo en el formato heredado, para una dirección heredada (1… en mainnet, m… o n… en redes de prueba). Crea una en la pestaña Receive con el tipo Base58 (Legacy), o con `getnewaddress \"\" legacy`.",
@@ -436,12 +502,14 @@
       }
     },
     "did": {
+      "description": "Demuestra que controlas un identificador descentralizado (DID del W3C): firma la declaración con una clave que su documento DID indica o, para did:web, publícala junto a tu did.json.",
       "file": {
         "check": "Luego pulsa Comprobar. El archivo sigue siendo público mientras la prueba esté en uso; borrarlo retira esta prueba de todos los contactos en su próxima comprobación.",
         "content": "Con exactamente este contenido:",
         "create": "Crea este archivo en tu servidor web, junto a tu did.json:",
         "serve": "Sírvelo por HTTPS exactamente en esa dirección, sin ninguna redirección, y con esta cabecera para que los navegadores puedan leerlo (tu did.json también la necesita):"
       },
+      "limits": "No prueba quién controla el DID, solo que quien añadió la prueba tenía una de sus claves (o su sitio web).",
       "paste": {
         "label": "JWS o firma",
         "placeholder": "eyJhbGciOi… o la firma en hexadecimal"
@@ -459,10 +527,25 @@
         "unusable": "{{count}} claves: otra curva, o no son para authentication ni assertionMethod",
         "unusableOne": "1 clave: otra curva, o no es para authentication ni assertionMethod"
       },
+      "privacy": "did:key y did:jwk: nada, se comprueba en este dispositivo. did:web: la app del contacto pregunta a su resolvedor DNS-over-HTTPS por tu dominio y descarga tu did.json, así que tu servidor web ve la dirección IP del contacto. did:dht: uno de los relays Pkarr del contacto (sus ajustes de Red) sabe qué DID se consultó.",
       "service": {
         "add": "Añade esta entrada a la lista \"service\" de tu did.json:",
         "addAt": "Añade esta entrada a la lista \"service\" de tu did.json ({{url}}):",
         "check": "Luego pulsa Comprobar. Quitar la entrada retira esta prueba de todos los contactos en su próxima comprobación."
+      },
+      "signers": {
+        "file": {
+          "description": "Solo did:web: sube un pequeño archivo junto a tu did.json. Las apps de tus contactos descargan ambos de tu servidor.",
+          "label": "Publicar un archivo junto a did.json"
+        },
+        "service": {
+          "description": "Solo did:web: añade una entrada a la lista service de tu did.json. Las apps de tus contactos la leen allí.",
+          "label": "Añadir un servicio a did.json"
+        },
+        "sign": {
+          "description": "Firma la declaración con una clave que tu documento DID indica para authentication o assertionMethod, y pega un JWS o la firma sin procesar. La clave privada nunca entra en Ghostly.",
+          "label": "Firmar con una clave del DID"
+        }
       },
       "steps": {
         "anyKey": "una clave listada en authentication o assertionMethod",
@@ -471,9 +554,15 @@
         "openssl": "O con OpenSSL 3 y tu clave {{curve}} en PEM:",
         "paste": "Pega lo que muestre: un JWS compacto ({{alg}}, adjunto o separado), o la firma en hexadecimal o base64. Si tu DID lista varias claves, puedes escribir antes el id de la clave: #key-1 <firma>.",
         "sign": "Firma esta declaración con la clave privada de {{key}}. Es una sola línea, sin salto de línea al final:"
-      }
+      },
+      "subject": {
+        "help": "did:key, did:jwk, did:dht o did:web. Los contactos ven el DID completo y la clave que firmó.",
+        "placeholder": "did:key:z6Mk… o did:web:example.com"
+      },
+      "summary": "did:key, did:jwk, did:dht o did:web"
     },
     "domain": {
+      "description": "Demuestra que controlas un nombre de dominio: publica un registro DNS TXT o un archivo en su sitio web, una vez. Las apps de tus contactos lo consultan cuando lo compartes y pueden comprobarlo de nuevo más tarde.",
       "dns": {
         "name": "Abre los ajustes de DNS de {{domain}} en tu registrador o proveedor de DNS y añade un registro TXT con este nombre. Algunos proveedores añaden el dominio por sí mismos: entonces escribe solo la parte antes de {{domain}}.",
         "public": "El registro sigue siendo público mientras la prueba esté en uso. Quitarlo retira esta prueba de todos los contactos en su próxima comprobación.",
@@ -486,27 +575,132 @@
         "file": "Crea este archivo en el servidor web de {{domain}}:",
         "serve": "Sírvelo por HTTPS exactamente en esa dirección, sin ninguna redirección (ni siquiera a www), y con esta cabecera para que los navegadores puedan leerlo:"
       },
+      "label": "Dominio",
+      "limits": "No prueba quién gestiona el dominio, solo que quien añadió la prueba podía publicar en él.",
       "nip05": {
         "approve": "Aprueba la declaración de identidad de Ghostly en tu firmante."
-      }
+      },
+      "privacy": "DNS: la app del contacto pide el registro al resolvedor DNS-over-HTTPS elegido en sus ajustes (Quad9 por defecto; el siguiente de Quad9, Cloudflare y Google si no responde), así que ese resolvedor sabe que se comprobó el dominio. Sitio web o NIP-05: el resolvedor conoce el dominio, y el servidor web del dominio ve la dirección IP del contacto.",
+      "signers": {
+        "dns": {
+          "description": "Añade un registro TXT en tu proveedor de DNS. Las apps de tus contactos lo consultan con un resolvedor DNS-over-HTTPS.",
+          "label": "Registro DNS TXT"
+        },
+        "https": {
+          "description": "Sube un pequeño archivo a tu sitio web. Las apps de tus contactos lo descargan de tu servidor.",
+          "label": "Archivo en tu sitio web"
+        },
+        "nip05-nip07": {
+          "description": "¿Ya usas NIP-05? Firma con la clave de Nostr que el nostr.json de tu dominio indica para el propio dominio. No hace falta ningún registro nuevo.",
+          "fields": {
+            "domain": {
+              "help": "Su /.well-known/nostr.json debe indicar esta clave de Nostr para \"_\" (el propio dominio).",
+              "label": "Dominio"
+            }
+          },
+          "label": "NIP-05 con una extensión del navegador"
+        },
+        "nip05-nip46": {
+          "description": "¿Ya usas NIP-05? Firma con la clave de Nostr que el nostr.json de tu dominio indica para el propio dominio. No hace falta ningún registro nuevo.",
+          "fields": {
+            "bunker": {
+              "label": "Enlace de conexión del firmante"
+            },
+            "domain": {
+              "help": "Su /.well-known/nostr.json debe indicar esta clave de Nostr para \"_\" (el propio dominio).",
+              "label": "Dominio"
+            }
+          },
+          "label": "NIP-05 con un firmante remoto"
+        }
+      },
+      "subject": {
+        "help": "Un dominio o subdominio que controlas. Una prueba para alice.example.com se publica en alice.example.com.",
+        "label": "Dominio"
+      },
+      "summary": "Un registro DNS o un archivo en tu sitio"
     },
     "nostr": {
-      "approve": "Aprueba la declaración de identidad de Ghostly en tu firmante."
+      "approve": "Aprueba la declaración de identidad de Ghostly en tu firmante.",
+      "description": "Demuestra que tienes una clave de Nostr: tu firmante firma la declaración y tu clave nunca sale de él.",
+      "privacy": "Nada: la firma se comprueba en este dispositivo. La prueba nunca se publica en un relay.",
+      "signers": {
+        "nip07": {
+          "description": "Apruébalo en la extensión de Nostr de este navegador.",
+          "label": "Extensión del navegador (NIP-07)"
+        },
+        "nip46": {
+          "description": "Pega el enlace bunker:// de tu app firmante y luego apruébalo allí.",
+          "fields": {
+            "bunker": {
+              "label": "Enlace de conexión del firmante"
+            }
+          },
+          "label": "Firmante remoto (NIP-46)"
+        }
+      },
+      "subject": {
+        "label": "Clave pública"
+      },
+      "summary": "Firma una vez con tu firmante de Nostr"
     },
     "oidc": {
-      "signIn": "Inicia sesión con {{provider}} en la ventana que se abrió."
+      "description": "Inicia sesión con Google, Microsoft, Apple, GitLab o Twitch: el proveedor avala ante Ghostly, con un token firmado, que la cuenta es tuya.",
+      "label": "Cuenta en un proveedor",
+      "limits": "Avalada por el proveedor, no por una clave que tengas: tu contacto confía en esa empresa.",
+      "privacy": "La app de tu contacto descarga las claves públicas del proveedor (por ejemplo desde www.googleapis.com), así que el proveedor ve que alguna app comprobó un inicio de sesión, no de quién. Tu contacto ve el identificador de la cuenta y lo que elegiste compartir.",
+      "signIn": "Inicia sesión con {{provider}} en la ventana que se abrió.",
+      "signers": {
+        "oidc-account": {
+          "description": "El token lleva el identificador del proveedor para tu cuenta, nada más.",
+          "label": "Iniciar sesión: compartir solo la cuenta"
+        },
+        "oidc-email": {
+          "description": "Añade tu dirección de correo, si el proveedor la ofrece.",
+          "label": "Iniciar sesión: compartir la cuenta y el correo"
+        },
+        "oidc-profile": {
+          "description": "Añade tu dirección de correo y tu nombre o nombre de usuario, si el proveedor los ofrece.",
+          "label": "Iniciar sesión: compartir la cuenta, el correo y el nombre"
+        }
+      },
+      "subject": {
+        "help": "Tu contacto ve el identificador de tu cuenta en ese proveedor, más lo que elijas añadir. GitLab también añade los grupos a los que perteneces directamente; Apple nunca da tu correo a Ghostly.",
+        "label": "Proveedor"
+      },
+      "summary": "Inicia sesión con Google, Microsoft, Apple…"
     },
     "openpgp": {
+      "description": "Demuestra que tienes una clave OpenPGP: firma la declaración con gpg (también sirve una YubiKey) y pega el resultado.",
+      "label": "Clave OpenPGP",
+      "limits": "Tener una clave no prueba los nombres ni los correos de sus ID de usuario.",
+      "lookupLabel": "Comprobar correos con keys.openpgp.org",
       "paste": {
         "signed": "Declaración firmada",
         "signedAndKey": "Declaración firmada y clave pública"
+      },
+      "privacy": "Nada: la firma se comprueba en este dispositivo. Solo se contacta con keys.openpgp.org si lo eliges para tu clave o le pides que confirme correos.",
+      "signers": {
+        "gpg": {
+          "description": "Firma con gpg y pega lo que imprime, clave pública incluida. No se consulta nada."
+        },
+        "gpg-keys-openpgp-org": {
+          "description": "Firma con gpg y pega la firma; luego Ghostly descarga tu clave pública de keys.openpgp.org, que sabe qué clave se consultó.",
+          "label": "gpg, clave de keys.openpgp.org"
+        }
       },
       "steps": {
         "card": "En una YubiKey u otra tarjeta OpenPGP, gpg pide el PIN de la tarjeta, y un toque si la tarjeta lo requiere. Sin una terminal, guarda la declaración de abajo en un archivo de texto y firma ese archivo.",
         "save": "Guarda la declaración en un archivo (es una sola línea, sin salto de línea al final):",
         "sign": "Fírmala, luego copia todo lo que esto muestre:",
         "signExport": "Fírmala y exporta tu clave pública, luego copia todo lo que esto muestre:"
-      }
+      },
+      "subject": {
+        "help": "La huella completa de la clave principal. Tener una clave no prueba los nombres ni los correos de sus ID de usuario.",
+        "label": "Huella de la clave",
+        "placeholder": "40 caracteres hex, de gpg --fingerprint"
+      },
+      "summary": "Firma con gpg y pega el resultado"
     },
     "pubky": {
       "approval": {
@@ -516,45 +710,104 @@
         "qrNote": "El código es tu solicitud: escanéalo tú, y no lo compartas.",
         "ring": "O escanea con Pubky Ring"
       },
+      "description": "Demuestra que tienes una clave Pubky: aprueba una solicitud en Pubky Ring o Pubky Passport, y Ghostly escribe un pequeño archivo de prueba en tu homeserver. Las apps de tus contactos lo leen a través de los registros de tu propia clave.",
+      "limits": "El archivo está en tu homeserver: quien lo gestiona también podría escribir ahí. No prueba quién tiene la clave.",
+      "privacy": "La app de tu contacto lee los registros de tu clave en los relays Pkarr de Pubky (pkarr.pubky.org, pkarr.pubky.app), busca la dirección de tu homeserver con su resolvedor DNS-over-HTTPS (o con el siguiente si no responde; solo contacta una dirección pública, en el puerto 443) y lee el archivo de prueba en tu homeserver, que ve la dirección IP del contacto.",
       "progress": {
         "approved": "Aprobado. Comprobando lo que concedió Pubky…",
         "deleting": "Borrando el archivo de la prueba de tu homeserver…",
         "popupBlocked": "Tu navegador bloqueó la ventana de Passport: permite las ventanas emergentes para Ghostly y pulsa el botón otra vez, o escanea el código con Pubky Ring.",
         "writing": "Escribiendo la prueba en tu homeserver…"
+      },
+      "signers": {
+        "pubky-auth": {
+          "action": "Continuar",
+          "description": "Una solicitud: apruébala en Pubky Passport en tu navegador o escanéala con Pubky Ring. Ghostly solo pide escribir un pequeño archivo en una carpeta nueva de tu homeserver.",
+          "label": "Pubky Ring o Pubky Passport"
+        }
+      },
+      "subject": {
+        "help": "La da Pubky Ring o Passport cuando lo apruebas.",
+        "label": "Clave Pubky"
+      },
+      "summary": "Apruébalo en Pubky Ring o Passport",
+      "unpublish": {
+        "description": "También borra el archivo de prueba de tu homeserver: eso requiere otra aprobación en Pubky Ring o Passport, porque Ghostly no conservó acceso a él."
       }
     },
     "ssh": {
+      "description": "Demuestra que tienes una clave SSH, incluidas las llaves de seguridad FIDO: firma la declaración una vez con ssh-keygen y pega la firma.",
+      "label": "Clave SSH",
       "paste": {
         "label": "Firma SSH"
+      },
+      "privacy": "Nada: la firma se comprueba en este dispositivo. La huella de la clave vincula todos los chats en los que la compartes.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Firma con ssh-keygen de OpenSSH (8.1 o posterior): un archivo de clave, ssh-agent o una llave de seguridad FIDO."
+        }
       },
       "steps": {
         "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
         "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
         "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
         "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
-      }
+      },
+      "subject": {
+        "help": "Tu clave pública, la única línea del archivo .pub. Los contactos ven su huella.",
+        "label": "Clave pública",
+        "placeholder": "ssh-ed25519 AAAA… (o SHA256:…)"
+      },
+      "summary": "Firma una vez con ssh-keygen"
     },
     "ssh-github": {
+      "description": "Demuestra que tienes una clave SSH que tu cuenta de GitHub publica: firma la declaración una vez con ssh-keygen. Sin iniciar sesión en GitHub.",
+      "label": "GitHub (clave SSH)",
+      "limits": "No prueba un inicio de sesión en GitHub: solo que una clave que la cuenta muestra es tuya, mientras siga en la lista.",
       "paste": {
         "label": "Firma SSH"
+      },
+      "privacy": "La app de tu contacto pide a api.github.com las claves SSH públicas de esta cuenta, cuando la compartes y en cada nueva comprobación: GitHub sabe que se consultó la cuenta, y desde qué dirección IP. Lo mismo ocurre con esta app cuando la añades.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Firma con una clave SSH que tu cuenta de GitHub muestra (Settings → SSH keys)."
+        }
       },
       "steps": {
         "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
         "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
         "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
         "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
-      }
+      },
+      "subject": {
+        "label": "Usuario de GitHub"
+      },
+      "summary": "Una clave que tu cuenta de GitHub muestra"
     },
     "ssh-gitlab": {
+      "description": "Demuestra que tienes una clave SSH que tu cuenta de GitLab publica: firma la declaración una vez con ssh-keygen. Sin iniciar sesión en GitLab.",
+      "label": "GitLab (clave SSH)",
+      "limits": "No prueba un inicio de sesión en GitLab: solo que una clave que la cuenta muestra es tuya, mientras siga en la lista.",
       "paste": {
         "label": "Firma SSH"
+      },
+      "privacy": "La app de tu contacto pide a gitlab.com las claves SSH públicas de esta cuenta, cuando la compartes y en cada nueva comprobación: GitLab sabe que se consultó la cuenta, y desde qué dirección IP. Lo mismo ocurre con esta app cuando la añades.",
+      "signers": {
+        "ssh-keygen": {
+          "description": "Firma con una clave SSH que tu cuenta de GitLab muestra (Settings → SSH keys)."
+        }
       },
       "steps": {
         "orSave": "O guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe.",
         "paste": "Pega la firma entera que muestra, de -----BEGIN SSH SIGNATURE----- a -----END SSH SIGNATURE-----. Tu clave privada nunca sale de tu ordenador.",
         "run": "Ejecuta esto en una terminal (macOS, Linux, o Git Bash/WSL en Windows). Si tu clave no es ~/.ssh/id_ed25519, cambia la ruta después de -f; una ruta .pub sirve cuando la clave privada está en ssh-agent o en una llave de seguridad.",
         "save": "Guarda esta declaración en un archivo, ejecuta ssh-keygen -Y sign -n {{namespace}} -f <tu clave> <archivo> y pega el <archivo>.sig que escribe."
-      }
+      },
+      "subject": {
+        "label": "Usuario de GitLab",
+        "placeholder": "usuario"
+      },
+      "summary": "Una clave que tu cuenta de GitLab muestra"
     }
   },
   "received": {
