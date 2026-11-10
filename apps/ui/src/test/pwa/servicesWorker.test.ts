@@ -95,7 +95,7 @@ describe("a navigation the services worker hands to the contact", () => {
 describe("an answer of the contact's app the worker passes on", () => {
   it("carries Ghostly's viewer policy after the app's own, Hide my IP on or off, whatever policy the app sends", async () => {
     const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
-    const { VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
+    const { VIEWER_GUARD_CSP, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
     const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", label: "", owner: "", hostError: () => null };
     for (const own of [null, "connect-src *"]) {
       for (const relayOnly of [false, true]) {
@@ -105,8 +105,9 @@ describe("an answer of the contact's app the worker passes on", () => {
           void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
         });
         const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
-        const policy = relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP;
-        expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
+        // With Hide my IP on, the WebRTC guard's policy comes with the guard (`guardViewerAnswer`), before the viewer's.
+        const policy = relayOnly ? [VIEWER_GUARD_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY] : [VIEWER_SERVICE_CSP];
+        expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, ...policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
       }
     }
   });
