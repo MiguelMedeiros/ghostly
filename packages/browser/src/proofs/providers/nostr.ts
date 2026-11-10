@@ -2,7 +2,7 @@ import { schnorr } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { npubEncode, decode as nip19Decode } from "nostr-tools/nip19";
 import { utf8Encode, type IdentityStatement } from "@ghostly/core";
-import type { IdentityProofProvider, InAppSigner, SignerSession } from "../contract";
+import { englishSay, type IdentityProofProvider, type InAppSigner, type SignerSession } from "../contract";
 import { extensionSigner, withNostrSigner } from "../nostr";
 
 /** A signed Nostr event (NIP-01). The evidence of a Nostr proof. */
@@ -46,7 +46,7 @@ function nostrSigner(id: "nip07" | "nip46"): InAppSigner<NostrEvent> {
       const session: SignerSession<NostrEvent> = {
         subject: async () => normalizeNostrKey(await signer.getPublicKey()),
         sign: async statement => {
-          ctx.onProgress("Approve the Ghostly identity statement in your signer.");
+          ctx.onProgress((ctx.say ?? englishSay)("approve", "Approve the Ghostly identity statement in your signer."));
           return (await signer.signEvent(nostrProofTemplate(statement))) as NostrEvent;
         },
       };
