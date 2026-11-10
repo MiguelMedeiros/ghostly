@@ -64,14 +64,20 @@ export function PeerStatusMark({ entry, testId, hidden = false, className = "" }
 /**
  * The contact's presence and status in words beside their name (the chat's header, the contact panel): the dot's words
  * for a screen reader only (the dot is on the picture), and the status shown. Nothing while they say nothing.
+ * `emojiOnPhone`: a phone shows the status's emoji alone, its text for a screen reader (the chat's header).
+ * With nothing to see (online with no status, or on such a phone a status with no emoji), the line is out of the row's
+ * flow: an empty item still took the row's gap from the name beside it, 4 px of a long name on a 390 px phone.
  */
-export function PeerPresenceLine({ peerKey, testId, className = "" }: { peerKey?: string; testId: string; className?: string }) {
+export function PeerPresenceLine({ peerKey, testId, className = "", emojiOnPhone = false }: { peerKey?: string; testId: string; className?: string; emojiOnPhone?: boolean }) {
   const { t } = useI18n();
   const entry = usePeerPresence(peerKey);
   const tone = presenceTone(entry);
-  if (!tone && !statusText(t, entry)) return null;
+  const shown = statusText(t, entry);
+  if (!tone && !shown) return null;
+  // Each class whole in the source, for Tailwind to find it.
+  const unseen = !shown ? "sr-only" : !emojiOnPhone ? "" : entry?.status?.emoji ? "max-md:[&_bdi]:sr-only" : "max-md:[&_bdi]:sr-only max-md:sr-only";
   return (
-    <span data-testid={testId} className={`flex min-w-0 items-center gap-1 ${className}`}>
+    <span data-testid={testId} className={`flex min-w-0 items-center gap-1 ${unseen} ${className}`}>
       {tone && <span data-testid={`${testId}-presence`} className="sr-only">{presenceLabel(t, tone)}</span>}
       <PeerStatusMark entry={entry} testId={`${testId}-status`} />
     </span>

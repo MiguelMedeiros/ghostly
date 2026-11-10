@@ -981,7 +981,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               </button>
               </h1>
               {/* The contact's status (WISP 401 § Presence and status), and the dot's words for a screen reader; a phone shows the emoji. */}
-              {paired && <PeerPresenceLine peerKey={params.peerPubKeyB64} testId="chat-presence" className="max-w-[40%] text-xs max-md:[&_bdi]:sr-only" />}
+              {paired && <PeerPresenceLine peerKey={params.peerPubKeyB64} testId="chat-presence" emojiOnPhone className="max-w-[40%] text-xs" />}
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}

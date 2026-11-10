@@ -364,8 +364,8 @@ test("on a phone in Arabic the chat's header keeps the contact's whole name besi
 });
 
 /*
- * Known to fail: on a 320 px phone a contact's status takes the room "Cérebro (Mac)" needs (83 of its 97 px; 96 with no
- * status set, while the contact is online): the header's status (apps/ui/src/pages/Chat.tsx, the `PeerPresenceLine`
+ * Known to fail: on a 320 px phone a contact's status takes the room "Cérebro (Mac)" needs (83 of its 97 px; with no
+ * status set, while the contact is online, it has them all): the header's status (apps/ui/src/pages/Chat.tsx, the `PeerPresenceLine`
  * beside the name) does not give way before the name, as the chat list's does. Once it does, this passes: take
  * `test.fail` away.
  */
