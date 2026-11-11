@@ -563,6 +563,10 @@ const RULES: readonly Rule[] = [
   { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
   exact("It did not answer in time", "errors.wallet.didNotAnswer"),
   exact("No mint answered", "errors.wallet.noMintAnswered"),
+  // A mint that took a swap and has not answered (engine/wallet.ts SwapUnsettledError): nothing failed, and the next
+  // line says what comes back. Three sentences, so it read as "Something went wrong" (or in English) without these.
+  { match: new RegExp(`^${HOST} has not answered yet\\. The payment was not made\\. The sats set aside for it return to your wallet a few minutes after the mint answers\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentPayNext" },
+  { match: new RegExp(`^${HOST} has not answered yet\\. The ecash is added to your wallet as soon as it does\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentRedeemNext" },
   exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
   { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
   exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),

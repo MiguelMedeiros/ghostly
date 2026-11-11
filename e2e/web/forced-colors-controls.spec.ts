@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { pasteInvite } from "../support/clipboard";
 import { expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
+import { pair } from "../support/paired";
 
 /**
  * Forced colors (Windows high contrast) replace every background with the page's. Controls drawn by a background
@@ -237,4 +238,63 @@ test.describe("forced colors mark the place you are on", () => {
       await bot.stop();
     }
   });
+});
+
+/** A box's background and, if it has one, its `::after`'s, each laid over what is behind the box. */
+const drawn = (el: Locator, pseudo?: "::after"): Promise<{ bg: string; border: number; borderColor: string; around: string }> => el.evaluate((node, pseudo) => {
+  type RGBA = [number, number, number, number];
+  const rgba = (c: string): RGBA => { const n = c.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0, 0]; return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1]; };
+  const over = (top: RGBA, under: RGBA): RGBA => {
+    const a = top[3] + under[3] * (1 - top[3]);
+    if (!a) return [0, 0, 0, 0];
+    const mix = (i: number) => (top[i] * top[3] + under[i] * under[3] * (1 - top[3])) / a;
+    return [mix(0), mix(1), mix(2), a];
+  };
+  const seen = (from: Element | null): RGBA => {
+    let c: RGBA = [0, 0, 0, 0];
+    for (let n = from; n && c[3] < 1; n = n.parentElement) c = over(c, rgba(getComputedStyle(n).backgroundColor));
+    return c[3] < 1 ? over(c, [255, 255, 255, 1]) : c;
+  };
+  const text = (c: RGBA) => `rgb(${c.slice(0, 3).map(Math.round).join(", ")})`;
+  const style = getComputedStyle(node, pseudo ?? null);
+  const around = pseudo ? seen(node) : seen(node.parentElement);
+  return { bg: text(over(rgba(style.backgroundColor), around)), border: parseFloat(style.borderTopWidth), borderColor: text(over(rgba(style.borderTopColor), around)), around: text(around) };
+}, pseudo);
+
+test("forced colors keep the connection panel's Fallback switch drawn, on and off", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+  await still(page);
+  await page.getByTestId("connection-options").click();
+  const fallback = page.getByRole("switch", { name: "Fallback", exact: true });
+  await expect(fallback).toBeEnabled();
+  const track = page.getByTestId("connection-menu").locator(".connection-switch-track");
+
+  // Normal colours: the track and its knob are what they were.
+  const normal = { track: await drawn(track), knob: await drawn(track, "::after") };
+  expect(normal.knob.bg, "knob against its track in normal colours").not.toBe(normal.track.bg);
+
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  const read = async () => ({ checked: await fallback.isChecked(), track: await drawn(track), knob: await drawn(track, "::after") });
+  const first = await read();
+  await fallback.click();
+  await expect(fallback).toBeChecked({ checked: !first.checked });
+  const second = await read();
+  for (const state of [first, second]) {
+    const name = state.checked ? "on" : "off";
+    expect.soft(state.track.border, `${name}: track border`).toBeGreaterThanOrEqual(1);
+    expect.soft(state.track.borderColor, `${name}: track border against the panel`).not.toBe(state.track.around);
+    expect.soft(state.knob.bg, `${name}: knob against its track`).not.toBe(state.track.bg);
+  }
+  // On and off differ by more than the knob's place.
+  expect.soft(second.track.bg === first.track.bg && second.knob.bg === first.knob.bg, "on and off look alike").toBe(false);
+  await fallback.click();
+  await expect(fallback).toBeChecked({ checked: first.checked });
+
+  // The chosen transport's dot shows inside its ring.
+  const ring = page.getByTestId("connection-menu").locator('[role="radio"][aria-checked="true"] > span:last-child');
+  await expect(ring).toHaveCount(1);
+  const dot = await drawn(ring.locator("span"));
+  expect.soft(dot.bg, "the chosen transport's dot against its ring").not.toBe(dot.around);
 });

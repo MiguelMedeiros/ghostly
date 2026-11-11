@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -195,10 +195,19 @@ function fakeRepo() {
   const unrebasable = new Set<number>();
   /** Pull requests git cannot fetch: GitHub made no `refs/pull/N/head` for them, and their branch does not hold their head. */
   const missing = new Set<number>();
+  /** Pull requests that merge cleanly onto the base but conflict with these others (each on the base by itself). */
+  const clashes = new Map<number, number[]>();
   let lastSha = "";
   const git = {
     build: async (base: string, prs: Pr[]) => {
-      const applied = prs.filter((p) => !conflicts.has(p.number) && !missing.has(p.number)).map((p) => p.number);
+      const applied: number[] = [];
+      const dropped: { number: number; reason: string; with?: number[] }[] = [];
+      for (const p of prs) {
+        const ahead = (clashes.get(p.number) ?? []).filter((n) => applied.includes(n));
+        if (missing.has(p.number) || conflicts.has(p.number)) dropped.push({ number: p.number, reason: missing.has(p.number) ? "missing" : "conflict" });
+        else if (ahead.length) dropped.push({ number: p.number, reason: "ahead", with: ahead });
+        else applied.push(p.number);
+      }
       lastSha = `${tips[base]}:${applied.join(",")}`;
       // One commit per pull request aboard, each holding the files of the one before plus its own.
       const commitOf: Record<number, string> = {};
@@ -209,7 +218,6 @@ function fakeRepo() {
         trees.set(commitOf[n], tree);
         made.set(commitOf[n], { message: `${pulls.get(n)!.title} (#${n})\n\n* part one of ${n}\n* part two of ${n}`, tree });
       });
-      const dropped = prs.filter((p) => missing.has(p.number) || conflicts.has(p.number)).map((p) => ({ number: p.number, reason: missing.has(p.number) ? "missing" : "conflict" }));
       return { baseSha: tips[base], sha: lastSha, applied, dropped, commits: commitOf };
     },
     push: async (branch: string, sha: string) => void built.set(branch, sha),
@@ -269,7 +277,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, mergeStates, pullReads, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, clashes, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, mergeStates, pullReads, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -450,6 +458,91 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 13]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
     expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
+  });
+
+  describe("a pull request that merges cleanly onto dev but conflicts with one ahead of it in the batch", () => {
+    const waitsFor = (n: number, batch: number | string) =>
+      `Merge train: in line for \`dev\`: **1st**. Waiting for the next batch: it merges cleanly onto \`dev\` by itself, but conflicts with #${n} in batch #${batch}, ahead of it, so it boards once that batch is done (merging \`origin/dev\` into it now changes nothing). It keeps its place.`;
+    const said = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.map((c) => c.body.replace(/^<!--[^\n]*\n/, ""));
+
+    it("keeps its queue and its place, names the one it conflicts with, and boards right after it lands", async () => {
+      // #12 and #11 change the same lines; each is clean against dev (2026-11-06: ghostly#5391 behind #5397).
+      const repo = fakeRepo();
+      for (const n of [11, 12, 13]) repo.add(n);
+      repo.clashes.set(11, [12]);
+      repo.clashes.set(12, [11]);
+      const r = await repo.run();
+      expect(r.dropped).toEqual([]);
+      expect(repo.members()).toEqual([11, 13]);
+      expect(r.log).toContain("WAIT #12: it conflicts only with #11 ahead of it, so it keeps its place and boards the next batch");
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+      expect(said(repo, 12)).toEqual([waitsFor(11, r.inFlight!)]);
+      expect(repo.batch()!.body).toContain("#12 waits for the next batch: it merges cleanly onto `dev` by itself, but conflicts with #11 here.");
+
+      // While the batch's CI runs, the comment still says on whom it waits.
+      repo.runs.set(repo.batch()!.sha, running);
+      await repo.run();
+      expect(said(repo, 12)).toEqual([waitsFor(11, r.inFlight!)]);
+
+      // Green: #11 and #13 land, and #12 goes next, first in line (alone, so rebased onto the new dev).
+      repo.settle();
+      const landed = await repo.run();
+      expect(landed.merged).toEqual([11, 13]);
+      expect(landed.inFlight).toBe(12);
+      expect(repo.flight()).toEqual([12]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+      expect(said(repo, 12)).toEqual([expect.stringMatching(/^Merge train: next into `dev`, alone\./)]);
+    });
+
+    it("leaves with queue:conflict and the base's own text when it conflicts with dev once the one ahead landed", async () => {
+      const repo = fakeRepo();
+      for (const n of [11, 12]) repo.add(n);
+      repo.clashes.set(12, [11]);
+      await repo.run();
+      expect(repo.members()).toEqual([11]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+      // #11 on dev now: #12 conflicts with dev itself, which merging origin/dev into it resolves.
+      repo.conflicts.add(12);
+      repo.settle();
+      const r = await repo.run();
+      expect(r.merged).toEqual([11]);
+      expect(r.dropped).toEqual([12]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
+      expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([
+        "Merge train: this pull request conflicts with `dev`, so it left the line. Rebase it onto `origin/dev` (or merge `origin/dev` into it), push, and add `queue` again once CI is green.",
+      ]);
+    });
+
+    it("lets the one first in line go: queue:priority ahead, the other waits whichever was queued first", async () => {
+      const repo = fakeRepo();
+      repo.add(11);
+      repo.add(12);
+      repo.add(13, { priority: true });
+      repo.clashes.set(11, [13]);
+      repo.clashes.set(13, [11]);
+      const r = await repo.run();
+      expect(repo.members()).toEqual([13, 12]);
+      expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+      expect(said(repo, 11)).toEqual([waitsFor(13, r.inFlight!)]);
+    });
+
+    it("still names the one ahead when the batch is rebuilt on a new tip or split after a red", async () => {
+      const repo = fakeRepo();
+      for (const n of [11, 12, 13]) repo.add(n);
+      repo.clashes.set(12, [11]);
+      await repo.run();
+      repo.tips.dev = "dev1";
+      const rebuilt = await repo.run();
+      expect(repo.members()).toEqual([11, 13]);
+      expect(said(repo, 12)).toEqual([waitsFor(11, rebuilt.inFlight!)]);
+
+      // Red: the first half (#11) goes alone, #13 after it; #12 still waits on #11.
+      repo.settle([13]);
+      const split = await repo.run();
+      expect(repo.members()).toEqual([11]);
+      expect(said(repo, 12)).toEqual([waitsFor(11, split.inFlight!)]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    });
   });
 
   const conflictSaid = /Waiting: it conflicts with `dev`, and GitHub runs no CI on a pull request until its conflict with the base is resolved; merge `origin\/dev` into it\. It keeps its place until then; after that push it leaves the line and joins it again at the back once it is reviewed and queued\.$/;
@@ -3624,6 +3717,105 @@ describe("the bases with a train", () => {
     expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
   });
 
+  // A red batch (or lone pull request) is held while CI Success on the base's tip still runs, and only that CI ending
+  // moves it: CI on a push to the base woke nothing, so it waited for the schedule (20 to 64 minutes apart).
+  it("woken by CI on a push to a base are that base, while the commit is its tip and the base has a train", () => {
+    const a = "a".repeat(40), tip = "1".repeat(40), old = "2".repeat(40), epicTip = "3".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("epic/x", "c".repeat(40), [LABEL.queue])];
+    const tips = { dev: tip, "epic/x": epicTip };
+    expect(trainBases(pulls, tip, tips)).toEqual(["dev"]);
+    expect(trainBases(pulls, epicTip, tips)).toEqual(["epic/x"]);
+    // A commit the base has moved past: a newer push's CI (or a push's own run of the train) serves the tip.
+    expect(trainBases(pulls, old, tips)).toEqual([]);
+    // A base with no train: nothing to hold, nothing to run.
+    expect(trainBases([pr("epic/x", "c".repeat(40), [LABEL.queue])], tip, tips)).toEqual([]);
+    // With the tips unread (or a base whose tip is not known), a base's commit wakes nothing, as before.
+    expect(trainBases(pulls, tip)).toEqual([]);
+    expect(trainBases(pulls, [old, tip], tips)).toEqual(["dev"]);
+  });
+
+  /** The workflow's view of `repo` for --list-bases: every open pull request, and this run alone among its runs. */
+  const listing = (repo: ReturnType<typeof fakeRepo>) => {
+    const reads: string[] = [];
+    const gh = {
+      ...repo.gh,
+      pulls: async () => [...repo.pulls.values()].filter((p) => p.open).map((p) => ({ ...p, labels: [...p.labels] })),
+      queueRuns: async () => [{ id: 7, conclusion: null, display_title: "Merge queue: CI ended on x" }],
+      runJobs: async () => [],
+      branchSha: async (base: string) => (reads.push(base), repo.gh.branchSha(base)),
+    };
+    return { gh, reads };
+  };
+  const DEV = "d".repeat(40);
+
+  it("woken by dev's own CI ending: a red batch held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    // dev's CI ends green: its run wakes the workflow, which lists dev, and the train blames the batch's own red.
+    repo.runs.set(DEV, green);
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, DEV, 7)).toEqual(["dev"]);
+    expect(reads).toEqual(["dev"]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.members()).toEqual([11]);
+    // Ended red: listed too; the train then says the hold is for dev's red, not its CI still running.
+    const pending = fakeRepo();
+    pending.tips.dev = DEV;
+    for (const n of [11, 12]) pending.add(n);
+    await pending.run();
+    pending.runs.set(DEV, running);
+    pending.settle([11, 12]);
+    await pending.run();
+    pending.runs.set(DEV, red);
+    expect(await listBases(listing(pending).gh, DEV, 7)).toEqual(["dev"]);
+    expect((await pending.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is red/);
+  });
+
+  it("woken by dev's own CI ending: a lone pull request held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #11: .*itself is still running/);
+    repo.runs.set(DEV, green);
+    expect(await listBases(listing(repo).gh, DEV, 7)).toEqual(["dev"]);
+    const first = repo.pulls.get(11)!.sha;
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    // Its one more run on a fresh rebase, as for any lone pull request red on a green base.
+    expect(repo.pulls.get(11)!.sha).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ retried: true });
+  });
+
+  it("woken by a pull request's CI are as before: dev's tip is read, and lists dev once at most", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11);
+    repo.pulls.set(20, { number: 20, title: "draft", body: "", draft: true, sha: "e".repeat(40), branch: "wip", fork: false, labels: [], createdAt: "", open: true, base: "dev" });
+    const queued = "f".repeat(40);
+    repo.pulls.get(11)!.sha = queued;
+    // A draft's CI, or any commit that heads nothing in line and is no base's tip: no train.
+    expect(await listBases(listing(repo).gh, "e".repeat(40), 7)).toEqual([]);
+    expect(await listBases(listing(repo).gh, "0".repeat(40), 7)).toEqual([]);
+    // A queued one's CI: dev, once, even when a replaced wake was dev's own CI.
+    expect(await listBases(listing(repo).gh, queued, 7)).toEqual(["dev"]);
+    expect(trainBases([...repo.pulls.values()], [queued, DEV], { dev: DEV })).toEqual(["dev"]);
+    // Not woken by CI (the schedule, a label, a push, by hand): every base with a train, and no tip is read.
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, undefined, 7)).toEqual(["dev"]);
+    expect(await listBases(gh, "", 7)).toEqual(["dev"]);
+    expect(reads).toEqual([]);
+  });
+
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
     const refs = ["refs/heads/epic/x", "refs/heads/epic/apps-1.2", "refs/heads/epic/a/b"].map((ref) => ({ ref }));
     const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(refs) }), wait: async () => {} });
@@ -3971,6 +4163,53 @@ describe("building a batch with git", () => {
       // Alone, the same: #2 from its branch, #3 nowhere.
       expect(await layer.rebase("dev", prs[1])).toMatchObject({ sha: expect.any(String) });
       expect(await layer.rebase("dev", prs[2])).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "missing" });
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("tells a pull request that conflicts only with one applied before it from one that conflicts with the base", async () => {
+    // Each of #10, #11 and #12 changes the same line of file.txt, and each merges cleanly onto dev by itself; #13 changes
+    // a line dev changed too, after it branched. (2026-11-07: ghostly#5693 and #5694 both behind #5696.)
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const write = (file: string, text: string, message: string) => {
+      writeFileSync(join(origin, file), text);
+      git(["add", file]);
+      git(["commit", "-q", "-m", message]);
+    };
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      write("file.txt", "one\ntwo\nthree\n", "base");
+      write("other.txt", "other\n", "base, other");
+      const make = (number: number, file: string, text: string) => {
+        git(["checkout", "-q", "-b", `fix-${number}`, "dev"]);
+        write(file, text, `fix ${number}`);
+        git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
+        git(["checkout", "-q", "dev"]);
+        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", `fix-${number}`]) };
+      };
+      const [x, a, b, c] = [make(10, "file.txt", "one\nTWO by x\nthree\n"), make(11, "file.txt", "one\nTWO by a\nthree\n"), make(12, "file.txt", "one\nTWO by b\nthree\n"), make(13, "other.txt", "other, by 13\n")];
+      write("other.txt", "other, by dev\n", "dev moves");
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      for (const p of [x, a, b]) expect(git(["merge-tree", "--write-tree", "origin/dev", p.sha], clone)).toMatch(/^\w+$/);
+      const layer = gitLayer({ cwd: clone });
+      // Two that conflict only with each other: the first goes, the second waits, naming it.
+      expect(await layer.build("dev", [a, b])).toMatchObject({ applied: [11], dropped: [{ number: 12, reason: "ahead", with: [11] }] });
+      // Both behind one they each conflict with: each names that one, not the other one that waits.
+      // One that conflicts with dev itself is a conflict as before, even with others applied ahead of it.
+      const built = await layer.build("dev", [x, a, b, c]);
+      expect(built.applied).toEqual([10]);
+      expect(built.dropped).toEqual([
+        { number: 11, reason: "ahead", with: [10] },
+        { number: 12, reason: "ahead", with: [10] },
+        { number: 13, reason: "conflict" },
+      ]);
+      expect(git(["show", `${built.sha}:file.txt`], clone)).toBe("one\nTWO by x\nthree");
+      expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.baseSha);
       layer.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
