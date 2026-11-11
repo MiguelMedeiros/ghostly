@@ -16,6 +16,8 @@ try { settings = readSettings(process.env) } catch (error) {
   console.error(new Date().toISOString(), `Ghostly HyperDHT relay not started: ${error.message}`)
   process.exit(1)
 }
+// A misspelt name (GHOSTLY_RELAY_ORIGIN, GHOSTLY_RELAY_PROXY): said, not dropped.
+if (settings.ignored.length) console.log(new Date().toISOString(), `${settings.ignored.join(', ')} ${settings.ignored.length === 1 ? 'is not a setting' : 'are not settings'} of this relay; ignored`)
 // A port in use or below 1024, a HOST that is no address here: one line naming the setting, not Node's stack.
 const start = options => startRelay(options).catch(error => {
   const problem = listenProblem(error, settings)
