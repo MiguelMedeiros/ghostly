@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine, engineControl } from "./fakeEngine";
-import { bootExtension, engine, PEER } from "./extension";
+import { bootExtension, engine, PEER, restartServiceWorker } from "./extension";
 
 // covers: app.attention.notifications, extension.engine
 
@@ -129,5 +129,53 @@ describe("a message with no Ghostly tab open", () => {
     await vi.waitFor(() => expect(asked()).toHaveLength(1), { timeout: 10_000 });
     await settle();
     expect(world.callsTo("notifications.create")).toEqual([]);
+  });
+});
+
+/**
+ * A contact sending a few texts back to back, a forward of several, a group's members writing at once: the peer asks for
+ * a notification per message in the same moment, and the worker shows one per chat, as a tab does, not one per message.
+ */
+describe("messages that come together with no Ghostly tab open", () => {
+  /** The peer hears these events in the same moment; waits until the worker showed every one. */
+  async function hearAtOnce(...events: Partial<AttentionEvent>[]): Promise<void> {
+    const before = created().length;
+    for (const fields of events) engine().attention(event(fields));
+    await vi.waitFor(() => expect(created().length).toBe(before + events.length), { timeout: 4_000 });
+    await settle();
+  }
+
+  const chatOf = (id: string) => world.session.get(`notice:${id}`);
+  const noticeKeys = () => [...world.session.keys()].filter((key) => key.startsWith("notice:"));
+
+  it("five of one chat are one notification, shown again for each", async () => {
+    await hearAtOnce({}, {}, {}, {}, {});
+    expect(new Set(created().map(([id]) => id)).size).toBe(1);
+    expect(world.notices.size).toBe(1);
+    expect(noticeKeys()).toHaveLength(1);
+    expect(chatOf(created()[0]![0])).toBe(CHAT);
+  });
+
+  it("two chats at once are two notifications, one each", async () => {
+    await hearAtOnce({}, { linkId: "group:g1" }, {}, { linkId: "group:g1" }, {}, { linkId: "group:g1" });
+    expect(world.notices.size).toBe(2);
+    expect(noticeKeys()).toHaveLength(2);
+    expect([...world.notices.keys()].map(chatOf).sort()).toEqual([CHAT, "group:g1"].sort());
+  });
+
+  it("one after another still takes the place of the one before", async () => {
+    for (let i = 0; i < 3; i++) await hear({}, true);
+    expect(new Set(created().map(([id]) => id)).size).toBe(1);
+    expect(world.notices.size).toBe(1);
+  });
+
+  it("a worker Chrome stopped and started again goes on with the chat's notification", async () => {
+    await hear({}, true);
+    const [id] = created()[0]!;
+    await restartServiceWorker(world);
+    await hearAtOnce({}, {}, {}, {});
+    expect(created().map(([shown]) => shown)).toEqual([id, id, id, id, id]);
+    expect([...world.notices.keys()]).toEqual([id]);
+    expect(noticeKeys()).toEqual([`notice:${id}`]);
   });
 });

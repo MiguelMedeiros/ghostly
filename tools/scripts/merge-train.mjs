@@ -19,8 +19,11 @@
 //   (MIN_BATCH, MAX_WAIT). Until then it says it is holding (in its log, and in each held one's position comment with
 //   the time from which the batch leaves at the train's next run), and only the first in line lands, if it needs no CI run
 //   (green on its own full run, at the base's tip). A batch is built on the base's tip with one squash commit per pull
-//   request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one comment, `queue` taken off
-//   (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The batch is a pull request from
+//   request, in order ("<title> (#n)"). One that conflicts with the base drops out: `queue:conflict`, one comment, `queue`
+//   taken off (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). One that merges cleanly onto
+//   the base by itself but conflicts with one aboard ahead of it stays in line and keeps its place: its position comment
+//   names that one, and it boards the next batch (merging the base into it, as the conflict comment asks, changes
+//   nothing while that one is not on the base yet). The batch is a pull request from
 //   `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull request boards on its fast tier
 //   alone, and its own full CI run still going is cancelled (when the token may cancel runs; else one log line), which
 //   frees runners for the batch. So is the run of one still waiting in line on a green fast tier whose head is behind
@@ -397,6 +400,9 @@ export const readState = (body) => {
   }
 };
 
+/** The ones a batch's mark says wait behind one aboard it (`git.build`'s "ahead"): [{ number, with }]. */
+const waitsOf = (state) => (Array.isArray(state?.waits) ? state.waits.filter((x) => Number.isInteger(x?.number) && Array.isArray(x.with) && x.with.every(Number.isInteger)) : []);
+
 /** A pull request that looks like a batch: from this repository, on a `batch/<base>-` branch, with a mark. */
 const batchShaped = (p, base) => !p.fork && p.branch.startsWith(`batch/${base}-`) && readState(p.body)?.base === base;
 
@@ -426,6 +432,7 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
     ...prs.map((p) => `- #${p.number} ${p.title.replaceAll("<", "&lt;")}`),
     "",
     next.length ? `If this batch is green, ${next.map((p) => `#${p.number}`).join(" ")} go next (the other half of a red batch).` : "",
+    ...waitsOf(state).map((x) => `#${x.number} waits for the next batch: it merges cleanly onto \`${base}\` by itself, but conflicts with ${x.with.map((n) => `#${n}`).join(" ")} here.`),
     base === "dev"
       ? "Green: each of them is merged with GitHub's squash merge, in this order (a commit GitHub signs, checked against the one tested here), and this pull request closes. Red: it is split in halves until the pull request that breaks CI is found."
       : "Green: the base is fast-forwarded to these commits and the originals close as merged via this one. Red: it is split in halves until the pull request that breaks CI is found.",
@@ -443,7 +450,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
  * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with that label that may not
- * (`cannot`: `canGoAlone` refuses its branch) says why, and its help leaves that advice out.
+ * (`cannot`: `canGoAlone` refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
+ * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
 export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null, cannot = false) {
   const mark = `<!-- merge-train:head ${head} -->`;
@@ -474,10 +482,14 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
     !why && own && pr.fast === "success"
       ? ` It can board on its fast tier (CI Success (draft)): while its head is behind \`${base}\`, the train cancels its own full CI run, which it would not land on.${cancelled}`
       : "";
+  // Behind one aboard the batch in flight that it conflicts with (`git.build`'s "ahead"): it boards once that one lands.
+  const after = !why && pr.behind
+    ? ` Waiting for the next batch: it merges cleanly onto \`${base}\` by itself, but conflicts with ${pr.behind.with.map((n) => `#${n}`).join(" ")} in batch #${pr.behind.batch}, ahead of it, so it boards once that batch is done (merging \`origin/${base}\` into it now changes nothing). It keeps its place.`
+    : "";
   const wait = !why && company
     ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at the train's first run after ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC. It keeps its place.`
     : "";
-  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}.${why.includes(AT_BACK) ? "" : " It keeps its place."}` : `${wait}${note}`}${hold}`;
+  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}.${why.includes(AT_BACK) ? "" : " It keeps its place."}` : `${after}${wait}${note}`}${hold}`;
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
@@ -550,7 +562,7 @@ const workflowText = (base, workflows) =>
 const conflictText = (base, reason) =>
   reason === "empty"
     ? `Merge train: this pull request has no changes left against \`${base}\`, so it left the line. Close it if it already landed.`
-    : `Merge train: this pull request conflicts with \`${base}\` (or with the pull requests ahead of it), so it left the line. Rebase it onto \`origin/${base}\` (or merge \`origin/${base}\` into it), push, and add \`queue\` again once CI is green.`;
+    : `Merge train: this pull request conflicts with \`${base}\`, so it left the line. Rebase it onto \`origin/${base}\` (or merge \`origin/${base}\` into it), push, and add \`queue\` again once CI is green.`;
 // Merging the base into it again does not help: that merge is what the rebase skips.
 const pastConflictText = (base) =>
   `Merge train: the train is on hold for CI Success red on \`${base}\` itself, and a \`queue:priority\` pull request goes ahead of the held one only alone, rebased onto \`${base}\`. Its commits do not rebase onto \`${base}\` (a conflict resolved in a merge of \`origin/${base}\` comes back once that merge is skipped), so it left the line and the next \`queue:priority\` pull request goes. Rebase it onto \`origin/${base}\` without the merge (\`git rebase origin/${base}\`), push, and once it is reviewed and CI is green add \`queue\` and \`queue:priority\` again.`;
@@ -813,11 +825,30 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     await cancelOwnCi(p, `its head is behind \`${base}\`: it lands on a batch's CI or on a rebase's`);
   };
 
-  /** Builds a batch from `prs` on the base's tip and opens its pull request; `next` waits behind it. */
-  const board = async (prs, next = [], extra = {}) => {
+  /**
+   * Those in line that merge cleanly onto the base but conflict with one aboard a batch ahead of them (`git.build`'s
+   * "ahead"), by number: { batch, with }. They wait for the next batch, and their position comments say on whom.
+   */
+  const behind = new Map();
+  /**
+   * Builds a batch from `prs` on the base's tip and opens its pull request; `next` waits behind it. `extra.waits` (a
+   * rebuild's or a split's, from the batch before) is kept for those still behind one aboard.
+   */
+  const board = async (prs, next = [], { waits: before = [], ...extra } = {}) => {
     if (!prs.length) return null;
     const built = await git.build(base, prs);
-    for (const { number, reason } of built.dropped) {
+    const waits = before
+      .map((x) => ({ number: x.number, with: x.with.filter((n) => built.applied.includes(n)) }))
+      .filter((x) => !built.applied.includes(x.number) && x.with.length);
+    for (const { number, reason, with: ahead } of built.dropped) {
+      if (reason === "ahead") {
+        // It merges cleanly onto the base by itself: only the ones aboard ahead of it conflict with it. Told to merge
+        // the base, which does not hold them yet, its author changed nothing, and it had lost its place for it: it
+        // stays in line and boards with the next batch, after them (then a conflict with the base is one as usual).
+        say(`WAIT #${number}: it conflicts only with ${ahead.map((n) => `#${n}`).join(" ")} ahead of it, so it keeps its place and boards the next batch`);
+        waits.push({ number, with: ahead });
+        continue;
+      }
       say(`DROP #${number} (${reason})`);
       // Pushed to after its CI was read: not built now, and on the next run its new head no longer matches the head in
       // its position comment, so it leaves the line until it is reviewed and queued again.
@@ -858,13 +889,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         await leave(p, LABEL.failed, text);
       }
       // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
-      return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, extra);
+      return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, { ...extra, waits });
     }
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
-    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra, built.commits) });
+    const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, { ...extra, ...(waits.length ? { waits } : {}) }, built.commits) });
     say(`OPEN #${pr.number} ${title}`);
     done.opened.push(pr.number);
     for (const p of aboard) await cancelOwnCi(p);
+    for (const x of waits) behind.set(x.number, { batch: pr.number, with: x.with });
     return { number: pr.number, branch, sha: built.sha, members: aboard };
   };
 
@@ -925,6 +957,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const batch = batches[0];
   if (batch) {
     const state = readState(batch.body);
+    const waits = waitsOf(state);
+    for (const x of waits) behind.set(x.number, { batch: batch.number, with: x.with });
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
     const jobs = await gh.ciJobs(batch.sha, counts(batch));
@@ -1095,7 +1129,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     } else if (tip !== state.baseSha) {
       // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
-      inFlight = await board(members, next, { retried: state.retried });
+      inFlight = await board(members, next, { retried: state.retried, waits });
     } else if (ci === "failure" && (baseCi === "pending" || (baseCi === "failure" && !members.some((p) => p?.priority)))) {
       // A batch with a `queue:priority` member is not held for the base's red: that member is most likely the base's
       // fix, and held it would wait for good (only one not in the held batch goes past it). It is split, as on a green base.
@@ -1108,7 +1142,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (culprit && !state.retried) {
         // One rerun before blaming a single pull request: a flake should not cost its author a review round.
         await retire(batch, `Merge train: CI Success failed with only #${culprit.number} on \`${base}\`; trying once more before calling it.`);
-        inFlight = await board([culprit], [], { retried: true });
+        inFlight = await board([culprit], [], { retried: true, waits });
       } else {
         await retire(batch, culprit ? `Merge train: CI Success failed twice with only #${culprit.number} on \`${base}\`.` : `Merge train: CI Success failed; trying ${first.map((p) => `#${p.number}`).join(" ")} first.`);
         if (culprit) {
@@ -1116,7 +1150,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           done.failed.push(culprit.number);
           await leave(culprit, LABEL.failed, `Merge train: CI Success failed twice in a batch with only this pull request on \`${base}\` (last: #${batch.number}). Fix it, get it reviewed again, and add \`queue\` again.`);
         } else {
-          inFlight = await board(first, second);
+          inFlight = await board(first, second, { waits });
         }
       }
     } else if (ci === "success") {
@@ -1128,7 +1162,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       } else inFlight = tested ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
-      inFlight = await board(members, next, { retried: state.retried });
+      inFlight = await board(members, next, { retried: state.retried, waits });
     } else {
       if (ci === "none") say(`::warning::CI has not started on batch #${batch.number} yet.`);
       inFlight = stay;
@@ -1349,6 +1383,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const company = holding && !inFlight ? { count: holding.count, minBatch, leavesAt: now - holding.waited + maxWait } : null;
   let place = 0;
   for (const p of line()) {
+    const after = behind.get(p.number);
+    p.behind = after && inFlight && !inFlight.alone && after.batch === inFlight.number && !aboard.has(p.number) ? after : null;
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
     const text =
       past?.number === p.number
@@ -1765,7 +1801,35 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     }
     return missing;
   };
+  /**
+   * Whether `ref` merges cleanly onto the base by itself, so that a squash merge of it that failed in a batch failed only
+   * on the pull requests applied before it (`applied`). If so, the ones of them it conflicts with by themselves, each
+   * on the base alone (all of them when only their sum conflicts); else null (it conflicts with the base itself).
+   */
+  const aheadOf = (baseSha, ref, applied) => {
+    const clean = (a, b) => {
+      try {
+        return git(["merge-tree", "--write-tree", a, b]).split("\n")[0];
+      } catch (e) {
+        if (e.code === "ETIMEDOUT") throw e; // not a conflict
+        return null;
+      }
+    };
+    if (!clean(baseSha, ref)) return null;
+    const named = applied.filter((n) => {
+      const alone = clean(baseSha, `${ns}/pr-${n}`);
+      if (!alone) return false;
+      const on = git([...identity(), "commit-tree", alone, "-p", baseSha, "-m", `#${n} on its own`]);
+      return !clean(on, ref);
+    });
+    return named.length ? named : [...applied];
+  };
   return {
+    /**
+     * Squash-merges `prs` onto `base`'s tip, one commit each, in order: { baseSha, sha, applied, dropped, commits }. A
+     * dropped one's reason: "missing", "moved", "empty", "conflict" (with the base itself), or "ahead": it merges cleanly
+     * onto the base by itself but not after the ones applied before it, and `with` names those it conflicts with.
+     */
     async build(base, prs) {
       signal?.throwIfAborted();
       const missing = fetchPulls(prs, [`+refs/heads/${base}:${ns}/base`]);
@@ -1795,7 +1859,8 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         } catch (e) {
           if (e.code === "ETIMEDOUT") throw e; // not a conflict
           git(["reset", "-q", "--hard", "HEAD"]);
-          dropped.push({ number: p.number, reason: "conflict" });
+          const ahead = applied.length ? aheadOf(baseSha, ref, applied) : null;
+          dropped.push(ahead ? { number: p.number, reason: "ahead", with: ahead } : { number: p.number, reason: "conflict" });
           continue;
         }
         if (!git(["status", "--porcelain"])) {
