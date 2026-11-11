@@ -94,7 +94,9 @@ the daemon runs another version). Ctrl-C, a service manager's stop, or the termi
 it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
 socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
 wait up to `--timeout` for its socket, then stop it. Any other command run meanwhile waits up to 30 s for that socket
-and goes through it.
+and goes through it. The same goes for a profile that `daemon restart` or `daemon --detach` keeps for the daemon it
+starts (`daemon.claim` in the profile's folder), from before the stop until the new daemon holds the profile: other
+commands do not open the profile in between, so a stream of them cannot keep the new daemon from starting.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
@@ -302,7 +304,9 @@ once the daemon has answered `status`: one that has not in 15 seconds is a timeo
 sent, so the daemon does not act on it when it wakes. A read (`chat list`, `status` and the like) that a daemon
 stopping or restarting leaves unanswered is asked once more, through the daemon that runs then or on the profile
 itself; so is a `chat wait` or `file wait`, for the time it had left. When that one goes away too it fails with
-`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. A `file send --wait`
+`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. Any command whose
+connection ended before it was sent to the daemon (`unavailable`, "The daemon went away") is sent once more the same
+way: the daemon never read it. A `file send --wait`
 answers before the daemon stops, as `send --wait` does: a timeout (exit 4) with `details.reason: daemon-stopped`, its
 `chat`, `messageId`, the file's id (`file`) and how far it got. Any other command it leaves unanswered may be done: it
 is a timeout (exit 4) with `details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
