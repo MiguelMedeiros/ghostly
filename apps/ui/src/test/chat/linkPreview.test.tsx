@@ -92,6 +92,19 @@ describe("a link preview in the composer", () => {
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
+
+  it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
+    const fetch = sites();
+    composer();
+    type("guess the ending: ||https://news.example/ending||");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
+    type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
 
 describe("a link preview in a message", () => {
@@ -147,6 +160,27 @@ describe("a link preview in a message", () => {
     for (const s of ["paypal.com", "https://paypal.com/login", "paypal。com", "‮moc.lapyap", "Pay​Pal"]) {
       const view = renderApp(<MessageBubble message={{ id: "m8", text: "https://evil.example/a", sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://evil.example/a", t: "A page", s } }} />);
       expect(screen.getByTestId("link-preview-site"), s).toHaveTextContent(/^evil\.example$/);
+      view.unmount();
+    }
+  });
+
+  it("is not drawn for a link the text shows only inside a spoiler, as an older app still sends one", () => {
+    const secret: LinkPreview = { u: "https://news.example/ending||", t: "The butler did it", s: "Example News", i: thumbnail };
+    const view = renderApp(<MessageBubble message={{ id: "m10", text: "guess: ||https://news.example/ending||", sender: "peer", timestamp: 1_700_000_000_000, preview: secret }} />);
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    expect(document.body).not.toHaveTextContent("The butler did it");
+    view.unmount();
+    // A link whose words are a spoiler hides where it goes too.
+    renderApp(<MessageBubble message={{ id: "m11", text: "[||the ending||](https://news.example/ending)", sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { ...secret, u: "https://news.example/ending" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+  });
+
+  it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
+      expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();
     }
   });
