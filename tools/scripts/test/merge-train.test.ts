@@ -3347,6 +3347,130 @@ describe("the fast tier on a commit", () => {
   });
 });
 
+describe("a cancelled CI run newer than one that ended on the same head", () => {
+  const reply = (body: object) => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(body) });
+  /** One of ci.yml's pull request runs on `sha` (from the branch fix-21), as GitHub lists it: green unless `extra` says. */
+  const wf = (id: number, sha: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    path: ".github/workflows/ci.yml",
+    head_sha: sha,
+    head_branch: "fix-21",
+    event: "pull_request",
+    created_at: "2026-11-06T00:10:45Z",
+    status: "completed",
+    conclusion: "success",
+    repository: { full_name: "o/r" },
+    head_repository: { full_name: "o/r" },
+    ...extra,
+  });
+  /** A REST layer over recorded answers: each commit's runs (newest first, as GitHub lists them) and each run's jobs. */
+  const layer = (runsOn: Record<string, object[]>, jobsOf: Record<number, object[]>) =>
+    restLayer("t", "o/r", {
+      wait: async () => {},
+      fetchImpl: async (url: string) => {
+        const path = url.replace("https://api.github.com/repos/o/r", "");
+        const sha = /ci\.yml\/runs\?head_sha=(\w+)/.exec(path)?.[1];
+        if (sha) return reply({ workflow_runs: runsOn[sha] ?? [] });
+        const id = Number(/\/actions\/runs\/(\d+)\/jobs/.exec(path)?.[1]);
+        return reply({ jobs: jobsOf[id] ?? [] });
+      },
+    });
+  const job = (id: number, name: string, status: string, conclusion: string | null) => ({ id, name, status, conclusion, started_at: "2026-11-06T00:10:50Z", completed_at: "2026-11-06T00:22:00Z" });
+  /** Leaving draft's second run, cancelled after 4 s: every job cancelled, the gate under ci.yml's unrendered name. */
+  const cutShort = [job(201, "Changed paths", "completed", "cancelled"), job(202, "${{ needs.changes.outputs.draft == 'true' && 'CI Success (draft)' || 'CI Success' }}", "completed", "cancelled")];
+  /** A green full run that skipped only what a change in packages/core turns off (Tauri Backend, Website, its browser checks). */
+  const greenForCore = [
+    job(101, "CI Success", "completed", "success"),
+    ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend tests (packages 1/4)", "CLI on Linux ARM64", "Frontend builds", "Desktop media (macOS WKWebView)", "Desktop on macOS"].map((name, i) => job(110 + i, name, "completed", "success")),
+    ...["Tauri Backend (apps/desktop)", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => job(130 + i, name, "completed", "skipped")),
+  ];
+  const failed = [job(301, "CI Success", "completed", "failure")];
+  const going = [job(401, "Changed paths", "completed", "success"), job(402, "CI Success", "queued", null)];
+
+  it("reads the green run before a cancelled one (the recorded case: two runs a second apart when it left draft), and the train lands it", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.files.set(21, ["packages/core/src/x.ts"]);
+    // The real REST layer reads CI, over GitHub's recorded answers: run 41939375958 (cancelled after 4 s) is the newer.
+    const rest = layer(
+      { h21: [wf(41939375958, "h21", { created_at: "2026-11-06T00:10:46Z", conclusion: "cancelled" }), wf(41939374808, "h21")] },
+      { 41939375958: cutShort, 41939374808: greenForCore },
+    );
+    Object.assign(repo.gh, { ciJobs: rest.ciJobs, draftJobs: rest.draftJobs });
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/does not count/);
+    expect(repo.comments.get(21)?.map((c) => c.body).join("\n") ?? "").not.toMatch(/CI Success has not passed/);
+    expect(r.merged).toEqual([21]);
+    expect(repo.landed).toEqual(["#21"]);
+  });
+
+  it("tells a pull request in line what the run before a cancelled one says: red is red, and a run still going is waited for", async () => {
+    const repo = fakeRepo();
+    for (const n of [22, 23, 24]) repo.add(n);
+    const rest = layer(
+      {
+        h22: [wf(32, "h22", { conclusion: "cancelled" }), wf(31, "h22", { conclusion: "failure" })],
+        h23: [wf(34, "h23", { status: "in_progress", conclusion: null }), wf(33, "h23")],
+        h24: [wf(35, "h24", { conclusion: "cancelled" })],
+      },
+      { 31: failed, 32: cutShort, 33: greenForCore, 34: going, 35: cutShort },
+    );
+    Object.assign(repo.gh, { ciJobs: rest.ciJobs, draftJobs: rest.draftJobs });
+    await repo.run();
+    expect(repo.comments.get(22)![0].body).toMatch(/Waiting: CI Success is red on its last commit/);
+    expect(repo.comments.get(23)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
+    expect(repo.comments.get(24)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
+    expect(repo.landed).toEqual([]);
+  });
+
+  it("decides by the newest run that ended or is still going: red over green, red under a cancelled one, pending over green", async () => {
+    const gh = layer(
+      {
+        // A failure newer than a success: red.
+        a: [wf(3, "a"), wf(2, "a")],
+        // A cancelled run newer than a failure: still red.
+        b: [wf(5, "b", { conclusion: "cancelled" }), wf(4, "b")],
+        // Only a cancelled run: nothing, never green.
+        c: [wf(6, "c", { conclusion: "cancelled" })],
+        // A run still going newer than a green one: it may yet end red, so it is waited for.
+        d: [wf(8, "d", { status: "in_progress", conclusion: null }), wf(7, "d")],
+        // A cancelled run whose other jobs still run (a re-run starting): pending, as before.
+        e: [wf(10, "e", { status: "in_progress", conclusion: null }), wf(9, "e")],
+        // Two cancelled runs over a green one: the green one.
+        f: [wf(13, "f", { conclusion: "cancelled" }), wf(12, "f", { conclusion: "cancelled" }), wf(11, "f")],
+      },
+      { 2: greenForCore, 3: failed, 4: failed, 5: cutShort, 6: cutShort, 7: greenForCore, 8: going, 9: greenForCore, 10: [job(501, "CI Success", "completed", "cancelled"), job(502, "Changed paths", "in_progress", null)], 11: greenForCore, 12: cutShort, 13: [] },
+    );
+    expect(ciState(await gh.ciJobs("a"))).toBe("failure");
+    expect(ciState(await gh.ciJobs("b"))).toBe("failure");
+    expect(ciState(await gh.ciJobs("c"))).toBe("none");
+    expect(ciState(await gh.ciJobs("d"))).toBe("pending");
+    expect(ciState(await gh.ciJobs("e"))).toBe("pending");
+    expect(ciState(await gh.ciJobs("f"))).toBe("success");
+    // A cancelled run is never handed to `counts`: a green run that does not count still passes to the run before it.
+    const asked: number[] = [];
+    expect(ciState(await gh.ciJobs("f", (_jobs: object[], run: { id: number }) => (asked.push(run.id), false)))).toBe("none");
+    expect(asked).toEqual([11]);
+  });
+
+  it("reads the fast tier past a draft gate that was cancelled, and waits for one still going", async () => {
+    const draftGate = (id: number, status: string, conclusion: string | null) => [job(id, "CI Success (draft)", status, conclusion)];
+    const gh = layer(
+      {
+        a: [wf(22, "a", { conclusion: "cancelled" }), wf(21, "a")],
+        b: [wf(24, "b", { status: "in_progress", conclusion: null }), wf(23, "b")],
+        c: [wf(26, "c", { conclusion: "cancelled" }), wf(25, "c", { conclusion: "failure" })],
+        d: [wf(27, "d", { conclusion: "cancelled" })],
+      },
+      { 21: draftGate(1, "completed", "success"), 22: draftGate(2, "completed", "cancelled"), 23: draftGate(3, "completed", "success"), 24: draftGate(4, "in_progress", null), 25: draftGate(5, "completed", "failure"), 26: draftGate(6, "completed", "cancelled"), 27: draftGate(7, "completed", "cancelled") },
+    );
+    expect(draftState(await gh.draftJobs("a"))).toBe("success");
+    expect(draftState(await gh.draftJobs("b"))).toBe("pending");
+    expect(draftState(await gh.draftJobs("c"))).toBe("failure");
+    expect(draftState(await gh.draftJobs("d"))).toBe("none");
+  });
+});
+
 describe("the bases with a train", () => {
   it("are dev and epic branches with a queued pull request or an open batch", () => {
     const pr = (base: string, labels: string[] = [], body = "", branch = "fix", fork = false) => ({ base, labels, body, branch, fork });
