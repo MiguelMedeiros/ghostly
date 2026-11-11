@@ -14,6 +14,7 @@ import type { ChatMessage, ChatSession } from "../../lib/types";
 import { Settings } from "../../pages/Settings";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "../apps/showApps";
 
 // covers: chats.list.rows, settings.chat-list-density
 
@@ -125,8 +126,13 @@ describe("the chat list's rows (compact, the default)", () => {
     const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
     const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } as const;
     saveSession(chat("a", { nick: "Ana", messages: [message({ text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, card })] }));
-    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
-    expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+    // A 1:1 chat where Apps shows: its bubble draws the card (elsewhere both say its text, appCardLineWhereShown.test.tsx).
+    showApps();
+    fakeEngine.on("appList", () => []);
+    try {
+      renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
+      expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+    } finally { hideApps(); }
   });
 
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
