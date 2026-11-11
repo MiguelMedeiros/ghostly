@@ -474,7 +474,7 @@ export function CallOverlay({
           </button>
         )}
 
-        {devices && <DeviceMenu devices={devices} />}
+        {devices && <DeviceMenu devices={devices} overVideo={overVideo} />}
 
         {/* Screen share: in any connected call, voice or video. Where no screen can be captured (phones) it is not here at all. */}
         {(canShareScreen || screenShareUnavailable) && onToggleScreenShare && (
@@ -527,8 +527,11 @@ const DEVICE_KINDS_SHOWN: readonly DeviceKind[] = ["audioinput", "videoinput", "
 const KIND_NAME = { audioinput: "settings.media.microphone", videoinput: "settings.media.camera", audiooutput: "settings.media.speaker" } as const;
 const NOTICE_TEXT = { lost: "calls.devices.lost", gone: "calls.devices.gone", failed: "calls.devices.failed", back: "calls.devices.back" } as const;
 
-/** The call's device menu: which microphone, camera and speaker, switched without leaving the call. */
-function DeviceMenu({ devices }: { devices: CallDevices }) {
+/**
+ * The call's device menu: which microphone, camera and speaker, switched without leaving the call. Over a video filling
+ * the window (`overVideo`) the call is drawn over it, and so is its menu: at the menus' usual height it opened under both.
+ */
+function DeviceMenu({ devices, overVideo }: { devices: CallDevices; overVideo: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -552,7 +555,8 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
           <circle cx="17" cy="18" r="2" />
         </svg>
       </button>
-      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst>
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst
+        stack={overVideo ? "z-[2147483002]" : "z-50"}>
         {kinds.map((kind, i) => {
           const devicesOfKind = devices.list[kind];
           if (kind !== "audioinput" && devicesOfKind.length === 0) return null;

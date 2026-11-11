@@ -54,11 +54,16 @@ type MenuProps = {
    * its opener's edge, down and towards the line's end as the webview's menu would, and follows the opener on scroll.
    */
   at?: MenuPoint;
+  /**
+   * How high it is drawn, as a popover over the whole page or a phone's sheet: the menus' usual `z-50`, or higher for
+   * an opener that is itself over everything (a call over a video filling the window).
+   */
+  stack?: string;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
@@ -182,9 +187,9 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   };
 
   if (phone) return createPortal(<>
-    <div aria-hidden="true" data-testid="menu-backdrop" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
+    <div aria-hidden="true" data-testid="menu-backdrop" className={`fixed inset-0 ${stack} bg-black/40 animate-fade-in`} />
     <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      className={`menu-sheet fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
+      className={`menu-sheet fixed inset-x-0 bottom-0 ${stack} max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
       {children}
     </div>
@@ -193,7 +198,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
-      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, document.body);
 
