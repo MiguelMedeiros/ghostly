@@ -277,6 +277,23 @@ describe("an app the watchdog stopped", () => {
     expect(within(app).queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it.each([["Close", false], ["Back to the chat", true]])("in a chat: left with %s while Open again opens, it stays closed", async (leave, phone) => {
+    setAppOpener(open);
+    const { user } = chatPanel(phone);
+    await act(() => open(REF, "link-1"));
+    act(() => started[0]!.stop("unresponsive"));
+    const app = screen.getByTestId("mini-app");
+    let go!: () => void;
+    entryWaits = new Promise((resolve) => { go = resolve; });
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await user.click(within(app).getByRole("button", { name: leave }));
+    expect(chatApp("link-1")).toBeUndefined();
+    await act(async () => { go(); await new Promise((r) => setTimeout(r, 10)); });
+    expect(started).toHaveLength(1);
+    expect(chatApp("link-1")).toBeUndefined();
+    expect(app).not.toBeVisible();
+  });
+
   const en = translateWith(locales.en, "en");
   const aloneOpener = () => webOpener({ apps: () => host, nameIn: () => undefined, closeLabel: () => "Close", openAgainLabel: () => "Open again", errorText: (error) => appErrorText(error, en), stoppedLabel: (title, takedown) => takedownText(title, takedown, en) });
 
