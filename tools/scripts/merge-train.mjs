@@ -983,8 +983,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         if (!r.ok && r.status !== 409 && at === from) {
           // The first one refused: read it again (which also has GitHub work its mergeability out). Turned into a draft,
           // closed or pushed to since the run read it, it left the line: nothing lands, nor by the rebase merge below.
-          const again = await gh.pull(s.number);
-          if (!again.open || again.draft || again.sha !== s.sha || onHold(again)) {
+          const read = await gh.pull(s.number);
+          if (!read.open || read.draft || read.sha !== s.sha || onHold(read)) {
             why = changedText([s]);
             break;
           }
