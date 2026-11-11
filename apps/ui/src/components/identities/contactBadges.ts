@@ -96,7 +96,7 @@ export function contactBadges(received: ReceivedIdentityView[] | undefined, { go
     if (!state || (good && !isGood(state))) return;
     // A public profile's name, while the proof still vouches for it: "Nostr: npub1…yz (Alice) · verified 2 h ago".
     const profile = isGood(state) && r.publicProfile?.found ? r.publicProfile : undefined;
-    const providerName = providerLabel(r.provider), short = shortSubject(r.provider, r.verified.subject), stateText = stateWords(state, r, now, t, language);
+    const providerName = providerLabel(r.provider, t),short = shortSubject(r.provider, r.verified.subject), stateText = stateWords(state, r, now, t, language);
     const label = `${providerName}: ${short}${profile?.name ? ` (${profile.name})` : ""} · ${stateText}`;
     const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
     const about = profile ? { ...(profile.name ? { name: profile.name } : {}), ...(profile.handle ? { handle: profile.handle } : {}), ...(profile.hosts?.length ? { hosts: profile.hosts } : {}) } : {};

@@ -13,6 +13,7 @@ import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
+import { localProvider } from "./providerWords";
 import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
 import type { Translate } from "../contexts/I18nContext";
 
@@ -77,7 +78,11 @@ export function addableProviders(): IdentityProofProvider[] {
 }
 
 export const providerOf = (id: string) => identityProvider(id);
-export const providerLabel = (id: string) => identityProvider(id)?.label ?? id;
+/** A provider's name, in `t`'s language for a built-in one (as Add shows it); English by default, as in tests. */
+export const providerLabel = (id: string, t: Translate = english) => {
+  const p = identityProvider(id);
+  return p ? localProvider(p, t).label : id;
+};
 export const shortSubject = (provider: string, subject: string) => {
   const p = identityProvider(provider);
   try { return p?.subject.short?.(subject) ?? subject; } catch { return subject; }

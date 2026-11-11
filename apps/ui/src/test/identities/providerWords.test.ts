@@ -2,16 +2,20 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { newIdentityBinding, identityStatement } from "@ghostly/core";
+import { newIdentityBinding, identityStatement, type IdentityTimelineEntry } from "@ghostly/core";
 import { BITCOIN_WALLET_GUIDES } from "@ghostly/browser/proofs/bitcoinWallets";
 import type { ExternalToolSigner, IdentityProofProvider, PublishSigner } from "@ghostly/browser/proofs/contract";
 import { OIDC_PROVIDERS } from "@ghostly/browser/proofs/oidc/providers";
 import { builtInIdentityProvider } from "@ghostly/browser/proofs/load";
 import { SCRIPT_NAMES } from "@ghostly/browser/proofs/providers/bitcoin";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
+import { contactBadges } from "../../components/identities/contactBadges";
+import { idCard, receivedIdCard, shareIdCard } from "../../components/identities/idCard";
+import { providerLabel } from "../../lib/identities";
 import { localProvider, providerSay } from "../../lib/providerWords";
 import { translateWith } from "../../locales/translate";
 import { LOCALES, lookup } from "../i18n/locales";
+import { now, proofView, receivedView } from "./views";
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
 /** An Ed25519 did:key (the all-zero seed's, from the did:key spec's test vectors): resolved on the device. */
@@ -201,6 +205,21 @@ describe("a provider's words in the app's language", () => {
     expect(wallets.filter(([key, text]) => lookup("en", `identities.providers.bitcoin.${key}`) !== text).map(([key]) => key)).toEqual([]);
     // An address type's name, said under a key built at run time (`scripts.${type}`), which sayCalls cannot read.
     expect(Object.entries(SCRIPT_NAMES).filter(([type, name]) => lookup("en", `identities.providers.bitcoin.scripts.${type}`) !== name).map(([type]) => type)).toEqual([]);
+  });
+
+  it("names the provider in the app's language on an ID card, a contact's card, a share and a contact's marks, as Add does", () => {
+    const pt = translateWith(LOCALES.pt, "pt");
+    const name = lookup("pt", "identities.providers.domain.label")!;
+    expect(name).not.toBe(provider("domain").label);
+    expect(localProvider(provider("domain"), pt).label).toBe(name);
+    expect(idCard(proofView(), { t: pt }).label).toBe(name);
+    expect(receivedIdCard(receivedView(), now(), pt, "pt").label).toBe(name);
+    expect(shareIdCard({ id: "mine:gone:1", proof: "gone", side: "mine", kind: "shared", provider: "domain", at: now() } as IdentityTimelineEntry,"waiting", { t: pt }).label).toBe(name);
+    expect(contactBadges([receivedView()], { t: pt, language: "pt" })[0]!.providerName).toBe(name);
+    expect(providerLabel("domain", pt)).toBe(name);
+    // English where no language is given (a test, a module outside the app's provider), and a plugin's own name.
+    expect(idCard(proofView()).label).toBe("Domain");
+    expect(providerLabel("acme", pt)).toBe("acme");
   });
 
   it("lists OpenID Connect's issuers as configured now, not as they were when first shown", () => {
