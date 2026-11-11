@@ -2,7 +2,7 @@ import {
   Wallet, MnemonicIdentity, RestArkProvider, RestIndexerProvider, EsploraProvider,
   IndexedDBWalletRepository, IndexedDBContractRepository, ArkAddress, Transaction,
   assertSubmittedArkTxid, matchServerCheckpoints, assertAllowedSighashTypes, verifyTapscriptSignatures,
-  isRecoverable, canRecoverOnchain, type StorageConfig,
+  isVtxoSpent, canRecoverOnchain, type StorageConfig,
 } from "@arkade-os/sdk";
 import { tapLeafHash } from "@scure/btc-signer/payment.js";
 import { assertWholeSats, arkAddressPrefix, validatePaymentTarget, type PaymentAdapter, type PaymentReview, type PaymentTarget } from "@ghostly/core";
@@ -44,7 +44,7 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
     const preview=new PreviewProvider(config.provider);
     const indexer=new RestIndexerProvider(config.provider);
     const repositories={...storage,walletRepository:storage?.walletRepository??new IndexedDBWalletRepository(`ghostly-ark-${config.walletId}`),contractRepository:storage?.contractRepository??new IndexedDBContractRepository(`ghostly-ark-${config.walletId}`)};
-    const wallet=await Wallet.create({identity,arkProvider:preview,indexerProvider:indexer,onchainProvider:new EsploraProvider(config.explorer),
+    const wallet=await Wallet.create({identity,operatorProvider:preview,indexerProvider:indexer,onchainProvider:new EsploraProvider(config.explorer),
       // Renews VTXOs before they expire and settles on-chain deposits into Ark, so a wallet left alone keeps its funds.
       // A local regtest server expires batches within minutes; there the test drives settlement itself.
       settlementConfig:config.network==="regtest"?false:{boardingUtxoSweep:true},walletMode:"hd",storage:repositories});
@@ -69,7 +69,8 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
     const now={timestamp:new Date()};
     let swept=0,sweeping=0;
     for(const vtxo of await this.wallet.getVtxos({withRecoverable:true,withUnrolled:false})) {
-      if(isRecoverable(vtxo))swept+=vtxo.value;
+      // Swept and still unspent: what 0.4's `isRecoverable` said, which 0.5 no longer exports.
+      if(vtxo.isSwept&&!isVtxoSpent(vtxo))swept+=vtxo.value;
       else if(!vtxo.isSwept&&canRecoverOnchain(vtxo,now))sweeping+=vtxo.value;
     }
     // What a recovery would hand back, over the same coins it would take (only asked when none is still sweeping),
