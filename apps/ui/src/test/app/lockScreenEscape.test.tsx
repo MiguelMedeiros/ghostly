@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LockScreen } from "../../components/LockScreen";
@@ -29,6 +29,7 @@ function Lock() {
 }
 
 const { showModal, close } = HTMLDialogElement.prototype;
+const layerDepth = () => (history.state as Record<string, unknown> | null)?.ghostlyLayer;
 const lockField = () => screen.getByLabelText("Ghostly is locked").querySelector("input[type=password]") as HTMLInputElement;
 
 describe("Escape on the lock screen", () => {
@@ -59,6 +60,23 @@ describe("Escape on the lock screen", () => {
     await act(async () => { fireEvent.submit(lockField().closest("form")!); });
     await screen.findByText("false");
     expect(screen.getByRole("dialog", { name: "Send files" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Caption")).toHaveValue("for you");
+  });
+
+  it("Back (Android's back gesture) leaves the dialog under the lock open too, and the app on its page", async () => {
+    act(() => { fireEvent.click(screen.getByTestId("lock")); });
+    // The lock takes an entry of its own once it is in.
+    await waitFor(() => expect(layerDepth()).toBe(2));
+    await act(async () => { history.back(); });
+    await waitFor(() => expect(layerDepth()).toBe(1));
+    expect(screen.getByTestId("lock")).toHaveTextContent("true");
+    expect(screen.getByRole("dialog", { name: "Send files", hidden: true })).toBeInTheDocument();
+    // It takes an entry again: the next Back is the lock screen's too, never the page's.
+    await waitFor(() => expect(layerDepth()).toBe(2));
+
+    fireEvent.change(lockField(), { target: { value: "pw" } });
+    await act(async () => { fireEvent.submit(lockField().closest("form")!); });
+    await screen.findByText("false");
     expect(screen.getByLabelText("Caption")).toHaveValue("for you");
   });
 

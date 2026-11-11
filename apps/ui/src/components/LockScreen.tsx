@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { currentProfile, listProfiles } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
 import { useViewportHeight } from "../hooks/useViewportHeight";
+import { useBackCloses } from "../hooks/useDismiss";
 import { PeerAvatar } from "./Avatar";
 import { ACCEPT, DECLINE, DeclineIcon, PhoneIcon, VideoIcon } from "./IncomingCallNotification";
 
@@ -93,6 +94,10 @@ export function LockScreen() {
       lockScreen.close();
     };
   }, [isLocked]);
+
+  // Back (Android's back gesture) is refused as Escape is: it would close the dialog left open under the lock, what was
+  // typed in it lost, or move the page under it, or leave the app. The lock takes an entry again.
+  useBackCloses(() => {}, isLocked);
 
   useEffect(() => {
     if (isLocked && inputRef.current) {
