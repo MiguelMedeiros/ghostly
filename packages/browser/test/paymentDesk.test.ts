@@ -1251,15 +1251,17 @@ describe("a request closed because its wallet was removed", () => {
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id).sort()).toEqual(["ark", "ln"]);
 
     sent.length = 0;
-    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to", "your contact removed the wallet it was paid to")).toBe(true);
-    expect(await desk.close("done", "x", "y"), "a paid request stays paid").toBe(false);
+    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to")).toBe(true);
+    expect(await desk.close("done", "x"), "a paid request stays paid").toBe(false);
     expect(state("ark")).toMatchObject({ state: "failed", closed: true, error: "you removed the Mainnet Ark wallet it was paid to" });
     expect(state("done")?.state).toBe("settled");
     expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
 
+    // The chat opening again says it closed once more: a contact away when it closed still had it open, with Pay.
     sent.length = 0;
     await desk.replay("l");
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id)).toEqual(["ln"]);
+    expect(sent.filter((s) => s.kind === "res")).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
   });
 
   it("on the payer's side it closes too, unless a Lightning payment for it is already in flight; nobody else can close it", async () => {

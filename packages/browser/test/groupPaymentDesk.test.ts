@@ -222,6 +222,24 @@ describe("a request to the whole group", () => {
     expect(view(c, paymentId).state).toBe("settled");
   });
 
+  it("a member away when the request closed (its wallet removed) has it closed when their edge opens, not left to pay", async () => {
+    const { world, members: [a, b, c] } = await group("A", "B", "C");
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: Date.now(), rail: "cashu" });
+    await world.settle();
+    world.down.add("AC");
+    expect(await a.desk.close(paymentId, "you removed the Testnet Cashu wallet it was paid to")).toBe(true);
+    await world.settle();
+    expect(view(b, paymentId)).toMatchObject({ state: "failed", closed: true });
+    expect(view(c, paymentId).state).toBe("pending");
+
+    world.down.delete("AC");
+    await a.desk.replay("AC");
+    await world.settle();
+    expect(view(c, paymentId)).toMatchObject({ state: "failed", closed: true, error: "your contact removed the wallet it was paid to" });
+    await expect(c.desk.payRequest({ linkId: "CA", paymentId })).rejects.toThrow("no longer open");
+    expect(a.sent.filter(s => s.kind === "req" && s.linkId === "AC")).toHaveLength(1);
+  });
+
   it("an edge opening says paid again only the requests under a week old, not the group's whole history", async () => {
     const names = Array.from({ length: 30 }, (_, i) => `M${i}`);
     const { world, members: [a] } = await group(...names);
