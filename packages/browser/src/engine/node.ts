@@ -206,7 +206,7 @@ import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../sh
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
 import { QuoteSweeps, patchRemoval, removalNumber, removalRow, withRemoval, type Removal, type RemovedQuotes } from "./removals";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
-import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
+import { mintAwaiting, sentUntaken, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
@@ -2137,7 +2137,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async sentWithoutLine(payments: readonly StoredPayment[]): Promise<Set<string>> {
     const lost = new Set<string>();
-    const sent = payments.filter((p) => p.kind === "payment" && p.direction === "out" && p.state === "pending" && p.token);
+    const sent = payments.filter(sentUntaken);
     if (!sent.length) return lost;
     let groups: string[] | undefined;
     const everyGroup = () => groups ??= this.groups.views().map((g) => g.id);
