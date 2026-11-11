@@ -62,6 +62,22 @@ describe("a call with the microphone or camera refused", () => {
     expect(within(notice).queryByRole("button")).toBeNull();
   });
 
+  // A video call whose camera alone was refused, or the microphone alone: the note said "the mic or camera".
+  it("names the camera when the call went on without it", () => {
+    setAgent("Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0");
+    renderApp(<CallMediaProblem problem="denied" of="camera" />);
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("No access to the camera, so video is off");
+    expect(notice).toHaveTextContent("Allow access in your browser or system settings.");
+  });
+
+  it("names the microphone when it was the microphone", () => {
+    renderApp(<CallMediaProblem problem="unavailable" of="mic" />);
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("No mic found");
+    expect(notice).toHaveTextContent("Connect one, or close the app using it.");
+  });
+
   it("is in every language", () => {
     inAndroidApp();
     renderApp(<CallMediaProblem problem="denied" />, { language: "pt" });
