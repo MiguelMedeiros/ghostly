@@ -23,7 +23,12 @@ const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args],
 beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relays.map((r) => r.url).join(","), GHOSTLY_LINK_TRACE: trace };
+  // The relays' budget unbounded: the pairing and the switch would spend its minute, and a text sent in it could wait
+  // ten seconds to go out, so the test waited that minute out (65 s of its 100 s on CI).
+  env = {
+    GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_PKARR_RELAYS: relays.map((r) => r.url).join(","), GHOSTLY_LINK_TRACE: trace,
+    GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity",
+  };
 }, 30_000);
 
 afterAll(async () => {
@@ -56,8 +61,6 @@ it("a daemon takes the texts of a contact that chose DHT only at the open chat's
     expect(Date.now(), "Bob never saw Alice choose DHT only").toBeLessThan(chose + 90_000);
     await new Promise((r) => setTimeout(r, 500));
   }
-  // The pairing and the switch spent Alice's relays' minute: a text she sends in it can wait ten seconds to go out.
-  await new Promise((r) => setTimeout(r, Math.max(0, chose + 65_000 - Date.now())));
   const lastSeq = (ok(await as(bob, "status")).events as { lastSeq: number }).lastSeq;
   const listen = new Running(["--home", bob, "listen", "--since", String(lastSeq), "--type", "message.received"], env);
   running.push(listen);

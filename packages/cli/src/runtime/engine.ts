@@ -166,6 +166,15 @@ function refuseDataAnswers(scope: Record<string, unknown>): void {
   };
 }
 
+/**
+ * For tests: `GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE=<n>` gives the relays' budget n requests a minute (`Infinity`: no
+ * bound), so a test on loopback relays need not wait out the minute its pairing spent (`REQUESTS_PER_MINUTE`).
+ */
+function relayBudgetForTests(): { requestsPerMinute?: number } {
+  const perMinute = Number(process.env.GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE);
+  return perMinute > 0 ? { requestsPerMinute: perMinute } : {};
+}
+
 /** `GHOSTLY_STUN=0`: every connection the engine makes leaves the apps' public STUN servers out of its configuration. */
 function leaveOutPublicStun(scope: Record<string, unknown>): void {
   const Base = scope.RTCPeerConnection as typeof RTCPeerConnection;
@@ -293,7 +302,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   ]);
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
   // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
-  const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
+  const relayOptions = { ...(pinned ? { relays: pinned } : {}), ...relayBudgetForTests() };
+  const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, relayOptions, !!pinned) : null;
   const apps = servedApps(paths.dir).length > 0;
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
