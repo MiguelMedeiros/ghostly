@@ -374,13 +374,14 @@ const TURNS_WAIT_MS = 60_000;
  * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
  * STARTING_WAIT_MS, and named as the holder. So is a profile a `daemon restart` or `daemon --detach` keeps for the daemon
  * it starts (`daemonClaim`): the commands that took the profile in turn in the gap kept that daemon from ever starting.
- * A `listen` with no daemon opens it the same way, as the daemon (`mode`).
+ * A `listen` with no daemon opens it the same way, as the daemon (`mode`). A wait that goes on past WAIT_NOTICE_MS says
+ * on a terminal what it waits for, once per kind of holder: it said nothing for up to 30 s (60 s behind commands in turn).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const from = performance.now();
-  // The process that holds the profile, as last seen, and since when.
-  let holder: unknown, since = from;
+  // The process that holds the profile, as last seen, and since when; the kind of holder the terminal was told of.
+  let holder: unknown, since = from, told: string | undefined;
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
@@ -398,6 +399,14 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
         if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: starting });
         const held = now - since >= HOLDER_WAIT_MS ? `was not free after ${HOLDER_WAIT_MS / 1000} s` : `was taken by one process after another for ${TURNS_WAIT_MS / 1000} s`;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and ${held}: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      const kind = claimed !== null ? "claimed" : starting !== null ? "starting" : "command";
+      if (process.stderr.isTTY && now - from >= WAIT_NOTICE_MS && told !== kind) {
+        told = kind;
+        const line = claimed !== null ? `profile ${g.profile} is kept for the daemon that process ${claimed} (ghostly daemon) starts: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : starting !== null ? `profile ${g.profile}'s daemon (process ${starting}) is starting: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : `profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command` : "another ghostly command"}: waiting for it to let go (up to ${HOLDER_WAIT_MS / 1000} s`;
+        process.stderr.write(`ghostly: ${line}; Ctrl-C stops waiting)\n`);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
     }
