@@ -175,6 +175,20 @@ describe("agent turns", () => {
     expect(toTurn(received("c1", "p5", "Deploy", { press }))).toMatchObject({ source: "message.received", chat: "c1", press: { ...press, by: "c1" } });
     expect(toTurn(received("c1", "p6", "hi"))).not.toHaveProperty("press");
   });
+
+  it("a member's press the engine learned late (its group.message pressed nothing) is one turn, with who pressed", () => {
+    const press = { messageId: "q1", button: "go", label: "Deploy" };
+    const first = groupMessage("g1", "p1", "Deploy");
+    expect(toTurn(first)).toBeNull();
+    // The author's whole copy completed it: `button.pressed` carries the reply, as the group's events give it.
+    const late = other("button.pressed", { group: "g1", ...press, by: KEY, name: null, replyId: "p1", untrusted: { name: "Carol" }, message: { ...first.message as object, press } });
+    expect(toTurn(late)).toEqual({
+      seq: late.seq, id: `agent.turn:button.pressed:g1:${turnRef("g1", "p1")}`, type: "agent.turn", at: 5, source: "button.pressed", group: "g1", member: KEY, messageId: turnRef("g1", "p1"), timestamp: 4,
+      press: { ...press, by: KEY }, untrusted: { text: "Deploy", name: "Carol", messageId: "p1" },
+    });
+    // The press said beside its reply's own event carries no reply: that event's turn has it already.
+    expect(toTurn(other("button.pressed", { group: "g1", ...press, by: KEY, name: null, replyId: "p2", untrusted: { name: "Carol" } }))).toBeNull();
+  });
 });
 
 describe("hooks", () => {
