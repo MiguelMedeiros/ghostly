@@ -1,5 +1,5 @@
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
+import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -57,16 +57,28 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
 }
 
 /**
+ * A private group with no member but me (they all left, or nobody accepted an invitation yet): what I send there now
+ * reaches nobody, not even a member who joins later (a joiner reads nothing from before). A community's roster may not
+ * list every member yet, so only a private group counts.
+ */
+export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => {
+  const group = state(ctx).groups?.find((g) => g.id === groupId);
+  return group?.profile === "mesh" && !group.members.some((m) => !m.me);
+};
+
+/**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
- * private group, an edge to one of my hubs in a community.
+ * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no
+ * edge will ever take it, and the wait sat its whole time, then said "it goes when one opens" and exited 4, which a
+ * bot retries, sending it again each time.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
   const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
-    if (taken > 0) return taken;
+    if (taken > 0 || nobodyElseIn(ctx, groupId)) return taken;
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

@@ -7,10 +7,10 @@ import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForRemoval } from
 /** A timed-out `edit --wait confirmed` and `group edit --wait sent` say what happens next, as `send`'s timeout does. */
 const pending = { linkId: "chat-one", id: "me_1", text: "new", sender: "me", timestamp: 1, via: "datalink", edit: { seq: 2, pending: true } } as unknown as StoredMessage;
 
-function fake(mode: "one-shot" | "daemon", links: unknown[] = []) {
+function fake(mode: "one-shot" | "daemon", links: unknown[] = [], groups?: unknown[]) {
   const node = {
     getMessage: vi.fn(async () => pending), groupTaken: vi.fn(() => 0), removalPending: vi.fn(() => true),
-    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), getState: () => ({ links }),
+    chatUnconfirmed: vi.fn(() => ({ reactions: [1], pin: null })), getState: () => ({ links, groups }),
   };
   return { runtime: { server: { node } }, mode } as unknown as ApiContext;
 }
@@ -80,5 +80,36 @@ describe("a wait's timeout with the wall clock set back", () => {
     vi.setSystemTime(Date.now() - 60_000);
     await vi.advanceTimersByTimeAsync(3_500);
     expect(error).toMatchObject({ code: "timeout" });
+  });
+});
+
+describe("a group frame's wait", () => {
+  const me = { key: "mine", me: true }, ana = { key: "ana", me: false };
+  const crew = (profile: string, members: unknown[]) => [{ id: "g1", profile, members }];
+
+  // Nothing sent there reaches anyone, not even a member who joins later: it sat its whole wait, said "it goes when one
+  // opens" and exited 4, which a bot retries, sending it again.
+  it("answers 0 at once in a private group with nobody else in it", async () => {
+    vi.useFakeTimers();
+    for (const which of [undefined, 2, { reaction: 1 }, { pin: 1 }]) {
+      await expect(waitForGroupFrame(fake("one-shot", [], crew("mesh", [me])), "g1", "mine:0:2", which, 30_000)).resolves.toBe(0);
+    }
+    await expect(waitForGroupFrame(fake("daemon", [], crew("mesh", [me])), "g1", "mine:0:2", undefined, 30_000)).resolves.toBe(0);
+  });
+
+  it("still waits with another member in it, and in a community, whose roster may not list everyone yet", async () => {
+    vi.useFakeTimers();
+    expect(await timedOut(waitForGroupFrame(fake("daemon", [], crew("mesh", [me, ana])), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({ code: "timeout" });
+    expect(await timedOut(waitForGroupFrame(fake("daemon", [], crew("community", [me])), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({ code: "timeout" });
+  });
+
+  it("ends when the last other member leaves while it waits", async () => {
+    vi.useFakeTimers();
+    const groups = crew("mesh", [me, ana]);
+    const wait = waitForGroupFrame(fake("daemon", [], groups), "g1", "mine:0:2", undefined, 30_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    (groups[0] as { members: unknown[] }).members = [me];
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(wait).resolves.toBe(0);
   });
 });
