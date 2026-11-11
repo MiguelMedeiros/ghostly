@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { expect, it, vi } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
+import { createIdentity } from "@ghostly/core";
 import type { ApiContext } from "../src/apiKit";
 import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -344,6 +345,18 @@ it("a restored profile keeps a chat's hold: the chat gets its live link back whe
   const dir = home("backup-holds");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Held bot"]));
   const original = join(dir, "profiles", "default");
+  // The held chats are the profile's (a start drops a hold whose chat its store does not have).
+  const opened = await openPersistentIndexedDb(join(original, "db"));
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = opened.factory.open("ghostly"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const tx = db.transaction("links", "readwrite");
+    for (const id of ["chat-held", "chat-ended"]) {
+      tx.objectStore("links").put({ id, profile: "paired-chat/1", createdAt: 1, label: id, deliveryMode: "dht", seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+        peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64, pairedPeerKey: createIdentity().pubKeyZ32, peerTrust: { version: 1 } });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error); });
+    db.close();
+  } finally { await opened.close(); }
   // As `chat disconnect --hold` writes it: two holds on at the backup.
   const now = Date.now(), until = now + 60 * 60_000;
   const holds = JSON.stringify({ "chat-held": { until, since: now }, "chat-ended": { until: now + 10 * 60_000, since: now } }) + "\n";
