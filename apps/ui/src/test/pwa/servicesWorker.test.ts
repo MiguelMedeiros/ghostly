@@ -137,6 +137,38 @@ describe("a request the app's page could not get an answer to", () => {
     expect(html).toContain("<html><head>");
   });
 
+  it("ends at a status a Response takes, whatever status the app's error comes with: never left waiting", async () => {
+    // As Chromium and Firefox build a Response (the test DOM's takes anything): refused outside 200-599, and with a
+    // body at a status that carries none.
+    const Native = globalThis.Response;
+    class BrowserResponse extends Native {
+      constructor(body?: BodyInit | null, init?: ResponseInit) {
+        const status = init?.status ?? 200;
+        if (status < 200 || status > 599) throw new RangeError(`The status provided (${status}) is outside the range [200, 599].`);
+        if (body != null && [101, 103, 204, 205, 304].includes(status)) throw new TypeError("Response with null body status cannot have body");
+        super(body, init);
+      }
+    }
+    vi.stubGlobal("Response", BrowserResponse);
+    const statuses: [number, number][] = [[204, 204], [205, 205], [304, 304], [0, 502], [99, 502], [600, 502], [700, 502], [502, 502]];
+    for (const [sent, kept] of statuses) {
+      for (const lang of [undefined, "en"]) {
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          (transfer[0] as MessagePort).postMessage({ type: "error", status: sent, text: "Not here", lang });
+        });
+        const waiting = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000));
+        const response = await Promise.race([fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!, waiting]);
+        const label = `${sent} ${lang ?? "plain"}`;
+        expect(response, label).not.toBeNull();
+        expect(response!.status, label).toBe(kept);
+        expect(response!.headers.get("content-security-policy"), label).toMatch(/^frame-ancestors 'self' https:\/\/app\.ghostly\.example(;|$)/);
+        const text = await response!.text();
+        if ([204, 205, 304].includes(kept)) expect(text, label).toBe("");
+        else expect(text, label).toContain("Not here");
+      }
+    }
+  });
+
   it("passes a fetch the app gives up on before any answer on as cancelled: the page lets go of it, and its body", async () => {
     let port: MessagePort | undefined;
     const said: unknown[] = [];
