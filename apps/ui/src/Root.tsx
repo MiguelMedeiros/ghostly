@@ -221,7 +221,7 @@ function ChatNotStoredNotice() {
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
  * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
- * the ⓘ), there until closed.
+ * the ⓘ), there until closed or until the next link is taken.
  * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
  * counted once the engine has loaded its groups.
  */
@@ -242,7 +242,8 @@ function GroupLinkIntake() {
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
-    else setCode(link);
+    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+    else { setProblem(null); setCode(link); }
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {
