@@ -1023,11 +1023,13 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
   // `file send` guard them.
   "createGroup", "renameGroup", "updateSettings", "sendFile",
+  // The status every contact reads, as `status set` guards it.
+  "setOwnStatus",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
