@@ -4,6 +4,7 @@ import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice"
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
 import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
+import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
@@ -546,9 +547,19 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.forward"(ctx, params) {
     const from = chatOrGroup(ctx, str(params, "chat", true));
-    const messageIds = list(params, "messages");
+    // Each id once, and the engine's bounds before any row is read: one id given 50,000 times was read and guarded as
+    // often (a minute of the daemon's thread) for the one message the engine forwarded.
+    const messageIds = [...new Set(list(params, "messages"))];
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
-    const to = list(params, "to").map((ref) => chatOrGroup(ctx, ref));
+    if (messageIds.length > FORWARD_MESSAGES) throw new CliError("bad_request", `Forward at most ${FORWARD_MESSAGES} messages at once, not ${messageIds.length}`);
+    // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
+    const to: ReturnType<typeof chatOrGroup>[] = [];
+    for (const ref of new Set(list(params, "to"))) {
+      const target = chatOrGroup(ctx, ref);
+      if (to.some((t) => t.linkId === target.linkId)) continue;
+      if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
+      to.push(target);
+    }
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
     // Each by its id here, one row each: never the whole history of the chat or group.
     const chosen: StoredMessage[] = [];
