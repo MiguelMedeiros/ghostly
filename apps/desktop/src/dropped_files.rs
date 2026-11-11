@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-use crate::clipboard::{pasted_files, shelve_files, PasteShelf, PastedItem};
+use crate::clipboard::{pasted_files, shelve_files, PasteShelf, ShelvedFiles};
 
 /// The event the page hears while another app's drag of files is over the window (true), and when it left (false).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -77,11 +77,12 @@ pub fn local_files<S: AsRef<str>>(uris: &[S]) -> Vec<PathBuf> {
 }
 
 /// The files of the drop the page just took, on the shelf (regular files only, as a paste's): read by token
-/// (`read_pasted_bytes`), let go with `incoming_share_done`. Empty when no drop of files came from another app.
+/// (`read_pasted_bytes`), let go with `incoming_share_done`; those left out by name. Empty when no drop of files came
+/// from another app.
 #[tauri::command]
 pub async fn read_dropped_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
-) -> Result<Vec<PastedItem>, String> {
+) -> Result<ShelvedFiles, String> {
     if window.label() != "main" {
         return Err("Not allowed from this window".into());
     }
@@ -280,7 +281,7 @@ mod tests {
             .expect("app")
     }
 
-    fn read(window: &tauri::WebviewWindow<MockRuntime>) -> Result<Vec<PastedItem>, String> {
+    fn read(window: &tauri::WebviewWindow<MockRuntime>) -> Result<ShelvedFiles, String> {
         tauri::async_runtime::block_on(read_dropped_files(window.clone()))
     }
 
@@ -300,7 +301,7 @@ mod tests {
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        assert_eq!(read(&main), Ok(Vec::new()), "no drop yet");
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()), "no drop yet");
 
         let dropped = app.state::<DroppedFiles>();
         dropped.put(
@@ -313,7 +314,13 @@ mod tests {
             .unwrap();
         assert_eq!(read(&other), Err("Not allowed from this window".into()));
 
-        let items = read(&main).unwrap();
+        let dropped_now = read(&main).unwrap();
+        // The folder is named, for the page to say it was left out.
+        assert_eq!(
+            (dropped_now.left_out, dropped_now.past_limit),
+            (vec!["a folder".to_string()], Vec::new())
+        );
+        let items = dropped_now.items;
         assert_eq!(items.len(), 1);
         assert_eq!(
             (
@@ -334,14 +341,14 @@ mod tests {
             tauri::ipc::InvokeResponseBody::Raw(raw) => assert_eq!(raw, b"boo"),
             other => panic!("not raw bytes: {other:?}"),
         }
-        assert_eq!(read(&main), Ok(Vec::new()), "taken once");
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()), "taken once");
 
         // A drop the page never asked for in time is gone.
         dropped.put(
             vec![dir.join("ghost story.txt")],
             Instant::now().checked_sub(FRESH * 2).unwrap(),
         );
-        assert_eq!(read(&main), Ok(Vec::new()));
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

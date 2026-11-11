@@ -243,6 +243,17 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(onSendFile.mock.calls.map(([f]) => [f.name, f.type, f.size])).toEqual([["scan.pdf", "application/pdf", 4], ["notes", "", 1]]);
   });
 
+  it("a paste the platform brought only some files of names the ones it left out", async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `p${33 + i}.txt`);
+    fakeEngine.readClipboardFiles = vi.fn(async () => Object.assign([held("p1.txt", [1])], { pastLimit: names }));
+    composer();
+    paste(field(), {});
+    const open = await screen.findByTestId("attachment-sheet");
+    // The first ten names, then the rest unnamed: the line stays one to read.
+    expect(await within(open).findByRole("alert")).toHaveTextContent(
+      `Only the first 32 files were added. Left out: ${names.slice(0, 10).join(", ")}, …. Add the rest with + → Document.`);
+  });
+
   it("text, or files the paste already showed, never ask the platform", async () => {
     fakeEngine.readClipboardFiles = vi.fn(async () => []);
     composer();

@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unknown) => options }));
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ClipboardFile } from "@ghostly/browser/host";
+import type { ClipboardFiles } from "@ghostly/browser/host";
 import { createDesktopHost } from "../../desktop/host";
 import { PLATFORM_PASTE_MAX, readPlatformFiles } from "../../lib/pastedFiles";
 
@@ -25,15 +25,15 @@ import { PLATFORM_PASTE_MAX, readPlatformFiles } from "../../lib/pastedFiles";
 
 type Held = { token: string; name: string | null; size: number; mime: string | null };
 const called = vi.mocked(invoke) as unknown as ReturnType<typeof vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>>;
-const read = () => (createDesktopHost("1.2.0") as unknown as { readClipboardFiles(): Promise<ClipboardFile[]> }).readClipboardFiles();
+const read = () => (createDesktopHost("1.2.0") as unknown as { readClipboardFiles(): Promise<ClipboardFiles> }).readClipboardFiles();
 /** The tokens the page said it is done with, in the order it said so. */
 const released = () => called.mock.calls.filter(([command]) => command === "incoming_share_done").flatMap(([, args]) => args!.tokens as string[]);
 
 /** Rust's side of a paste: what it holds by token, and what was read of it when. */
-function shelf(held: Held[], bytes: Record<string, number[]>, fail?: string) {
+function shelf(held: Held[], bytes: Record<string, number[]>, fail?: string, pastLimit: string[] = [], leftOut: string[] = []) {
   const order: string[] = [];
   called.mockImplementation(async (command, args) => {
-    if (command === "read_clipboard_files") return held;
+    if (command === "read_clipboard_files") return { items: held, pastLimit, leftOut };
     if (command === "read_pasted_bytes") {
       const { token, offset, length } = args as { token: string; offset: number; length: number };
       order.push(`read ${token}`);
@@ -94,6 +94,12 @@ describe("a paste the Desktop app read lets go of its bytes in Rust", () => {
       { a: [], b: [1, 2] },
     );
     expect((await readPlatformFiles(await read(), new Date(), true)).map((file) => file.name)).toEqual(["a.bin", "b.bin"]);
+  });
+
+  it("the files Rust left out of a paste come with the ones it holds, by name", async () => {
+    shelf([{ token: "a", name: "a.txt", size: 1, mime: null }], { a: [1] }, undefined, ["p33.txt"], ["Photos"]);
+    const clips = await read();
+    expect([clips.map((clip) => clip.name), clips.pastLimit, clips.leftOut]).toEqual([["a.txt"], ["p33.txt"], ["Photos"]]);
   });
 
   it("a release Rust refuses does not fail the paste", async () => {
