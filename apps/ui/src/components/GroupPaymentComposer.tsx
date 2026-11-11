@@ -31,6 +31,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const wallet = useWalletPlatform();
   const [to, setTo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Escape too, spent there: a key handler of its own closed it once more and left the key to a notice behind.
   useOutsideDismiss(ref, to === null, onClose);
   // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
   useTabTrap(ref, useIsMobile() && to === null);
@@ -89,7 +90,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
 
   return <>
     <div className="sheet-backdrop" />
-    <div ref={ref} data-testid="group-pay-recipients" onKeyDown={e => e.key === "Escape" && onClose()}
+    <div ref={ref} data-testid="group-pay-recipients"
       className="sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">{t("payments.mode.pay")}</p>
       <p className="m-0 px-1 text-xs text-text-muted">{community
