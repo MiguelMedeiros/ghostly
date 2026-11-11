@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { bech32 } from "@scure/base";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { decodeBolt11 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
@@ -27,7 +28,9 @@ const journal = (op: LightningOp) => transact([STORES.settings], (s) => { s[STOR
 beforeEach(async () => { await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); lightningJournalWritten(); });
 
 const services: LightningService[] = [];
-afterEach(async () => { for (const s of services.splice(0)) await s.stop(); });
+// A pass under way when its service stops still writes what it heard: one that wrote after the next test's
+// `beforeEach` cleared the journal left a "failed" op in it. A pass after `stop` waits for it, then does nothing.
+afterEach(async () => { for (const s of services.splice(0)) { await s.stop(); await s.reconcile(); } });
 
 function service(provider: LightningProvider = new FakeLightningProvider({ settleMs: 600_000 }), extra: Partial<LightningProviderDescriptor> = {}) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
@@ -245,8 +248,9 @@ describe("paying a quote", () => {
     const fake = new FakeLightningProvider({ behaviour: "hang" });
     Object.assign(fake, { capabilities: { ...fake.capabilities, lookup: false } });
     const { lightning } = await ready(fake);
-    expect(await lightning.pay((await lightning.quote(fakeInvoice(10, hash()))).quote)).toBe(false);
-    expect((await lightning.list())[0]).toMatchObject({ state: "unknown", error: expect.stringContaining("check this payment in the wallet itself") });
+    const paymentHash = hash();
+    expect(await lightning.pay((await lightning.quote(fakeInvoice(10, paymentHash))).quote)).toBe(false);
+    expect(await opOf(lightning, bytesToHex(paymentHash))).toMatchObject({ state: "unknown", error: expect.stringContaining("check this payment in the wallet itself") });
   });
 });
 
