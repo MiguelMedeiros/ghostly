@@ -213,6 +213,7 @@ import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } f
 import { db } from "./db";
 import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen, pinKey, reactionKey } from "./groups";
+import { communityEdgeIntervals } from "./communityEdgePace";
 import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView, keptMeshPeer, meshPeersKeeping } from "./groupEdges";
 import { GroupPayments, paymentsMembership } from "./groupPayments";
@@ -8518,8 +8519,11 @@ export class GhostlyNode implements EngineImplementation {
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
       transport: live.carried ?? this.groupTransport,
       nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
-      // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 902 § Cost per member).
-      pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
+      // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 902 § Cost per member). A
+      // community's connected edges, as this app holds more of them there: a hub's, one per member it carries.
+      pollIntervals: entry ? this.pollIntervals
+        : this.groups.isCommunityGroup(group) ? communityEdgeIntervals(this.pollIntervals, () => this.groupEdges(group).size)
+        : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
       // A member never seen is awaited from when the edge was made, as a chat's contact is: from each start, every edge
       // to a member away for a day was read every 4 s for ten minutes of every start, as an invite just sent.
       madeAt: stored.createdAt,

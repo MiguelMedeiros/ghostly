@@ -1,5 +1,6 @@
 import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@ghostly/core";
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { communityEdgeScale } from "../src/engine/communityEdgePace";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
 import type { GroupLight, GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 
@@ -448,9 +449,11 @@ export class CommunityWorld {
         const there = this.counterpart(edge);
         // The other side closed, or its app did (its data link dropped): signaling starts over.
         if (edge.upAt !== undefined && (!there || !there.peer.online || !this.sameSide(peer, there.peer))) { edge.upAt = undefined; edge.polls = 0; edge.sawPeer = edge.signaled = false; }
-        // A private group's edges look more slowly as it grows (`meshEdgeIntervals`).
+        // A private group's edges look more slowly as it grows (`meshEdgeIntervals`); a community's connected ones, as
+        // this app holds more edges there (`communityEdgeIntervals`).
         const mesh = edge.kind === "edge" && !peer.groups.isCommunityGroup(edge.g), size = mesh ? peer.groups.meshSize(edge.g) : 0;
-        const every = edge.upAt !== undefined ? net.connectedPollMs * (mesh ? meshEdgeScale(size) : 1)
+        const held = edge.kind === "edge" && !mesh ? [...peer.links.values()].filter(e => e.kind === "edge" && e.g === edge.g).length : 0;
+        const every = edge.upAt !== undefined ? net.connectedPollMs * (mesh ? meshEdgeScale(size) : held ? communityEdgeScale(held) : 1)
           : this.now < edge.fastUntil ? net.fastPollMs : net.backgroundPollMs * (mesh ? meshEdgeScale(size, false) : 1);
         if (this.now - edge.lastPoll < every) continue;
         edge.lastPoll = this.now;
