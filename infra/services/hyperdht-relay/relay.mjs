@@ -134,6 +134,28 @@ async function holdsKey(keyPair, options, onLeave) {
   sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
   return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
 }
+/**
+ * Where a dial's stream goes. A far server that says it is open has HyperDHT connect the dial's UDX stream to the first
+ * public address it names, whatever that is, and send it everything the client writes: through the relay, anyone could
+ * have its node send UDP to any public host and port, from the relay's address. The public addresses a far server names
+ * are dropped from its reply to a dial here, so HyperDHT connects to the address the DHT node that relayed the handshake
+ * saw it at (an open server names that one itself). Its private ones stay: HyperDHT tries them only on a LAN, by a ping.
+ * Every other way a dial connects follows a packet from the far peer.
+ */
+const { isBogon } = hyperdht('bogon')
+const NoiseWrap = hyperdht('./lib/noise-wrap.js')
+const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
+const reached = payload => payload?.addresses4?.length ? { ...payload, addresses4: payload.addresses4.filter(address => isBogon(address.host)) } : payload
+const reachedOnly = create => (...args) => {
+  const handshake = create(...args)
+  const recv = handshake.recv.bind(handshake)
+  // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
+  handshake.recv = (...message) => {
+    const payload = recv(...message)
+    return typeof payload?.then === 'function' ? payload.then(reached) : reached(payload)
+  }
+  return handshake
+}
 const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
 
 /**
@@ -230,7 +252,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
-        return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
+        return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
