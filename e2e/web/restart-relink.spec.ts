@@ -51,10 +51,13 @@ test("a page that crashes is live again with its contact once it is loaded again
     for (const p of [goes, stays]) await connectedOnWebRtc(p, 60_000);
     const url = goes.page.url();
     const started = Date.now();
-    // The tab's renderer dies: no goodbye, no close; the WebRTC connection just stops answering.
+    // The tab's renderer dies: no goodbye, no close; the WebRTC connection just stops answering. chrome://kill ends it at
+    // once, as a real crash does in Chrome (its crash handler); chrome://crash dumps a core on a Linux runner first, which
+    // systemd-coredump takes about a minute to read, and the crash is only seen then.
     const dead = goes.page, crashed = new Promise(resolve => dead.once("crash", resolve));
-    await dead.goto("chrome://crash").catch(() => {});
+    await dead.goto("chrome://kill").catch(() => {});
     await crashed;
+    expect(Date.now() - started, "the renderer is gone at once").toBeLessThan(5_000);
     // Opened again in a new tab: a crashed one cannot be navigated.
     goes.page = await goes.context.newPage();
     await goes.page.goto(url);
