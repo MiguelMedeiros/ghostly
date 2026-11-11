@@ -92,6 +92,7 @@ describe("identityFromSeed", () => {
     expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 3);
   });
 
+  // 16,385 keys derived: about 4 s on a desktop, past the default 5 s on a busy CI runner.
   it("keeps a bounded number of keys, used or not: past them, the oldest is derived again", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 4 * IDENTITY_MEMO_IDLE_MS);
@@ -102,7 +103,7 @@ describe("identityFromSeed", () => {
     expect(derive.calls).toBe(IDENTITY_MEMO_MAX + 1);
     identityFromSeed(fresh[0]!);
     expect(derive.calls).toBe(IDENTITY_MEMO_MAX + 2);
-  });
+  }, 60_000);
 
   it("refuses a seed that is not 32 bytes", () => {
     expect(() => identityFromSeed(new Uint8Array(31))).toThrow("Seed must be exactly 32 bytes");
