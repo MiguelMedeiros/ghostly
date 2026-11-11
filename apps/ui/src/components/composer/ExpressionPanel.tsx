@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEve
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useLockScreen } from "../../contexts/LockScreenContext";
-import { useOutsideDismiss } from "../../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { getPrefix } from "../../lib/storage";
 import { EmojiTab } from "./EmojiTab";
@@ -63,6 +63,8 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   const [switched, setSwitched] = useState(false);
   const [compact, setCompact] = useState(false);
   useOutsideDismiss(ref, !isLocked, onClose, dismissRef);
+  // On a phone it is a sheet over a backdrop, as the composer's + and the message menus: Tab stays in it.
+  useTabTrap(ref, phone && !isLocked);
 
   useLayoutEffect(() => {
     const bounds = boundsRef.current;
