@@ -187,8 +187,11 @@ export interface DeskSpark {
 class NoEcashError extends Error {
   declare readonly engineCode?: unknown;
   declare readonly values?: unknown;
+  /** The mint took the split and has not answered: the sats it set aside come back once it does (`SwapUnsettledError`). */
+  readonly unsettled: boolean;
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause));
+    this.unsettled = cause instanceof SwapUnsettledError;
     const { engineCode, values } = (cause ?? {}) as { engineCode?: unknown; values?: unknown };
     if (engineCode !== undefined) Object.assign(this, { engineCode });
     if (values !== undefined) Object.assign(this, { values });
@@ -694,6 +697,8 @@ export class PaymentDesk {
     const lightning = !!request.invoice && link.allowsPayment("lightning");
     // The person reviewed a Lightning payment: that is what is paid, never ecash in its place.
     if (params.via === "lightning" && !lightning) throw new Error("This request cannot be paid over Lightning in this chat");
+    // Ecash whose mint has not answered yet: why the payment was not made when Lightning finds nothing to pay with either.
+    let unsettled: NoEcashError | undefined;
     // A Fedimint request names no mint: ecash of a shared federation goes through a review, anything else is its invoice.
     if (params.via !== "lightning" && link.allowsPayment("cashu") && !request.federations) {
       try {
@@ -709,11 +714,12 @@ export class PaymentDesk {
       } catch (error) {
         // Lightning only when no ecash left the wallet: a token that exists may already be the contact's.
         if (!lightning || !(error instanceof NoEcashError)) throw error;
+        if (error.unsettled) unsettled = error;
       }
     } else if (!lightning) throw new Error("No way of paying this request is allowed in this chat");
 
     // Through the Lightning card the person picked; the network's default one otherwise.
-    const quote = await this.lightning[network].quote(request.invoice!, params.card);
+    const quote = await this.lightning[network].quote(request.invoice!, params.card).catch((error: unknown) => { throw unsettled ?? error; });
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     // Never above the ceiling the person approved, when they set one.
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);
