@@ -1158,12 +1158,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         }
       }
     } else if (ci === "success") {
-      // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on.
-      const tested = bySquash ? await readTested() : null;
-      if (base === "dev" && !tested) {
-        const why = bySquash ? "GitHub does not list exactly the commits its mark names" : "its mark does not name the commits the train built for it";
+      // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on. An epic
+      // lands the whole batch and closes every pull request its mark names, so it too needs GitHub to list exactly the
+      // mark's commits: one written into the editable body, which the batch does not hold, must not close as merged.
+      const marked = state.prs.every((s) => typeof s.commit === "string") && state.prs.at(-1)?.commit === state.head;
+      const tested = bySquash || (base !== "dev" && marked) ? await readTested() : null;
+      if (!tested) {
+        const why = marked ? "GitHub does not list exactly the commits its mark names" : "its mark does not name the commits the train built for it";
         await retire(batch, `Merge train: this batch's branch does not hold just the commits the train built (${why}), so it closes; its pull requests go back to the line.`);
-      } else inFlight = tested ? await landEach(tested, 0) : await landWhole();
+      } else inFlight = bySquash ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
       inFlight = await board(members, next, { retried: state.retried, waits });
