@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 // covers: apps.desktop-sandbox
 
@@ -30,8 +30,11 @@ class Document {
   writeln(): void {}
 }
 
-/** The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. */
-function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }, sent: unknown[] = []) {
+/**
+ * The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. `globals` adds to (or
+ * stands in for) the window's own.
+ */
+function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }, sent: unknown[] = [], globals: Json = {}) {
   const written: string[] = [];
   /** The window's events, a class per window: `stopImmediatePropagation` marks the event, so a test sees it was called. */
   class Event {
@@ -71,6 +74,7 @@ function open(answer: (request: { type: string; id?: number }) => string, clock 
         return runInNewContext(`(${JSON.stringify(answer(request))})`, window);
       },
     },
+    ...globals,
   } as unknown as Window;
   window.window = window;
   window.self = window;
@@ -204,4 +208,36 @@ it("refuses a request over 66 KiB without sending it", async () => {
   await expect(window.ghostly.storage.set("k", "é".repeat(33 * 1024))).rejects.toThrow("too-large");
   await expect(window.ghostly.storage.set("k", new Array(8 * 1024 * 1024).fill(0))).rejects.toThrow("too-large");
   expect(sent).toHaveLength(2);
+});
+
+// A file's bytes come as base64 in the answer (`bytes_response`), up to 64 MiB: decoded a character at a time, 64 MiB
+// held the app window's thread for about 250 ms in WebKit; the engine's own decoder takes about 40 ms.
+describe("a file's bytes", () => {
+  const file = new Uint8Array(1024).map((_, i) => (i * 37) & 0xff);
+  const answer = (request: { type: string; id?: number }) =>
+    request.type === "start" ? `"<p>chess</p>"`
+      : request.type === "file" ? `{"id":${request.id},"ok":true,"bytes":"${Buffer.from(file).toString("base64")}"}`
+      : `{"id":${request.id},"ok":true,"value":null}`;
+
+  it("are decoded by the engine's own decoder, not a character at a time", async () => {
+    const decoded: string[] = [];
+    const { window } = open(answer, undefined, undefined, { atob: (text: string) => { decoded.push(text); return atob(text); } });
+    await settle();
+    const bytes = await (window.ghostly as unknown as { file(path: string): Promise<ArrayBuffer> }).file("board.png");
+    expect(new Uint8Array(bytes)).toEqual(file);
+    expect(decoded, "atob").toEqual([]);
+  });
+
+  it("are decoded a character at a time where the engine has no decoder", async () => {
+    // A Uint8Array without `fromBase64`, as an older WebKit has it.
+    const decoded: string[] = [];
+    const { window } = open(answer, undefined, undefined, {
+      Uint8Array: Object.defineProperty(class extends Uint8Array {}, "fromBase64", { value: undefined }),
+      atob: (text: string) => { decoded.push(text); return atob(text); },
+    });
+    await settle();
+    const bytes = await (window.ghostly as unknown as { file(path: string): Promise<ArrayBuffer> }).file("board.png");
+    expect(new Uint8Array(bytes)).toEqual(file);
+    expect(decoded, "atob").toHaveLength(1);
+  });
 });
