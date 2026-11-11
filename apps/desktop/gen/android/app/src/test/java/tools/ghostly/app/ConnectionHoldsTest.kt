@@ -49,4 +49,20 @@ class ConnectionHoldsTest {
     // Exit self, crashes, ANR, a permission changed, a force stop, the app stopped, an update.
     for (reason in listOf(1, 4, 5, 6, 8, 10, 11, 15, 16)) assertEquals("reason $reason", false, ConnectionHolds.killedBySystem(true, reason))
   }
+
+  @Test
+  fun theAppsOwnExitCountsNotItsWebViewRenderers() {
+    val app = "tools.ghostly.app"
+    val renderer = "com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0"
+    // A force stop as the API 35 emulator records it: the renderer goes a few ms after the app, "other kills by system"
+    // (isolated not needed), so it is the newest record.
+    val forceStopped = listOf(renderer to 13, app to 10, renderer to 13, app to 2)
+    assertEquals(10, ConnectionHolds.lastExitReason(forceStopped, app))
+    assertEquals(false, ConnectionHolds.killedBySystem(true, ConnectionHolds.lastExitReason(forceStopped, app)))
+    // Killed by a signal, its renderer ending by itself after: still the system's.
+    val signaled = listOf(renderer to 1, app to 2)
+    assertEquals(true, ConnectionHolds.killedBySystem(true, ConnectionHolds.lastExitReason(signaled, app)))
+    // No record of the app at all: not known.
+    assertEquals(null, ConnectionHolds.lastExitReason(listOf(renderer to 13), app))
+  }
 }

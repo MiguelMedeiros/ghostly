@@ -89,7 +89,10 @@ class ConnectionService : Service() {
       prefs.edit().putBoolean(RUNNING, false).apply()
       val reason = if (Build.VERSION.SDK_INT >= 30) {
         val activities = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        runCatching { activities.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull()?.reason }.getOrNull() ?: 0
+        runCatching {
+          val exits = activities.getHistoricalProcessExitReasons(context.packageName, 0, 0).map { it.processName to it.reason }
+          ConnectionHolds.lastExitReason(exits, context.packageName)
+        }.getOrNull() ?: 0
       } else null
       val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
       return ConnectionHolds.killedBySystem(true, reason) && !power.isIgnoringBatteryOptimizations(context.packageName)
