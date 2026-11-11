@@ -112,7 +112,6 @@ function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
  */
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
   const request = readRequest(data);
-  if (!request) { port.close(); return; }
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
   let ended = false;
   const post = (reply: ServiceReply, transfer: Transferable[] = []) => {
@@ -126,6 +125,13 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
+  // One this page does not take (a path past its length, a method it does not read) never goes on the link, and is
+  // answered now: left unanswered, the worker waited `HEAD_TIMEOUT_MS` and said so in its own English.
+  if (!request) {
+    post({ type: "error", status: 400, text: words.failed });
+    port.close();
+    return;
+  }
   const release = holdRoom(jar, request.body?.byteLength ?? 0);
   if (!release) {
     post({ type: "error", status: 503, text: words.failed });
