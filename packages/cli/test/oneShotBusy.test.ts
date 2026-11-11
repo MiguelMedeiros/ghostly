@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { profilePaths } from "../src/profiles";
 import { error, ghostly, home, localRelay, ok, Running } from "./support/cli";
@@ -41,6 +42,26 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
     expect(Date.now() - started).toBeGreaterThanOrEqual(5_000);
     expect(error(run, "busy", 1).message).toBe(`Profile default is in use by process ${process.pid}, another ghostly command, and was not free after 5 s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`);
     expect(run.json.error).toMatchObject({ details: { pid: process.pid } });
+  });
+
+  it("one behind processes that take the profile in turn waits for each of them, not 5 s in all", async () => {
+    const turns = home("one-shot-turns");
+    ok(await ghostly(["--home", turns, "settings", "get"], { env }));
+    const { lock } = profilePaths(turns, "default");
+    // This test's own process, then another one, each hold the profile for 3 s: 6 s in all, past one holder's wait.
+    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore" });
+    try {
+      writeFileSync(lock, String(process.pid));
+      const started = Date.now();
+      const run = ghostly(["--home", turns, "chat", "list"], { env });
+      await new Promise((r) => setTimeout(r, 3_000));
+      writeFileSync(lock, String(other.pid));
+      await new Promise((r) => setTimeout(r, 3_000));
+      rmSync(lock, { force: true });
+      // Before: busy, "and was not free after 5 s", while the profile was passing from one process to the next.
+      expect(ok(await run)).toEqual({ chats: [] });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(6_000);
+    } finally { other.kill(); }
   });
 
   it.skipIf(process.platform === "win32")("one run while the daemon starts goes through it once its socket answers, not busy after the wait", async () => {
