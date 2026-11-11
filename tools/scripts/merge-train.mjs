@@ -84,8 +84,8 @@
 // GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
 // is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base the workflow runs
 // every base that has a queued pull request or a batch open (--list-bases prints them as JSON; with --woken <commit>,
-// the head of the CI run that woke the workflow, only the bases where that commit heads one of them, or the head of a run
-// that waited and that this one, --run-id, replaced), and a Mac runs `dev`
+// the head of the CI run that woke the workflow, only the bases where that commit heads one of them or is the base's own
+// tip, or the head of a run that waited and that this one, --run-id, replaced), and a Mac runs `dev`
 // and every `epic/*` branch, logging them each round. Every request and git call has a timeout, and a round that runs
 // past ROUND_DEADLINE is cut and logged, so the loop never stalls silently. --dry-run reads the live repo,
 // builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
@@ -1846,14 +1846,31 @@ const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /**
  * The bases with a train to run: `dev` and `epic/<name>` branches with a queued pull request or a batch open. `woken`:
  * the head commit of the CI run that woke the workflow, when one did. Then only the bases where that commit is the head
- * of a queued pull request or of a batch: the only CI runs that move a train. A run on a pull request that is not in
- * line (a draft still worked on, a ready one before `queue`) or on a head a push has replaced moves nothing, and the
- * `queue` label wakes the train by itself when it is added. Anything that is not a commit id is no `woken`. A batch
- * counts by its shape here (the train's login is not known yet): the run itself ignores one another login opened.
+ * of a queued pull request or of a batch, or the base's own tip (`tips`: each base's tip): the only CI runs that move a
+ * train. The base's own CI ending is what a red batch or lone pull request held for it waits on (HOLD in `tick`, which
+ * holds only on the tip). A run on a pull request that is not in line (a draft still worked on, a ready one before
+ * `queue`) or on a head a push has replaced moves nothing, and the `queue` label wakes the train by itself when it is
+ * added. Anything that is not a commit id is no `woken`. A batch counts by its shape here (the train's login is not
+ * known yet): the run itself ignores one another login opened.
  */
-export const trainBases = (pulls, woken) => {
+export const trainBases = (pulls, woken, tips = {}) => {
   const heads = [woken ?? []].flat().filter((w) => COMMIT.test(w));
-  return [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || batchShaped(p, p.base)) && (!heads.length || heads.includes(p.sha))).map((p) => p.base))].sort();
+  return [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || batchShaped(p, p.base)) && (!heads.length || heads.includes(p.sha) || heads.includes(tips[p.base]))).map((p) => p.base))].sort();
+};
+
+/**
+ * --list-bases: the bases whose train runs now (`trainBases`), read with `gh`. `woken`: the head of the CI run that woke
+ * the workflow, if any; `runId`: this run, which also serves the wakes it replaced while they waited (`missedWakes`).
+ * Woken by CI, the tips of the bases with a train are read too (one request each), so CI ending on a push to a base
+ * wakes that base's train.
+ */
+export const listBases = async (gh, woken, runId) => {
+  const pulls = await gh.pulls();
+  const missed = COMMIT.test(woken ?? "") && runId ? await missedWakes(await gh.queueRuns(), runId, gh.runJobs) : [];
+  const heads = missed && [woken, ...missed].filter((w) => COMMIT.test(w ?? ""));
+  if (!heads?.length) return trainBases(pulls, heads);
+  const tips = Object.fromEntries(await Promise.all(trainBases(pulls).map(async (b) => [b, await gh.branchSha(b)])));
+  return trainBases(pulls, heads, tips);
 };
 
 /** The name merge-queue.yml gives a run woken by CI: it carries that CI run's head. */
@@ -1954,9 +1971,7 @@ async function main() {
   const scrub = (s) => String(s).replaceAll(token, "***");
   const gh = restLayer(token, repo);
   if (flag("--list-bases")) {
-    const woken = opt("--woken");
-    const missed = COMMIT.test(woken ?? "") && opt("--run-id") ? await missedWakes(await gh.queueRuns(), Number(opt("--run-id")), gh.runJobs) : [];
-    return console.log(JSON.stringify(trainBases(await gh.pulls(), missed && [woken, ...missed])));
+    return console.log(JSON.stringify(await listBases(gh, opt("--woken"), opt("--run-id") && Number(opt("--run-id")))));
   }
   const local = !process.env.GITHUB_ACTIONS && !dry;
   if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 60_000 }).trim(), "merge-train.lock"));
