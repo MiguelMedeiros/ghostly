@@ -840,6 +840,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
     </div>
   );
+  // A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it from
+  // starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
+  // A call refused again while it shows is a new alert, said again. Like the wake notice, over whatever is on screen
+  // when the chat is not: Camera pressed in a call's small window over Settings or another chat.
+  const mediaNotice = webrtc.mediaProblem && (
+    <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} of={webrtc.mediaProblemOf} />
+  );
   /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
   const rarerRows = (close: () => void) => <>
     <FolderMenuItem chat={sessionId} onChoose={() => { close(); setShowFolders(true); }} />
@@ -877,10 +884,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {t("calls.noAnswer")}
         </div>
       )}
-      {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
-          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
-          A call refused again while it shows is a new alert, said again. */}
-      {webrtc.mediaProblem && <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} of={webrtc.mediaProblemOf} />}
+      {visible && mediaNotice}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -1312,6 +1316,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
+      {!visible && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
 
       {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
       {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}
