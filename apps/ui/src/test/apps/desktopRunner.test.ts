@@ -220,11 +220,16 @@ describe("a file's bytes", () => {
       : `{"id":${request.id},"ok":true,"value":null}`;
 
   it("are decoded by the engine's own decoder, not a character at a time", async () => {
-    const decoded: string[] = [];
-    const { window } = open(answer, undefined, undefined, { atob: (text: string) => { decoded.push(text); return atob(text); } });
+    // The engine's decoder, played (Node before 25 has none): WebKit's, Chromium's, Firefox's.
+    const decoded: string[] = [], native: string[] = [];
+    const { window } = open(answer, undefined, undefined, {
+      Uint8Array: Object.defineProperty(class extends Uint8Array {}, "fromBase64", { value: (text: string) => { native.push(text); return Uint8Array.from(Buffer.from(text, "base64")); } }),
+      atob: (text: string) => { decoded.push(text); return atob(text); },
+    });
     await settle();
     const bytes = await (window.ghostly as unknown as { file(path: string): Promise<ArrayBuffer> }).file("board.png");
     expect(new Uint8Array(bytes)).toEqual(file);
+    expect(native, "Uint8Array.fromBase64").toHaveLength(1);
     expect(decoded, "atob").toEqual([]);
   });
 
