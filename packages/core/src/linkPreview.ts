@@ -65,7 +65,8 @@ export function linkStop(url: string): string {
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", in any of
  * the app's languages) and a closing bracket or quote the link did not open ("(https://x.example/a)") are left as
- * text. The same rule as the message bubble's links.
+ * text, and so is a doubled `~~` or `||` closing the strike or spoiler the link sits in. The message bubble's links,
+ * the composer's preview and the receiver's check of it all end a link here, so a card opens the link the bubble does.
  */
 export function linkEnd(whole: string): string {
   const url = linkStop(whole);
@@ -76,9 +77,11 @@ export function linkEnd(whole: string): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
-    if (opener) count[last]--;
-    end--;
+    if (LINK_TRAILING.test(last) || (opener && count[last] > count[opener])) {
+      if (opener) count[last]--;
+      end--;
+    } else if ((last === "~" || last === "|") && url[end - 2] === last) end -= 2;
+    else break;
   }
   return url.slice(0, end);
 }
