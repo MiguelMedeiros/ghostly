@@ -25,6 +25,8 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
   let labels = 0;
   const hooks: { opened?: (label: string) => void; focused?: boolean } = {};
   const invoke = vi.fn(async (command: string, args: Record<string, unknown> = {}, options?: { headers: Record<string, string> }) => {
+    // Tauri reads JSON args with serde_json, which refuses half a surrogate pair (JSON.stringify writes it as a `\u` escape).
+    if (!(args instanceof Uint8Array) && /\\ud[89a-f]/i.test(JSON.stringify(args))) throw new Error("unexpected end of hex escape");
     calls.push(options ? { command, args, headers: options.headers } : { command, args });
     if (command === "app_focused") return hooks.focused ?? true;
     if (command === "app_open") {
@@ -267,6 +269,28 @@ describe("opening an app on Desktop", () => {
       { event: "chat.peer", data: { open: true, version: "1.2.0" } },
       { event: "chat.message", data: { move: "e4" } },
     ]));
+  });
+
+  // An answer or event holding half a surrogate pair never reached the app window (Tauri refused the `app_post`, without
+  // a word): the app waited a minute for `failed`. The broker puts U+FFFD in its place, on the web too (WISP 1200).
+  it("answers a stored value holding a lone surrogate at once, with U+FFFD in its place, and so hands on a contact's message", async () => {
+    const half = "\u{1F600}".slice(0, 1);
+    const { open, request, answer, host, posts } = setup();
+    // Stored before (a restored backup): it cannot be refused now.
+    host.stored.set(`${REF} ${LINK}`, new Map<string, unknown>([["game", { [`m${half}`]: [`v${half}`, "\u{1F600}"] }], [`k${half}`, 1]]) as never);
+    await open(REF, LINK);
+    request("app-1", { id: 1, type: "writing", args: [] });
+    await answer("app-1", 1);
+    request("app-1", { id: 2, type: "storage.get", args: ["game"] });
+    expect(await answer("app-1", 2)).toEqual({ id: 2, ok: true, value: { "m\uFFFD": ["v\uFFFD", "\u{1F600}"] } });
+    request("app-1", { id: 3, type: "storage.keys", args: [] });
+    expect(await answer("app-1", 3)).toEqual({ id: 3, ok: true, value: ["game", "k\uFFFD"] });
+    const app = memoryAppId(LINK, REF);
+    await vi.waitFor(() => expect(host.calls.some((c) => c.op === "chat.open")).toBe(true));
+    await Promise.resolve();
+    host.receive(LINK, { app, o: "open", v: "1.2.0" });
+    host.receive(LINK, { app, d: { move: `e4${half}` } });
+    await vi.waitFor(() => expect(posts("app-1").filter((m) => m.event === "chat.message")).toEqual([{ event: "chat.message", data: { move: "e4\uFFFD" } }]));
   });
 
   it("closes the window when the app asks, and stops the app when its window closes", async () => {

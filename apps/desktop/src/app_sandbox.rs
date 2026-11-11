@@ -154,15 +154,22 @@ const RUNNER: &str = r#"<!doctype html>
   } });
   // What a request may carry, as the broker reads it: plain JSON, no deeper than 64. An `undefined` member or item
   // goes, as JSON.stringify writes it (left out, or null in an array), the way the web broker reads it (jsonValueOf).
+  // A string or member name with a lone surrogate (half an emoji, cut by `slice`) does not: Tauri's JSON refuses it, and the web
+  // broker refuses it too, so the app gets `bad-request` on both (WISP 1200).
+  const loneSurrogate = /\p{Cs}/u;
+  const testPattern = RegExp.prototype.test;
+  const wellFormed = (text) => !reflectApply(testPattern, loneSurrogate, [text]);
   const isJson = (value, depth) => {
     if (depth > 64) return false;
-    if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+    if (value === null || typeof value === "boolean") return true;
+    if (typeof value === "string") return wellFormed(value);
     if (typeof value === "number") return Number.isFinite(value);
     const inside = (item) => item === undefined || isJson(item, depth + 1);
     if (Array.isArray(value)) return value.every(inside);
     if (typeof value !== "object") return false;
     const proto = Object.getPrototypeOf(value);
-    return (proto === Object.prototype || proto === null) && Object.values(value).every(inside);
+    const member = (entry) => entry[1] === undefined || (wellFormed(entry[0]) && isJson(entry[1], depth + 1));
+    return (proto === Object.prototype || proto === null) && Object.entries(value).every(member);
   };
   // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
   // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
