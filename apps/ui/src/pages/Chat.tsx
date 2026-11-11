@@ -10,6 +10,7 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
+import { asksEachAlone } from "../desktop/androidMediaDenied";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -321,6 +322,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     iceServers: engine.state?.settings.iceServers,
     // "Hide my IP from contacts" (Settings → Network): through that TURN server only.
     relayOnly: engine.state?.settings.relayOnly === true,
+    // The Android app shows a dialog per device at each request: a video call asks each alone, once.
+    asksEachAlone: asksEachAlone(),
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
