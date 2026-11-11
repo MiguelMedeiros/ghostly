@@ -1115,7 +1115,10 @@ export class DhtDelivery {
    * envelope was seen in the pinned mailbox, the invite's is not read any more.
    */
   private async read(background: boolean, signal = false): Promise<void> {
-    const pinned = this.pinned(), options = signal ? { signal } : background ? { background } : undefined;
+    // A contact on DHT only, this side not: its envelope saying it left is what the live link waits on, read like a
+    // contact that went away (`PkarrRequestOptions.departed`, `departedRead`).
+    const departed = !signal && !background && this.departedRead();
+    const pinned = this.pinned(), options = signal ? { signal } : background ? { background } : departed ? { departed } : undefined;
     const before = this.state.peerPinned;
     const boxes: ("invite" | "pinned")[] = !pinned ? ["invite"] : before === "seen" ? ["pinned"] : before ? ["pinned", "invite"] : ["invite", "pinned"];
     let found: SignedPacket | null = null;
@@ -1233,6 +1236,21 @@ export class DhtDelivery {
     // hunt, 2026-11-07). Just started, a contact there is read at the background pace until its next envelope.
     const there = now - this.peerNewAt < PRESENCE_WINDOW;
     return this.state.peerMode === "dht" && this.options.peerDhtPollMs && there ? Math.min(this.options.peerDhtPollMs, STREAM_POLL_MS) : STREAM_POLL_MS;
+  }
+  /**
+   * The contact is on DHT only and this side is not: a live link waits on the contact's envelope saying it left, and
+   * nothing else of the contact's shows before it (no offer is read, no dial taken, while its mailbox says DHT only). Its
+   * reads that are not background ones (the chat open, a text awaiting its receipt) then say `departed`: a few may go over
+   * the relays' minute (`DEPARTED_READS` in relay.ts, per mailbox, every relay together, 6 at the open chat's 10 s pace).
+   * As plain reads, an extension that stayed on Automatic, its minute spent by what it did before, read nothing of its
+   * contact for 40 s after the contact left DHT only, and the matrix's chat stayed "On DHT · retrying live" (E2E full,
+   * 2026-11-07 and 11-08). No more reads than before: those it made anyway, the minute spent, go within the allowance.
+   * Not while this side is leaving DHT only itself (`signalReads` left, `leavingRead`): its read at the switch stays a
+   * plain one, the rest are signaling, so the few requests past a spent minute stay for the dialling side's read of the
+   * answer. As a departed read, the switch's took one, and both sides leaving went live in 34 s, against 10.
+   */
+  private departedRead(): boolean {
+    return this.mode !== "dht" && this.state.peerMode === "dht" && this.signalReads === 0 && !!this.options.credentials.peerKey;
   }
   /**
    * This side is DHT only, and nothing waits on the contact's mailbox: the contact, pinned, is away (nothing new of its

@@ -195,17 +195,18 @@ describe("leaving DHT-only after the contact reloaded", () => {
  * mailbox once a moment before the contact's envelope saying it left got there, and its next reads waited as long, so
  * it never dialled (mx-47d9d4bb). Each side has its own budget on one relay they share, as the e2e's.
  */
-describe("leaving DHT-only with the relay minute spent", () => {
-  function relayFetch(): typeof fetch {
-    const stored = new Map<string, Uint8Array>();
-    return (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const key = new URL(String(input)).pathname.slice(1);
-      if (init?.method === "PUT") { stored.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
-      const body = stored.get(key);
-      return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
-    }) as typeof fetch;
-  }
+/** One relay both sides use: each side's `RelayTransport` over it has its own budget, as the e2e's. */
+function relayFetch(): typeof fetch {
+  const stored = new Map<string, Uint8Array>();
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const key = new URL(String(input)).pathname.slice(1);
+    if (init?.method === "PUT") { stored.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
+    const body = stored.get(key);
+    return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
+  }) as typeof fetch;
+}
 
+describe("leaving DHT-only with the relay minute spent", () => {
   for (const dialer of ["a", "b"] as const) for (const first of ["a", "b"] as const) for (const gap of [0, 3_000]) {
     it(`is live in seconds · ${dialer.toUpperCase()} dials · ${first.toUpperCase()} leaves ${gap / 1000} s first`, async () => {
       const fetch = relayFetch();
@@ -256,6 +257,37 @@ describe("leaving DHT-only with the relay minute spent", () => {
       await two.setDeliveryMode("stream");
       const took = await untilLive(a, b, 60_000);
       expect(took, "live after both left DHT-only").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
+});
+
+/**
+ * The matrix's chat after pairing on DHT only (E2E full, 2026-11-07 and 11-08): only A chose it, B stayed on Automatic
+ * with the chat open, and B's relay minute was spent by the steps before. A left; B's reads of A's mailbox, plain reads
+ * at the open chat's pace, were held until the minute freed 40 s later, and the chat stayed "On DHT · retrying live".
+ */
+describe("the contact leaving DHT only with this side's relay minute spent", () => {
+  for (const dialer of ["a", "b"] as const) for (const spentBefore of [5_000, 500]) {
+    it(`is live in seconds · ${dialer.toUpperCase()} dials · B's minute spent ${spentBefore / 1000} s before A leaves`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      // Only A chose DHT only: B is on Automatic and has read A's mailbox saying so.
+      pair.b.params.deliveryMode = "stream";
+      pair.a.state.peerMode = "stream";
+      const a = open(pair.a, relay.a, true), b = open(pair.b, relay.b, true);
+      // Both chats on screen, as the matrix's: B reads A's mailbox at the open chat's pace.
+      for (const link of [a, b]) link.setChatActive(true);
+      await run(20_000);
+      expect(b.dhtDelivery?.peerMode).toBe("dht");
+      // What else B's profile asks the relay for (its other chats, its groups) spends its minute.
+      const other = createIdentity();
+      for (let i = 0; i < 40; i++) await relay.b.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+      await run(spentBefore);
+      await a.setDeliveryMode("stream");
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after A left DHT only").toBeLessThanOrEqual(15_000);
     }, 60_000);
   }
 });
