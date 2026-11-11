@@ -521,7 +521,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           if (fd !== null) await new Promise<void>((resolve, reject) => fsync(fd, (error) => (error ? reject(error) : resolve())));
         } catch (error) {
           failed(error);
-          void enqueue(writeSnapshot).then(() => { for (const complete of batch) complete(); });
+          // The entries written while it ran are no surer: they go with the fold too. None is written straight to the
+          // journal while the fold waits in the queue, so none is left for another sync.
+          const folded = [...batch, ...unsynced.splice(0)];
+          void enqueue(writeSnapshot).then(() => { for (const complete of folded) complete(); });
           continue;
         }
         for (const complete of batch) complete();

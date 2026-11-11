@@ -18,7 +18,7 @@ vi.mock("node:fs", async (original) => {
     fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); disk.synced++; },
     fsync: (fd: number, done: (error: NodeJS.ErrnoException | null) => void) => {
       syncs.count++;
-      if (faults.sync) return void setImmediate(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })));
+      if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
       const end = (error: NodeJS.ErrnoException | null) => { disk.synced++; done(error); };
       fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
     },
@@ -165,15 +165,18 @@ describe("persistent IndexedDB", () => {
     await tx(d, ["settings"], (s) => { s.settings.put("before", "a"); });
     const lines: string[] = [];
     const errors = vi.spyOn(process.stderr, "write").mockImplementation((line) => { lines.push(String(line)); return true; });
+    // A slow sync that fails, and a second transaction that commits while it runs: neither hears `complete` before the
+    // snapshot holds it (the journal it took the place of is gone by then).
+    const journalAt: boolean[] = [];
     faults.sync = true;
+    disk.syncMs = 10;
     try {
-      await tx(d, ["settings"], (s) => { s.settings.put("after", "b"); });
-    } finally { faults.sync = false; errors.mockRestore(); }
-    // The snapshot holds it, and the journal it took the place of is gone.
+      await Promise.all(["b", "c"].map((key) => tx(d, ["settings"], (s) => { s.settings.put("after", key); }).then(() => { journalAt.push(existsSync(join(dir, "journal.bin"))); })));
+    } finally { faults.sync = false; disk.syncMs = 0; errors.mockRestore(); }
     expect(lines).toEqual([expect.stringContaining("EIO: i/o error, fsync")]);
-    expect(existsSync(join(dir, "journal.bin"))).toBe(false);
+    expect(journalAt).toEqual([false, false]);
     const again = await db(await open(dir));
-    expect(await read(again.transaction("settings").objectStore("settings").get("b"))).toBe("after");
+    expect(await read(again.transaction("settings").objectStore("settings").getAll())).toEqual(["before", "after", "after"]);
   });
 
   it("drops an aborted transaction", async () => {
