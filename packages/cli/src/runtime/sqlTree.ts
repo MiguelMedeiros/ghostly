@@ -1,4 +1,4 @@
-import { closeSync, openSync } from "node:fs";
+import { closeSync, fsyncSync, openSync } from "node:fs";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { deserialize, serialize } from "node:v8";
 import { AFTER, keyBytes } from "./keyBytes";
@@ -133,7 +133,13 @@ export class TreeFile {
 
   /** Everything SQLite holds is on disk: before a snapshot takes the place of the journal that had it. */
   sync(): void {
-    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const { busy } = this.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy: number };
+    if (!busy) return;
+    // A reader (a backup's export, `openTreeReader`) holds rows.db as it was: the checkpoint stopped at it, and what it
+    // left in the WAL goes to the disk there.
+    const { file } = this.db.prepare("PRAGMA database_list").get() as { file: string };
+    const fd = openSync(`${file}-wal`, "r");
+    try { fsyncSync(fd); } finally { closeSync(fd); }
   }
 
   /** Trees whose store or index is gone from the schema (deleted, a database removed) go, with their entries. */
@@ -379,6 +385,16 @@ export class SqlTree {
     return out;
   }
 
+  /**
+   * This tree as it is now, its rows read from `file` (rows.db as it was at this turn, `openTreeReader`) under the
+   * layers of the transactions finished so far: not the ones after, nor one still running.
+   */
+  at(file: TreeFile): SqlTree {
+    const tree = new SqlTree(file, this.id, this._keysAreUnique, this.index);
+    tree.pending = [...this.pending];
+    return tree;
+  }
+
   /** @internal */
   complete(owner: object | null, seq: number): void {
     if (!this.active || (this.active.owner !== owner && this.active.owner !== null)) return;
@@ -424,6 +440,21 @@ export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string,
   const db = new sqlite.DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA secure_delete = ON");
   return new TreeFile(db, constraintError);
+}
+
+/**
+ * rows.db as it is at this call, for a long read that leaves the event loop turns between its pages (a backup's
+ * export): a second connection, read-only, in one read transaction, which the writes after it do not change (WAL).
+ * Closing its `db` ends it.
+ */
+export function openTreeReader(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
+  const db = new sqlite.DatabaseSync(path, { readOnly: true });
+  try {
+    db.exec("BEGIN");
+    // The read transaction holds rows.db from its first read, not from BEGIN.
+    db.prepare("SELECT 1 FROM entries LIMIT 1").get();
+    return new TreeFile(db, constraintError);
+  } catch (error) { db.close(); throw error; }
 }
 
 /** A range's keys as bytes: from the first (in) up to the second (out), undefined where it is open. */
