@@ -1339,6 +1339,19 @@ describe("a pending chat's invite code is a secret", () => {
     expect(printed.links.map((l) => l.inviteCode)).toEqual([undefined, "<hidden>", "<hidden>"]);
     expect(printed.groups[0]).toMatchObject({ entryLink: "<hidden>" });
   });
+
+  it("engine getState hides another group's link under a held id and the wake-up tokens", () => {
+    const state = pending().node.getState();
+    const full = { ...state,
+      links: state.links.map((l, i) => (i === 0 ? { ...l, wakeToken: "wake-chat" } : l)),
+      groups: [{ ...group, wakeTokens: ["wake-group"], others: [{ link: "group1/g/entry-key" }, { linkId: "chat-zero", name: "Other", members: 2 }] }] };
+    const printed = hideStateSecrets(full);
+    expect(JSON.stringify(printed)).not.toMatch(/entry-key|wake-chat|wake-group/);
+    expect(printed.groups[0]).toMatchObject({ wakeTokens: ["<hidden>"], others: [{ link: "<hidden>" }, { linkId: "chat-zero", name: "Other", members: 2 }] });
+    expect(printed.links[0]).toMatchObject({ wakeToken: "<hidden>" });
+    // With --show-secret the state is printed as the engine gave it.
+    expect(JSON.stringify(full)).toMatch(/entry-key.*wake-group|wake-group.*entry-key/);
+  });
 });
 
 // A chat or a group with no message yet answered `lastMessageAt: 0` (1970), where every other time not reached yet is null.
