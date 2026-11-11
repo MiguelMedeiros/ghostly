@@ -545,6 +545,25 @@ describe("a run of the train", () => {
     });
   });
 
+  it("tells a queue:priority pull request it drops that queue:priority came off too, to add it again with queue", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 13]) repo.add(n);
+    repo.add(12, { priority: true });
+    repo.add(14, { priority: true });
+    repo.add(15);
+    for (const n of [12, 15]) repo.conflicts.add(n);
+    repo.missing.add(14);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12, 14, 15]);
+    expect(repo.members()).toEqual([11, 13]);
+    // Taken off with `queue`: back with `queue` alone, the fix for a red `dev` waits behind the batch held for that red.
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
+    expect(repo.pulls.get(14)!.labels).toEqual([LABEL.failed]);
+    for (const n of [12, 14]) expect(repo.comments.get(n)![0].body).toMatch(/ It had `queue:priority`, which the train took off with `queue`: add both again, or only `queue` if it no longer goes first\.$/);
+    // One without it is told nothing about it.
+    expect(repo.comments.get(15)![0].body).not.toMatch(/priority/);
+  });
+
   const conflictSaid = /Waiting: it conflicts with `dev`, and GitHub runs no CI on a pull request until its conflict with the base is resolved; merge `origin\/dev` into it\. It keeps its place until then; after that push it leaves the line and joins it again at the back once it is reviewed and queued\.$/;
 
   it("says first that a queued pull request that waits conflicts with its base, which GitHub runs no CI on, and keeps it in line", async () => {
