@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutAudioMetadata, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
+import { taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
@@ -230,7 +231,7 @@ describe("a copy whose source goes while it is copied", () => {
 });
 
 // covers: files.video.metadata
-describe("a received video", () => {
+describe("a received video or audio file", () => {
   // From an app that sent it as it was recorded: it says where.
   const recorded = withMovie(H264_MP4, [xyzUdta()]);
   const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
@@ -288,6 +289,25 @@ describe("a received video", () => {
     expect(hasPlace(sent)).toBe(false);
     expect(Buffer.compare(sent, stripped)).toBe(0);
   });
+
+  // covers: files.audio.metadata
+  for (const kept of ["blob", "storage"] as const)
+    for (const [as, name, mime, bytes, voice] of [
+      ["a voice note", "voice.m4a", "audio/mp4", taggedM4a(), { duration: 1200, peaks: [1, 2, 3] }],
+      ["an audio file", "memo.mp3", "audio/mpeg", taggedMp3(), undefined],
+    ] as const)
+      it(`goes on as ${as} (kept in ${kept}) without its first sender's tags: the digest is the stripped copy's`, async () => {
+        const { id, target } = await received(bytes, name, mime, kept);
+        if (voice) target.file = { ...target.file, voice } as typeof target.file;
+        const stripped = await bytesOf((await withoutAudioMetadata(new Blob([bytes]), mime))!);
+        const file = await copyForForward(id, target);
+        const sent = await copied(target.file.id);
+        expect(hasPlace(sent)).toBe(false);
+        expect(Buffer.compare(sent, stripped)).toBe(0);
+        expect(file).toMatchObject({ size: bytes.length, ...(voice && { voice }) });
+        expect(await fileStore.get(target.file.id)).toMatchObject({ digest: createHash("sha256").update(stripped).digest("base64url") });
+        expect(hasPlace(await copied(id))).toBe(true);
+      });
 
   it("whose metadata cannot be removed is refused as one sent from here is, and no copy is kept", async () => {
     for (const kept of ["blob", "storage"] as const) {

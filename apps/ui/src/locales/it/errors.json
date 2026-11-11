@@ -159,6 +159,8 @@
     "askAgain": "Chiedi al tuo contatto di inviarlo di nuovo.",
     "askGroupAgain": "Richiedilo al gruppo più tardi.",
     "askedTooOften": "Il tuo contatto ha chiesto questo file troppe volte",
+    "audioMetadata": "Questo audio non può essere inviato: Ghostly non è riuscito a rimuovere i dati salvati al suo interno, come il luogo in cui è stato registrato",
+    "audioMetadataNext": "Salvane una copia in un editor audio, oppure esportalo di nuovo dall'app che lo ha creato, e invia quella.",
     "cancelledHere": "L'hai annullato.",
     "cancelledThere": "Il tuo contatto l'ha annullato.",
     "cannotDecodeRecording": "Questo dispositivo non riesce a decodificare la registrazione",
