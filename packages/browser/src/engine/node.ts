@@ -768,6 +768,12 @@ export interface NodeOptions {
    */
   webrtcGroupLinks?: boolean;
   /**
+   * This app's WebRTC does not keep to the relay (the CLI's libdatachannel: with `iceTransportPolicy: "relay"` it still
+   * checks from this machine's own sockets, and the contact sees its address). While Hide my IP from contacts is on, its
+   * chats and group edges run no WebRTC, as an app with none: they go over the relayed transports (`contactRtc`).
+   */
+  webrtcIgnoresRelayOnly?: boolean;
+  /**
    * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 902 · Group Mesh § Hubs, Budget):
    * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
    * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
@@ -1818,7 +1824,7 @@ export class GhostlyNode implements EngineImplementation {
       // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with
       // most listeners free of 1:1 chats gives them (`groupNativeRoom`): a link needs one.
       const native = Object.keys(this.nativeFactories) as NativeTransport[];
-      if (typeof RTCPeerConnection === "undefined" && native.length) {
+      if (!this.contactRtc() && native.length) {
         let held = 0;
         for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
         return Math.max(0, Math.max(...native.map(key => this.groupNativeRoom(key))) - held);
@@ -2992,11 +2998,11 @@ export class GhostlyNode implements EngineImplementation {
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
-        ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
+        ...(!this.contactRtc() && { webrtc: false as const }),
         ...(this.directPath.blocked && { directBlocked: true as const }),
         ...(this.clock.offset !== null && { clockOffMs: this.clock.offset }),
         // A group's link goes over WebRTC, or a native transport where one side has none (WISP 902 § Transports).
-        ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
+        ...(!this.contactRtc() && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
@@ -5509,7 +5515,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async setGroupTransport({ groupId, transport }: { groupId: string; transport: PairedTransport | "auto" }): Promise<void> {
     if (!this.groups.view(groupId)) throw new Error("Group not found");
-    const runs = transport === "webrtc/1" ? typeof RTCPeerConnection !== "undefined" : transport !== "auto" && TRANSPORTS.includes(transport) && transport in this.nativeFactories;
+    const runs = transport === "webrtc/1" ? this.contactRtc() : transport !== "auto" && TRANSPORTS.includes(transport) && transport in this.nativeFactories;
     if (transport !== "auto" && !runs) throw new Error("Transport unavailable");
     if ((this.settings.groupTransports?.[groupId] ?? "auto") === transport) return;
     const { [groupId]: _, ...others } = this.settings.groupTransports ?? {};
@@ -8500,7 +8506,7 @@ export class GhostlyNode implements EngineImplementation {
       largeFilesSupport: !entry,
       binaryFilesSupport: !entry,
       params: stored,
-      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId) && !this.groupNativeChoice(stored),
+      rtcAvailable: this.contactRtc() && !this.edgeRtcOff.has(linkId) && !this.groupNativeChoice(stored),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
       // WebRTC, unless one side has none: then the native transport both run.
@@ -8531,7 +8537,7 @@ export class GhostlyNode implements EngineImplementation {
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
       // drawn so), and the joiner's packet is already there: its offer goes in its first packet.
       ...(entry ? { oneShot: true, firstPublish: stored.groupEntry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
-      createPeerConnection: () => new RTCPeerConnection(this.contactRtcConfig()),
+      createPeerConnection: () => this.contactPeerConnection(),
       localFetch: this.localFetch,
       getServices: () => [{ id: "chat", type: "chat" }],
       getHostedHttpService: () => undefined,
@@ -8654,7 +8660,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private keepsGroupNative(stored: StoredLink): boolean {
     if (this.options.webrtcGroupLinks) return false;
-    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"))
+    return !this.contactRtc() || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"))
       || this.groupNativeChoice(stored) !== undefined;
   }
 
@@ -8815,7 +8821,7 @@ export class GhostlyNode implements EngineImplementation {
       usdtPaymentsSupport: true,
       barkPaymentsSupport: true,
       params: stored,
-      rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      rtcAvailable: this.contactRtc(),
       // Call media is a WebRTC connection of its own, whatever carries the chat: the page's, or the host's own
       // (Ghostly Desktop on Linux, where WebKitGTK has none, brings GStreamer's).
       callsSupport: this.options.callsSupport ?? typeof RTCPeerConnection !== "undefined",
@@ -8906,7 +8912,7 @@ export class GhostlyNode implements EngineImplementation {
       pollIntervals: this.pollIntervals,
       ...(this.options.watchPeerIdleMs ? { watchPeerIdleMs: this.options.watchPeerIdleMs } : {}),
       autoConnect: true,
-      createPeerConnection: () => this.chatPeer(new RTCPeerConnection(this.contactRtcConfig())),
+      createPeerConnection: () => this.chatPeer(this.contactPeerConnection()),
       localFetch: this.localFetch,
       getServices: () => stored.profile ? [{ id: "chat", type: "chat" }] : this.advertisedServices(stored.peerPubKeyZ32),
       // A paired contact learns only the apps granted to it, on the open session; nothing is published.
@@ -9276,7 +9282,21 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The layer-1 transports this app can run at all: WebRTC where the page has it, then its native adapters. */
   private transportsHere(): PairedTransport[] {
-    return [...(typeof RTCPeerConnection !== "undefined" ? ["webrtc/1" as const] : []), ...Object.keys(this.nativeFactories) as NativeTransport[]];
+    return [...(this.contactRtc() ? ["webrtc/1" as const] : []), ...Object.keys(this.nativeFactories) as NativeTransport[]];
+  }
+
+  /**
+   * Whether chats and group edges run WebRTC: where the page has it, but not while Hide my IP from contacts is on where
+   * that WebRTC does not keep to the relay (`webrtcIgnoresRelayOnly`, the CLI). Calls are refused there on their own.
+   */
+  private contactRtc(): boolean {
+    return typeof RTCPeerConnection !== "undefined" && !(this.options.webrtcIgnoresRelayOnly && this.settings.relayOnly === true);
+  }
+
+  /** A chat's or group edge's WebRTC connection; none (an offer is neither made nor answered) where `contactRtc` says so. */
+  private contactPeerConnection(): RTCPeerConnection {
+    if (!this.contactRtc()) throw new Error("No WebRTC for contacts here");
+    return new RTCPeerConnection(this.contactRtcConfig());
   }
 
   /** Something the capability record carries changed here: every chat publishes its record anew if it differs. */
@@ -9470,7 +9490,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private reachedOnlyNatively(live: LiveLink): boolean {
     const theirs = live.stored.capsState?.peer?.transports ?? live.stored.peerTransports;
-    return typeof RTCPeerConnection === "undefined" || !theirs || !theirs.includes("webrtc/1") || this.directPath.blocked;
+    return !this.contactRtc() || !theirs || !theirs.includes("webrtc/1") || this.directPath.blocked;
   }
 
   /**
@@ -9881,7 +9901,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
-    const rtc = typeof RTCPeerConnection !== "undefined";
+    const rtc = this.contactRtc();
     const rank = new Map(linkIds.filter(isChat).map(id => {
       const live = this.links.get(id)!;
       const theirs = live.stored.capsState?.peer?.transports ?? live.stored.peerTransports;
