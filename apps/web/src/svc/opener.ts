@@ -351,10 +351,13 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       frame.style.display = "none";
       if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
     } else {
+      // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
+      const had = notice.contains(document.activeElement);
       notice.hidden = true;
       notice.style.display = "none";
       frame.style.display = "";
       frame.src = src;
+      if (had) frame.focus({ preventScroll: true });
     }
   };
   retry.addEventListener("click", () => { refused = null; present(); });

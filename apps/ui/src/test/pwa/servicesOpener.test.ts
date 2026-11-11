@@ -514,10 +514,13 @@ describe("a contact's app shown over the app", () => {
     for (const l of listeners) l();
     expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
     expect(frame.src).toBe("about:blank");
-    view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!.click();
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    retry.focus();
+    retry.click();
     expect(notice.hidden).toBe(true);
     expect(frame.style.display).toBe("");
     expect(frame.src, "the bridge is loaded anew").toBe(first);
+    expect(document.activeElement, "the focus goes to the app, not the page's body").toBe(frame);
     // A page of the app the bridge would not show.
     refused("unguarded");
     expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
