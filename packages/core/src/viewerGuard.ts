@@ -226,6 +226,8 @@ const find = (bytes: Uint8Array, from: number, text: string) => {
  * `head` ends before that is known and more is coming (`done` false).
  */
 export function viewerGuardOffset(head: Uint8Array, done: boolean): number | null {
+  // A part of a byte order mark: before it, the guard would leave the page with none (and windows-1252 for UTF-8).
+  if (!done && head.length < 3 && at(head, 0, "ï»¿".slice(0, head.length))) return null;
   let offset = at(head, 0, "ï»¿") ? 3 : 0;
   for (;;) {
     while (offset < head.length && [0x09, 0x0a, 0x0c, 0x0d, 0x20].includes(head[offset])) offset++;
