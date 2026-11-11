@@ -393,6 +393,23 @@ describe("chat disconnect --hold", () => {
     expect(node.connect).toHaveBeenCalledWith({ linkId: "chat-two" });
   });
 
+  // The check ran before the dial only: the contact's choice, read from the DHT while the dial waited (up to 30 s
+  // later), ended it as `engine`, the line the refusal above replaced.
+  it("chat connect whose contact's DHT only is learned while it dials is refused the same way", async () => {
+    const { ctx, node, setLink } = fake();
+    node.connect.mockImplementationOnce(async () => {
+      setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+      throw new Error("DHT-only delivery does not open a live connection. Both peers must choose a live method first.");
+    });
+    const refused = await callApi(ctx, "chat.connect", { chat: "Bob" }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "refused", details: { reason: "peer-dht-only" } });
+    expect(refused?.message).toMatch(/^Your contact keeps this chat on DHT only/);
+    // Any other failure is still the engine's.
+    node.connect.mockRejectedValueOnce(new Error("Link is closed"));
+    setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
+    await expect(callApi(ctx, "chat.connect", { chat: "Bob" })).rejects.toMatchObject({ message: "Link is closed" });
+  });
+
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
   // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
   it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {
