@@ -5,7 +5,7 @@ import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
-import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
+import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 
@@ -581,9 +581,7 @@ export class CallManager {
    */
   private async attach(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<void> {
     const queue = (call.queue = new PlaybackQueue(call.rate));
-    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
-      onAudio: (chunk) => queue.push(chunk),
-    });
+    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, feedQueue(queue));
     if (call.ended) { await socket.close(); return; }
     call.socket = socket;
     await this.connect(call, create);
