@@ -371,6 +371,30 @@ describe("with the apps flag on", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("while a waiting Update runs, Open, Keep it stopped and Run anyway do not leave the screen, and a failed update shows why", async () => {
+    const removedRun = { status: "removed" as const, by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    for (const run of [undefined, removedRun]) {
+      let fail: (e: Error) => void = () => {};
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => new Promise<InstalledAppView>((_, reject) => { fail = reject; }));
+      const onClose = vi.fn(), onOpen = vi.fn();
+      const { user, unmount } = renderApp(<InstalledAppDialog onClose={onClose} onOpen={onOpen}
+        app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] }, ...(run && { run }) })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      const leaving = run ? ["app-run-anyway", "app-keep-stopped"] : ["app-open"];
+      for (const id of leaving) await user.click(screen.getByTestId(id));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+      for (const id of [...leaving, "app-uninstall-open"]) expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId("app-details")).toBeInTheDocument();
+      await act(async () => fail(new Error("The host answered 503")));
+      expect(await screen.findByTestId("app-details-error")).toBeInTheDocument();
+      // Once the update is over, they work again.
+      await user.click(screen.getByTestId(leaving[0]!));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
   it("while Add store runs, the store's Cancel, Escape and the backdrop do not close Add: no Cancel the store is added after all", async () => {
     const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
     let finish: () => void = () => {};
