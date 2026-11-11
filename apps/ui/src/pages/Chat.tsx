@@ -1151,7 +1151,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
             <p data-testid="chat-created" className="mb-3 px-4 text-center chat-text-note text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
-                {t("common.chatCreated", {date: new Intl.DateTimeFormat(language, {dateStyle:"medium", timeStyle:"short"}).format(session.createdAt)})}
+                {t("common.chatCreated", {date: formatAt(session.createdAt, { dateStyle: "medium", timeStyle: "short" }, language)})}
               </time>
             </p>
           )}
