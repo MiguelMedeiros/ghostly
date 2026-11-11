@@ -293,6 +293,24 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby-reenroll")).toHaveTextContent("Add this device to my profile");
   });
 
+  it("out of the set for good: the old set is not listed, its Active device is not the one in use now", async () => {
+    const old = (): DeviceSetView => ({ state: "standby", devices: [
+      { key: DESKTOP, name: "Desktop", slot: 0, self: false, active: true, status: "connecting" },
+      { key: PHONE, name: "Phone", slot: 1, self: false, active: false, status: "connecting" },
+      { key: TABLET, name: "Tablet", slot: 2, self: true, active: false },
+    ] });
+    const first = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop" }} />);
+    first.engine.on("deviceSet", old);
+    // A move that goes on lists the set it belongs to.
+    expect(await screen.findAllByTestId("device-standby-link")).toHaveLength(2);
+    first.unmount();
+    const { engine } = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop", reenroll: true }} />);
+    engine.on("deviceSet", old);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByTestId("device-standby-reenroll")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-standby-links")).toBeNull();
+  });
+
   it("removed while its screen is open: the keyboard focus on Use here goes to Add this device, not to the page", async () => {
     const { rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
     act(() => screen.getByTestId("handoff-use-here").focus());
