@@ -82,9 +82,12 @@ function startedHere(event: FetchEvent, all: WindowClient[]): boolean {
   return !!event.clientId && all.some((client) => client.id === event.clientId);
 }
 
-/** The request body, read up to the data link's limit: null past it. */
+/** The request body, read up to the data link's limit: "too-large" past it, null when there is none. */
 async function readBody(request: Request): Promise<ArrayBuffer | null | "too-large"> {
-  if (["GET", "HEAD"].includes(request.method) || !request.body) return null;
+  if (["GET", "HEAD"].includes(request.method)) return null;
+  // Firefox has no `Request.body` (undefined, where null means no body): its body is read whole, within the limit.
+  if (request.body === undefined) return readWhole(request);
+  if (!request.body) return null;
   const reader = request.body.getReader();
   const parts: Uint8Array[] = [];
   let size = 0;
@@ -99,6 +102,18 @@ async function readBody(request: Request): Promise<ArrayBuffer | null | "too-lar
   let at = 0;
   for (const part of parts) { body.set(part, at); at += part.byteLength; }
   return body.buffer;
+}
+
+/**
+ * The body of a request with no stream to read it by (Firefox's): refused unread when its declared length is past the
+ * limit, and refused after reading when it turns out past it. An empty one is no body, as where the stream is null.
+ */
+async function readWhole(request: Request): Promise<ArrayBuffer | null | "too-large"> {
+  const declared = request.headers.get("content-length")?.trim();
+  if (declared && /^\d+$/.test(declared) && Number(declared) > MAX_REQUEST_BYTES) return "too-large";
+  const body = await request.arrayBuffer();
+  if (body.byteLength > MAX_REQUEST_BYTES) return "too-large";
+  return body.byteLength ? body : null;
 }
 
 /**
