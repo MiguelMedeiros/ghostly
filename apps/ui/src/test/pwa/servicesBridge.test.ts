@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
 import { BRIDGE_PORT } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
@@ -52,7 +52,31 @@ describe("the bridge's frame of the contact's app", () => {
     }
     // Inline: the bridge's policy allows it by its hash, in the page and from the server.
     const web = (file: string) => readFileSync(join(import.meta.dirname, "../../../../web", file), "utf8");
-    expect(web("svcBuild.ts")).toContain("script-src 'self' ${VIEWER_GUARD_HASH};");
-    expect(web("nginx-services.conf")).toContain(`script-src 'self' ${VIEWER_GUARD_HASH};`);
+    expect(web("svcBuild.ts")).toContain("script-src 'self' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH};");
+    expect(web("nginx-services.conf")).toContain(`script-src 'self' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH};`);
+  });
+
+  it("runs the clipboard guard always, before the app's frame is made: the app's page reaches this window's execCommand", async () => {
+    for (const relayOnly of [false, true]) {
+      document.head.replaceChildren();
+      vi.resetModules();
+      await bridgeFrame(relayOnly);
+      const scripts = [...document.head.querySelectorAll("script")].map((script) => script.textContent);
+      expect(scripts[0], String(relayOnly)).toBe(CLIPBOARD_GUARD_SCRIPT);
+    }
+  });
+
+  it("does not show a page it cannot read, nor take a frame's word for which page is in it", async () => {
+    // Which pages it shows, the guard's and those without scripts, is e2e/web/services-web-clipboard.spec.ts's: the
+    // getters it reads are a browser's `Document.prototype`'s.
+    vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+    vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+    const { guardedDocument, guardedPage } = await import("../../../../web/src/svc/bridge");
+    // Cross-origin or opaque (a `sandbox` policy of the page's own): nothing to read, not shown.
+    expect(guardedDocument(null)).toBe(false);
+    // A `contentDocument` the app's page put on the frame is not what is read: the getter was taken before.
+    const frame = document.createElement("iframe");
+    Object.defineProperty(frame, "contentDocument", { get: () => ({ URL: "about:blank" }) });
+    expect(guardedPage(frame)).toBe(false);
   });
 });

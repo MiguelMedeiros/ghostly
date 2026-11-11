@@ -14,7 +14,8 @@
  *
  * Fail-closed: a file that is an MP4 or QuickTime video, by its bytes or by its type, and whose metadata cannot be
  * removed (truncated, malformed, a part of its movie this does not know) is refused with `NO_VIDEO_METADATA`, never sent as it was.
- * A picture (HEIF is pictureMetadata.ts's), a file without a video track (an M4A) and any other file go as they are.
+ * A picture (HEIF is pictureMetadata.ts's) and any other file go as they are; so does a file without a video track (an
+ * M4A) here: audioMetadata.ts strips it.
  */
 import { isStrippedPicture } from "./pictureMetadata";
 
@@ -381,7 +382,7 @@ function meets(ranges: [number, number][], start: number, end: number): boolean 
  * the reads after it within them (the next boxes' headers, a fragment's `moof`) are served from it, as copies (they
  * are changed in place). A Blob's read costs about the same whatever its size, so a fragment costs one, not three.
  */
-function readingAhead(source: VideoSource): VideoSource {
+export function readingAhead(source: VideoSource): VideoSource {
   let start = 0, window: Uint8Array = new Uint8Array(0);
   return {
     size: source.size,
@@ -453,9 +454,9 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
 /**
  * What `withoutVideoMetadata` changes in a video read from `source` (one not held in a Blob: a file kept in storage):
  * the parts replaced, in order and apart, the rest of its bytes going as they are; undefined when it goes as it is.
- * Throws `NO_VIDEO_METADATA` as it does.
+ * Throws `NO_VIDEO_METADATA` as it does. With `audio`, a movie without a video track (an M4A) is stripped too.
  */
-export async function videoMetadataPatches(file: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+export async function videoMetadataPatches(file: VideoSource, mime: string, audio = false): Promise<VideoPatch[] | undefined> {
   const source = readingAhead(file);
   const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
@@ -499,7 +500,7 @@ export async function videoMetadataPatches(file: VideoSource, mime: string): Pro
 
   const moov = await whole(source, moovs[0]!);
   const { video, fragmented, metadata, zeroed, tables, captions } = stripMoov(moov);
-  if (!video && !typed) return undefined;
+  if (!video && !typed && !audio) return undefined;
   patches.push({ start: moovs[0]!.start, end: moovs[0]!.end, bytes: moov });
 
   // No sample is where zeros go.

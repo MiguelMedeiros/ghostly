@@ -198,6 +198,18 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect((await post("1.1.1.1")).status).toBe(400);
   });
 
+  it("a full table keeps an address at its limit and forgets one under it", async () => {
+    const relay = await startRelay({ limits: { perMinute: 2, tracked: 3 }, proxies: 1 });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (xff: string) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools", "X-Forwarded-For": xff }, body: request({ endpoint: "https://example.com/" }) });
+    expect((await post("1.1.1.1")).status).toBe(400);
+    expect((await post("1.1.1.1")).status).toBe(400);
+    for (const address of ["2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"]) expect((await post(address)).status).toBe(400);
+    expect(relay.tracked()).toBe(3);
+    expect((await post("1.1.1.1")).status).toBe(429);
+  });
+
   it("weighs a request in bytes, not characters", async () => {
     const relay = await startRelay();
     close = relay.close;

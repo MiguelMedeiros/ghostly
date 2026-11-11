@@ -184,6 +184,30 @@ describe("group picture, group-mesh/1", () => {
     await old.open(a, b);
     expect(old.sent.slice(before).some(s => s.frame.t === "group-meta")).toBe(false);
   });
+
+  it("a statement waiting for the chain is not pushed out by an altered copy, a member's own, or an older one of the admin's", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    const bobBefore = clone(bob.state);
+    await alice.admit(createIdentity().pubKeyZ32);
+    await alice.rename("Book club");
+    await alice.rename("Renamed");
+    await mesh.settle();
+    const metas = mesh.sent.filter(s => s.frame.t === "group-meta" && s.to === bob.myKey).map(s => s.frame as GroupMetaFrame);
+    const older = metas[metas.length - 2], real = metas[metas.length - 1];
+    const commits = mesh.sent.filter(s => s.frame.t !== "group-meta" && s.to === bob.myKey && s.from === alice.myKey && (s.frame as { commit?: { e: number } }).commit?.e === real.e);
+    const carolSeed = identityFromSeedB64(carol.state.seedB64).seed;
+    const carolsOwn = wrapGroupMeta(signGroupMeta({ g: real.g, e: real.e + 20, h: real.h, r: 999, ts: 1 }, encodeGroupMetaBody({ name: "Carol's" }), carolSeed, carol.myKey), real.k, new Uint8Array(32));
+    for (const junk of [{ ...clone(real), e: real.e + 20, r: 999 }, carolsOwn, older]) {
+      const bob2 = new Mesh().add(clone(bobBefore));
+      await bob2.handle(alice.myKey, clone(real));
+      await bob2.handle(carol.myKey, clone(junk));
+      expect(bob2.name).toBe("Ghosts");
+      for (const c of commits) await bob2.handle(alice.myKey, clone(c.frame));
+      expect(bob2.name, JSON.stringify({ e: junk.e, by: junk.by })).toBe("Renamed");
+    }
+  });
 });
 
 describe("group name, group-mesh/1", () => {
@@ -380,11 +404,15 @@ class Net {
   /** Whom each line credits, `undefined` for one that names nobody. */
   readonly authors: { at: string; by: string | undefined }[] = [];
   readonly relayed: CommunityFrame[] = [];
+  /** Members that are away: what is sent to them is kept here, in order, and not delivered. */
+  readonly away = new Map<string, { from: string; frame: CommunityFrame }[]>();
   private pending: Promise<unknown>[] = [];
   private hooks(name: string) {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
       const me = this.members.get(name)!;
       if (!to || to === me) return;
+      const held = this.away.get(to.name);
+      if (held) { held.push({ from: me.session.myKey, frame: clone(frame) }); return; }
       this.pending.push(to.session.handle(me.session.myKey, clone(frame)));
     };
     return {
@@ -576,6 +604,36 @@ describe("group name, group-community/1", () => {
     const kept = clone(bob.saved);
     expect(JSON.parse(kept.meta!.body)).toMatchObject({ name: "Book club" });
     expect(new CommunitySession(kept, { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("a rename waiting for its commit is not pushed out by an altered copy, a member's own, or an older one of the admin's", async () => {
+    for (const junk of ["altered", "own", "older"] as const) {
+      const net = new Net();
+      const alice = net.create("alice");
+      const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+      await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+      net.away.set("carol", []);
+      await net.admit(alice, "dave");
+      await alice.session.rename("Book club");
+      await alice.session.rename("Renamed");
+      await net.settle();
+      const held = net.away.get("carol")!;
+      net.away.delete("carol");
+      const metas = held.filter(h => h.frame.t === "group-meta").map(h => h.frame as GroupMetaFrame);
+      const older = metas[metas.length - 2], real = metas[metas.length - 1];
+      const bobSeed = identityFromSeedB64(bob.session.state.seedB64).seed;
+      const frame = junk === "altered" ? { ...clone(real), e: real.e + 20, r: 999 }
+        : junk === "own" ? wrapGroupMeta(signGroupMeta({ g: real.g, e: real.e + 20, h: real.h, r: 999, ts: 1 }, encodeGroupMetaBody({ name: "Bob's" }), bobSeed, bob.session.myKey), real.k, new Uint8Array(32), true)
+        : older;
+      // Carol meets nobody now: what she takes is only what she is handed here.
+      for (const other of ["alice", "bob", "dave"]) net.members.delete(other);
+      const s = carol.session;
+      await s.handle(alice.session.myKey, clone(real));
+      await s.handle(bob.session.myKey, clone(frame));
+      expect(s.name).toBe("Ghosts");
+      for (const h of held) if (h.frame.t !== "group-meta") await s.handle(h.from, clone(h.frame));
+      expect(s.name, junk).toBe("Renamed");
+    }
   });
 
   it("after the admin role moves before anyone renamed it, the new admin's rename is theirs to every member", async () => {

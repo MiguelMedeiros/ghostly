@@ -734,8 +734,9 @@ export class IdentityProofs {
         const provider = this.providers().find(p => p.id === r.binding.provider);
         const status = receivedIdentityStatus(r, theirs, mine, t);
         const publicProfile = status === "verified" ? this.host.publicProfile?.(r.binding.provider, r.verified.subject) : undefined;
+        // A check stored while this device's clock ran ahead reads as done now, not at that future date.
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
-          status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
+          status, verifiedAt: Math.min(r.verifiedAt, t), checkedAt: Math.min(r.checkedAt, t),
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
           recheckDue: !!provider?.recheck && (r.checkedAt > t || t - r.checkedAt >= provider.recheck.afterSeconds),
           ...(publicProfile ? { publicProfile } : {}) };

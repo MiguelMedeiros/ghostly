@@ -29,7 +29,7 @@ const FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/
  * minute while calling, so 30 is fifteen contacts calling it at once, and no pool of addresses wakes it more. A forward
  * the push service refuses (a 4xx other than 429) wakes nothing and is not counted there.
  * `tracked`: addresses, and subscriptions apart, whose counts are kept at most. Past it, the ones idle for a minute go
- * first, then the oldest: a full table forgets a count rather than turn away every newcomer.
+ * first, then the oldest under its limit: a full table forgets a count rather than turn away every newcomer.
  * `requestMs`: how long a client has to send a whole request (headers and body) before the connection is closed.
  */
 export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30, perEndpoint: 30, tracked: 10_000, requestMs: 15_000 }
@@ -170,18 +170,25 @@ export function refusalLog (log) {
 /**
  * Counts of the last minute by key, at most `perMinute` each, for at most `tracked` keys. `take` counts one for a key
  * and says whether it was under its limit; a newcomer to a full table drops the idle (a scan at most once a second),
- * else the entry seen longest ago.
+ * else the entry seen longest ago that is under its limit (the oldest of all only when every one is at it). Dropped at
+ * its limit, a key would start its minute over: newcomers enough would buy it another `perMinute`.
  */
 function minuteCounts (perMinute, tracked) {
   const recent = new Map()
   let pruned = 0
   const prune = now => { pruned = now; for (const [key, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(key) }
+  // Times are kept in the order taken, so the `perMinute`-th last one says whether the key is at its limit.
+  const atLimit = (times, now) => times.length >= perMinute && now - times[times.length - perMinute] < 60_000
+  const dropped = now => {
+    for (const [key, times] of recent) if (!atLimit(times, now)) return key
+    return recent.keys().next().value
+  }
   return {
     size: () => recent.size,
     prune,
     take: (key, now) => {
       if (recent.size >= tracked && !recent.has(key) && now - pruned >= 1000) prune(now)
-      if (recent.size >= tracked && !recent.has(key)) recent.delete(recent.keys().next().value)
+      if (recent.size >= tracked && !recent.has(key)) recent.delete(dropped(now))
       const times = (recent.get(key) ?? []).filter(t => now - t < 60_000)
       if (times.length >= perMinute) return false
       times.push(now)

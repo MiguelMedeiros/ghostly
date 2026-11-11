@@ -105,8 +105,9 @@ describe("an answer of the contact's app the worker passes on", () => {
           void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
         });
         const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
-        // With Hide my IP on, the WebRTC guard's policy comes with the guard (`guardViewerAnswer`), before the viewer's.
-        const policy = relayOnly ? [VIEWER_GUARD_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY] : [VIEWER_SERVICE_CSP];
+        // The guards' policy comes with the guards (`guardViewerAnswer`: the clipboard guard always, the WebRTC guard with
+        // Hide my IP on), before the viewer's.
+        const policy = [VIEWER_GUARD_CSP, relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP];
         expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, ...policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
       }
     }

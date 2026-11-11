@@ -274,4 +274,15 @@ describe("the bridge's clear of its origin", () => {
     await clearSite(host.suffix);
     expect([...files]).toEqual([]);
   });
+
+  it("deletes the storage buckets too: what an app put in its own bucket's IndexedDB, caches and files goes with it", async () => {
+    const buckets = new Set(["kept", "other"]);
+    vi.stubGlobal("navigator", {
+      storage: { getDirectory: async () => ({ async *keys() {}, removeEntry: async () => {} }) },
+      storageBuckets: { keys: async () => [...buckets], delete: async (name: string) => { buckets.delete(name); } },
+      serviceWorker: { getRegistrations: async () => [] },
+    });
+    await clearSite(host.suffix);
+    expect([...buckets]).toEqual([]);
+  });
 });

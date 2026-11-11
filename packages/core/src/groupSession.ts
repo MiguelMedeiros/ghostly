@@ -510,6 +510,8 @@ function isMessageFrame(v: unknown): v is GroupMessageFrame {
 
 /** A frame waiting for its epoch or secret: who handed it over, since when, and whether no recent commit names its key. */
 interface Waiting<F> { from: string; frame: F; at: number; stranger: boolean }
+/** A metadata frame waiting for the chain, with its statement, whose signature holds. */
+interface WaitingMeta { from: string; frame: unknown; s: GroupMetaStatement }
 
 /**
  * A waiting list past `max` places, past `waitingStrangers` of keys no recent commit names, or past its bytes (`heavy`):
@@ -570,8 +572,8 @@ export class GroupSession {
   private messagePace = new Map<string, AuthorPace>();
   private editPace = new Map<string, AuthorPace>();
   private queue = Promise.resolve();
-  /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
-  private pendingMeta: { from: string; frame: unknown } | undefined;
+  /** Metadata frames that name a commit or an epoch I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain moves. */
+  private pendingMeta: { admin?: WaitingMeta; other?: WaitingMeta } = {};
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
   /** The frames kept to hand on that the app holds with its messages, oldest first; undefined when the state holds them all. */
@@ -2326,11 +2328,11 @@ export class GroupSession {
     if (!frame || frame.statement.g !== this.id || typeof frame.k !== "number" || !rosterHas(this.roster, from)) return;
     const s = frame.statement;
     if (!groupMetaNewer(s, this.state.meta)) return;
-    if (s.e > this.epoch || frame.k > this.epoch) { this.pendingMeta = { from, frame: raw }; this.ask(from); return; }
+    if (s.e > this.epoch || frame.k > this.epoch) { this.waitMeta(from, raw, s); return; }
     const commit = this.state.chain[s.e];
     if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return;
     const secret = this.secret(frame.k);
-    if (!secret) { this.pendingMeta = { from, frame: raw }; this.ask(from); return; }
+    if (!secret) { this.waitMeta(from, raw, s); return; }
     const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
     if (!opened) return;
     const before = this.state.meta;
@@ -2343,6 +2345,18 @@ export class GroupSession {
     if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s), change, opened.meta.ts);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
+  }
+
+  /**
+   * A statement that waits for the chain: only one its signer signed, so an altered copy cannot push out the one
+   * waiting. The admin I know has a place of their own, which another member's statement cannot take, and in each
+   * place only a later statement takes the one waiting.
+   */
+  private waitMeta(from: string, raw: unknown, s: GroupMetaStatement): void {
+    if (!verifyGroupMetaSignature(s)) return;
+    const place = s.by === this.admin ? "admin" : "other", waiting = this.pendingMeta[place];
+    if (!waiting || groupMetaNewer(s, waiting.s)) this.pendingMeta[place] = { from, frame: raw, s };
+    this.ask(from);
   }
 
   /**
@@ -2360,9 +2374,9 @@ export class GroupSession {
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
   private async metaFollowsChain(): Promise<void> {
-    const pending = this.pendingMeta;
-    this.pendingMeta = undefined;
-    if (pending) await this.receiveMeta(pending.from, pending.frame);
+    const { admin, other } = this.pendingMeta;
+    this.pendingMeta = {};
+    for (const pending of [admin, other]) if (pending) await this.receiveMeta(pending.from, pending.frame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again.
     // Dated when it was set: a member holding nothing tells it from a change of mine by that (`metaAuthor`).
     if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.state.meta.ts, true);

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_AUDIO_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutAudioMetadata, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -158,17 +158,17 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
 }
 
 /**
- * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture or an MP4 or
- * QuickTime video without its metadata (where it was taken or recorded, the device, the time), before its size is read
- * and its digest computed. One whose metadata cannot be removed is refused, never sent as it was. A voice note goes as it is.
+ * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture, an MP4 or
+ * QuickTime video or an audio file without its metadata (where it was taken or recorded, the device, the time, an
+ * audio file's tags), before its size is read and its digest computed. One whose metadata cannot be removed is
+ * refused, never sent as it was. A voice note is a file made anywhere, so its tags go too.
  */
-async function sendable(path: string, mime: string, voice: VoiceMeta | undefined): Promise<Blob> {
+async function sendable(path: string, mime: string): Promise<Blob> {
   const source = await openAsBlob(path, { type: mime });
-  if (voice) return source;
   try {
-    return await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? source;
+    return await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? await withoutAudioMetadata(source, mime) ?? source;
   } catch (error) {
-    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw new CliError("refused", error.message);
+    if (error instanceof Error && [NO_PICTURE_METADATA, NO_VIDEO_METADATA, NO_AUDIO_METADATA].includes(error.message)) throw new CliError("refused", error.message);
     throw error;
   }
 }
@@ -205,7 +205,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
   const { voice, warning } = await voiceOf(params, path, mime, picked);
-  const source = await whileUnchanged(path, () => sendable(path, mime, voice));
+  const source = await whileUnchanged(path, () => sendable(path, mime));
   const size = source.size;
   const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
   const fileId = groupFileId(group.id, "out");
@@ -344,7 +344,7 @@ export const FILE_METHODS: Record<string, Method> = {
       if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: false, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
-    const source = await whileUnchanged(path, () => sendable(path, mime, voice));
+    const source = await whileUnchanged(path, () => sendable(path, mime));
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
     const wireId = toBase64Url(randomBytes(12));

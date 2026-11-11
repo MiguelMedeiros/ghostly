@@ -3,10 +3,12 @@
  * on an origin of its own, full screen over the app, and every request it makes sent over the contact's data link
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
-import { GhostlyHttpError, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
 import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
+
+const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
@@ -103,9 +105,10 @@ function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
  * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
  * too, rather than running on their machine and holding one of the link's places. Every answer carries Ghostly's viewer
  * policy after the contact's own (`viewerServicePolicy`, as Desktop, the extension and `ghostly service open` add it):
- * the app talks to nothing but its own origin, and nothing over plain http. `relayOnly`: Hide my IP from contacts was on
- * when the app opened, and the policy is `VIEWER_SERVICE_CSP_RELAY_ONLY`: the app loads nothing but its own origin. Its
- * pages run the WebRTC guard first (`guardViewerAnswer`).
+ * the app talks to nothing but its own origin, and nothing over plain http. Its pages run the clipboard guard first
+ * (`guardViewerAnswer`, `CLIPBOARD_GUARD_SCRIPT`): it writes the clipboard only in the person's own tap in it.
+ * `relayOnly`: Hide my IP from contacts was on when the app opened, and the policy is `VIEWER_SERVICE_CSP_RELAY_ONLY`:
+ * the app loads nothing but its own origin. Its pages run the WebRTC guard first too.
  */
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
   const request = readRequest(data);
@@ -156,9 +159,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       if (name.toLowerCase() === "set-cookie") jar.take(value);
       else out.push([name, value]);
     }
-    let body = answer.body;
-    // Hide my IP from contacts: no policy keeps a page off WebRTC, so each of the app's pages runs the guard first.
-    if (relayOnly) ({ headers: out, body } = await guardViewerAnswer(out, body, request.destination ?? null));
+    // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
+    // pages runs the guards first.
+    const guards: PageGuard[] = [CLIPBOARD_GUARD, ...(relayOnly ? [WEBRTC_GUARD] : [])];
+    const guarded = await guardViewerAnswer(out, answer.body, request.destination ?? null, guards);
+    out = guarded.headers;
+    const body = guarded.body;
     // A browser enforces every policy it is sent: the contact's own cannot widen this one.
     out.push(["content-security-policy", viewerServicePolicy(relayOnly)]);
     headed = true;
