@@ -56,7 +56,7 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
     relay.holdMs = 6_000;
     const writes = [
       ["chat", "rename", bob, "Bobby"], ["settings", "set", "sendTyping", "false"], ["settings", "set", "autoDownloads", "false"],
-      ["settings", "set", "serveFiles", "false"], ["call", "auto", "on"], ["call", "auto", "off"], ["call", "auto", "on"],
+      ["settings", "set", "serveFiles", "false"], ["settings", "set", "daemonPresence", "true"], ["call", "auto", "on"], ["call", "auto", "off"], ["call", "auto", "on"],
       ["service", "add", "web", "http://127.0.0.1:46049"], ["chat", "remove", carol, "--yes"],
     ];
     for (const args of writes) {
@@ -71,7 +71,7 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
     // Kept: the process's last writes reach the store before it closes (they are not awaited where they are made).
     expect(ok(await ghostly(["--home", dir, "chat", "show", bob], { env }))).toMatchObject({ name: "Bobby" });
     expect((await ghostly(["--home", dir, "chat", "show", carol], { env })).code).not.toBe(0);
-    expect(ok(await ghostly(["--home", dir, "settings", "get"], { env }))).toMatchObject({ sendTyping: false, autoDownloads: false, serveFiles: false });
+    expect(ok(await ghostly(["--home", dir, "settings", "get"], { env }))).toMatchObject({ sendTyping: false, autoDownloads: false, serveFiles: false, daemonPresence: true });
     expect(ok(await ghostly(["--home", dir, "call", "auto"], { env }))).toMatchObject({ autoAnswer: { on: true } });
     expect(JSON.stringify(ok(await ghostly(["--home", dir, "service", "list"], { env })))).toContain("http://127.0.0.1:46049");
     expect(relay.requests).toEqual([]);

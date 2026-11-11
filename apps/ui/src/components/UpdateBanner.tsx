@@ -3,6 +3,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { tabbables } from "../hooks/useDismiss";
 import { externalLinkProps } from "../lib/externalLink";
+import { updateFailure } from "../lib/updateFailure";
 
 /**
  * A new version exists. Nothing happens until the user says so: applying one
@@ -13,7 +14,7 @@ import { externalLinkProps } from "../lib/externalLink";
  */
 export function UpdateBanner() {
   const { t } = useI18n();
-  const { update, dismissed, stage, progress, error, install, dismiss, downloadUrl } = useUpdate();
+  const { update, dismissed, stage, progress, error, failed, install, dismiss, downloadUrl } = useUpdate();
   const banner = useRef<HTMLDivElement>(null);
 
   const shown = !!update && !dismissed;
@@ -21,6 +22,10 @@ export function UpdateBanner() {
   const busy = installing || undefined;
   const downloading = (percent: number) => percent > 0 ? t("updates.downloading", { percent: String(percent) }) : t("updates.installing");
   const title = update && t(update.replaced ? "updates.replaced" : "updates.available", { version: update.version });
+  // Only an install that failed takes the warning's place, said in words (the updater's English is in Settings' ⓘ):
+  // a later check that failed leaves the update found standing, and what Reload does still needs saying.
+  const why = failed === "install" && error ? updateFailure(error) : null;
+  const whyText = why && t(why === "unknown" ? "updates.installFailed" : `updates.why.${why}`);
 
   /** Later takes the banner out with the focus in it: the focus goes on to what Tab would reach next, not the page. */
   const later = () => {
@@ -41,7 +46,7 @@ export function UpdateBanner() {
       <div role="status" className="sr-only">
         {shown && <>
           <p>{title}</p>
-          {installing ? <p>{downloading(Math.floor(progress * 10) * 10)}</p> : error && <p>{error}</p>}
+          {installing ? <p>{downloading(Math.floor(progress * 10) * 10)}</p> : whyText && <p>{whyText}</p>}
         </>}
       </div>
       {shown && (
@@ -55,8 +60,8 @@ export function UpdateBanner() {
             <p className="text-text-muted text-[11px] m-0 truncate">
               {installing
                 ? downloading(Math.round(progress * 100))
-                : error
-                  ? error
+                : whyText
+                  ? whyText
                   : t(update.apply === "manual" ? "updates.manualHint" : "updates.applyHint")}
             </p>
           </div>

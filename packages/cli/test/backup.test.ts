@@ -3,8 +3,10 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
+import type { ApiContext } from "../src/apiKit";
+import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { BIN, error, ghostly, home, ok, testEnv } from "./support/cli";
 // covers: headless.backup, backup.light
@@ -319,8 +321,60 @@ it("a restored profile keeps auto-join (groups.json) and auto-answer (calls.json
   const none = join(plain, "none.ghostly-backup");
   ok(await ghostly(["--home", plain, "profile", "backup", "--out", none, "--no-passphrase"], { env: NO_PASS }));
   const bare = ok(await ghostly(["--home", plain, "profile", "restore", none, "copy"], { env: NO_PASS })) as { folder: string };
-  expect(existsSync(join(bare.folder, "groups.json")) || existsSync(join(bare.folder, "calls.json"))).toBe(false);
+  expect(["groups.json", "calls.json", "holds.json"].filter((name) => existsSync(join(bare.folder, name)))).toEqual([]);
   expect(ok(await ghostly(["--home", plain, "--profile", "copy", "group", "auto"]))).toEqual({ autoJoin: { on: false, from: [] } });
+});
+
+/** The restored daemon's start over its folder (`resumeHolds`), with these chats on DHT only, as its store has them. */
+function startRestored(dir: string, chats: string[]) {
+  let links = chats.map((id) => ({ id, profile: "paired-chat/1", deliveryMode: "dht", runnableTransports: ["webrtc/1"] }));
+  const released: Record<string, unknown>[] = [];
+  const node = {
+    getState: () => ({ links }),
+    setDeliveryMode: vi.fn(async ({ linkId, mode }: { linkId: string; mode: string }) => { links = links.map((l) => (l.id === linkId ? { ...l, deliveryMode: mode } : l)); }),
+  };
+  const hub = { onState: () => () => {}, emit: (type: string, _id: string, fields: Record<string, unknown>) => { released.push({ type, ...fields }); } };
+  const ctx = { runtime: { server: { node }, paths: { dir } }, hub, mode: "daemon" } as unknown as ApiContext;
+  return { ctx, node, released, modes: () => Object.fromEntries(links.map((l) => [l.id, l.deliveryMode])) };
+}
+
+// A chat held off its direct link (`chat disconnect --hold`) is on DHT only in the store, and only holds.json says it
+// comes back: the backup left that file out, so the restored copy kept the chat on DHT only for good, and nothing said why.
+it("a restored profile keeps a chat's hold: the chat gets its live link back when the hold ends, at the start if it ended meanwhile", async () => {
+  const dir = home("backup-holds");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Held bot"]));
+  const original = join(dir, "profiles", "default");
+  // As `chat disconnect --hold` writes it: two holds on at the backup.
+  const now = Date.now(), until = now + 60 * 60_000;
+  const holds = JSON.stringify({ "chat-held": { until, since: now }, "chat-ended": { until: now + 10 * 60_000, since: now } }) + "\n";
+  writeFileSync(join(original, "holds.json"), holds, { mode: 0o600 });
+
+  const file = join(dir, "held.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS })) as { folder: string };
+  const copied = join(restored.folder, "holds.json");
+  expect(existsSync(copied), "the holds travel with the backup").toBe(true);
+  expect(readFileSync(copied, "utf8")).toBe(holds);
+  expect(statSync(copied).mode & 0o777).toBe(0o600);
+
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // Restored and started half an hour later: one hold ended meanwhile.
+  vi.setSystemTime(now + 30 * 60_000);
+  try {
+    const { ctx, node, released, modes } = startRestored(restored.folder, ["chat-held", "chat-ended", "chat-chosen"]);
+    resumeHolds(ctx);
+    await vi.advanceTimersByTimeAsync(0);
+    // The hold that ended meanwhile: the chat is back on its live link at the start, not left on DHT only. The other is still on.
+    expect(modes()).toEqual({ "chat-held": "dht", "chat-ended": "stream", "chat-chosen": "dht" });
+    expect(holdOf(ctx, "chat-held")).toBe(until);
+    expect(holdOf(ctx, "chat-ended")).toBeNull();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    // Its time up, the held chat comes back too; a DHT only the chat chose itself (no hold) stays.
+    expect(modes()).toEqual({ "chat-held": "stream", "chat-ended": "stream", "chat-chosen": "dht" });
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(2);
+    expect(released).toEqual([{ type: "chat.released", chat: "chat-ended", reason: "expired" }, { type: "chat.released", chat: "chat-held", reason: "expired" }]);
+    expect(JSON.parse(readFileSync(copied, "utf8"))).toEqual({});
+  } finally { vi.useRealTimers(); }
 });
 
 // The profile keeps its messages in rows.db: its snapshot names them only. A backup is one store with every value in

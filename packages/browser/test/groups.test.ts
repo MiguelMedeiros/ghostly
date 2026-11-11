@@ -813,6 +813,19 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
       });
 
+      it("that was far behind on the chain (70 changes while away) gets every commit between, and is told", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        for (let i = 0; i < 70; i++) { await alice.rotate(groupId); await world.settle(); }
+        await alice.remove(groupId, bobKey); await world.settle();
+        // Bob is back: the edge opens once, and he says where he is once.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: alice.views()[0].epoch });
+      });
+
       it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
         const { world, alice, bob, carol, groupId, key, edge } = await trio();
         const bobKey = key(bob);
@@ -952,6 +965,37 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(alice.edgeAllows(groupId, bobKey, { t: "group-sync", g: groupId, e: 4 })).toBe(false);
         expect(alice.edgeAllows(groupId, createIdentity().pubKeyZ32, { t: "group-commit", g: groupId, commit: chain[0] })).toBe(false);
         expect(alice.edgeAllows(groupId, key(carol), { t: "group-sync", g: groupId, e: 4 })).toBe(true);
+      });
+
+      it("is still told by the admin that removed it after that admin left the group, and the tombstone goes once it is", async () => {
+        const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        // The admin leaves before Bob is back: the role goes to Carol, who heard the leave. Nobody else keeps an edge to him.
+        await alice.leave(groupId); await world.settle();
+        expect(carol.views()[0]).toMatchObject({ isAdmin: true });
+        expect(alice.views()).toEqual([]);
+        expect(edgesOf(world, "carol")).not.toContain(bobKey);
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Her app restarts meanwhile: the tombstone still waits for him.
+        const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+        await again.load(); await world.settle();
+        world.peers.get("alice")!.groups = again;
+        known.set(again, key(alice));
+        await again.tick(Date.now() + 60_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Bob is back: the commit that removed him comes over that edge.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", canSend: false });
+        expect(await bob.send(groupId, "anyone?")).toMatchObject({ error: "You were removed from this group" });
+        // A moment later the edge goes, and so does the tombstone: nothing is kept of the group.
+        await again.tick(Date.now() + 60_000 + 16_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([]);
+        expect(await world.peers.get("alice")!.store.getGroups()).toEqual([]);
+        expect(again.views()).toEqual([]);
       });
 
       it("invited again before it is back takes the invitation only once it knows, and ends as a member", async () => {
