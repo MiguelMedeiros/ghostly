@@ -464,7 +464,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Unknown payment", `${BROWSER}/engine/payments.ts`],
   ["The mint did not confirm the ecash", `${BROWSER}/engine/payments.ts`],
   ["your contact closed it", `${BROWSER}/engine/payments.ts`],
-  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/node.ts`],
+  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/payments.ts`],
   ["Fedimint is off in this chat", `${BROWSER}/engine/payments.ts`],
   ["This app has no Fedimint wallet", `${BROWSER}/engine/payments.ts`],
   ["Unsupported amount", `${BROWSER}/engine/payments.ts`],
