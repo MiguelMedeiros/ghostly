@@ -5,7 +5,7 @@ import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
-import { useTabTrap } from "../hooks/useDismiss";
+import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
@@ -148,6 +148,9 @@ export function CallOverlay({
   const overVideo = useSyncExternalStore(watchWindowFilled, windowFilledNow);
   const stack = overVideo ? "z-[2147483001]" : "z-50";
   useTabTrap(box, !mini);
+  // Back (Android's back gesture) takes it to the small window, as a phone's own call screen does: the chat under it
+  // stays where it was. It went back under the call (a chat to the list), and the next Back left the app mid-call.
+  useBackCloses(() => setMini(true), !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
