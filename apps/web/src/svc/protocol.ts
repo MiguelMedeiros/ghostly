@@ -121,6 +121,13 @@ export function closeServiceView(): void {
 export const BRIDGE_READY = "ghostly-svc-ready";
 export const BRIDGE_PORT = "ghostly-svc-port";
 /**
+ * The bridge says, after the port, that it shows no app (`reason`): `"blocked"`, the browser refused it the services
+ * worker (Firefox when it blocks third-party cookies: the services host is a site of its own); `"unguarded"`, a page of
+ * the app's ran without the clipboard guard. The app says so in the profile's words, over the bridge's English.
+ */
+export const BRIDGE_REFUSED = "ghostly-svc-refused";
+export type BridgeRefusal = "blocked" | "unguarded";
+/**
  * The app answers with this in place of the port when it only wants the origin cleared (the chat deleted, Clear all
  * data, the profile deleted): the bridge erases what the contact's app kept there, then says `BRIDGE_CLEARED`.
  */

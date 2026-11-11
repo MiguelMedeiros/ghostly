@@ -36,6 +36,7 @@
     "stopped": "Stopped"
   },
   "window": {
+    "blocked": "This browser blocks what {{app}} needs to open here: storage for a site inside another. Allow it for this site, or open {{app}} in the Ghostly desktop app or extension.",
     "busy": "{{app}} has too many pages loading at once on your contact's machine. Try again in a moment.",
     "callOn": "A call is on. End it to open {{app}}.",
     "elsewhere": "{{app}} tried to send you somewhere else, outside what your contact shares.",
@@ -46,6 +47,7 @@
     "owner": "{{contact}}'s app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
     "retry": "Try again",
     "tooSlow": "{{app}} did not answer in time on your contact's machine. Try again in a moment.",
+    "unguarded": "This page of {{app}} cannot be shown here: it keeps Ghostly's protections from running in it. Ask your contact to check it.",
     "unreachable": "This service is not reachable. Services exist while their ghost is online.",
     "unshared": "{{app}} is no longer shared with you."
   },
