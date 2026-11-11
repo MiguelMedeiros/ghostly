@@ -23,9 +23,9 @@ export interface TestStore {
 /**
  * A curated store listing one app, "Chess", that asks for `chat` (and whatever else `permissions` says). `entry`: the
  * app's HTML instead of a page with its title. `view`: where it shows (absent: in a chat); `title`, `tagline` and
- * `version`: another app's.
+ * `version`: another app's. `removed`: the store took this version down, for that reason.
  */
-export async function testStore(options: { permissions?: AppPermission[]; entry?: string; view?: AppViewMode; title?: string; tagline?: string; version?: string } = {}): Promise<TestStore> {
+export async function testStore(options: { permissions?: AppPermission[]; entry?: string; view?: AppViewMode; title?: string; tagline?: string; version?: string; removed?: string } = {}): Promise<TestStore> {
   const publisher = signer("publisher"), store = signer("store");
   const title = options.title ?? "Chess", tagline = options.tagline ?? "Play chess with a contact", storeName = "E2E store";
   const entry = options.entry ?? `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font:16px system-ui"><h1>${title}</h1>`;
@@ -37,7 +37,8 @@ export async function testStore(options: { permissions?: AppPermission[]; entry?
   const ref = `${toZ32(publisher.publicKey)}/chess`;
   const index: AppStoreIndex = {
     ghostlyStore: 1, key: toZ32(store.publicKey), name: storeName, description: "Apps for the end-to-end tests.", kind: "curated", sequence: 1,
-    expires: Math.floor(Date.now() / 1000) + 30 * 24 * 3600, removed: [], revoked: [],
+    expires: Math.floor(Date.now() / 1000) + 30 * 24 * 3600, revoked: [],
+    removed: options.removed === undefined ? [] : [{ ref, digest: made.digest, reason: options.removed, at: Math.floor(Date.now() / 1000) }],
     apps: [{ ref, sequence: 1, digest: made.digest, urls: [APP_URL], title, tagline, category: "games" }],
   };
   const signed = await signAppStore(index, store);

@@ -220,6 +220,9 @@ function inviteNotOut(detail: string): string {
 /** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
 const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
 
+/** A one-shot's typing without `--for` (it opens the profile offline, `offlineCall`): said on no live session. */
+const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -458,6 +461,7 @@ const METHODS: Record<string, Method> = {
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
     };
   },
   /**
@@ -854,6 +858,7 @@ const METHODS: Record<string, Method> = {
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
     };
   },
   async "group.leave"(ctx, params) {
