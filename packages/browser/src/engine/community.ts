@@ -260,6 +260,13 @@ const LEFT_HAND_ON_MS = 1_000;
  * commit to me was lost), a community I left asks my edges what moved its chain, as a member catches up.
  */
 const LEFT_ASK_MS = 10_000;
+/**
+ * Opened again through the link while a community I left still follows its chain, and the chain has not made me the
+ * admin this long after my leave (or my hand-on): no role is on its way to me any more, so the following stops and the
+ * knock goes. Waited for to the end, a member whose admission lost unseen (nothing takes it out of its own roster) was
+ * kept out the whole ten minutes.
+ */
+const LEFT_REJOIN_WAIT_MS = 60_000;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
 /** The newest hand-over in a chain. */
 const lastRole = (chain: readonly { k: string; by: string; s?: string }[]) => { for (let i = chain.length - 1; i >= 0; i--) if (chain[i].k === "role") return chain[i]; return undefined; };
@@ -610,7 +617,7 @@ export class Communities {
     const existing = this.stored.get(link.g);
     const live = this.live.get(link.g);
     // Back through the link a moment after leaving: the left session follows on while the chain may still need it (the
-    // role reached it, or may yet), and the knock waits for it (`leftBehind`, `tick`). Dropped at once, the role went
+    // role reached it, or may yet: `LEFT_REJOIN_WAIT_MS`), and the knock waits for it (`leftBehind`, `tick`). Dropped at once, the role went
     // with it: nobody else can hand it on. Done (out of the roster), it stops now and its edges go.
     await this.leftMoved(link.g, this.now());
     // Opened again while joining: a join nobody answered (`JOIN_GIVE_UP_MS`) knocks again.
@@ -859,6 +866,8 @@ export class Communities {
     if (!rosterHas(s.roster, s.myKey) && !this.handedToLeaver(left)) await this.dropLeftBehind(groupId);
     else if (now - left.since > LEFT_FOLLOW_MS) await this.dropLeftBehind(groupId);
     else if (!rosterHas(s.roster, s.myKey)) left.handOnAt = undefined;
+    // Opened again through the link (the knock waits for this): only while the role is mine or may yet reach me.
+    else if (this.stored.get(groupId)?.joining && s.admin !== s.myKey && now - left.since >= LEFT_REJOIN_WAIT_MS) await this.dropLeftBehind(groupId);
     else {
       // The secret of my tip went missing (a fresh one sealed to me was lost), or what moved the chain since I left never
       // reached me (the app started again meanwhile, or a commit to me was lost, the role among them, `LEFT_ASK_MS`):
