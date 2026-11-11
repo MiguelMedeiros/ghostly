@@ -1677,6 +1677,77 @@ describe("a green batch landing on dev", () => {
     for (const n of [11, 12]) expect(last(repo, n)).toBe(`Merged via #${b}.`);
   });
 
+  // Only a rule's refusal sends the batch the rebase way: a first pull request that left the line during the run, or a
+  // refusal of the moment, never lands the batch unsigned.
+  it("lands nothing when the first pull request turns into a draft during the run", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13], { behind: true });
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n !== 11) return squash(n, sha, title, message);
+      repo.merges.push(`squash #${n}`);
+      repo.pulls.get(11)!.draft = true;
+      return { ok: false, status: 405, message: "HTTP 405 Pull Request is still a draft" };
+    };
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(repo.landed).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(last(repo, b)).toBe("Merge train: nothing landed, and the landing stopped there: #11 changed or left the line. #11 #12 #13 did not land; the ones still queued go back to the line.");
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, draft: true });
+    expect(repo.pulls.get(11)!.merged).toBeUndefined();
+  });
+
+  it("lands nothing when the first pull request is closed during the run", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13], { behind: true });
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n === 11) repo.pulls.get(11)!.open = false;
+      return squash(n, sha, title, message);
+    };
+    const r = await repo.run();
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(repo.landed).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(last(repo, b)).toMatch(/^Merge train: nothing landed, and the landing stopped there: #11 changed or left the line\./);
+    expect(repo.comments.get(11)?.map((c) => c.body) ?? []).not.toContain(`Merged via #${b}.`);
+    expect(repo.pulls.get(11)!.merged).toBeUndefined();
+  });
+
+  it("asks a first merge refused for a moment again, and never lands the batch by the rebase merge for it", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13], { behind: true });
+    const squash = repo.gh.squash;
+    let refusals = 1;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n === 11 && refusals-- > 0) return { ok: false, status: 405, message: "HTTP 405 Base branch was modified. Review and try the merge again." };
+      return squash(n, sha, title, message);
+    };
+    const pauses: number[] = [];
+    const r = await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
+    expect(pauses).toEqual([5000]);
+    expect(repo.pullReads).toContain(11); // read once, so GitHub works its mergeability out
+    expect(r.merged).toEqual([11, 12, 13]);
+    expect(repo.merges).not.toContain(`rebase #${b}`);
+    expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
+  });
+
+  it("closes the batch with nothing landed when GitHub keeps saying the first one is not mergeable", async () => {
+    const { repo, b } = await greenBatch([11, 12], { behind: true });
+    const squash = repo.gh.squash;
+    repo.gh.squash = async (n: number, sha: string, title: string, message: string) => {
+      if (n !== 11) return squash(n, sha, title, message);
+      repo.merges.push(`squash #${n}`);
+      return { ok: false, status: 405, message: "HTTP 405 Pull Request is not mergeable" };
+    };
+    const pauses: number[] = [];
+    const r = await repo.run({ pause: async (ms: number) => void pauses.push(ms) });
+    expect(repo.merges).toEqual(["squash #11", "squash #11", "squash #11"]);
+    expect(pauses).toEqual([5000, 5000]);
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toContain(b);
+    expect(last(repo, b)).toBe("Merge train: nothing landed, and the landing stopped there: GitHub refused to merge #11 (HTTP 405 Pull Request is not mergeable). #11 #12 did not land; the ones still queued go back to the line.");
+    for (const n of [11, 12]) expect(repo.pulls.get(n)).toMatchObject({ open: true, labels: [LABEL.queue] });
+  });
+
   it("never blocks when only the first one could merge without a bypass: the rest go back to the line", async () => {
     const repo = fakeRepo();
     repo.rules.bypass = false;
