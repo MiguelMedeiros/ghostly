@@ -261,13 +261,22 @@ describe("one request from the app, over the contact's link", () => {
     }
   });
 
-  it("drops what is not a request, sending nothing", async () => {
-    const { port, replies, closed } = recorder();
-    let called = false;
-    await serve(port, { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null }, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
-    expect(called).toBe(false);
-    expect(replies).toEqual([]);
-    expect(closed()).toBe(true);
+  it("sends nothing on the link for what is not a request, and says it failed at once: the worker would wait for an answer", async () => {
+    // A path past what the page takes (a long query), a method it does not read, a full URL: none reaches the contact,
+    // and each is answered now, in the profile's words, never left to the worker's English after HEAD_TIMEOUT_MS.
+    for (const data of [
+      { type: "request", method: "GET", path: `/search?q=${"a".repeat(9000)}`, headers: [], body: null },
+      { type: "request", method: "patch", path: "/api", headers: [], body: null },
+      { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null },
+      null,
+    ]) {
+      const { port, replies, closed } = recorder();
+      let called = false;
+      await serve(port, data, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
+      expect(called).toBe(false);
+      expect(replies).toEqual([{ type: "error", status: 400, text: "Failed" }]);
+      expect(closed()).toBe(true);
+    }
   });
 });
 
