@@ -269,6 +269,24 @@ describe("the quote on a reply's bubble", () => {
     expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("Not found in this chat");
   });
 
+  it("a reply naming a button that came before its original quotes the original's own words once it is here", () => {
+    // The contact's reply names a message of theirs not here yet, a line of their choice and a button id.
+    const reply = message({ id: `peer_${OTHER}`, text: "Confirmed, as I said above", replyTo: { id: WIRE, snippet: "I owe you 5,000 EUR", from: "peer", button: "ok" } });
+    expect(quoted(reply.replyTo!, [reply])).toMatchObject({ state: "unverified", snippet: "I owe you 5,000 EUR" });
+    const original = message({ text: "See you at the meeting" });
+    expect(quoted(reply.replyTo!, [reply, original])).toEqual({ state: "found", name: "Alice", snippet: "See you at the meeting", mine: false, targetId: original.id });
+    // A group: a member names my next message by its id (author:epoch:seq) before I send it.
+    const me = "a".repeat(52), them = "b".repeat(52), next = `${me}:1:6`;
+    const groupReply: MessageReply = { id: next, snippet: "I agree, send the 2 BTC", from: "me", member: me, button: "ok" };
+    const press = { id: `${them}:1:3`, text: "ok", sender: "peer", member: them, timestamp: 1, replyTo: groupReply };
+    expect(quoteFor(groupReply, replyIndex([press], true), names)).toMatchObject({ state: "unverified", mine: true });
+    const mine = { id: next, text: "lunch at 1?", sender: "me", member: me, timestamp: 2 };
+    expect(quoteFor(groupReply, replyIndex([press, mine], true), names)).toEqual({ state: "found", name: "You", snippet: "lunch at 1?", mine: true, targetId: next });
+    // A press the engine took on the question here keeps the line it pressed, even if the bot changed it after.
+    const pressed = { ...groupReply, snippet: "lunch at noon?", messageId: next };
+    expect(quoteFor(pressed, replyIndex([press, mine], true), names).snippet).toBe("lunch at noon?");
+  });
+
   it("only an id, and nothing here by it: the original is not available", () => {
     const quote = quoted({ id: WIRE, snippet: "" }, []);
     expect(quote).toEqual({ state: "missing", name: undefined, snippet: "", mine: false });

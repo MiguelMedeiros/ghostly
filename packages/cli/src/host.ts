@@ -2,10 +2,12 @@ import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
+import { fileStore } from "@ghostly/browser/shared/idb";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
+import { sinceSeq, type Params } from "./apiKit";
 import { CallManager } from "./calls/manager";
 import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
@@ -52,15 +54,18 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   const unmark = mode === "daemon" ? markStarting(paths) : () => {};
   const release = () => { unmark(); locked(); };
   let runtime;
+  // Made once the engine runs (it needs the engine), and asked by the engine from then on: an invitation over a chat it
+  // names finds room when 32 others wait (`GroupAutoJoin.autoJoins`).
+  let groupAuto: GroupAutoJoin | undefined;
+  const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
   try {
-    runtime = await startRuntime(paths, mode === "daemon" ? { ...options, logJoins: true } : options);
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();
     throw error;
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
-  let groupAuto!: GroupAutoJoin;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -71,14 +76,18 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
     // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
     // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+    // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
     const closed = !runtime.store.recovered;
+    const kept = runtime.server.takeStartNewest();
     for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
-      const page = closed && !runtime.server.historyChanged(id) ? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+      const page = closed && !runtime.server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
       if (page && !page.more) histories.set(id, page.messages);
       else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
       else histories.set(id, await whole(id));
     }
     hub.baseline(now, histories, { newest, whole });
+    // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
+    await hub.ended((id) => fileStore.get(id));
     announceJoins(hub, node);
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
@@ -86,12 +95,13 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
     // Group invitations over the chats `group auto on --from` names: only a daemon accepts them, those that came while it was down too.
-    groupAuto = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
-    const joiner = groupAuto;
+    const joiner = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
+    groupAuto = joiner;
     hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
     joiner.check(node.getState());
   } catch (error) {
+    hub.release();
     await runtime.close().catch(() => {});
     release();
     throw error;
@@ -105,6 +115,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
       runtime.server.detach(hub.sink);
+      // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
+      hub.release();
       await runtime.close().catch(() => {});
       release();
     })()),
@@ -268,11 +280,13 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     if (request.method === "events.subscribe") {
       // One stream per connection: a second would get every event again, and its replay would pass the bound once more.
       if (unsubscribes.length) { write({ id, error: new CliError("bad_request", "This connection is subscribed already: open another one for a new stream").toJSON() }); return; }
-      const params = (request.params ?? {}) as { since?: unknown };
-      const since = typeof params.since === "number" ? params.since : ctx.hub.lastSeq;
-      // A journal that cannot be replayed is the answer, never a subscription that then says nothing.
+      // A since that is wrong, or a journal that cannot be replayed, is the answer, never a subscription that then says nothing.
+      let since: number;
       let replay: GhostlyEvent[];
-      try { replay = ctx.hub.replay(since); } catch (error) { write({ id, error: asCliError(error).toJSON() }); return; }
+      try {
+        since = sinceSeq((request.params ?? {}) as Params, ctx.hub.lastSeq);
+        replay = ctx.hub.replay(since);
+      } catch (error) { write({ id, error: asCliError(error).toJSON() }); return; }
       // Live events queue while the journal replays, so none falls between the two.
       const queued: GhostlyEvent[] = [];
       let replaying = true;

@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, expect, it, vi } from "vitest";
-import { DhtDelivery, DiscoveryBudgetError, HoldKeys, createIdentity, identityFromSeedB64, createLink, createRelayPayload, emptyDhtDeliveryState, parseRelayPayload,
+import { DhtDelivery, DiscoveryBudgetError, HoldKeys, RatchetBox, createIdentity, emptyRatchetState, fromBase64Url, identityFromSeedB64, createLink, createRelayPayload, emptyDhtDeliveryState, parseRelayPayload,
   type DhtDeliveryState, type PairingCredentials, type PkarrTransport, type SignedPacket } from "@ghostly/core";
 import { PEEK_LIMITS, ProfilePeek, readPathOf, readProfileStore, type ProfilePeekHost } from "../src/engine/profilePeek";
 import { databaseExists } from "../src/backup/database";
@@ -28,15 +28,20 @@ function fakeDht() {
   return { packets, publish, resolve, publishPayload, transport };
 }
 
-/** C and B paired over the DHT, then B stopped: what B stored, and C still running to send. */
-async function pairedThenAway() {
+/**
+ * C and B paired over the DHT, then B stopped: what B stored, and C still running to send. `ratchet`: C seals with the
+ * chat's ratchet (WISP 4xx) once B is pinned, as an app does whose contact's record lists it.
+ */
+async function pairedThenAway({ ratchet = false } = {}) {
   vi.useFakeTimers();
   const dht = fakeDht(), link = createLink(), params = [link.mine, link.invite];
   const saved: DhtDeliveryState[] = [emptyDhtDeliveryState(), emptyDhtDeliveryState()];
   const credentials: PairingCredentials[] = [0, 1].map(() => ({ seedB64: createIdentity().seedB64 }));
+  const box = (i: number) => new RatchetBox(() => ({ seed: fromBase64Url(credentials[i].seedB64), self: identityFromSeedB64(credentials[i].seedB64).pubKeyZ32, peer: credentials[i].peerKey!,
+    rendezvous: [identityFromSeedB64(params[i].seedB64).pubKeyZ32, params[i].peerPubKeyZ32], secret: fromBase64Url(params[i].encKeyB64) }), emptyRatchetState(), async () => {});
   const make = (i: number) => new DhtDelivery({ params: params[i], mode: "dht", state: saved[i], credentials: credentials[i], transport: dht.transport,
     save: async (state) => { saved[i] = structuredClone(state); }, pin: async (key) => { credentials[i].peerKey = key; },
-    message: async () => {}, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+    message: async () => {}, receipt: async () => {}, changed: () => {}, pollMs: 100, ...(ratchet && i === 0 && { ratchet: { box: box(0), peerSupports: () => true } }) });
   const c = make(0), b = make(1);
   await c.start(); await b.start(); await vi.advanceTimersByTimeAsync(4_500);
   expect(credentials.every((x) => x.peerKey)).toBe(true);
@@ -65,6 +70,19 @@ it("sees a text waiting for a profile that is not running, and writes nothing an
   expect(w.dht.publishPayload).not.toHaveBeenCalled();
   expect(w.dht.resolve.mock.calls.slice(-result.reads).every(([, options]) => options?.background === true)).toBe(true);
   expect(JSON.stringify(result)).not.toContain("for B only");
+  await w.c.stop();
+});
+
+it("sees a text sealed with the chat's ratchet before that profile kept any ratchet state of its own", async () => {
+  // B stopped before it sealed or opened anything with the ratchet (its contact's record had not come yet): its chat
+  // has no ratchet state, and C's first ratcheted envelope opens from an empty one, as B's engine opens it.
+  const w = await pairedThenAway({ ratchet: true });
+  expect(w.stored().ratchetState).toBeUndefined();
+  expect(await w.c.send("sealed", Date.now(), "ratchetbbbbbbbbbbbbbbb")).toBeNull();
+  await vi.advanceTimersByTimeAsync(200);
+  expect([...w.dht.packets.values()].some((p) => p.records.some((r) => r.label === "_dr")), "C's text is ratcheted").toBe(true);
+  const result = await new ProfilePeek(host(w.dht.transport, () => [w.stored()])).peek("b", "ghostly_b");
+  expect(result.chats[0].text).toBe("ratchetbbbbbbbbbbbbbbb");
   await w.c.stop();
 });
 

@@ -96,7 +96,8 @@ function openGroup(group: GroupView, language?: "pt") {
   </Routes>, { route: "/group/group-1", language });
 }
 const activeGroup = () => groupView({ status: "active", epoch: 1, members: [{ key: key("m"), role: "member", me: true, online: true, missing: 0 }] });
-const rowTexts = (menu: HTMLElement) => within(menu).getAllByRole("checkbox").map(b => b.querySelector("[data-menu-text]")?.textContent);
+/** The pick-one choices (radios), then the switch below them (a checkbox). */
+const rowTexts = (menu: HTMLElement) => [...within(menu).getAllByRole("radio"), ...within(menu).getAllByRole("checkbox")].map(b => b.querySelector("[data-menu-text]")?.textContent);
 
 describe("choosing from the chat's menu, in the Desktop app", () => {
   beforeEach(() => {

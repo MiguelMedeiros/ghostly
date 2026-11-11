@@ -74,6 +74,20 @@ async function listenTo(dir: string, ...args: string[]): Promise<Running> {
   return listener;
 }
 
+/**
+ * `listenTo` for live-only events (`typing.*`: never journaled, so `--since` does not replay them), resolved once the
+ * listener is subscribed: a message from `from` (on its `chat`) has reached it. The daemon replays and subscribes in
+ * one step, so whatever comes after that line is heard. Before, a start sent while the listen still started was lost,
+ * and the listener saw only the stop its 6 s fade made (CI, a busy runner).
+ */
+async function listenLive(dir: string, from: string, chat: string, ...args: string[]): Promise<Running> {
+  const listener = await listenTo(dir, ...args, "--type", "message.received");
+  const text = `listening ${randomBytes(4).toString("hex")}`;
+  ok(await as(from, "send", chat, text, "--wait", "delivered"));
+  await listener.waitFor((l) => l.type === "message.received" && (l.message as { text?: string }).text === text);
+  return listener;
+}
+
 /** Waits until `dir`'s roster of `group` names a member `name` (names come over the edges, a moment after joining). */
 async function waitForMember(dir: string, group: string, name: string): Promise<void> {
   const until = Date.now() + 120_000;
@@ -289,7 +303,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("show the contact this side is typing, and its stream says when it started and stopped", async () => {
-    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
+    const listen = await listenLive(bob, alice, "bob", "--type", "typing.started", "--type", "typing.stopped");
     expect(ok(await as(alice, "typing", "bob"))).toMatchObject({ chat: chatA, typing: true, live: true, sendTyping: true });
     expect(await listen.waitFor((l) => l.type === "typing.started")).toMatchObject({ chat: chatB });
     ok(await as(alice, "typing", "bob", "--stop"));
@@ -304,7 +318,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("keep typing on with --for until the time is up, or a message ends it", async () => {
-    const listen = await listenTo(bob, "--type", "typing.");
+    const listen = await listenLive(bob, alice, "bob", "--type", "typing.");
     const count = (type: string) => listen.lines.filter((l) => l.type === type).length;
     // A single start fades after 6 s; --for 10 keeps it on past that.
     expect(ok(await as(alice, "typing", "bob", "--for", "10"))).toMatchObject({ typing: true, until: expect.any(Number) });
@@ -323,7 +337,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
   it("show the contact a bot is thinking, with its status, and then recording", async () => {
     // chat.connection too: a failure then says whether the session went down in the window.
-    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped", "--type", "chat.connection");
+    const listen = await listenLive(bob, alice, "bob", "--type", "typing.started", "--type", "typing.stopped", "--type", "chat.connection");
     expect(ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Transcribing your audio…")))
       .toMatchObject({ chat: chatA, typing: true, kind: "thinking", status: "Transcribing your audio…", live: true });
     expect(await listen.waitFor((l) => l.type === "typing.started" && l.kind === "thinking"))
@@ -487,12 +501,13 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
   it("react to a message: the contact's stream says it, its history shows it, a new one replaces it, --remove takes it back", async () => {
     const listen = await listenTo(bob, "--type", "message.reaction");
-    const theirs = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string; text: string }[]).find((m) => m.text === "done typing")!;
+    // Its own message: one an earlier test sent is not there when that test failed before sending it.
+    const theirs = { id: ok(await as(alice, "send", "bob", "react to me", "--wait", "delivered")).messageId as string };
     expect(ok(await as(alice, "react", "bob", theirs.id, "👍"))).toMatchObject({ chat: chatA, messageId: theirs.id, emoji: "👍", removed: false });
     const event = await listen.waitFor((l) => l.type === "message.reaction");
     // Alice's own message: on Bob's side it is the contact's, reacted to by the contact.
     expect(event).toMatchObject({ chat: chatB, by: "peer", emoji: "👍", removed: false, mine: false });
-    const shown = async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; text: string; reactions?: { by: string; emoji: string }[] }[]).find((m) => m.text === "done typing")!;
+    const shown = async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; text: string; reactions?: { by: string; emoji: string }[] }[]).find((m) => m.text === "react to me")!;
     expect((await shown()).reactions).toMatchObject([{ by: "peer", emoji: "👍" }]);
     ok(await as(alice, "react", "bob", theirs.id, "❤"));
     await listen.waitFor((l) => l.type === "message.reaction" && l.emoji === "❤️");
@@ -1016,5 +1031,26 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(file?.transfer).toMatchObject({ state: "done" });
     const saved = ok(await as(bob, "file", "save", file!.file.id, "--path", join(bob, "from-a-one-shot.bin")));
     expect(sha(saved.path as string)).toBe(sha(path));
+  });
+
+  it("a chat paired before is paired while its contact is away: chat wait --until paired answers at once, as a one-shot or from a daemon", async () => {
+    // Before, with the contact's daemon stopped and the pairing made in an earlier run, it waited its whole timeout and
+    // answered `timeout` (exit 4): a bot's start-up guard failed for a chat whose texts go out over the DHT.
+    for (const dir of [alice, bob]) {
+      if (!ok(await as(dir, "daemon", "status")).running) continue;
+      ok(await as(dir, "daemon", "stop"));
+      expect(await daemons[dir].exited()).toBe(0);
+    }
+    const paired = async () => {
+      const asked = Date.now();
+      expect(ok(await as(alice, "chat", "wait", "bob", "--until", "paired", "--timeout", "10"))).toMatchObject({ id: chatA, live: false });
+      expect(Date.now() - asked).toBeLessThan(5_000);
+    };
+    await paired();
+    await startDaemon(alice);
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ live: false, pairing: "connecting" });
+    await paired();
+    // Live still means the contact is there now.
+    error(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "2"), "timeout", 4);
   });
 });

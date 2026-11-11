@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { useBackCloses } from "../../hooks/useDismiss";
 import { safeAreaInsets } from "../../hooks/useFloatingBox";
 
 export interface SelectOption<V extends string = string> {
@@ -187,6 +188,9 @@ export function Select<V extends string = string>({
     };
   }, [open, host]);
 
+  // Back (Android's back gesture) closes it alone, as a menu, and the page or dialog under it stays; focus never left the button.
+  useBackCloses(() => setOpen(false), open);
+
   // A press anywhere else, or focus moving elsewhere, closes it without choosing.
   useEffect(() => {
     if (!open) return;
@@ -198,11 +202,15 @@ export function Select<V extends string = string>({
     return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("focusin", focus, true); };
   }, [open]);
 
+  // The active option comes into view once the list has its place, and each time another option becomes active. Not
+  // on a re-measure (a resize, a scroll of the page): that scrolled a list the person had scrolled back to the chosen
+  // option, under the pointer about to press another.
+  const placed = place !== null;
   useEffect(() => {
-    if (open && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
+    if (open && placed && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
     // optionId is derived from uid, which never changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, active, place]);
+  }, [open, active, placed]);
 
   const small = size === "sm";
   // Every side is set: a popover's own style (inset: 0) would fill in any side left out.

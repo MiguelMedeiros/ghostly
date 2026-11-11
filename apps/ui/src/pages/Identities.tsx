@@ -6,6 +6,8 @@ import { ContactIdentitiesSection } from "../components/identities/ContactIdenti
 import { NostrSection } from "../components/nostr/NostrSection";
 import { AddIdentityDialog } from "../components/identities/AddIdentityDialog";
 import { addableProviders, identityAttention, markIdentityNewsSeen, useEngineValue } from "../lib/identities";
+import { SIGN_IN_INTERRUPTED_EVENT, takeSignInInterrupted } from "../lib/signInInterrupted";
+import { Button, Notice } from "../components/wallet/ui";
 
 /**
  * Identities, a page beside the chat list: this profile's proofs of other identities (add, status, remove),
@@ -22,16 +24,31 @@ export function Identities() {
     attention: identityAttention(s),
   });
   const [adding, setAdding] = useState(false);
+  // A sign-in Android cut off (its process ended while the provider's page was in the browser): said here, once.
+  const [interrupted, setInterrupted] = useState(false);
+  useEffect(() => {
+    const heard = () => { if (takeSignInInterrupted()) setInterrupted(true); };
+    heard();
+    window.addEventListener(SIGN_IN_INTERRUPTED_EVENT, heard);
+    return () => window.removeEventListener(SIGN_IN_INTERRUPTED_EVENT, heard);
+  }, []);
+  const add = () => { setInterrupted(false); setAdding(true); };
   const canAdd = addableProviders().length > 0;
   const showNostr = !!state?.showNostr;
   // News (a contact's proof revoked, one of yours refused) is seen once it is on this page.
   useEffect(() => { if (state) markIdentityNewsSeen(state.attention); }, [state]);
   return (
     <Page title={t("tabs.identities")} width="md" testId="identities-page" trailing={!!state && canAdd && (
-      <PageAction label={t("sidebar.new")} title={t("identities.ghostly.addOne")} testId="identities-new" onClick={() => setAdding(true)} />
+      <PageAction label={t("sidebar.new")} title={t("identities.ghostly.addOne")} testId="identities-new" onClick={add} />
     )}>
+      {interrupted && (
+        <div className="space-y-2" data-testid="sign-in-interrupted">
+          <Notice tone="error" title={t("identities.add.interrupted")} />
+          {canAdd && <Button variant="primary" onClick={add}>{t("identities.add.tryAgain")}</Button>}
+        </div>
+      )}
       <p className="text-sm text-text-secondary">{t("identities.page.intro")}</p>
-      <IdentityProofsSection onAdd={() => setAdding(true)} />
+      <IdentityProofsSection onAdd={add} />
       <ContactIdentitiesSection />
       {showNostr && <NostrSection />}
       {adding && <AddIdentityDialog onClose={() => setAdding(false)} />}

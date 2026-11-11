@@ -11,6 +11,7 @@ import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 
 // covers: chat.forward
 
@@ -361,6 +362,9 @@ describe("the Forward to… picker", () => {
     const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
     expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
     expect(lines[0]).toHaveTextContent("Ana! (أُرسل 1 من 2): ");
+    // Read out as an alert and still as a list of 2: the alert on the list itself took the list away from its lines.
+    expect(screen.getByTestId("forward-error")).toHaveAttribute("role", "alert");
+    expect(await axeViolations(screen.getByRole("dialog"))).toEqual([]);
     expect(isolated("forward-sent")).toEqual(["Friends"]);
     expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
     expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);
@@ -545,6 +549,25 @@ describe("choosing several", () => {
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
     fireEvent.click(screen.getByText("first"));
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  // A <dialog> opened over the chat while messages were chosen (Delete chat from the header's ⋮): the browser closes it
+  // on the Escape's default action, which the choice's own listener cancelled. The first Escape ended the choice behind
+  // and left the dialog open.
+  it("an Escape in a dialog over the chat is the dialog's: the choice stays, and the key is not cancelled", async () => {
+    const { user } = renderApp(<Timeline messages={messages} />);
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    const dialog = document.createElement("dialog");
+    document.body.append(dialog);
+    dialog.setAttribute("open", "");
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { dialog.dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(false);
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    dialog.remove();
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })); });
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 

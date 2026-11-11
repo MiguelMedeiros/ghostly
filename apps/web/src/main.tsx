@@ -22,12 +22,13 @@ import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, setLinkedFiles, takedownText } from "../../ui/src/lib/apps/open";
+import { appErrorText } from "../../ui/src/lib/apps/errors";
 import { idbPickStore, linkedFilesDatabase, pickSheetText, webLinkedFiles } from "../../ui/src/lib/apps/webFiles";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
-import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
+import { closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
@@ -47,7 +48,7 @@ listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
@@ -137,6 +138,7 @@ if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
     openAgainLabel: () => profileTranslator()("apps.view.openAgain"),
+    errorText: (error) => appErrorText(error, profileTranslator()),
     // Files the person picks for an app granted `files`: the client's own sheet, links for this page's life.
     linkedFiles,
   }));

@@ -57,7 +57,8 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
         const [{ BunkerSigner }, { SimplePool }] = await Promise.all([import('nostr-tools/nip46'), import('nostr-tools/pool')]);
         if (closed) throw new Error('Signer request cancelled');
         pool = new SimplePool(); clientKey = generateSecretKey();
-        signer = BunkerSigner.fromBunker(clientKey, bp, { pool, skipSwitchRelays: true, onauth: url => {
+        // No timeout of nostr-tools' own (30 s since 2.26): the person approves on their phone, within the 2 minutes above.
+        signer = BunkerSigner.fromBunker(clientKey, bp, { pool, skipSwitchRelays: true, timeout: 0, onauth: url => {
           try { const u = new URL(url); if (!closed && u.protocol === 'https:' && !u.username && !u.password) options.onAuth(u.href); } catch { /* Invalid signer URL: never navigate. */ }
         } });
         await signer.sendRequest('connect', [bp.pubkey, bp.secret ?? '', options.permissions ?? 'sign_event:30078', JSON.stringify({ name: options.appName ?? 'Ghostly — optional conversation proof' })]);

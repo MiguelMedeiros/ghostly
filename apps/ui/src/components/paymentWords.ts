@@ -1,7 +1,7 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
 import type { Translate } from "../contexts/I18nContext";
-import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { formatAmount, formatDecimal, formatTokenAmount } from "../lib/amount";
 import type { ChatPayment, WalletState } from "../lib/platform";
 import { satsIn } from "./NetworkTag";
 
@@ -73,7 +73,7 @@ export function paymentIsTest(payment: ChatPayment, state: WalletState | null | 
 }
 
 /** What a payment's bubble is titled: who sent or asked whom. */
-export const paymentTitle = (t: Translate, payment: ChatPayment): string =>
+export const paymentTitle = (t: Translate, payment: Pick<ChatPayment, "kind" | "direction">): string =>
   t(payment.kind === "request" ? (payment.direction === "out" ? "payments.bubble.title.youRequested" : "payments.bubble.title.requests") : payment.direction === "out" ? "payments.bubble.title.youSent" : "payments.bubble.title.sentYou");
 
 /**
@@ -85,4 +85,40 @@ export function paymentLine(t: Translate, payment: ChatPayment, state: WalletSta
     ? `${formatTokenAmount(payment.amount, payment.target.decimals, t.language)} ${payment.target.asset}`
     : t("wallet.cards.amount", { amount: formatAmount(payment.amount, t.language), unit: satsIn(t, paymentIsTest(payment, state) ? "testnet" : "mainnet") });
   return t("chat.preview.payment", { what: paymentTitle(t, payment), amount });
+}
+
+/**
+ * The English line the app keeps with a payment's message (Chat.tsx, the engine's payments.ts): "⚡ 1,000 sats",
+ * "⚡ Requested 1,000 test sats", "Requested 2100 test sats on Ark", "Requested 1.5 TEST-USDT". Lines written before
+ * the amount was always "en-US" carry the device's digits (any script: ২১,০০০, ၂၁,၀၀၀) and grouping (Safari's Swiss ’).
+ */
+const STORED_LINE = /^(?:⚡ )?(Requested )?(\p{Nd}[\p{Nd}.,'’٫٬\s]*?) (test sats|sats|[A-Z][A-Z0-9-]*)(?: on (?:Ark|Bark|Fedimint|Spark)| on-chain| from the group)?$/u;
+const DIGIT = /^\p{Nd}$/u;
+/** A token amount as the engine writes it (`formatPaymentAmount`): Latin digits, a point, no grouping. */
+const PLAIN_DECIMAL = /^\d+(?:\.\d+)?$/;
+/** A decimal digit's value: Unicode keeps each script's digits as a run of ten from 0, runs side by side. */
+function digitValue(digit: string): number {
+  const code = digit.codePointAt(0)!;
+  let first = code;
+  while (DIGIT.test(String.fromCodePoint(first - 1))) first--;
+  return (code - first) % 10;
+}
+/** A whole number of sats as written there, whatever its digits and grouping marks. */
+const satsWritten = (number: string) => Number([...number].filter((c) => DIGIT.test(c)).map(digitValue).join(""));
+
+/**
+ * A payment's stored line said as `paymentLine` says it, for when the wallet does not know the payment (not loaded yet,
+ * or its record is gone): `mine` is who sent the message. A line the app did not write this way stays as it is.
+ */
+export function storedPaymentLine(t: Translate, text: string, mine: boolean): string {
+  const direction = mine ? "out" : "in";
+  if (text === "Token payment request") return `⚡ ${paymentTitle(t, { kind: "request", direction })}`;
+  const line = STORED_LINE.exec(text);
+  if (!line) return text;
+  const [, requested, number, unit] = line;
+  const what = paymentTitle(t, { kind: requested ? "request" : "payment", direction });
+  const amount = unit === "sats" || unit === "test sats"
+    ? t("wallet.cards.amount", { amount: formatAmount(satsWritten(number), t.language), unit: satsIn(t, unit === "sats" ? "mainnet" : "testnet") })
+    : `${PLAIN_DECIMAL.test(number) ? formatDecimal(number, t.language) : number} ${unit}`;
+  return t("chat.preview.payment", { what, amount });
 }

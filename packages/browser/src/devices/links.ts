@@ -1,6 +1,6 @@
 import {
   DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, checkPushEndpoint, vapidKeysMatch, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
-  fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
+  fromBase64Url, readSetUpdate, setAckFrame, toBase64Url, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
   type WakeTarget,
 } from "@ghostly/core";
 import { DEVICE_RENEW_FRAME, DEVICE_TOKENS_FRAME, DEVICE_WAKE_FRAME, DeviceWaker, deviceWakeFrame, otherTarget, ownTargetFor, postPush, pushForSet, readDeviceTokens, readDeviceWake, withAllowed, withOtherPush, withOwnPush, withRenew } from "./push";
@@ -12,7 +12,7 @@ import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
-import { acknowledged, pendingFrames } from "./remove";
+import { acknowledged, delivered, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
@@ -49,7 +49,8 @@ export interface DeviceHandoffHandler {
  * Which links a device holds follows from its record alone, and is brought in line by `refresh()`:
  * - under the current `D`, one to every other device the set lists;
  * - under the `D` of an earlier set, one to each staying device that has not acknowledged the move yet (the list
- *   kept for it), so the new secret can reach it over the old link;
+ *   kept for it), so the new secret can reach it over the old link: the link under the secret it holds, never one
+ *   per set it missed;
  * - none for a `removed` device, and none for a `single` profile: no record, no key read, nothing asked of a relay.
  * A link whose `D` or device is no longer in the record is closed. So a device that no longer holds the current `D`
  * derives none of the links the others hold, and loses the ones it had as soon as they move.
@@ -311,9 +312,21 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** A hint came inside `TURN_HINT_EVERY_MS` of the last read, and a read is due at its end. */
   private hintDeferred = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  /** When this device added each device it enrolled in this run, by signing key (`expectDevice`). */
+  private readonly added = new Map<string, number>();
 
   constructor(private readonly options: DeviceLinksOptions) {
     this.createPeerConnection = "createPeerConnection" in options ? options.createPeerConnection : defaultPeerConnection();
+  }
+
+  /**
+   * This device just added the device of signing key `key` (an enrollment's record was written): its link, opened by the
+   * next `refresh`, awaits it as a chat awaits the contact of an invite just sent (`AWAITING_PEER_MS`). The new device
+   * starts into its standby screen only once the person taps Continue there, after the link's first read: read at the
+   * background pace from then, it went live about 30 s after it started (bug hunt, 2026-11-06).
+   */
+  expectDevice(key: string): void {
+    this.added.set(key, Date.now());
   }
 
   /** `host` is the device-link-only server's: it is told when what the standby screen shows changes. */
@@ -458,15 +471,26 @@ export class DeviceLinks implements DeviceLinkEngine {
     record.deviceSet.forEach((slot, index) => {
       if (slot && index !== identity.ownSlot && slot.key !== own) wanted.push({ id: `${record.d}|${slot.key}`, d: identity.d, key: slot.key, name: slot.name, slot: index, earlier: false });
     });
-    // An earlier set's secret reaches the devices that stay over the links of that set, until each acknowledged it.
-    for (const earlier of record.earlierSets) {
-      for (const key of earlier.pending) {
-        if (key === own || earlier.d === record.d) continue;
-        // Only a device that stays: a key the current set no longer lists gets no link, whatever the list says.
-        const staying = record.deviceSet.find((slot) => slot?.key === key);
-        if (!staying) continue;
-        // One link per old secret and device: two sets that both wait for it share none.
-        if (!wanted.some((w) => w.id === `${earlier.d}|${key}`)) wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name: staying.name, earlier: true });
+    // An earlier set's secret reaches the devices that stay over the links of that set, until each acknowledged it. Only
+    // a device that stays: a key the current set no longer lists gets no link, whatever the list says. A device off
+    // across several moves holds one secret, the oldest set still waiting for it: that set's link is the one it opens.
+    // The set's frame names the secret it takes from there, and only that set's link follows: the newest one (a frame
+    // this device signed again, `remove.ts`), which the current link covers, or the next set (one another device
+    // signed). A link under any other set is under a secret that device never got, and could never open. Except where a
+    // frame went to the device over a live link (`delivered`): it may hold the secret that frame named then, its
+    // `set-ack` lost, and the chain from that set's link follows too.
+    const pendingFor = (key: string, d?: string) => record.earlierSets.find((set) => set.d !== record.d && (d === undefined || set.d === d) && set.pending.includes(key));
+    for (const staying of record.deviceSet) {
+      if (!staying || staying.key === own) continue;
+      const key = staying.key;
+      const took = record.earlierSets.flatMap((set) => (set.pending.includes(key) ? (set.delivered ?? []).filter((e) => e.key === key).map((e) => pendingFor(key, e.d)) : []));
+      for (const start of [pendingFor(key), ...took]) for (let set = start; set;) {
+        const id = `${set.d}|${key}`;
+        if (wanted.some((w) => w.id === id)) break;
+        wanted.push({ id, d: fromBase64Url(set.d), key, name: staying.name, earlier: true });
+        let next: string | undefined;
+        try { const update = readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame); if (update) next = toBase64Url(update.d); } catch { /* none */ }
+        set = next === undefined ? undefined : pendingFor(key, next);
       }
     }
     return wanted;
@@ -487,8 +511,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       transport: this.options.transport,
       pollIntervals: this.options.pollIntervals,
       // Never an invite just sent: the other device is there (its packet is read at once) or away. As one, a link to a
-      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each.
-      madeAt: 0,
+      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each. Only a device
+      // this one added just now is awaited (`expectDevice`), from when it was added.
+      madeAt: want.earlier ? 0 : this.added.get(want.key) ?? 0,
       autoConnect: true,
       createPeerConnection: () => {
         if (!this.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
@@ -795,7 +820,9 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (running.earlier) {
       for (const pending of pendingFrames(record)) {
         if (pending.d !== running.d || pending.key !== running.key) continue;
-        try { running.link.sendDeviceFrame(pending.frame); } catch { /* the link closed under it: the next session sends it */ }
+        try { running.link.sendDeviceFrame(pending.frame); } catch { continue; /* the link closed under it: the next session sends it */ }
+        // The device may take it and its `set-ack` be lost: the link of the secret it names is kept after the next move.
+        if (record.state === "active" && delivered(record, pending.key, pending.d)) await amendDevice(this.options.profile, (current) => delivered(current, pending.key, pending.d));
       }
       return;
     }

@@ -30,17 +30,99 @@ export const fitGroupName = (value: string): string => fitText(value, fitsGroupN
 export const fitGroupNameEdit = (before: string, after: string, caret: number | null): { value: string; caret: number } =>
   fitTextEdit(before, after, caret, fitsGroupName);
 
-export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>
-  m.me ? t("group.member.you") : m.nick || t("group.member.unnamed", { key: publicKeyLabel(m.key) });
+/**
+ * What a name may hold that draws nothing by itself, and that `sanitizeNick` keeps since a name may need it beside
+ * something else: the joiners, the fillers, the variation selectors and the other default-ignorable code points, and
+ * the blank Braille pattern.
+ */
+const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
+ * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
+ * and "Alice (…k1p0aa)" are all "Alice".
+ */
+const sameNameForm = (nick: string) =>
+  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+
+/**
+ * The app's own word for me in each language it speaks, which its lines about me start with ("You removed Bob",
+ * "Você reagiu…"). Every language's is here (test/i18n checks it): a name in one language's word reads as mine in it.
+ */
+const MY_WORDS = ["You", "Você", "Tú", "Vous", "Tu", "あなた", "你", "أنت"];
+/** `sameNameForm` without accents or marks: "Voce", "Tu" and "انت" are the word too. */
+const wordForm = (name: string) => sameNameForm(name).normalize("NFD").replace(/\p{M}/gu, "");
+const MY_WORD_FORMS = new Set(MY_WORDS.map(wordForm));
+
+/**
+ * A name someone chose (a contact's, a member's) as a line about them says it: in quotes where it is the app's word for
+ * me (`MY_WORDS`, whatever its case, spacing or accents), so a member named "You" reads "“You” removed Bob", never my
+ * own "You removed Bob". Not for my own name: those lines are mine.
+ */
+export function othersName(name: string, t: Translate = english): string {
+  const form = wordForm(name);
+  return MY_WORD_FORMS.has(form) || form === wordForm(t("group.member.you")) || form === wordForm(t("chat.reply.you")) ? t("common.quotedName", { name }) : name;
+}
+
+/** `sameNamed` of a roster already read: a page names many of its rows, each by the same roster. */
+const sameNamedOf = new WeakMap<readonly object[], ReadonlySet<string>>();
+
+/**
+ * The keys of a roster whose name another key there shows too. Names are what each member says it is called, and
+ * nothing makes them unique: anyone with a community's link can take its admin's. `myName`: mine, as the others see it.
+ */
+export function sameNamed(members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[], myName = ""): ReadonlySet<string> {
+  const known = myName ? undefined : sameNamedOf.get(members);
+  if (known) return known;
+  const byName = new Map<string, Set<string>>();
+  for (const m of members) {
+    const nick = m.me ? myName : m.nick;
+    const form = nick && sameNameForm(nick);
+    if (form) byName.set(form, (byName.get(form) ?? new Set()).add(m.key));
+  }
+  const keys = new Set([...byName.values()].filter(same => same.size > 1).flatMap(same => [...same]));
+  if (!myName) sameNamedOf.set(members, keys);
+  return keys;
+}
+
+/**
+ * A name told apart by the end of its key, as "@" offers a member. The end is isolated left to right (LRI … PDI): in
+ * an Arabic name's direction "محمد (…k1p0aa)" is laid out as "(k1p0aa…) محمد", the key's end read as its start.
+ */
+const withKeyEnd = (nick: string, key: string) => `${nick} \u2066(…${key.slice(-6)})\u2069`;
+
+/** `sameNamed`: a member whose name another member shows too is told apart by the end of their key (`withKeyEnd`). */
+export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english, sameNamed?: ReadonlySet<string>) =>
+  m.me ? t("group.member.you") : !m.nick ? t("group.member.unnamed", { key: publicKeyLabel(m.key) })
+    : sameNamed?.has(m.key) ? withKeyEnd(m.nick, m.key) : m.nick;
+
+/** What `formerName` reads of a group. */
+type FormerNamesOf = { profile?: GroupView["profile"]; members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[] };
 
 /**
  * Who wrote (or reacted to) a group's message: a member by the roster's name; an author no longer in the roster
- * (removed, or back with a new member key) by the name the group knew them by, else by their key.
+ * (removed, or back with a new member key) by the name the group knew them by, else by their key. A name another
+ * member shows too is told apart by the end of its key, a member's always and a former member's in a community
+ * (`formerName`).
  */
-export const authorName = (group: { members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[]; formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
+export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
-  return member ? memberName(member, t) : group.formerNames?.[key] || t("group.member.unnamed", { key: key.slice(0, 8) });
+  if (member) return member.me ? memberName(member, t) : othersName(memberName(member, t, sameNamed(group.members)), t);
+  const former = group.formerNames?.[key];
+  return former ? othersName(formerName(group, key, former), t) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
+
+/**
+ * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it
+ * is told apart by the end of its key where a member there shows it too. A private group's members come in only by
+ * the admin's invitation, and one removed and invited again comes back with a new key under the same name: what she
+ * wrote before keeps that name as it is.
+ */
+export function formerName(group: FormerNamesOf, key: string, name: string): string {
+  if (group.profile !== "community") return name;
+  const form = sameNameForm(name);
+  return group.members.some(m => !m.me && m.key !== key && m.nick && sameNameForm(m.nick) === form) ? withKeyEnd(name, key) : name;
+}
 
 /**
  * A member's picture, when this app has one: mine, or what a member who is also a contact sent in our chat (the

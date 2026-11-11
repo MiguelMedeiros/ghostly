@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AddIdCardFace, IdCardFace } from "../../components/identities/IdCardFace";
-import { contactGhostlyCard, ghostlyCard, idCard, idCardTone, machineLine, shortKey } from "../../components/identities/idCard";
+import { contactGhostlyCard, ghostlyCard, idCard, idCardTone, machineLine, receivedIdCard, shortKey } from "../../components/identities/idCard";
 import type { Translate } from "../../contexts/I18nContext";
 import { date } from "../../lib/identities";
 import en from "../../locales/en";
 import { renderApp } from "../render";
-import { DAY, now, proofView } from "./views";
+import { DAY, now, proofView, receivedView } from "./views";
 
 // covers: proofs.deck, proofs.expiry, proofs.revoke, proofs.ghostly-card
 
@@ -88,6 +88,15 @@ describe("what an ID card says", () => {
   it("writes accented letters without their marks on the machine-readable line", () => {
     expect(machineLine("Ghostly", "João Müller")).toBe("ID<GHOSTLY<<GHOSTLY<<JOAO<MULLER".padEnd(44, "<"));
     expect(machineLine("Identité", "Ünïcode")).toBe("ID<GHOSTLY<<IDENTITE<<UNICODE".padEnd(44, "<"));
+  });
+
+  it("shows a contact's looked-up name without hidden or direction-changing characters, else the name the proof carried", () => {
+    const keyserver = { source: "Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's", fetchedAt: 1 };
+    const stored = receivedView({ provider: "openpgp", display: { ...keyserver, name: "‮moc.x@y.io​" } });
+    expect(receivedIdCard(stored, now()).name).toBe("moc.x@y.io");
+    const hidden = receivedView({ display: { ...keyserver, name: "‏ ​" }, verified: { subject: "example.org", source: "DNS TXT record", display: { name: "Alice‮", source: "Self-described", fetchedAt: 1 } } });
+    expect(receivedIdCard(hidden, now()).name).toBe("Alice");
+    expect(receivedIdCard(receivedView({ display: { ...keyserver, name: "​" } }), now()).name).toBeUndefined();
   });
 });
 

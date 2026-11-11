@@ -22,7 +22,7 @@ const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 
 function fake(): ApiContext {
-  const node = { getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn() };
+  const node = { getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
   const dir = mkdtempSync(join(tmpdir(), "gnc-"));
   dirs.push(dir);
   const calls = new CallManager({ engine: { getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
@@ -63,6 +63,75 @@ describe("a group named where only a 1:1 chat goes", () => {
     await expect(callApi(ctx, "call.answer", { call: "Crew" })).rejects.toMatchObject(isGroup("Crew"));
     await expect(callApi(ctx, "call.auto", { on: true, from: ["Crew"] })).rejects.toMatchObject(isGroup("Crew"));
     await expect(callApi(ctx, "service.share", { service: "web", chat: "Crew" })).rejects.toMatchObject(isGroup("Crew"));
+  });
+});
+
+describe("group:<ref> where only a 1:1 chat goes, beside a contact that calls itself so", () => {
+  // Bob chose his own name; this side gave his chat no label. Carol's chat has the label `group:Crew` given here.
+  const bob = (nick: string) => ({ ...alice, id: "chat-bob", label: undefined, peerNick: nick, peerPubKeyZ32: "pbob" }) as unknown as LinkView;
+  const withBob = (nick: string): ApiContext => {
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    node.getState = () => ({ ...state(), links: [alice, bob(nick)] }) as unknown as EngineState;
+    return ctx;
+  };
+
+  it.each([
+    ["chat.send", { text: "hi" }, "group send Crew [text...]"],
+    ["chat.get", {}, "group show Crew"],
+    ["chat.remove", { yes: true }, "group forget Crew --yes"],
+  ] as const)("%s refuses it as the group, whatever the contact calls itself", async (method, params, command) => {
+    for (const nick of ["group:Crew", "group:crew"]) {
+      await expect(callApi(withBob(nick), method, { chat: "group:Crew", ...params })).rejects.toMatchObject({
+        code: "not_found", message: `"group:Crew" is a group, not a chat: ghostly ${command}`, details: { group: "g1crew" },
+      });
+    }
+    await expect(callApi(withBob("group:g1crew"), method, { chat: "group:g1crew", ...params })).rejects.toMatchObject({ code: "not_found", details: { group: "g1crew" } });
+    // A group nobody here is in: no chat, not Bob's.
+    await expect(callApi(withBob("group:Zed"), method, { chat: "group:Zed", ...params })).rejects.toMatchObject({ code: "not_found", message: expect.stringContaining('"group:Zed"') });
+  });
+
+  it.each([
+    ["chat.request", { sats: 21 }],
+    ["chat.accept", {}],
+    ["chat.pay", { sats: 21 }],
+    ["call.start", {}],
+  ] as const)("%s refuses it as the group", async (method, params) => {
+    await expect(callApi(withBob("group:Crew"), method, { chat: "group:Crew", ...params })).rejects.toMatchObject(isGroup("group:Crew"));
+    await expect(callApi(withBob("group:Zed"), method, { chat: "group:Zed", ...params })).rejects.toMatchObject(noChat("group:Zed"));
+  });
+
+  it("payment list --chat refuses it too", async () => {
+    await expect(callApi(withBob("group:Crew"), "payment.list", { chat: "group:Crew" })).rejects.toMatchObject(isGroup("group:Crew"));
+  });
+
+  it("a label given here does not name the chat either: the group, as send reads it; the chat by its id", async () => {
+    // A chat labelled `group:...` before such names were refused: one target per ref, the group, as `send` takes it.
+    const labelled = (label: string): ApiContext => {
+      const ctx = fake();
+      const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+      node.getState = () => ({ ...state(), links: [alice, { ...bob("Carol"), id: "chat-carol", label }] }) as unknown as EngineState;
+      return ctx;
+    };
+    await expect(callApi(labelled("group:Crew"), "chat.connect", { chat: "group:Crew" })).rejects.toMatchObject(isGroup("group:Crew"));
+    for (const method of ["chat.get", "chat.history"]) {
+      await expect(callApi(labelled("group:Crew"), method, { chat: "group:Crew" })).rejects.toMatchObject({ code: "not_found", details: { group: "g1crew" } });
+    }
+    // No such group: refused, naming the chat so labelled, never taken for it.
+    await expect(callApi(labelled("group:Zed"), "chat.connect", { chat: "group:Zed" })).rejects.toMatchObject({
+      code: "not_found", message: expect.stringContaining('"group:Zed" names a group, never a chat'), details: { matches: ["chat-carol"] },
+    });
+    expect(await callApi(labelled("group:Zed"), "chat.get", { chat: "chat-carol" })).toMatchObject({ id: "chat-carol" });
+    const renamed = labelled("group:Zed");
+    await callApi(renamed, "chat.rename", { chat: "chat-carol", name: "Carol" });
+    expect((renamed.runtime as unknown as { server: { node: { renameLink: ReturnType<typeof vi.fn> } } }).server.node.renameLink).toHaveBeenCalledWith({ linkId: "chat-carol", label: "Carol" });
+  });
+
+  it("chat rename and invite create --label refuse a name starting with group:", async () => {
+    for (const name of ["group:Crew", " group:x", "group:"]) {
+      await expect(callApi(fake(), "chat.rename", { chat: "Alice", name })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining('"group:"') });
+      await expect(callApi(fake(), "invite.create", { label: name })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining('"group:"') });
+    }
   });
 });
 

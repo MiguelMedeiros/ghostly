@@ -8,6 +8,9 @@ import { useCalm } from "@/lib/useCalm";
 import { HERO } from "@/lib/motion";
 import { usePlayheadProgress } from "@/lib/playhead";
 import { useCards } from "./stage";
+import { Icon } from "@/components/site/icons";
+import { useInstaller } from "@/lib/useInstaller";
+import { downloads } from "@/lib/release";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 
@@ -18,11 +21,14 @@ import type { HomeCopy } from "@/content/home";
  * scripts, with reduced motion, or on a phone (the story as cards), a still Boo
  * stands in for the actor and the copy scrolls like any other: nothing is drawn
  * over it, so the two ways in stay whole and tappable while they are on screen.
+ * On an Android phone the first way in is the release's APK (`version`), and the
+ * web app the second.
  */
-export function Hero({ t }: { t: HomeCopy["hero"] }) {
+export function Hero({ t, version }: { t: HomeCopy["hero"]; version: string }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
   const cards = useCards();
+  const android = useInstaller() === "androidApk";
   const scrollYProgress = usePlayheadProgress(ref, "leaving");
   // Function form on purpose: motion turns array ranges into native scroll animations fixed at mount.
   const fade = (v: number) => 1 - Math.max(0, Math.min(1, (v - 0.2) / 0.5));
@@ -56,12 +62,25 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
           {t.lead}
         </p>
         <div className="hero-actions hero-rise" style={{ animationDelay: `${HERO.copy + 0.06}s` }}>
-          <a className="btn btn--primary btn--lg" href={APP_URL}>
-            <GhostMark /> {t.open} <span aria-hidden="true">↗</span>
-          </a>
-          <a className="btn" href="#download">
-            {t.download} <span aria-hidden="true">↓</span>
-          </a>
+          {android ? (
+            <>
+              <a className="btn btn--primary btn--lg" href={downloads(version).androidApk}>
+                <Icon name="android" /> {t.android} <span className="hero-version">v{version}</span>
+              </a>
+              <a className="btn" href={APP_URL}>
+                {t.open} <span aria-hidden="true">↗</span>
+              </a>
+            </>
+          ) : (
+            <>
+              <a className="btn btn--primary btn--lg" href={APP_URL}>
+                <GhostMark /> {t.open} <span aria-hidden="true">↗</span>
+              </a>
+              <a className="btn" href="#download">
+                {t.download} <span aria-hidden="true">↓</span>
+              </a>
+            </>
+          )}
         </div>
         <p className="hero-micro caption hero-rise" style={{ animationDelay: `${HERO.copy + 0.12}s` }}>
           <span>{t.badge}</span>

@@ -57,7 +57,12 @@ describe("the translation download question", () => {
     const { onNotNow, onDownload } = ask({ busy: true });
     expect(await screen.findByTestId("translate-download-goes-on")).toHaveTextContent("the download goes on");
     expect(screen.getByTestId("translate-download-not-now")).toHaveTextContent("Close");
-    expect(screen.getByTestId("translate-download-yes")).toBeDisabled();
+    // Busy, not disabled: a disabled button would drop a keyboard's focus to the page. A press does nothing.
+    const download = screen.getByTestId("translate-download-yes");
+    expect(download).toBeEnabled();
+    expect(download).toHaveAttribute("aria-busy", "true");
+    expect(download).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(download);
     fireEvent.click(screen.getByTestId("translate-download-not-now"));
     fireEvent(screen.getByTestId("translate-download"), new Event("cancel", { cancelable: true }));
     expect(onNotNow).toHaveBeenCalledTimes(2);

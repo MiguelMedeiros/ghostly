@@ -1,13 +1,22 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { schnorr } from "@noble/curves/secp256k1.js";
 import {
-  createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
+  ATPROTO_PROOF_COLLECTION, atprotoProofRecord, createIdentity, DEFAULT_RELAYS, DiscoveryBudgetError, domainWellKnownFile, emptyIdentityLedger, IdentityCheckUnavailable, identityFromSeed, identityRevocationValue, identityStatement, IDENTITY_REVOCATION_LABEL,
   newIdentityBinding, RelayTransport, type IdentityDisplay, type IdentityLedger, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
-import type { IdentityProofProvider } from "../src/proofs/contract";
+import type { ExternalToolSigner, IdentityProofProvider } from "../src/proofs/contract";
+import { domain } from "../src/proofs/providers/domain";
+import { sshGithub, type SshEvidence } from "../src/proofs/providers/ssh";
+import { sshTestKey } from "./helpers/sshKeygen";
+import { createAtprotoIdentityProvider } from "../src/proofs/providers/atproto";
+import { clearDomainCache } from "../src/proofs/domain";
+import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
+import { testAtprotoNetwork } from "./helpers/atprotoNetwork";
+import { signNostr } from "./helpers/nostrSign";
 // covers: proofs.revoke, proofs.expiry, proofs.recheck, proofs.binding, profiles.public
 
 // The proof-key seed is sealed with a 600k-iteration PBKDF2 key (identityEngine.test.ts checks that);
@@ -61,7 +70,7 @@ function pair() {
   };
   const make = (me: Me) => new IdentityProofs(host(me), () => state.providers[me]);
   engines.a = make("a"); engines.b = make("b");
-  return { engines, ledgers, state, pkarr, resolved, make };
+  return { engines, ledgers, state, pkarr, resolved, make, host };
 }
 
 async function clearStorage() {
@@ -263,13 +272,54 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
 
-    // Thirty-one days on (the proof lived thirty), the next republish drops it.
+    // Thirty-one days on (the proof lived thirty), it is no longer published, but kept: this clock may be the one that is wrong.
     pkarr.clear();
     vi.setSystemTime(Date.now() + 31 * 86_400_000);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(pkarr.size).toBe(0);
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+    // Past its expiry by more than the longest a proof may last, the next republish drops it.
+    vi.setSystemTime(Date.now() + 401 * 86_400_000);
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     await vi.waitFor(async () => expect(await stored("identityRevocations")).toEqual([]));
     expect(pkarr.size).toBe(0);
     again.stop();
+  });
+
+  /**
+   * The revocation was dropped by this device's clock: one run with the clock 40 days ahead deleted it for good, and a
+   * removal made then kept none, so once the clock was put right nothing republished it and the contact, told by no
+   * withdraw (the chat deleted first), kept the proof verified until its real expiry.
+   */
+  for (const when of ["after the removal", "during the removal"] as const) it(`a clock once set ahead ${when} does not end the revocation: put right, it is republished and the contact sees it revoked`, async () => {
+    const { engines, state, pkarr, make, id, binding } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const right = Date.now();
+    const ahead = () => vi.setSystemTime(right + 40 * 86_400_000);
+    state.deleted.a = true;
+    engines.a.forget("chat");
+    const run = async (ms: number) => { const a = make("a"); await a.load(); a.start(); await vi.advanceTimersByTimeAsync(ms); a.stop(); return a; };
+
+    if (when === "during the removal") ahead();
+    const removing = make("a");
+    await removing.load();
+    await removing.remove({ id });
+    if (when === "after the removal") { ahead(); await run(10_000); }
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+
+    // The clock put right, the relays forgot the record; the app runs again for two hours.
+    vi.setSystemTime(right + 60_000);
+    pkarr.clear();
+    const a = await run(2 * 60 * 60_000);
+    expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) });
+    await engines.b.checkRevocations();
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked");
+
+    // Clear all data with the clock ahead again still publishes it, once more.
+    ahead();
+    pkarr.clear();
+    await a.revokeAll();
+    expect([...pkarr.keys()]).toEqual([binding.key]);
   });
 
   it("revocations are looked up only online, for proofs standing or withdrawn, never for one revoked or expired", async () => {
@@ -645,7 +695,23 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
-  it("a proof removed while the contact is still checking it: the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
+  it("a contact's request that is never presented leaves the chat's timeline once its challenge ends, with no request after it", async () => {
+    const { engines, ledgers } = pair();
+    await clearStorage();
+    await engines.b.load();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    engines.b.start();
+    // A asks for a challenge and never presents (its app closed, or the proof left its profile): A's engine has no such share.
+    await engines.b.frame("chat", { t: "idp-request", id: "e".repeat(64), provider: "fake-key" });
+    expect(ledgers.b.timeline).toEqual([expect.objectContaining({ side: "theirs", state: "verifying" })]);
+    expect(ledgers.b.challenges).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(ledgers.b.timeline).toEqual([]);
+    expect(ledgers.b.challenges).toEqual([]);
+    engines.b.stop();
+  });
+
+  it("a proof removed while the contact is still checking it:the contact keeps it withdrawn, not verified, then finds it revoked", async () => {
     const { engines, state, resolved, pkarr } = pair();
     await clearStorage();
     await engines.a.load(); await engines.b.load();
@@ -669,6 +735,112 @@ describe("removing a proof and its revocation", () => {
     await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked"));
     expect(resolved.length, "its revocation looked up after the withdraw").toBeGreaterThan(0);
     engines.b.stop();
+  });
+
+  /**
+   * B's checks of A's presentations, held by hand in the order they start: `release(n, ok)` ends the n-th (from 0),
+   * verified as usual or failed. Checks past those named pass through at once.
+   */
+  function heldChecks(state: ReturnType<typeof pair>["state"], held: number) {
+    const gates = Array.from({ length: held }, () => { let open!: (ok: boolean) => void; const gate = new Promise<boolean>(resolve => { open = resolve; }); return { gate, open }; });
+    const started: (() => void)[] = [];
+    const entered = gates.map((_, n) => new Promise<void>(resolve => { started[n] = resolve; }));
+    let calls = 0;
+    state.providers.b = [{ ...fakeKey, verify: async (statement, evidence, ctx) => {
+      const n = calls++;
+      if (n < held) { started[n](); if (!(await gates[n].gate)) throw new Error("Evidence is for another statement"); }
+      return fakeKey.verify(statement, evidence as Parameters<typeof fakeKey.verify>[1], ctx);
+    } }];
+    return { entered, release: (n: number, ok: boolean) => gates[n].open(ok) };
+  }
+
+  it("unshared and shared again while the contact still checks the older presentation: both sides end shared and verified, and an unshare after it reaches both (3 runs)", async () => {
+    for (let run = 1; run <= 3; run++) {
+      const { engines, ledgers, state } = pair();
+      await clearStorage();
+      await engines.a.load(); await engines.b.load();
+      const checks = heldChecks(state, 1);
+      const { id } = await prove(engines.a);
+      await engines.a.share({ linkId: "chat", id });
+      await checks.entered[0];
+      // The older presentation's check is still out (as on a session before a reconnect) when A unshares and shares again.
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      await engines.a.share({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("accepted"));
+      await vi.waitFor(() => expect(ledgers.b.received.find(r => r.id === id)?.status).toBe("verified"));
+      // Then the older check ends.
+      checks.release(0, true);
+      await vi.waitFor(() => expect(ledgers.b.challenges, `run ${run}: the older challenge is used up`).toEqual([]));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(ledgers.b.received.map(r => `${r.id}:${r.status}`), `run ${run}: B`).toEqual([`${id}:verified`]);
+      expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: B's view`).toEqual(["verified"]);
+      expect(ledgers.a.shared.map(s => `${s.id}:${s.status}`), `run ${run}: A`).toEqual([`${id}:accepted`]);
+      expect(engines.a.views()[0].sharedWith, `run ${run}: A's page`).toBe(1);
+      // B's chat ends on the share it verified, not on a stop.
+      expect(ledgers.b.timeline?.at(-1), `run ${run}: B's timeline`).toMatchObject({ proof: id, kind: "shared", state: "verified" });
+      // Unshared after that: no longer shared on both sides.
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      expect(ledgers.b.received.map(r => `${r.id}:${r.status}`), `run ${run}: B after the unshare`).toEqual([`${id}:withdrawn`]);
+      expect(engines.a.views()[0].sharedWith).toBe(0);
+      engines.a.stop(); engines.b.stop();
+    }
+  });
+
+  it("withdrawn, shared again, then removed while the contact still checks the new presentation: the contact finds it revoked after the withdraw (3 runs)", async () => {
+    for (let run = 1; run <= 3; run++) {
+      const { engines, ledgers, state, resolved, pkarr, id } = await shared();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await engines.a.withdraw({ linkId: "chat", id });
+      await vi.waitFor(() => expect(ledgers.b.received.map(r => r.status)).toEqual(["withdrawn"]));
+      // The first withdraw's lookups run and end.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const checks = heldChecks(state, 1);
+      await engines.a.share({ linkId: "chat", id });
+      await checks.entered[0];
+      await engines.a.remove({ id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+      // The relays do not return the owner's revocation yet when the check looks it up.
+      const published = [...pkarr];
+      pkarr.clear();
+      checks.release(0, true);
+      await vi.waitFor(() => expect(ledgers.b.challenges).toEqual([]));
+      expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: right after the check`).toEqual(["withdrawn"]);
+      for (const [key, records] of published) pkarr.set(key, records);
+      resolved.length = 0;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received.map(r => r.status), `run ${run}: 20 s after the removal`).toEqual(["revoked"]));
+      // Once: found on the first try, and no second round of lookups follows.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(resolved, `run ${run}: its revocation looked up after the withdraw`).toHaveLength(1);
+      engines.a.stop(); engines.b.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("the older presentation's check failing after the share again does not settle the newer share: both sides end shared and verified", async () => {
+    const { engines, ledgers, state } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const checks = heldChecks(state, 2);
+    const { id } = await prove(engines.a);
+    await engines.a.share({ linkId: "chat", id });
+    await checks.entered[0];
+    await engines.a.withdraw({ linkId: "chat", id });
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+    await engines.a.share({ linkId: "chat", id });
+    await checks.entered[1];
+    // The older check fails while the newer one is still out.
+    checks.release(0, false);
+    await vi.waitFor(() => expect(ledgers.b.challenges).toHaveLength(1));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ledgers.a.shared.find(s => s.id === id)?.status, "A still waits for the newer check").toBe("pending");
+    checks.release(1, true);
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("accepted"));
+    await vi.waitFor(() => expect(ledgers.b.received.map(r => `${r.id}:${r.status}`)).toEqual([`${id}:verified`]));
+    expect(engines.a.views()[0].sharedWith).toBe(1);
+    engines.a.stop(); engines.b.stop();
   });
 
   it("a proof only withdrawn from this chat (still in the owner's profile) stays withdrawn, after a few lookups that back off", async () => {
@@ -815,6 +987,18 @@ describe("per chat", () => {
     expect(engines.b.linkView("chat", true)!.received[0].display).toEqual(found.display);
   });
 
+  it("a looked-up public name is stored without hidden or direction-changing characters, and none when nothing visible is left", async () => {
+    const { engines, ledgers, state } = await shared();
+    const id = engines.b.linkView("chat", true)!.received[0].id;
+    const found: { display?: IdentityDisplay } = { display: { name: "‮a​b@x.io ", source: "Test directory‏", fetchedAt: 1 } };
+    state.providers.b = [{ ...fakeKey, lookupDisplay: async () => found.display } as IdentityProofProvider];
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ name: "ab@x.io", source: "Test directory", fetchedAt: 1 });
+    found.display = { name: "‏​", source: "Test directory", fetchedAt: 2 };
+    await engines.b.lookupDisplay({ linkId: "chat", id });
+    expect(ledgers.b.received[0].display).toEqual({ source: "Test directory", fetchedAt: 2 });
+  });
+
   it("a proof received under the contact's previous key is shown as such, not verified", async () => {
     const { engines, state } = await shared();
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("verified");
@@ -846,6 +1030,49 @@ describe("per chat", () => {
     expect(verify).toHaveBeenCalledTimes(1);
     expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published" });
     engines.b.stop();
+  });
+
+  it("a contact's proof checked while this device's clock ran ahead is due again once the clock is put right, not at that future date", async () => {
+    const { engines, ledgers, state } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const proof = await prove(engines.a, 365);
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow + 60 * 86_400_000);
+    await engines.a.share({ linkId: "chat", id: proof.id });
+    await vi.waitFor(() => expect(ledgers.b.received[0]?.status).toBe("verified"));
+    // The clock is put right.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: realNow });
+    const verify = vi.fn(async () => { throw new Error("The record is not published"); });
+    state.providers.b = [{ ...fakeKey, recheck: { afterSeconds: 86_400 }, verify } as unknown as IdentityProofProvider];
+    expect(engines.b.linkView("chat", true)!.received[0].recheckDue).toBe(true);
+    engines.b.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "The record is not published", recheckDue: false });
+    expect(ledgers.b.received[0].checkedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    engines.b.stop();
+  });
+
+  it("a contact's proof checked while this device's clock ran ahead, for a provider with no recheck, reads as checked now, not at that future date", async () => {
+    const { engines, ledgers } = pair();
+    await clearStorage();
+    await engines.a.load(); await engines.b.load();
+    const proof = await prove(engines.a, 365);
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow + 2 * 86_400_000);
+    await engines.a.share({ linkId: "chat", id: proof.id });
+    await vi.waitFor(() => expect(ledgers.b.received[0]?.status).toBe("verified"));
+    // The clock is put right; nothing checks the proof again.
+    vi.setSystemTime(realNow);
+    const now = Math.floor(realNow / 1000);
+    expect(ledgers.b.received[0].checkedAt).toBeGreaterThan(now);
+    const view = engines.b.linkView("chat", true)!.received[0];
+    expect(view).toMatchObject({ status: "verified", recheckDue: false });
+    expect(view.checkedAt).toBeLessThanOrEqual(now);
+    expect(view.verifiedAt).toBeLessThanOrEqual(now);
   });
 
   it("a check that could not reach the server changes nothing and backs off; offline nothing is checked; a check that holds is due a day later", async () => {
@@ -895,6 +1122,165 @@ describe("per chat", () => {
       engines.b.stop();
     } finally { timeout.mockRestore(); }
   });
+
+  it.each(["https", "nip05"] as const)("a domain proof (%s) whose domain stops existing reads unconfirmed at the next daily check; one whose resolvers fail stays verified", async method => {
+    // The contact's real domain provider, over a stubbed network: a DoH resolver answering from `zone`, and the domain's web server.
+    const host = "proofs.example.com", nostrSecret = schnorr.utils.randomSecretKey();
+    const zone: Zone = { a: { [host]: ["203.0.113.7"] }, ttl: 0 };
+    const files = new Map<string, string>();
+    const resolvers = { down: false };
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = new URL(url);
+      if (/^(dns\.quad9\.net|cloudflare-dns\.com|dns\.google)$/.test(u.hostname)) {
+        if (resolvers.down) throw new TypeError("Failed to fetch");
+        return new Response(answerDoh(queryFromUrl(url), zone), { headers: { "content-type": "application/dns-message" } });
+      }
+      const body = u.hostname === host ? files.get(u.pathname + u.search) : undefined;
+      return body === undefined ? new Response("", { status: 404 }) : new Response(body, { headers: { "content-type": "application/json" } });
+    });
+    clearDomainCache();
+    try {
+      const p = pair();
+      p.state.providers = { a: [domain], b: [domain] };
+      await clearStorage();
+      await p.engines.a.load(); await p.engines.b.load();
+      const { draftId, binding } = p.engines.a.begin({ provider: "domain", subject: host });
+      const s = identityStatement(binding);
+      files.set("/.well-known/ghostly.json", domainWellKnownFile([{ key: binding.key, proof: s.id }]));
+      files.set("/.well-known/nostr.json?name=_", JSON.stringify({ names: { _: Array.from(schnorr.getPublicKey(nostrSecret), b => b.toString(16).padStart(2, "0")).join("") } }));
+      const view = await p.engines.a.complete({ draftId, evidence: method === "https" ? { method } : { method, event: signNostr(s, nostrSecret) } });
+      await p.engines.a.share({ linkId: "chat", id: view.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === view.id)?.status).toBe("verified"));
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      p.engines.b.start();
+      // No resolver answers: the check could not run, and the proof stands.
+      resolvers.down = true;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(p.engines.b.linkView("chat", true)!.received[0].status).toBe("verified");
+      // The domain is gone (the resolver says it does not exist): that is an answer about the proof.
+      resolvers.down = false;
+      zone.a = {};
+      for (let day = 0; day < 3 && p.engines.b.linkView("chat", true)!.received[0].status === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `${host} has no address` });
+      p.engines.b.stop();
+    } finally { vi.unstubAllGlobals(); clearDomainCache(); }
+  });
+
+  it("an AT Protocol proof of a did:web account whose domain stops existing reads unconfirmed at the next daily check; its server's name gone, or resolvers that fail, keep it verified", async () => {
+    // The contact's real AT Protocol provider over the in-memory network, behind the global fetch.
+    const net = testAtprotoNetwork();
+    const web = net.account("web");
+    net.accounts.delete(web.did);
+    const host = "alice.example.com";
+    web.did = `did:web:${host}`;
+    web.doc.id = web.did;
+    (web.doc.verificationMethod as { id: string }[])[0].id = "#atproto";
+    net.accounts.set(web.did, web);
+    net.zone.a![host] = ["203.0.113.11"];
+    const resolvers = { down: false };
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (resolvers.down && new URL(url).hostname === "dns.quad9.net") throw new TypeError("Failed to fetch");
+      const r = await net.fetch(url);
+      return new Response(r.bytes, { status: r.status, headers: { "content-type": r.contentType } });
+    });
+    clearDomainCache();
+    try {
+      const atproto = createAtprotoIdentityProvider({ host: () => undefined });
+      const p = pair();
+      p.state.providers = { a: [atproto], b: [atproto] };
+      await clearStorage();
+      await p.engines.a.load(); await p.engines.b.load();
+      const { draftId, binding } = p.engines.a.begin({ provider: "atproto", subject: web.did });
+      const s = identityStatement(binding);
+      web.records.set(`${ATPROTO_PROOF_COLLECTION}/${binding.key}`, atprotoProofRecord(s, new Date(binding.issuedAt * 1000)));
+      const view = await p.engines.a.complete({ draftId, evidence: {} });
+      await p.engines.a.share({ linkId: "chat", id: view.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === view.id)?.status).toBe("verified"));
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      p.engines.b.start();
+      const status = () => p.engines.b.linkView("chat", true)!.received[0].status;
+      // The server the account's document names has no address: the operator's name, which may come back.
+      delete net.zone.a!["pds.example.com"];
+      const asked = net.asked.length;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(net.asked.length, "checked").toBeGreaterThan(asked);
+      expect(status()).toBe("verified");
+      net.zone.a!["pds.example.com"] = ["203.0.113.10"];
+      // No resolver answers: the check could not run, and the proof stands.
+      resolvers.down = true;
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(status()).toBe("verified");
+      // The account's domain is gone: for a did:web account that is the identity, an answer about the proof.
+      resolvers.down = false;
+      delete net.zone.a![host];
+      for (let day = 0; day < 3 && status() === "verified"; day++) await vi.advanceTimersByTimeAsync(25 * 60 * 60_000);
+      expect(p.engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: `The account's DID no longer resolves: ${host} has no address` });
+      p.engines.b.stop();
+    } finally { vi.unstubAllGlobals(); clearDomainCache(); }
+  });
+
+  /**
+   * The app was closed for a day: 200 contacts' GitHub SSH proofs are due at the start. GitHub answers 60 lookups an
+   * hour per IP without a login (403 past it); the daily re-check must stay well under that, so a new contact's proof
+   * shared half an hour in is still checked, and every proof is still checked about a day after the last time.
+   */
+  it("after a day away, the daily re-check of many GitHub proofs stays under GitHub's hourly limit, and a new contact's proof is still checked", async () => {
+    const key = sshTestKey();
+    const sign = async (s: ReturnType<typeof identityStatement>) => (sshGithub.signers[0] as ExternalToolSigner<SshEvidence>).parse(key.sign(s.text), s);
+    const lookups: { at: number; ok: boolean }[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (new URL(url).hostname !== "api.github.com") throw new TypeError("Failed to fetch");
+      const ok = lookups.filter(l => l.ok && Date.now() - l.at < 60 * 60_000).length < 60;
+      lookups.push({ at: Date.now(), ok });
+      return ok ? new Response(JSON.stringify([{ id: 1, key: key.publicKey }]), { headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 });
+    });
+    try {
+      const p = pair();
+      p.state.providers = { a: [sshGithub as IdentityProofProvider], b: [sshGithub as IdentityProofProvider] };
+      await clearStorage();
+      await p.engines.a.load();
+      const { draftId, binding } = p.engines.a.begin({ provider: "ssh-github", subject: "new-contact" });
+      const view = await p.engines.a.complete({ draftId, evidence: await sign(identityStatement(binding)) });
+
+      // Making the new contact's proof (`complete`) looked it up on the real clock, and the fake clock starts from that
+      // clock: the lookup can fall in t0's millisecond and count in the first hour. Count only the lookups from here on.
+      const before = lookups.length;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      const t0 = Date.now(), at = Math.floor(t0 / 1000);
+      // Last checked 25 to 49 hours ago.
+      const many = new Map<string, IdentityLedger>();
+      for (let i = 0; i < 200; i++) {
+        const { binding } = newIdentityBinding({ provider: "ssh-github", subject: `contact-${i}`, validitySeconds: 90 * 86_400 });
+        const s = identityStatement(binding), checkedAt = at - 25 * 3600 - Math.floor(i * 86_400 / 200);
+        many.set(`c${i}`, { ...emptyIdentityLedger(), received: [{ id: s.id, binding, evidence: await sign(s), verified: { provider: "ssh-github", subject: binding.subject } as VerifiedIdentity,
+          presenter: "p", audience: "a", context: "c".repeat(64), verifiedAt: checkedAt, checkedAt, status: "verified" }] });
+      }
+      const hb = p.host("b");
+      p.engines.b = new IdentityProofs({ ...hb, ledger: id => many.get(id) ?? hb.ledger(id), linkIds: () => [...hb.linkIds(), ...many.keys()],
+        updateLedger: async (id, change) => many.has(id) ? (many.set(id, change(structuredClone(many.get(id)!))), many.get(id)!) : hb.updateLedger(id, change) }, () => p.state.providers.b);
+      await p.engines.b.load(); p.engines.b.start();
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      // A new contact shares a GitHub SSH proof.
+      await p.engines.a.share({ linkId: "chat", id: view.id });
+      for (let i = 0; i < 100 && !p.ledgers.b.received.some(r => r.id === view.id); i++) await vi.advanceTimersByTimeAsync(100);
+      const first = lookups.slice(before);
+      expect(p.ledgers.b.received.find(r => r.id === view.id), `${first.length} GitHub lookups in the first half hour, ${first.filter(l => !l.ok).length} refused`).toMatchObject({ status: "verified" });
+      await vi.advanceTimersByTimeAsync(t0 + 48 * 60 * 60_000 - Date.now());
+      p.engines.b.stop();
+
+      const hourly = Array.from({ length: 48 }, (_, h) => lookups.slice(before).filter(l => l.at >= t0 + h * 3_600_000 && l.at < t0 + (h + 1) * 3_600_000).length);
+      const seen = `GitHub lookups per hour: ${hourly.join(" ")}`;
+      expect(lookups.filter(l => !l.ok), seen).toEqual([]);
+      // The re-check's 30 an hour, and the new contact's one.
+      expect(Math.max(...hourly), seen).toBeLessThanOrEqual(31);
+      const proofs = [...many.values()].map(l => l.received[0]);
+      expect(proofs.filter(r => r.status !== "verified"), "none left unconfirmed").toEqual([]);
+      expect(proofs.filter(r => r.checkedAt < at + 24 * 3600), "each checked again on the second day").toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  }, 120_000);
 
   it("what the contact verifies is shown only where identities are supported, and forgotten with the chat", async () => {
     const { engines } = await shared();

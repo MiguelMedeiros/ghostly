@@ -26,6 +26,7 @@
     "title": "等你处理"
   },
   "notCopied": "未复制",
+  "quotedName": "“{{name}}”",
   "save": "保存",
   "size": {
     "b": "{{n}} B",

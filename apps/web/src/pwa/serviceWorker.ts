@@ -1,6 +1,6 @@
 import { carryIncomingShare, incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
-import type { FromWorker, ToWorker, WindowSays } from "../sw/messages";
+import type { ChatTaken, FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
@@ -167,6 +167,8 @@ export function listenForShares(peerLock?: string): void {
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
     if (message?.type === "build-gone") { noteBuildGone(); return; }
+    // The worker restarted since this page last said it takes shares, and has one to forward: said again, unfocused.
+    if (message?.type === "share-where") { here(); return; }
     if (message?.type !== "share" || !message.item) return;
     const { item } = message;
     // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
@@ -175,12 +177,12 @@ export function listenForShares(peerLock?: string): void {
       tell(workers.controller, { type: "share-keep", item });
       return true;
     };
-    // Any website can post to the share target: a share waits behind one already in the picker, never in its place,
-    // and only one that is shown at once opens the picker. Those the worker could not keep are said with it.
-    const shown = !!incomingShare();
+    // Any website can post to the share target: a share waits behind one already in the picker, never in its place.
+    // The picker opens wherever it is not on screen, so the one it shows is never one left there unseen (the person
+    // went to a chat with it still waiting). Those the worker could not keep are said with it.
     const dropped = typeof message.dropped === "number" && message.dropped > 0 ? message.dropped : 0;
     receiveShare({ ...(item as IncomingShare), carry, ...(dropped > 0 && { dropped }) }, { queue: true });
-    if (!shown && incomingShare() && !openedForShare()) window.location.hash = "#/shared";
+    if (incomingShare() && !openedForShare()) window.location.hash = "#/shared";
   });
   workers.startMessages();
   // A share into this same window replaces this page with one opened for it: the shares still in the picker go back
@@ -219,6 +221,9 @@ function tellReady(message: ToWorker): void {
  * profile's peer to open the chat (`open-chat`). One that waits gets it only when no window answered for that profile
  * (a new window it opened, or pages of an older build): of its own profile, the chat is where it starts once it takes
  * over; of another, it runs nothing, so it switches. `peer`: whether this page holds its profile's peer yet.
+ *
+ * One that said nothing in time (frozen or busy) is told only on a guess (`silent`): holding another profile's peer, it
+ * stays that profile (WISP 04) and hands the chat back, and the worker opens a new window on it.
  */
 export function listenForTaps(peer: () => boolean): void {
   const workers = container();
@@ -226,7 +231,11 @@ export function listenForTaps(peer: () => boolean): void {
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
     if (message?.type === "open-ask") { event.ports[0]?.postMessage({ profile: activeProfileId(), peer: peer() } satisfies WindowSays); return; }
-    if (message?.type === "open-chat") openChat(message.path, message.profile);
+    if (message?.type !== "open-chat") return;
+    if (!message.silent) { openChat(message.path, message.profile); return; }
+    const taken = message.profile === activeProfileId() || !peer();
+    if (taken) openChat(message.path, message.profile);
+    event.ports[0]?.postMessage({ taken } satisfies ChatTaken);
   });
   workers.startMessages();
 }

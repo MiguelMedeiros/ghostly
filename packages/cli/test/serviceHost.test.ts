@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
-import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, openServiceServer, ownCookies, SERVICE_METHODS, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
 // covers: headless.services
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
@@ -211,6 +211,44 @@ describe("an opened service's host and link", () => {
     // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
     const own = await get(service, "/own", { cookie });
     expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("keeps the page on its own origin while Hide my IP from contacts is on: no picture, script or frame from an https server the contact names", async () => {
+    // covers: settings.network.relay-only
+    const send: ServiceSend = async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]);
+    expect(OPENED_SERVICE_CSP_RELAY_ONLY).toBe("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'");
+    const hidden = await openServiceServer(send, 0, { relayOnly: true });
+    servers.push(hidden);
+    const hiddenCookie = String((await get(hidden, new URL(hidden.url).pathname)).headers["set-cookie"]).split(";")[0];
+    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
+    // Off: as before.
+    const { service, cookie } = await opened(send);
+    expect((await get(service, "/", { cookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("`service open` opens no app while Hide my IP from contacts is on: its browser tab could not be kept off WebRTC", async () => {
+    // covers: settings.network.relay-only
+    const link = { id: "hidechat", peerPubKeyZ32: "hidepeer", peerServices: [{ id: "app", name: "App" }] };
+    let asked = 0;
+    const request = async (): Promise<ClientResponse> => { asked++; return answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]); };
+    const params = { chat: link.id, service: "app" };
+    const context = (relayOnly: boolean | undefined) => ({ mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [], settings: { relayOnly } }), request } } } }) as unknown as ApiContext;
+    await expect(SERVICE_METHODS["service.open"](context(true), params)).rejects.toMatchObject({ code: "unavailable", message: SERVICE_OPEN_OFF_RELAY_ONLY });
+    // Nothing listens and the contact is not asked: closing finds none open.
+    await expect(SERVICE_METHODS["service.close"](context(true), params)).rejects.toMatchObject({ code: "not_found" });
+    expect(asked).toBe(0);
+    // Off (or never set): as before, with the policy of an app that may load from https sites.
+    for (const relayOnly of [false, undefined]) {
+      const ctx = context(relayOnly);
+      const { url } = (await SERVICE_METHODS["service.open"](ctx, params)) as { url: string };
+      try {
+        const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
+        const cookie = String((await get(service, parsed.pathname)).headers["set-cookie"]).split(";")[0];
+        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(OPENED_SERVICE_CSP);
+      } finally {
+        await SERVICE_METHODS["service.close"](ctx, params);
+      }
+    }
   });
 
   it("passes on no header that makes the browser send reports or early requests elsewhere, and drops report directives from the contact's policy", async () => {

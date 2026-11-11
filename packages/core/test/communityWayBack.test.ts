@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostLink } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { RelayTransport } from "../src/relay";
+import { ANSWER_READ_ALLOWANCE, RelayTransport } from "../src/relay";
 import { withRequestOptions, type PkarrRequestOptions, type PkarrTransport } from "../src/transport";
 import { closeWorld, fakePeerConnection, invitationWhere, run, useFakeWorld, type Side } from "./support/pairingWorld";
 
@@ -136,7 +136,14 @@ describe("a community member back while 30 chats start", () => {
     } else if (how.startsWith("as an edge's")) {
       // Before: the edges took the groups' allowance, and no lobby was asked before the minute freed. A beacon may be
       // read early: a chat's offer goes to one relay while the chats need the relays, which can leave the other a request.
-      expect(asked.filter((at) => at !== null && at <= 30_000), result).toHaveLength(0);
+      // Asked as `signal` reads, these are what an edge's read for its answer is, and that now has an allowance of its
+      // own on each relay of 30 (`ANSWER_READ_ALLOWANCE`, one per `ANSWER_READ_SPACING_MS`; none on the relay of 5): the
+      // two beacons it reads at once, outside the groups' allowance, leave that allowance a read and a write when it frees
+      // 5 s on, one lobby's ask. No other lobby is asked before the minute frees, and past the beacons' reads (one each,
+      // as before) the allowance reads at most its own: 3 a minute on each of the two relays of 30.
+      expect(asked.filter((at) => at !== null && at <= 55_000).length, result).toBeLessThanOrEqual(1);
+      const readEarly = [...beacons, ...lobbies.map((lobby) => lobby.pubKeyZ32)].flatMap((key) => gets.get(key) ?? []).filter((at) => at - start < 55_000);
+      expect(readEarly.length, result).toBeLessThanOrEqual(COMMUNITIES + 2 * ANSWER_READ_ALLOWANCE);
     } else {
       // Every beacon read, and every lobby asked, within seconds.
       expect(read.filter((at) => at !== null && at <= 5_000), result).toHaveLength(COMMUNITIES);

@@ -1,4 +1,4 @@
-import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupEditFrame, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, PersonStatus, Presence, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -35,6 +35,8 @@ export interface StoredLink {
   wakeToken?: string;
   /** Paired 1:1 chats: muted here, so the contact is told to forget this side's subscription until it is unmuted. */
   wakeMuted?: boolean;
+  /** Paired 1:1 chats: when this side last told the contact it came online (an online wake-up), for the 30-minute limit. */
+  onlineWokeAt?: number;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
   /**
@@ -282,9 +284,10 @@ export interface StoredGroup {
   community?: CommunityState;
   /**
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
-   * race: my member seed, the entry session, and what arrived of the welcome.
+   * race: my member seed, the entry session, and what arrived of the welcome. `opened`: the entry key of the link a
+   * member checking it still is opened, when that is not the door it asks (where it knocks once it learns it is out).
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; opened?: string; replaced?: boolean };
 }
 
 /**
@@ -297,6 +300,18 @@ export interface GroupLive {
   state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
   came?: StoredGroup["came"];
 }
+
+/**
+ * What a pin, a deletion for everyone, a change of hubs or a member's edit changes of a private group's record, in a
+ * row of its own (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too:
+ * there while the record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * `hubs`: the record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count.
+ * `large`: the members noted in `StoredGroup.large` since the record was written, which the record's are added to.
+ * `relayEdits`: the state's (`GroupState.relayEdits`); absent in rows from before it was kept here, whose record holds
+ * them. `of`: what the record held of them when the row was written (a hash); a record that holds something else now
+ * was written by an app from before since, and counts. Absent in rows from before it.
+ */
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; relayEdits?: GroupEditFrame[]; of?: string }
 
 export interface GroupMemberView {
   key: string;
@@ -596,6 +611,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 /**
@@ -666,6 +683,8 @@ export interface StoredQuote {
    * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
    */
   outputs?: unknown[];
+  /** Came with a restored copy of the profile: its ecash is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
 }
 
 export type PaymentState =
@@ -837,6 +856,12 @@ export interface WalletAwaitingView {
   paymentId?: string;
   /** Lightning: the card it goes through. */
   card?: string;
+  /**
+   * `sent`: its bubble, with the chat's Take it back, is in no chat that can be opened: the chat it went in was deleted
+   * since (or joined again by the same invite, without its old history), or its group is gone. The Wallet page offers
+   * it instead. A group member who left, whose edge closed, leaves the bubble in the group: not this.
+   */
+  chatGone?: true;
 }
 
 /**
@@ -1014,6 +1039,11 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
+  /**
+   * A line of a group's history: when it was first stored on this device. Its `timestamp` keeps its commit's moment
+   * (`placed`), which can be long before it came here (a member back after a month). Absent on lines stored before it.
+   */
+  heardAt?: number;
   /** A private group's removal line (`gone`): the member key of the admin who removed `member`. */
   by?: string;
   /** Group history: a payment between members, as the group knows it (WISP 902 § Payments). */
@@ -1152,6 +1182,11 @@ export interface MessageEdit {
   /** The edit shown: its number (1 for the first; the highest one wins) and when its author made it. */
   seq: number;
   at: number;
+  /**
+   * A contact's or a member's edit: when this device took it. Their `at` is their clock's (never later than this), and
+   * can be long before it came. Absent on mine, made here at `at`, and on edits stored before it.
+   */
+  heardAt?: number;
   /** Earlier versions, oldest first (the newest `EDIT_HISTORY_KEEP`): when each was written, and its text. */
   history: MessageVersion[];
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
@@ -1447,6 +1482,16 @@ export interface Settings {
    */
   sendTyping?: boolean;
   /**
+   * Whether paired contacts see when this profile is online (WISP 401 § Presence and status, "Share when I'm online").
+   * Absent means yes; off, no presence is said (a set status still is), and a contact's is still shown.
+   */
+  sharePresence?: boolean;
+  /**
+   * The status this profile set (availability, emoji, text, until when), said to every paired contact whose app offers
+   * `status/1`. Set and cleared through `setOwnStatus`/`clearOwnStatus`, never a settings patch; this device's own.
+   */
+  ownStatus?: PersonStatus;
+  /**
    * Whether files are downloaded without asking where the rules allow it (WISP 503: a group's voice messages, and its
    * files up to 8 MiB within 256 MiB a group). Absent means on; off, each waits for a Download.
    */
@@ -1475,6 +1520,11 @@ export interface Settings {
    * `setWakeSubscription` clears this. Set by the engine only.
    */
   wakeRotate?: boolean;
+  /**
+   * False: contacts are not asked for an online notice when they come online while this app is closed (WISP 401 §
+   * Wake-up push, revision 2026-10-27). Absent: they are (the default). Only through `setWakeOnline`.
+   */
+  wakeOnline?: false;
   /**
    * Private groups muted here (WISP 902 · Group Mesh § Wake-up push): their members are told to forget this profile's
    * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
@@ -1790,6 +1840,13 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /**
+   * Paired 1:1 chats: the contact is online and shares it (`status/1`): active or idle. Absent otherwise; ends with the
+   * session. Never stored.
+   */
+  peerPresence?: Presence;
+  /** Paired 1:1 chats: the status the contact set, while it lasts (heard on a live session, kept until the engine stops). */
+  peerStatus?: PersonStatus;
   /** Paired 1:1 chats: this side's wake-up token for this chat (the push worker's table), when it shared its subscription. */
   wakeToken?: string;
   /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */
@@ -1885,6 +1942,18 @@ export interface ServiceView extends StoredService {
   requests: number;
 }
 
+/** A push relay's answer that was not a push service's status (`EngineState.pushRelayRefused`). */
+export interface PushRelayRefused {
+  /** The relay address it came from. */
+  url: string;
+  /** When, in ms. */
+  at: number;
+  /** The relay's HTTP status. */
+  http: number;
+  /** The relay's own error text, when it gave one. */
+  text?: string;
+}
+
 export interface EngineState {
   settings: Settings;
   /**
@@ -1909,6 +1978,12 @@ export interface EngineState {
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
    */
   wakeOwner?: "here" | "away";
+  /**
+   * The push relay set in `settings.pushRelay` answered the last wake-up it was handed, but not as a push relay: a web
+   * page, JSON without the push service's status, or its own refusal (`text`, its `{ error }` on one line, cut). Kept
+   * in memory until it forwards one; absent otherwise, and where the host posts wake-ups itself (Desktop, CLI).
+   */
+  pushRelayRefused?: PushRelayRefused;
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */

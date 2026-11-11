@@ -91,7 +91,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
     <div ref={card}>
       <EntityCardFrame testId="entity-identity" data={{ "data-provider": provider, "data-subject": subject, "data-standing": standing.kind === "contact" ? standing.state : standing.kind, "data-lookup": lookup.status }}
         label={label} mark={<ProviderMark provider={provider} subject={subject} />}
-        title={<span className="font-mono text-[12.5px]" title={subject}>{shortSubject(provider, subject)}</span>}
+        title={<span className="font-mono chat-text-card-mono" title={subject}>{shortSubject(provider, subject)}</span>}
         subtitle={badge}>
         {lookup.status === "ok" && (
           <dl data-testid="entity-identity-facts" className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
@@ -102,7 +102,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
           </dl>
         )}
         {lookup.status === "error" && <p role="alert" data-testid="entity-identity-error" className="m-0 text-danger-ink">{t("chat.entity.resolveFailed", { error: lookup.error })}</p>}
-        <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-identity-where">
+        <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-identity-where">
           {where} {standing.kind === "none" ? t("chat.entity.resolveNoteNone") : t("chat.entity.resolveNote")}
         </p>
         {!(offline && lookup.status === "ok") && (

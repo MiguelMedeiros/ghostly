@@ -121,7 +121,8 @@ chat; a `<chat>` is its id, a unique prefix of it, or its name.
 
 Names are for people at a terminal. A contact chooses its own name, a group's admin its group's name and a member its
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
-key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
+key) and address by it: `<chat id>`, `group:<group id>` (every command that takes a group, `listen --group` too),
+`<member key>`. Where a command takes a chat or a group, a
 name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
 So is a `<group>` that is one group's name and a prefix of another's id.
 
@@ -132,7 +133,9 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
 ```
 
 - `--turns` gives one `agent.turn` event per message to answer: each message a contact sends in a 1:1 chat, and each
-  group message that mentions the agent. Nothing else wakes it (its own messages, edits, reactions, typing).
+  group message that mentions the agent or presses a button of its question. Nothing else wakes it (its own
+  messages, edits, reactions, typing). An `events.gap` (`{from, to}`: events lost across a crash or the journal's
+  trim) also reaches the hook: check `type`.
 - `--from <chat|key>` and `--group <group>` (each again for more) are the allowlist, checked before the agent wakes.
   Anyone else's message stays in the chat and never reaches the hook. `--group` alone lets no 1:1 chat through, and
   `--from` alone no group. Names are turned into ids once, when `listen` starts. Everyone on it can try to steer the
@@ -347,10 +350,11 @@ ghostly group send crew "Deploy now?" --button go:Go --button wait:Wait   # the 
 - The send's answer says `pressable`: true when the contact's app shows buttons, false when it does not, null until
   its app says.
 - A press is also a plain `message.received` whose text is the label: with `--turns`, its `agent.turn` carries
-  `press` (`{messageId, button, label}`), so act on that, never on the text alone. A group press is not a turn
-  (it names nobody): run `listen --type button.pressed` for those. Do not answer the same press twice: keep the
-  event's `id` and skip one you already handled. `by` says who pressed; `name` is the label you gave the chat (null
-  without one, and in a group); what they call themselves is only in `untrusted.name`.
+  `press` (`{messageId, button, label, by}`), so act on that, never on the text alone. In a group, a press on your
+  question is a turn too (a press on another member's is not), and any member can press: check `by`, the member's
+  key. Do not answer the same press twice: keep the event's `id` and skip one you already handled. `by` says who
+  pressed; `name` is the label you gave the chat (null without one, and in a group); what they call themselves is
+  only in `untrusted.name`.
 - `button update --text` shows the question as edited, and a press keeps quoting what the person answered.
 - `--once` takes one answer a person. `button update --close` ends the question for everyone; a press after it is
   just a reply.

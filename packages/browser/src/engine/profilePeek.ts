@@ -1,4 +1,4 @@
-import { DEFAULT_RELAYS, HoldKeys, beaconKeys, communityHasFrame, currentRelays, isDiscoveryBudgetError, normalizeRelayUrl, peekDhtMailbox, readBeaconHead, type PkarrTransport } from "@ghostly/core";
+import { DEFAULT_RELAYS, HoldKeys, beaconKeys, communityHasFrame, currentRelays, emptyRatchetState, isDiscoveryBudgetError, normalizeRelayUrl, peekDhtMailbox, readBeaconHead, type PkarrTransport } from "@ghostly/core";
 import { databaseExists } from "../backup/database";
 import { STORES, databaseName } from "../shared/idb";
 import { runsEngine } from "../devices/state";
@@ -173,8 +173,10 @@ export class ProfilePeek {
   private async chat(link: StoredLink, transport: Pick<PkarrTransport, "resolve">): Promise<PeekChat> {
     // Only reads: `peekDhtMailbox` gets a transport whose publications refuse.
     const readOnly: PkarrTransport = { resolve: transport.resolve, publish: async () => { throw new Error("A peek publishes nothing"); }, describe: () => this.host.transport.describe() };
+    // A chat that never sealed nor opened anything with its ratchet has no state of it yet: the contact's first ratcheted
+    // envelope opens from an empty one, as that profile's engine opens it.
     const { text } = await peekDhtMailbox({ params: link, credentials: { seedB64: link.participationSeed!, peerKey: link.pairedPeerKey, expectedPeerKey: link.peerParticipationKeyZ32 },
-      state: link.dhtDeliveryState, transport: readOnly, background: true, ratchet: link.ratchetState });
+      state: link.dhtDeliveryState, transport: readOnly, background: true, ratchet: link.ratchetState ?? emptyRatchetState() });
     let held = 0;
     if (holdable(link)) {
       const keys = new HoldKeys(link, link.participationSeed!, link.pairedPeerKey!);

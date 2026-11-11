@@ -101,6 +101,12 @@ export interface IrohWebOptions {
    * the relay its descriptor names, and a contact who runs that relay would see this profile's address there.
    */
   ownRelaysOnly?: boolean;
+  /**
+   * Whether a contact's relay is at a public address, or at a name whose every address is public now: asked before each
+   * dial through a relay that is not one of `relays`, where the host has a resolver (the CLI's `nodePublicRelay`). A page
+   * has none; a contact's relay is held there to what its URL says (`dialableIrohRelay`).
+   */
+  publicRelay?: (relay: string) => Promise<boolean>;
 }
 
 const SEND_BUDGET = 120 * 1024;
@@ -154,32 +160,52 @@ class IrohWebChannel implements FrameChannel {
 }
 
 /**
- * The relay the first endpoint on a relay list homed on, per wasm loader and list. Each endpoint keeps measuring
- * every relay in its list (a `GET /ping` to each, about 1.3 a minute), and all the endpoints in one app share one
- * network, so the first measures for all: the others start on its home relay alone, which is also the one their
- * descriptor names. Dialling a contact on another relay still works; only the measuring is skipped.
+ * Where the endpoint that measures a relay list for the others is homed, per wasm loader and list. Each endpoint on a
+ * list keeps measuring every relay in it (a `GET /ping` to each, about 1.3 a minute), and all the endpoints in one app
+ * share one network, so one measures for all: the others start on its home relay alone, which is also the one their
+ * descriptor names, and move when it moves (`HOME_CHECK_MS`). On its home alone, an endpoint never leaves that relay by
+ * itself: when it went down, 5 of 6 such listeners stayed out of reach until it came back (local relays, 90 s), while
+ * the one measuring was homed elsewhere within 45 s. Dialling a contact on another relay still works; only the measuring
+ * is skipped.
  */
-const homes = new WeakMap<object, Map<string, Promise<string | null>>>();
+interface Homing {
+  /** Settles with the measuring endpoint's first home, or null when it failed to start. */
+  found: Promise<string | null>;
+  /** Its home now, as the list spells it, once found. */
+  home: string | null;
+  /** The endpoint measuring, or null once it closed: the next to start or to look takes it on. */
+  measurer: object | null;
+}
+const homes = new WeakMap<object, Map<string, Homing>>();
 
-/** Starts a node on the home relay the first endpoint found, or on every relay when there is none or it fails. */
-async function startNode(wasm: IrohWasm, homesOfList: Map<string, Promise<string | null>>, seed: Uint8Array, relays: string[], onlineMs: number): Promise<WasmNode> {
+/** The list's spelling of a relay the wasm names. */
+function listed(relays: readonly string[], relay: string | null | undefined): string | null {
+  if (!relay) return null;
+  try { return relays.find(own => new URL(own).href === new URL(relay).href) ?? null; } catch { return null; }
+}
+
+/**
+ * Starts a node on the home relay the measuring endpoint is on, or on every relay when none measures, it has no home
+ * or that one fails; then this one measures for the list (`whole`).
+ */
+async function startNode(wasm: IrohWasm, homesOfList: Map<string, Homing>, me: object, seed: Uint8Array, relays: string[], onlineMs: number): Promise<{ node: WasmNode; whole: boolean }> {
   const key = relays.join(" ");
-  const found = relays.length > 1 ? homesOfList.get(key) : undefined;
-  const home = found ? await found : null;
-  if (found && home) {
-    try { return await wasm.IrohNode.start(seed, [home], onlineMs); } catch {
+  const homing = relays.length > 1 ? homesOfList.get(key) : undefined;
+  if (homing?.measurer) await homing.found;
+  if (homing?.measurer && homing.home) {
+    try { return { node: await wasm.IrohNode.start(seed, [homing.home], onlineMs), whole: false }; } catch {
       // That relay stopped answering: measure again, from the next endpoint on.
-      if (homesOfList.get(key) === found) homesOfList.delete(key);
+      if (homesOfList.get(key) === homing) homesOfList.delete(key);
     }
   }
   let settle = (_home: string | null) => {};
-  const mine = relays.length > 1 && !homesOfList.has(key) ? new Promise<string | null>(resolve => { settle = resolve; }) : null;
+  const mine: Homing | null = relays.length > 1 && !homesOfList.get(key)?.measurer
+    ? { found: new Promise<string | null>(resolve => { settle = resolve; }), home: null, measurer: me } : null;
   if (mine) homesOfList.set(key, mine);
   try {
     const node = await wasm.IrohNode.start(seed, relays, onlineMs);
-    const homed = node.address().relay;
-    settle(relays.find(relay => homed && new URL(relay).href === new URL(homed).href) ?? null);
-    return node;
+    if (mine) settle(mine.home = listed(relays, node.address().relay));
+    return { node, whole: true };
   } catch (error) {
     if (mine && homesOfList.get(key) === mine) homesOfList.delete(key);
     settle(null);
@@ -204,9 +230,14 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
   const wasm = await load();
   let homesOfList = homes.get(load);
   if (!homesOfList) homes.set(load, homesOfList = new Map());
-  const node = await startNode(wasm, homesOfList, seed, relays, options.onlineMs ?? 10_000);
+  const onlineMs = options.onlineMs ?? 10_000;
+  const key = relays.join(" ");
+  const me = {};
+  let { node, whole } = await startNode(wasm, homesOfList, me, seed, relays, onlineMs);
   const channels = new Set<IrohWebChannel>();
   let stopped = false;
+  /** A node being replaced by one on another relay list (`move`): the old one's end is not the relay going away. */
+  let moving = false;
   let handler: NativeEndpoint["onConnection"] = null;
   const early: BoundChannel[] = [];
   const bind = (conn: WasmConn): BoundChannel => {
@@ -226,6 +257,10 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
       if (!dialableIrohRelay((descriptor as { relay?: unknown } | null)?.relay, relays)) throw new Error("The contact's Iroh relay is not one this device dials");
       const dialled = irohDescriptor(descriptor, BROWSER_SPELLING);
       if (options.ownRelaysOnly && !onOwnRelay(dialled, relays)) throw new Error("The contact is not on one of this profile's Iroh relays");
+      const relay = (dialled as { relay?: unknown } | null)?.relay;
+      if (options.publicRelay && typeof relay === "string" && !onOwnRelay(dialled, relays) && !await options.publicRelay(relay))
+        throw new Error("The contact's Iroh relay is not one this device dials");
+      if (stopped) throw new Error("Iroh endpoint is stopped");
       const conn = await node.connect(dialled, options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
@@ -234,34 +269,77 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
       if (stopped) return;
       stopped = true;
       clearInterval(watching);
+      const homing = homesOfList.get(key);
+      if (homing?.measurer === me) homing.measurer = null;
       for (const channel of [...channels]) channel.close();
       for (const bound of early.splice(0)) bound.channel.close();
       await node.close().catch(() => {});
     },
   };
+  /** Replaces the node with one on `list` (the whole list if that fails), same seed: same endpoint id. */
+  const move = async (list: string[]): Promise<void> => {
+    moving = true;
+    // Taking on the measuring: the others wait for its home, as for a first endpoint's (`startNode`).
+    let settle = (_home: string | null) => {};
+    const mine: Homing | null = list === relays && !homesOfList.get(key)?.measurer
+      ? { found: new Promise<string | null>(resolve => { settle = resolve; }), home: null, measurer: me } : null;
+    if (mine) homesOfList.set(key, mine);
+    try {
+      await node.close().catch(() => {});
+      let fresh: WasmNode | undefined;
+      for (const tried of list.length < relays.length ? [list, relays] : [relays]) {
+        if (stopped) return;
+        try { fresh = await wasm.IrohNode.start(seed, tried, onlineMs); whole = tried === relays; break; } catch { /* The next list, or none. */ }
+      }
+      if (fresh && stopped) { await fresh.close().catch(() => {}); return; }
+      if (!fresh) { if (!stopped) { endpoint.onUnavailable?.(); await endpoint.close(); } return; }
+      node = fresh;
+      serve(fresh);
+      if (mine) settle(mine.home = listed(relays, fresh.address().relay));
+      moving = false;
+      look();
+    } finally {
+      moving = false;
+      if (mine && !mine.home) {
+        if (homesOfList.get(key) === mine) homesOfList.delete(key);
+        settle(null);
+      }
+    }
+  };
   // Iroh moves its home to another of the relays when the one it homed on goes away or another answers faster, and a
   // contact reaches it only through the relay its record names (the one left: no answer, every time). The wasm says
   // nothing when it moves, so its address is read again (`HOME_CHECK_MS`) and a new home is published, as the
   // Desktop's own Iroh does (`onDescriptor`). Between two homes it has none: the last stays published.
-  const watching = setInterval(() => {
+  const look = () => {
     let now: IrohWebDescriptor;
     try { now = node.address(); } catch { return; }
-    if (stopped || !now.relay || now.relay === (endpoint.descriptor as IrohWebDescriptor).relay) return;
-    endpoint.descriptor = { ...now, relayed: true };
-    endpoint.onDescriptor?.();
-  }, HOME_CHECK_MS);
-  void (async () => {
-    while (!stopped) {
+    if (stopped || moving) return;
+    const homing = homesOfList.get(key);
+    if (now.relay && now.relay !== (endpoint.descriptor as IrohWebDescriptor).relay) {
+      endpoint.descriptor = { ...now, relayed: true };
+      endpoint.onDescriptor?.();
+      if (homing?.measurer === me) homing.home = listed(relays, now.relay) ?? homing.home;
+    }
+    // One on the measured home alone follows it, or measures once nobody does; only with no channel open, which the
+    // new node would end (a channel on a relay that went away ends by itself).
+    if (whole || relays.length < 2 || channels.size) return;
+    if (!homing?.measurer) void move(relays);
+    else if (homing.home && now.relay && listed(relays, now.relay) !== homing.home) void move([homing.home]);
+  };
+  const watching = setInterval(look, HOME_CHECK_MS);
+  const serve = (current: WasmNode) => void (async () => {
+    while (!stopped && current === node) {
       let conn: WasmConn | undefined;
-      try { conn = await node.accept(); } catch { break; }
+      try { conn = await current.accept(); } catch { break; }
       if (!conn) break;
-      if (stopped) { conn.close(); break; }
+      if (stopped || current !== node) { conn.close(); break; }
       const bound = bind(conn);
       const accept = endpoint.onConnection;
       if (accept) accept(bound); else if (early.length < 4) early.push(bound); else bound.channel.close();
     }
     // The relay went away for good (or the endpoint was closed): stop offering Iroh.
-    if (!stopped) { endpoint.onUnavailable?.(); await endpoint.close(); }
+    if (!stopped && current === node && !moving) { endpoint.onUnavailable?.(); await endpoint.close(); }
   })();
+  serve(node);
   return endpoint;
 }

@@ -1,5 +1,6 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { chat, say } from "../support/fixtures";
-import { type Adb, PKG, activityStarts, expect, newChat, pairWithWeb, pending, skipUntilA1, test } from "./support/android";
+import { type Adb, PKG, activityStarts, expect, newChat, pairWithWeb, pending, skipUntilA1, test, webViewPage } from "./support/android";
 
 /**
  * The Android host (A1): what the system does for the app, read from the system's side over adb. Until the APK under
@@ -48,8 +49,9 @@ test("a message in the background posts a private system notification", { tag: [
   const { page, adb } = app;
   const asks = adb.shell(`dumpsys package ${PKG}`).includes("android.permission.POST_NOTIFICATIONS");
   skipUntilA1("Notifications", !asks && "the app does not ask for POST_NOTIFICATIONS");
-  // Granted as a person would on the system's prompt (`pm clear` took any earlier answer away).
-  adb.run("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS");
+  // Granted as a person would on the system's prompt (`pm clear` took any earlier answer away). Below Android 13
+  // (API 33, the nightly's older emulator) there is no such permission to grant: notifications are allowed already.
+  if (Number(adb.shell("getprop ro.build.version.sdk").trim()) >= 33) adb.run("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS");
   await page.evaluate(() => { location.hash = "#/settings/notifications"; });
   const notices = page.getByRole("switch", { name: "System notifications", exact: true });
   await notices.click();
@@ -90,14 +92,89 @@ test("text shared from another app opens the Share to… picker", { tag: ["@feat
   await expect(app.page.getByTestId("share-text")).toHaveText(text);
 });
 
+test("text shared while the app's process is gone but its task is in Recents opens the Share to… picker", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app }) => {
+  const { adb, device } = app;
+  const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
+  skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
+  app.background();
+  await expect.poll(() => app.page.evaluate(() => document.visibilityState), { timeout: 10_000, message: "the page sees the app in the background" }).toBe("hidden");
+  // Android ends the process for memory and keeps the task: `am kill` ends only a process that is safe to end, so it
+  // is asked until the app's process is in the background enough for it.
+  await expect.poll(() => {
+    adb.tryRun("shell", "am", "kill", PKG);
+    return adb.pid();
+  }, { timeout: 30_000, message: "the app's process ended by am kill" }).toBe("");
+  expect(adb.shell("dumpsys activity recents"), "the app's task still in Recents").toContain(PKG);
+  const text = `shared-after-kill-${Date.now()}`;
+  // The task's activity (singleTask) is made again in a new process and gets the share as a new intent.
+  adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG);
+  let pid = "";
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
+  const page = await webViewPage(device, Number(pid));
+  await expect(page.getByTestId("share-picker")).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByTestId("share-text")).toHaveText(text);
+});
+
+/** A task of the app whose root intent is a share (`dumpsys activity recents`). */
+const shareRooted = /baseIntent=Intent \{ act=android\.intent\.action\.SEND [^\n]*pkg=tools\.ghostly\.app/;
+
+test("a share that started the app is not offered again when Android brings the app back after ending its process", { tag: ["@feature:android.host.share-target", "@gated"] }, async ({ app, relayUrl }) => {
+  const { adb, device } = app;
+  const takes = adb.shell("cmd package query-activities -a android.intent.action.SEND -t text/plain").includes(PKG);
+  skipUntilA1("Sharing into the app", !takes && "the app has no ACTION_SEND filter for text");
+  // The app not running and no task of it: the share starts it, and is its task's root intent (the profile and its
+  // Network settings stay). A debug e2e start, as the fixture's.
+  adb.run("shell", "am", "force-stop", PKG);
+  const text = `shared-at-start-${Date.now()}`;
+  adb.run("shell", "am", "start", "-W", "-f", "0x10008000", "-a", "android.intent.action.SEND", "-t", "text/plain", "--es", "android.intent.extra.TEXT", text, "-p", PKG, "--ez", "ghostly_e2e", "true", "--es", "GHOSTLY_PKARR_RELAYS", relayUrl);
+  expect(adb.shell("dumpsys activity recents"), "the share is the root intent of the app's task").toMatch(shareRooted);
+  let pid = "";
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's process" }).not.toBe("");
+  let page = await webViewPage(device, Number(pid));
+  await expect(page.getByTestId("share-text")).toHaveText(text, { timeout: 120_000 });
+  await expect(page.getByTestId("share-next")).toContainText(text);
+  await page.getByTestId("share-cancel").click();
+  await expect(page.getByTestId("share-picker")).toBeHidden();
+
+  adb.shell("input keyevent KEYCODE_HOME");
+  await expect.poll(() => page.evaluate(() => document.visibilityState), { timeout: 10_000, message: "the page sees the app in the background" }).toBe("hidden");
+  await expect.poll(() => {
+    adb.tryRun("shell", "am", "kill", PKG);
+    return adb.pid();
+  }, { timeout: 30_000, message: "the app's process ended by am kill" }).toBe("");
+  expect(adb.shell("dumpsys activity recents"), "the app's task, the share's, still in Recents").toMatch(shareRooted);
+
+  // Back from Recents, as a person would: the overview, then its front card (the app's task, the latest one).
+  adb.shell("input keyevent KEYCODE_APP_SWITCH");
+  await sleep(2_000);
+  const [width, height] = (/(\d+)x(\d+)/.exec(adb.shell("wm size")) ?? []).slice(1).map(Number);
+  adb.shell(`input tap ${Math.round(width / 2)} ${Math.round(height / 2)}`);
+  await expect.poll(() => (pid = adb.pid()), { timeout: 30_000, message: "the app's new process" }).not.toBe("");
+  page = await webViewPage(device, Number(pid));
+  // The chat list, or the picker over it: the share Rust would hand over comes at the page's start, a few seconds more
+  // for it to show, then none.
+  await expect(newChat(page).or(page.getByTestId("share-picker")), "the UI rendered").toBeAttached({ timeout: 120_000 });
+  await sleep(5_000);
+  await expect(page.getByTestId("share-picker")).toHaveCount(0);
+});
+
 /** The app's view of `id` in its activity's view hierarchy (`dumpsys activity`), as shown (V), or null when there is none. */
 function shownView(adb: Adb, id: string): boolean | null {
   const line = adb.shell(`dumpsys activity ${PKG}/.MainActivity`).split("\n").find((entry) => entry.trimEnd().endsWith(`app:id/${id}}`));
   return line ? /\{[0-9a-f]+ V/.test(line) : null;
 }
 
+/** Whether the app's window is secure (FLAG_SECURE): the `fl=` flags of its window in `dumpsys window windows`. */
+function secureWindow(adb: Adb): boolean {
+  const windows = adb.shell("dumpsys window windows").split(/\n(?=\s*Window #)/);
+  const own = windows.find((entry) => entry.includes(`${PKG}/${PKG}.MainActivity`) || entry.includes(`${PKG}/.MainActivity`));
+  return /\bfl=[^\n]*\bSECURE\b/.test(own ?? "");
+}
+
 test("with the lock screen on, the app switcher shows the app's cover: its mark and one line", { tag: ["@feature:android.host.switcher-cover", "@gated"] }, async ({ app }) => {
   const { page, adb } = app;
+  // With no lock, screenshots and screen sharing of the app work as any app's.
+  expect(secureWindow(adb), "the window is not secure with no lock").toBe(false);
   await page.evaluate(() => { location.hash = "#/settings/privacy"; });
   await page.getByTestId("settings-lock").click();
   const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
@@ -105,6 +182,9 @@ test("with the lock screen on, the app switcher shows the app's cover: its mark 
   await passwords.nth(1).fill("switcher-cover");
   await page.getByRole("button", { name: "Set password" }).click();
   await expect(page.getByTestId("settings-lock-now")).toBeVisible();
+  // Secure before the switcher opens: its opening shows the app's live window before the app hears it is going, so
+  // only a secure window keeps the page out of a picture, screenshot or recording of it (the cover comes after).
+  await expect.poll(() => secureWindow(adb), { timeout: 10_000, message: "the window secure with the lock on" }).toBe(true);
   adb.shell("input keyevent KEYCODE_APP_SWITCH");
   // The switcher shows the app's live window: the cover is over the page there, with the app's mark and its line.
   await expect.poll(() => shownView(adb, "lock_cover"), { timeout: 20_000, message: "the cover shown in the switcher" }).toBe(true);
@@ -150,4 +230,33 @@ test("a sign-in's deep link comes back to the running app and answers the sign-i
   const result = await page.evaluate(() => Promise.race([(window as unknown as { __a9SignIn: Promise<unknown> }).__a9SignIn, new Promise((done) => setTimeout(() => done({ error: "no answer in 15 s" }), 15_000))]));
   expect(result).toEqual({ answer: `?code=a9&state=${state}` });
   expect(await page.evaluate(() => (window as unknown as { __a9: string }).__a9)).toBe("the same page");
+});
+
+test("a sign-in's answer that comes back after Android ended the app's process says the sign-in was interrupted", { tag: ["@feature:android.host.oidc-deep-link", "@gated"] }, async ({ app }) => {
+  const { page, adb, device } = app;
+  let port: unknown;
+  try { port = await app.invoke("oidc_loopback_start"); } catch (error) { skipUntilA1("The sign-in deep link", pending(error) ?? false); throw error; }
+  const state = `a.${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
+  await page.evaluate(([port, state]) => {
+    void (window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }).__TAURI_INTERNALS__
+      .invoke("oidc_loopback_wait", { port, url: "https://example.com/authorize?client_id=a9&redirect_uri=https%3A%2F%2Fapp.ghostly.tools%2Foidc-callback.html", expectedState: state })
+      .catch(() => {});
+  }, [port, state] as const);
+  await expect.poll(() => adb.shell("dumpsys activity activities").match(/topResumedActivity=\S+ \S+ (\S+)/)?.[1] ?? "", { timeout: 15_000, message: "the provider's page in the system browser" }).not.toContain("tools.ghostly.app");
+
+  // Android ends the app's process while the browser is in front (it may, for memory): the waiting sign-in goes with it.
+  for (let i = 0; i < 10 && adb.pid(); i++) {
+    adb.run("shell", "am", "kill", PKG);
+    await sleep(700);
+  }
+  expect(adb.pid(), "the app's process ended with the browser in front").toBe("");
+
+  // The person finishes signing in: the answer starts a new process, whose page never asked for it.
+  adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", `'${OIDC_LINK}?code=a9&state=${state}'`);
+  await expect.poll(() => adb.pid(), { timeout: 30_000, message: "a new process for the answer" }).not.toBe("");
+  const again = await webViewPage(device, Number(adb.pid()));
+  const notice = again.getByTestId("sign-in-interrupted");
+  await expect(notice, "the page says so, not only the diagnostics log").toContainText("The sign-in was interrupted", { timeout: 120_000 });
+  await notice.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(again.getByTestId("add-identity")).toBeVisible();
 });

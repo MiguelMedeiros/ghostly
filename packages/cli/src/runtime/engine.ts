@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
@@ -12,11 +12,13 @@ import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodeHoldFetch } from "./holdFetch";
+import { nodePublicRelay } from "./irohRelay";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
+import { watchWake } from "./wakeWatch";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -205,7 +207,13 @@ function irohWasmBytes(): Buffer {
  * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
  * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
-export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
+export interface RuntimeOptions {
+  deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean;
+  /** The chats whose group invitations this profile accepts by itself (`group auto`, `NodeOptions.autoJoins`). */
+  autoJoins?: (linkId: string) => boolean;
+  /** The start keeps each history's newest rows that many, for the host's event check (`EngineServer.takeStartNewest`). */
+  keepNewest?: number;
+}
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -292,6 +300,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     irohWeb: true,
     // `GHOSTLY_IROH_RELAYS`: those relays only (the setting is not read).
     ...(pinnedIroh ? { irohRelays: pinnedIroh } : {}),
+    // A contact's Iroh relay is dialled only at a name whose every address is public now (./irohRelay.ts).
+    irohPublicRelay: nodePublicRelay(),
     // A CLI profile is one device's (WISP 06): no device state is kept for it.
     singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
@@ -309,6 +319,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     staysOnline: envSwitch("GHOSTLY_HUB", true),
     // A contact that left (a phone that put the app to sleep) is read every 10 s for 5 minutes, not every 30 s past 2.
     watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS,
+    // A bot is the chat open: a contact that chose DHT only is read every 10 s (WISP 403, poll pace), not every 30 s.
+    peerDhtPollMs: ACTIVE_DHT_POLL_MS,
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),
@@ -316,9 +328,11 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     holdFetch: nodeHoldFetch(),
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
+    ...(options.autoJoins ? { autoJoins: options.autoJoins } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
     ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
+    ...(options.keepNewest ? { keepNewest: options.keepNewest } : {}),
     // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
     ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),
   });
@@ -329,10 +343,14 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     await store.close().catch(() => {});
     throw error;
   }
+  // A machine back from sleep or on another network: the engine's wake, as a page's `visibilitychange`/`online` call it
+  // (./wakeWatch.ts). Without it a daemon's chats waited out their background pace, and a phone found it minutes later.
+  const stopWake = options.offline ? () => {} : watchWake(() => { server.node.wake({ network: true }); });
   let closing: Promise<void> | null = null;
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
+      stopWake();
       await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();

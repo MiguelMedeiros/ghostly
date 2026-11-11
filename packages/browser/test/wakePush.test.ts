@@ -1,13 +1,14 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { p256 } from "@noble/curves/nist.js";
-import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, type WakeTarget } from "@ghostly/core";
+import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, WAKE_RETRY_MS, type WakeTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink, WakeSubscription } from "../src/shared/types";
+import { hostOf } from "./helpers/urlHost";
 
-// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group
+// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group, push.wake.online
 
 function stubLink(overrides: Record<string, unknown> = {}) {
   const session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
@@ -211,7 +212,7 @@ describe("waking a contact whose app is closed", () => {
     const calls: { url: string; body: unknown }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, body: init.body });
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       return new Response(JSON.stringify({ status: 201 }), { status: 200 });
     }));
     const node = engine();
@@ -235,7 +236,7 @@ describe("waking a contact whose app is closed", () => {
     let relay = () => new Response("<html>Not Found</html>", { status: 404 });
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -255,6 +256,148 @@ describe("waking a contact whose app is closed", () => {
     node["wakeLimiter"].reset(chat.id);
     await node.sendMessage({ linkId: chat.id, text: "hi" });
     await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
+  });
+
+  it("a wake-up that did not reach the push service does not hold the next message's back past a short pause", async () => {
+    const failures: [string, () => Response][] = [
+      ["relay 429 (its own minute full)", () => new Response("Too Many Requests", { status: 429 })],
+      ["relay 502 (push service did not answer)", () => new Response(JSON.stringify({ error: "The push service did not answer" }), { status: 502 })],
+      ["push service 503 via relay", () => new Response(JSON.stringify({ status: 503 }), { status: 200 })],
+      ["push service 429 via relay", () => new Response(JSON.stringify({ status: 429 }), { status: 200 })],
+      ["relay unreachable", () => { throw new TypeError("Failed to fetch"); }],
+    ];
+    for (const [name, failure] of failures) {
+      const posts: string[] = [];
+      let relay = failure;
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+        try { const answer = relay(); posts.push(answer.ok && (await answer.clone().json() as { status: number }).status === 201 ? "ok" : "fail"); return answer; }
+        catch (error) { posts.push("fail"); throw error; }
+      }));
+      const t = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(t);
+      const node = engine();
+      await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail"]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      relay = () => new Response(JSON.stringify({ status: 201 }), { status: 200 });
+      // At once: the relay is not asked again yet.
+      now.mockReturnValue(t + 50);
+      await node.sendMessage({ linkId: chat.id, text: "are you there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail"]);
+      // A little later, the next message's own wake-up goes.
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hello?" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail", "ok"]));
+      // That one went out: the 5-minute limit holds from it.
+      now.mockReturnValue(t + 4 * 60_000);
+      await node.sendMessage({ linkId: chat.id, text: "still there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail", "ok"]);
+      expect((await saved(chat.id))?.peerWake, name).toBeDefined();
+      now.mockRestore();
+    }
+  });
+
+  it("a wake-up the push service took holds the next for five minutes, as does a subscription refused for good", async () => {
+    let status = 201;
+    const pushSend = vi.fn(async () => status);
+    const t = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t);
+    const node = engine({ pushSend });
+    for (const answer of [201, 400]) {
+      status = answer;
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      const before = pushSend.mock.calls.length;
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hi again" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(pushSend.mock.calls.length - before).toBe(1);
+      now.mockReturnValue(t);
+    }
+  });
+
+  it("a push relay that answers but not as a push relay is kept in the state, with its own error text, until it forwards one", async () => {
+    let relay: () => Response | Promise<Response> = () => new Response("<!doctype html><title>My site</title>", { status: 200, headers: { "Content-Type": "text/html" } });
+    const relayed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      relayed();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = relayed.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(relayed.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // A web page at that address: refused, no text of its own.
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ url: "https://push-relay.example/", http: 200 });
+    expect(node.getState().pushRelayRefused?.text).toBeUndefined();
+    // JSON, but without the push service's status.
+    relay = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 200 });
+    // The relay's own refusal: its error text, on one line and cut.
+    relay = () => new Response(JSON.stringify({ error: "Origin not allowed" }), { status: 403 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ url: "https://push-relay.example/", http: 403, text: "Origin not allowed" });
+    relay = () => new Response(JSON.stringify({ error: `Bad\nTTL\u202e value ${"x".repeat(300)}` }), { status: 400 });
+    await wake();
+    const { text } = node.getState().pushRelayRefused!;
+    expect(text).toMatch(/^Bad TTL value x+…$/);
+    expect([...text!]).toHaveLength(120);
+    // A status the relay forwards (here the push service's own 429) is the relay working: nothing is said any more.
+    relay = () => new Response(JSON.stringify({ status: 429 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // The push service's 410 through the relay is not the relay's problem either; it forgets the subscription as before.
+    relay = () => new Response(JSON.stringify({ status: 410 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
+  });
+
+  it("a push relay that cannot be reached (offline, timed out) is not said to refuse; another relay address drops what the old one said", async () => {
+    let relay: () => Response | Promise<Response> = () => { throw new TypeError("Failed to fetch"); };
+    const relayed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      relayed();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = relayed.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(relayed.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    relay = () => new Response(JSON.stringify({ error: "Too many" }), { status: 429 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 429, text: "Too many" });
+    // Unreachable afterwards: what it said last is kept, not taken for a fix.
+    relay = () => { throw new TypeError("Failed to fetch"); };
+    await wake();
+    expect(node.getState().pushRelayRefused).toMatchObject({ http: 429 });
+    await node.updateSettings({ settings: { pushRelay: "https://other-relay.example/" } });
+    expect(node.getState().pushRelayRefused).toBeUndefined();
   });
 
   it("a call to a closed app: one call wake-up, limited apart from messages; none while live or without a target", async () => {
@@ -285,6 +428,159 @@ describe("waking a contact whose app is closed", () => {
     const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
     node.removeLink({ linkId: chat.id });
     await vi.waitFor(async () => expect(await saved(chat.id)).toBeUndefined());
+  });
+});
+
+describe("online notices: a contact whose app is closed hears that this one came online", () => {
+  const asked = () => { const made = contactTarget(); return { ...made, target: { ...made.target, online: true as const } }; };
+  const bodies = (calls: unknown[][], secret: Uint8Array, auth: Uint8Array) =>
+    calls.map(([request]) => JSON.parse(utf8Decode(decryptPushPayload((request as { body: Uint8Array }).body, secret, auth))) as Record<string, unknown>);
+
+  it("this side asks for them by default; turned off, every live contact is told again without it", async () => {
+    const node = engine();
+    const a = stubLink();
+    await addChat(node, a);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(a.sendWake).toHaveBeenCalledTimes(1));
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    await node.setWakeOnline({ on: false });
+    expect(a.sendWake).toHaveBeenCalledTimes(2);
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0]).not.toHaveProperty("online");
+    expect((await db.getSettings()).wakeOnline).toBe(false);
+    expect(node.getState().settings.wakeOnline).toBe(false);
+    // The settings patch cannot turn it back on behind the contacts' backs.
+    await node.updateSettings({ settings: { wakeOnline: undefined } as never });
+    expect(node["settings"].wakeOnline).toBe(false);
+    await node.setWakeOnline({ on: true });
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    expect(await db.getSettings()).not.toHaveProperty("wakeOnline");
+  });
+
+  it("is not asked for while the subscription is another device's of this profile, which shows no online notice", async () => {
+    const node = engine();
+    const a = stubLink();
+    const chat = await addChat(node, a);
+    const inside = node as unknown as { ownDeviceKey: string | null; settings: { wake?: WakeSubscription } };
+    inside.ownDeviceKey = "desktop";
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(a.sendWake).toHaveBeenCalledTimes(1));
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    // The phone's subscription, carried by this desktop while it is the active one.
+    inside.settings = { ...inside.settings, wake: { ...inside.settings.wake!, device: "phone" } };
+    await node["shareWake"](chat.id);
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0]).not.toHaveProperty("online");
+  });
+
+  it("an away contact that asked gets one, with its token and nothing else, living five minutes", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+    expect((pushSend.mock.calls[0] as unknown as [{ headers: Record<string, string> }])[0].headers.TTL).toBe("300");
+  });
+
+  it("none to a contact that did not ask (an older app, or switched off), a live one, a muted one, a group edge, or while offline", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    await addChat(node, stubLink({ isDataLinkOpen: true }), { peerWake: asked().target });
+    // A chat the contact muted: its app said to forget the subscription.
+    await addChat(node, stubLink({ isDataLinkOpen: false }));
+    await addChat(node, stubLink({ isDataLinkOpen: false, groupsSupport: false }), { profile: undefined, group: "g", groupPeer: createIdentity().pubKeyZ32, peerWake: asked().target });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target });
+    node["settings"] = { ...node["settings"], online: false };
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+  });
+
+  it("none while \"Share when I'm online\" is off; switched back on, the next start says it again", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false, setStatus: vi.fn() }), { peerWake: target });
+    await node.updateSettings({ settings: { sharePresence: false } });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    await node.updateSettings({ settings: { sharePresence: true } });
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+  });
+
+  it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target });
+    const t = Date.now();
+    node["sayOnline"](t);
+    node["sayOnline"](t + 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => expect((await saved(chat.id))?.onlineWokeAt).toBe(t));
+    const restarted = engine({ pushSend });
+    await addChat(restarted, stubLink({ isDataLinkOpen: false }), (await saved(chat.id))!);
+    restarted["sayOnline"](t + 29 * 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    restarted["sayOnline"](t + 30 * 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("never holds back a message wake-up, nor is held back by one", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    await node.sendMessage({ linkId: chat.id, text: "hi" });
+    const other = asked();
+    const second = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: other.target });
+    await node.sendMessage({ linkId: second.id, text: "hi" });
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls.slice(0, 2), secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }, { wake: 1, k: target.token }]);
+    expect(bodies(pushSend.mock.calls.slice(2), other.secret, other.auth)).toEqual([{ wake: 1, k: other.target.token }, { wake: 1, k: other.target.token, o: 1 }]);
+  });
+
+  it("goes out ten a minute, so a push relay's minute (30) keeps room for message and call wake-ups", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pushSend = vi.fn(async () => 201);
+      const node = engine({ pushSend });
+      const chats = [];
+      for (let i = 0; i < 25; i++) chats.push(await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target }));
+      node["sayOnline"]();
+      expect(pushSend).toHaveBeenCalledTimes(10);
+      // A call right after still has the relay's room.
+      const callee = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      expect(await node.wakeForCall({ linkId: callee.id })).toBe(true);
+      expect(pushSend).toHaveBeenCalledTimes(11);
+      vi.advanceTimersByTime(59_999);
+      expect(pushSend).toHaveBeenCalledTimes(11);
+      // A contact whose chat went live meanwhile is not told.
+      (node["links"].get(chats[10]!.id)!.link as unknown as Stub).isDataLinkOpen = true;
+      vi.advanceTimersByTime(1);
+      expect(pushSend).toHaveBeenCalledTimes(21);
+      vi.advanceTimersByTime(60_000);
+      expect(pushSend).toHaveBeenCalledTimes(25);
+      vi.advanceTimersByTime(60_000);
+      expect(pushSend).toHaveBeenCalledTimes(25);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("is said a little after this app starts or comes back online, to those still away then", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const node = engine({ pushSend: vi.fn(async () => 201) });
+      const say = vi.spyOn(node as never, "sayOnline" as never).mockImplementation((() => {}) as never);
+      node["announceOnline"]();
+      node["announceOnline"]();
+      vi.advanceTimersByTime(29_999);
+      expect(say).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(say).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
   });
 });
 

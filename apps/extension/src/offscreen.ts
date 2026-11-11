@@ -1,4 +1,5 @@
-import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { GhostlyHttpError, fromBase64, parseLocalTarget, toBase64 } from "@ghostly/core";
+import { localAccessPattern } from "@ghostly/browser/host";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
@@ -11,6 +12,7 @@ import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
 import { setStorageProfile } from "../../ui/src/lib/storage";
+import { allowedLocalFetch } from "./localAllowList";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -20,6 +22,11 @@ import { setStorageProfile } from "../../ui/src/lib/storage";
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** How long a peer being replaced gets to say goodbye to its contacts before its document closes. */
 const STOP_GRACE_MS = 3_000;
+/**
+ * How long a peer being replaced in the middle of "Clear all data" gets to end it (take back what it can, stop, empty
+ * its database: `CLEAR_WITHDRAW_MS` and a little more), as long as the page gives it (clearData.ts `CLEAR_ENGINE_MS`).
+ */
+const CLEAR_GRACE_MS = 15_000;
 /**
  * Each chat's newest rows a page gets when it connects (`EngineServer.attach`'s `newest`), not its whole history: this
  * port carries JSON, and every chat's whole history went across to each tab opened or reloaded (about 20 MiB for 50
@@ -42,6 +49,14 @@ setStorageProfile(profile);
  * replaced document still closing, the new one waits for it rather than run beside it on the same data.
  */
 let running: PeerServer | null = null;
+/** When the peer's start failed for good (its database did not open: the device is full, or another window held it). */
+let failedAt: number | null = null;
+/**
+ * How long a peer whose start failed is kept before the worker may replace it. The pages on it connect again as its
+ * document closes, each asking for the peer: were they to replace the one just made, the documents would follow one
+ * another for as long as the device stays full. A page's Try again, the toolbar button or the minute check, later, do.
+ */
+const FAILED_KEPT_MS = 5_000;
 const server = new Promise<PeerServer>((resolve, reject) => {
   void navigator.locks.request(peerLockFor(profile), () => {
     // The device state is read first (WISP 06 § The gate), at browser start with no page open too: a device that is
@@ -50,12 +65,22 @@ const server = new Promise<PeerServer>((resolve, reject) => {
     // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
     // No mini-app runner here yet (WISP 1200 § Per client: Extension, and the TODO below): the engine offers no apps/1
     // and refuses the app calls, whatever the build's APPS_ENABLED says.
-    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
+    // A contact reaches only the local addresses this profile's person allowed in this browser, as the worker reads them
+    // (localAllowList.ts: this document has no `chrome.storage` nor `chrome.permissions`).
+    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e"), localFetch: allowedLocalFetch(profile) }).then((peer) => {
       running = peer;
+      // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
+      const engine = engineOf(peer);
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, engine.node.getState().links)).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
+      // Heard before any `ping` waits on it, so a ping that comes once it failed knows.
+      peer.ready.catch(() => { failedAt ??= Date.now(); });
       resolve(peer);
-    }, reject);
+    }, (error: unknown) => {
+      failedAt ??= Date.now();
+      reject(error);
+    });
     return new Promise<never>(() => {});
   });
 });
@@ -83,7 +108,15 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((request: ClientMessage) => withPeer((s) => {
     // A chat's whole history the page asked for; a device that is not the active one has none.
     if (request?.kind === "history") void engineOf(s)?.history(client, request.linkId);
-    else void s.handle(client, request);
+    else {
+      const handled = s.handle(client, request);
+      // "Clear all data" stops the peer for good (`clearProfileData`): once it is over, the worker replaces this document
+      // at the next start it is asked for, should the page go away before it asks for a new peer (`restart-engine`).
+      if (request?.kind === "request" && request.method === "clearProfileData") {
+        void handled.finally(() => { cleared = true; });
+        clearing = handled.catch(() => {});
+      }
+    }
   }));
 });
 
@@ -137,9 +170,35 @@ function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: strin
   }
 }
 
+/**
+ * Chrome no longer lets the extension reach `patterns` (`http://127.0.0.1/*`): every app this profile shares at one of
+ * those hosts, on any port, is turned off ("Share" off, `setServiceEnabled`), so contacts no longer see it and are
+ * answered as for any app not shared. Turning it on again is the person's to do.
+ */
+async function turnOffAppsAt(patterns: string[]): Promise<void> {
+  const peer = engineOf(await server);
+  if (!peer) return;
+  await peer.ready;
+  const gone = new Set(patterns);
+  for (const service of peer.node.getState().services) {
+    if (!service.enabled) continue;
+    let pattern: string;
+    try { pattern = localAccessPattern(parseLocalTarget(service.target).origin); } catch { continue; }
+    if (gone.has(pattern)) peer.node.setServiceEnabled({ serviceId: service.id, enabled: false });
+  }
+}
+
 let stopping: Promise<void> | null = null;
-/** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
-const stopPeer = () => (stopping ??= (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
+/** A page's "Clear all data" stopped the peer: it does not run again in this document. */
+let cleared = false;
+/** A page's "Clear all data" in progress in the peer: it ends with the peer stopped. */
+let clearing: Promise<void> | null = null;
+/**
+ * Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. One "Clear all
+ * data" stopped is not stopped again: nothing it held is written over the emptied database. One clearing stops once
+ * its clear is over: a switch in another tab no longer leaves its database half emptied.
+ */
+const stopPeer = () => (stopping ??= cleared ? Promise.resolve() : clearing ?? (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -147,16 +206,27 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId() } satisfies EngineStatus));
+    // A peer that stopped for good says so, and the worker starts another in its place: one whose start failed too, so
+    // the person who freed some space and pressed Try again gets a new start, not this one again until Chrome restarts.
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => {
+      const failed = failedAt !== null && Date.now() - failedAt >= FAILED_KEPT_MS;
+      sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null || failed } satisfies EngineStatus);
+    });
     return true;
   }
   if (message.type === "stop") {
     // Its contacts see it leave, if that takes a moment; a peer that hangs does not hold up the switch.
-    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, STOP_GRACE_MS))]).then(() => sendResponse(true));
+    const grace = clearing && !cleared ? CLEAR_GRACE_MS : STOP_GRACE_MS;
+    void Promise.race([stopPeer(), new Promise((resolve) => setTimeout(resolve, grace))]).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "http-request") {
     void handleHttpRequest(message).then(sendResponse);
+    return true;
+  }
+  if (message.type === "local-access-removed") {
+    const origins = Array.isArray(message.origins) ? message.origins.filter((o): o is string => typeof o === "string") : [];
+    void turnOffAppsAt(origins).then(() => sendResponse(true), () => sendResponse(false));
     return true;
   }
   return false;

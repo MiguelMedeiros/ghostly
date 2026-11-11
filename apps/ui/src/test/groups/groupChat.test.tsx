@@ -51,6 +51,12 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
   });
 
+  it("makes ⋮ and the connection button 44 px on a phone, as the chat header's and the group's own Back", () => {
+    // They were 38 px (`max-md:p-2.5` around an 18 px icon) beside the 44 px Back.
+    openGroup(active());
+    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-11", "max-md:w-11", "max-md:p-0");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
@@ -59,6 +65,15 @@ describe("GroupChat: what the header says", () => {
 
   it("with nobody else in it (just created, or everyone left), counts the members and no reachability", () => {
     openGroup(active({ members: [members[0]] }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+  });
+
+  it("a community with nobody else in it says neither connecting nor relaying, as its connection icon says only you", () => {
+    // Its app is not a hub yet (its first beacon read, or the relays down): it said "connecting…" for as long as that lasted.
+    openGroup(active({ profile: "community", members: [members[0]], community: { hub: false, hubs: 0, connected: 0 } }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+    // A hub, alone: it relays for nobody.
+    act(() => fakeEngine.update({ groups: [active({ profile: "community", members: [members[0]], community: { hub: true, hubs: 1, connected: 0 } })] }));
     expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 
@@ -266,6 +281,18 @@ describe("GroupChat: joining through a link", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("Try again on a link nobody answered keeps the focus on the card, on its Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const joining = (unanswered: boolean) => groupView({ createdAt: Date.now() - 2 * 60 * 60_000, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocking", ...(unanswered && { unanswered }) } });
+    const { user, engine } = openGroup(joining(true));
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [joining(false)] }); });
+    within(screen.getByTestId("group-joining")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining-cancel")).toHaveFocus();
+  });
+
   it("a full community: says it is full (n of max), with the knock left, and never that the link may be old", async () => {
     openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
       invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } }));
@@ -312,6 +339,14 @@ describe("GroupChat: joining through a link", () => {
     expect(card).not.toHaveTextContent("You are in in a moment");
     expect(card.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+  });
+
+  it("with Hide my IP on and no transport for group links, the joining card says Hide my IP is why", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...fakeEngine.state.settings, relayOnly: true } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(card).not.toHaveTextContent("web app");
   });
 
   it("Cancel joining is a thumb's height on a phone", () => {
@@ -635,6 +670,18 @@ describe("GroupChat: out of the group", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByText("You were removed. Open the group's link to join again.")).toBeInTheDocument();
     expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
+  it("removed from a community and knocking again: Try again on a link nobody answered keeps the focus on the notice's Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const unanswered = () => ({ ...knockingAgain(), invitation: { ...knockingAgain().invitation!, unanswered: true } });
+    const { user, engine } = openGroup(unanswered());
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [knockingAgain()] }); });
+    within(screen.getByTestId("group-notice")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-rejoin-cancel")).toHaveFocus();
   });
 
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
@@ -1167,7 +1214,8 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "m2", member: "gone".padEnd(52, "y"), text: "bye" }),
       stored({ id: "m3", sender: "me", member: ME, text: "hello" }),
     ]);
-    expect(await screen.findByText("Alice joined")).toBeInTheDocument();
+    // Alice is the admin: her name in the line carries the admin's mark.
+    expect((await screen.findAllByTestId("group-event"))[0]).toHaveTextContent(/^Alice admin joined$/);
     expect(screen.getByText("You are now the admin")).toBeInTheDocument();
     expect(screen.getByText("~Alice")).toBeInTheDocument();
     // Someone no longer in the roster: named by their key.

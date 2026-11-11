@@ -1,7 +1,9 @@
 {
   "attach": "Attach",
   "camera": "Camera",
+  "cameraBlocked": "Camera blocked. Allow the camera in Android's settings for Ghostly.",
   "cameraFailed": "The camera could not start.",
+  "cameraRefused": "No access to the camera. Tap Camera again and allow it.",
   "caption": "Add a caption",
   "captionTooLong": "This caption is {{bytes}} UTF-8 bytes. DHT allows up to {{max}}.",
   "category": {
@@ -15,6 +17,7 @@
     "recent": "Recent",
     "symbols": "Symbols"
   },
+  "chooseFiles": "Choose files",
   "closeCamera": "Close camera",
   "dhtTooLong": "Too long for the DHT ({{bytes}} of {{max}} bytes). Shorten it or go live; your draft is kept.",
   "document": "Document",
@@ -74,6 +77,7 @@
   "services": "Shared services",
   "servicesNeedApp": "Needs the Ghostly extension or desktop app",
   "servicesShared": "{{count}} shared in this chat",
+  "shareWaitsForEdit": "What you shared goes in once this edit ends.",
   "sharedTextFile": "Shared text",
   "skinTone": "Skin tone",
   "takePhoto": "Take photo",

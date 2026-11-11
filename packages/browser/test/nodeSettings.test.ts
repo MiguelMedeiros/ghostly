@@ -238,12 +238,14 @@ describe("one chat's choices", () => {
     const chat = await addChat(node, link);
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "hyperdht/1", fallback: true })).rejects.toThrow("Transport unavailable");
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: "no" as never })).rejects.toThrow("Transport unavailable");
-    // A new transport is a choice; the same one with another fallback (the Fallback switch) is not.
-    await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: false });
-    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", false, false, true);
-    expect(await saved(chat.id)).toMatchObject({ preferredTransport: "iroh/1", transportFallback: false });
-    await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: true });
-    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, false, false);
+    // A new transport is a choice (HyperDHT: Automatic names Iroh here, or WebRTC with Fallback off); the same one with
+    // another fallback (the Fallback switch) is not.
+    const desktop = stubLink({ availableTransports: ["webrtc/1", "iroh/1", "hyperdht/1"] }), other = await addChat(node, desktop);
+    await node.setTransportPreference({ linkId: other.id, preferred: "hyperdht/1", fallback: false });
+    expect(desktop.setTransportPreference).toHaveBeenLastCalledWith("hyperdht/1", false, false, true);
+    expect(await saved(other.id)).toMatchObject({ preferredTransport: "hyperdht/1", transportFallback: false });
+    await node.setTransportPreference({ linkId: other.id, preferred: "hyperdht/1", fallback: true });
+    expect(desktop.setTransportPreference).toHaveBeenLastCalledWith("hyperdht/1", true, false, false);
   });
 
   it("the Fallback switch on an Automatic chat changes only the fallback: still Automatic, no row, no switch intent", async () => {
@@ -251,15 +253,22 @@ describe("one chat's choices", () => {
     const link = stubLink();
     const chat = await addChat(node, link);
     const view = () => node.getState().links.find((l) => l.id === chat.id)!;
-    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "webrtc/1", transportFallback: true });
+    // Automatic names Iroh where the app runs it (WISP 100, revision 2026-11-08).
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "iroh/1", transportFallback: true });
     // The switch sends back the transport Automatic shows.
+    // With Fallback off, Automatic names WebRTC where there is one: Iroh's relay would be the chat's only transport.
     await node.setTransportPreference({ linkId: chat.id, preferred: view().preferredTransport!, fallback: false });
     expect(link.setTransportPreference).toHaveBeenLastCalledWith("webrtc/1", false, true, false);
     const stored = await saved(chat.id);
     expect(stored?.transportFallback).toBe(false);
     expect(stored?.preferredTransport).toBeUndefined();
     expect(stored?.transportLog).toBeUndefined();
-    expect(view()).toMatchObject({ transportAutomatic: true, transportFallback: false });
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "webrtc/1", transportFallback: false });
+    // On again, from a view from before the Iroh endpoint came up (WebRTC): still Automatic, no choice of WebRTC.
+    await node.setTransportPreference({ linkId: chat.id, preferred: "webrtc/1", fallback: true });
+    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, true, false);
+    expect((await saved(chat.id))?.preferredTransport).toBeUndefined();
+    expect(view()).toMatchObject({ transportAutomatic: true, preferredTransport: "iroh/1", transportFallback: true });
   });
 
   it("ways of paying: only known methods and yes/no, merged, saved and told to the contact", async () => {

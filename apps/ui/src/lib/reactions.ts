@@ -1,5 +1,6 @@
 import type { MessageReaction, ReactionNote } from "@ghostly/browser/shared/types";
 import type { useI18n } from "../contexts/I18nContext";
+import { othersName } from "./groups";
 
 /*
  * Reactions in the chat's view (WISP 400 § Reactions): the chips a message's reactions make, and the chat list's line.
@@ -25,9 +26,9 @@ export function reactionChips(reactions: Record<string, MessageReaction> | undef
   return [...chips.values()].sort((a, b) => b.count - a.count || a.first - b.first);
 }
 
-/** The chat list's line for a chat's latest reaction: "Ana reacted ❤️ to "…"", or "You reacted…". */
+/** The chat list's line for a chat's latest reaction: "Ana reacted ❤️ to "…"", or "You reacted…" (a contact named "You": "“You” reacted…"). */
 export function reactionNoteText(note: ReactionNote, name: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return note.by === "me" ? t("chat.reactions.noteMine", { emoji: note.emoji, snippet: note.snippet }) : t("chat.reactions.note", { name, emoji: note.emoji, snippet: note.snippet });
+  return note.by === "me" ? t("chat.reactions.noteMine", { emoji: note.emoji, snippet: note.snippet }) : t("chat.reactions.note", { name: othersName(name, t), emoji: note.emoji, snippet: note.snippet });
 }
 
 /** My reaction's emoji now, or "" for none. */

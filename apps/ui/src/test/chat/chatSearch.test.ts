@@ -16,6 +16,24 @@ describe("foldText", () => {
   });
 });
 
+describe("a received text its bubble shows translated", () => {
+  const translated = (m: ChatMessage) => (m.id === "t1" ? "Let's go to the **movies** tomorrow" : undefined);
+  const items = searchable([
+    message("t1", "Vamos ao cinema amanhã"),
+    message("t2", "Amanhã?"),
+    message("t3", "📎 amanhã.pdf", { file: file("amanhã.pdf") }),
+  ], undefined, translated);
+
+  it("is found by the words shown, read as its bubble reads them, and not by the original's", () => {
+    expect(searchMessages(items, "the movies tomorrow")).toEqual(["t1"]);
+    expect(searchMessages(items, "cinema")).toEqual([]);
+  });
+
+  it("leaves the texts shown as they are, and files, as they were", () => {
+    expect(searchMessages(items, "amanha")).toEqual(["t3", "t2"]);
+  });
+});
+
 describe("searchMessages", () => {
   const items = searchable([
     message("m1", "Vamos ao café amanhã?"),

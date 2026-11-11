@@ -13,6 +13,7 @@ describe("displaySourceOf", () => {
   it("the words stored proofs already hold", () => {
     expect(oidcDisplaySource("Google", "unverified")).toBe("Signed by Google; email not verified by Google");
     expect(displaySourceOf("oidc", "Signed by Google; email not verified by Google")).toEqual({ kind: "oidc", provider: "Google", email: "unverified" });
+    expect(displaySourceOf("nostr", "Nostr signature (NIP-01, BIP-340)")).toEqual({ kind: "nostr-signature" });
   });
 
   it("nothing for any other source, or another provider's, shown as written", () => {
@@ -22,5 +23,6 @@ describe("displaySourceOf", () => {
     expect(displaySourceOf("nostr", "Signed by another Nostr key")).toBeUndefined();
     expect(displaySourceOf("oidc", OPENPGP_USER_ID_SOURCE)).toBeUndefined();
     expect(displaySourceOf("domain", OPENPGP_KEYSERVER_SOURCE)).toBeUndefined();
+    expect(displaySourceOf("oidc", "Nostr signature (NIP-01, BIP-340)")).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
+import type { Locator } from "@playwright/test";
 import { pasteInvite } from "../support/clipboard";
-import { expect, expectConnected, test } from "../support/fixtures";
+import { chat, expect, expectConnected, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
@@ -35,8 +36,8 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
       await page.getByPlaceholder("Set a name...").press("Enter");
       await expect(name).toHaveText(to);
     };
-    /** The name's line against what it holds: cut with an ellipsis when `shown` < `whole`. */
-    const line = () => name.evaluate((el) => ({ shown: el.parentElement!.clientWidth, whole: el.parentElement!.scrollWidth }));
+    /** The name against what it holds: cut with an ellipsis when `shown` < `whole`. */
+    const line = () => name.evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
 
     // The names seen in the wild and an Arabic one, on each phone they fit.
     const names: [string, number][] = [["Cérebro (Mac)", 320], ["Hermes (Omarchy)", 375], ["عبد الرحمن الفارسي", 375]];
@@ -60,7 +61,7 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
       el.parentElement!.appendChild(probe);
       const twenty = probe.getBoundingClientRect().width;
       probe.remove();
-      return { shown: el.parentElement!.clientWidth, twenty };
+      return { shown: el.clientWidth, twenty };
     });
     expect(long.shown, JSON.stringify(long)).toBeGreaterThanOrEqual(long.twenty);
 
@@ -136,4 +137,92 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
   } finally {
     await bot.stop();
   }
+});
+
+/**
+ * A received message's name line on the narrowest phone, with a name of one long word (30 letters, the longest a
+ * contact's name takes). It had no rule to wrap or cut it, and ran from 19 to 381 px on a 320 px screen: past its
+ * bubble, past the screen's edge and over the message's ⋮. It is one line cut with an ellipsis inside the bubble now,
+ * the whole name in its tooltip; in a 1:1 chat (the name given to the contact) and in a group (a member's own name).
+ */
+test.describe("a received message's long one-word name on a 320px phone", () => {
+  const LONG = "W".repeat(30);
+  const PHONE = { width: 320, height: 568 };
+
+  /** The name line against its bubble and the screen: inside both, its text cut where the ellipsis is (it holds more than it shows). */
+  async function insideItsBubble(nick: Locator, whole: string) {
+    await expect(nick).toHaveText(whole);
+    await expect(nick).toHaveAttribute("title", whole);
+    const at = await nick.evaluate((el) => {
+      // In a group the name is a button (it opens who the member is) and the ellipsis is on it, inside the line.
+      const cut = el.querySelector<HTMLElement>("[data-testid='message-nick-open']") ?? el;
+      const line = el.getBoundingClientRect(), bubble = el.closest("[data-message-bubble]")!.getBoundingClientRect();
+      return { left: line.left, right: line.right, bubbleLeft: bubble.left, bubbleRight: bubble.right, screen: window.innerWidth,
+        shown: cut.clientWidth, whole: cut.scrollWidth, page: document.documentElement.scrollWidth };
+    });
+    const seen = JSON.stringify(at);
+    expect(at.left, seen).toBeGreaterThanOrEqual(at.bubbleLeft);
+    expect(at.right, seen).toBeLessThanOrEqual(at.bubbleRight);
+    expect(at.bubbleRight, seen).toBeLessThanOrEqual(at.screen);
+    expect(at.page, seen).toBeLessThanOrEqual(at.screen);
+    expect(at.whole, seen).toBeGreaterThan(at.shown);
+  }
+
+  test("a contact's name of one long word stays inside their message's bubble", { tag: ["@feature:app.mobile-layout", "@feature:chats.list.rename"] }, async ({ peer, relay }) => {
+    const url = await relay.listen();
+    const bot = new HeadlessBot();
+    try {
+      await bot.start(url, "Cérebro (Mac)");
+      const person = await peer("long-name-person", { mobile: true, viewport: { width: 402, height: 874 } });
+      const invite = await bot.run("invite", "create", "--label", "person");
+      await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+      await pasteInvite(person.page, invite.invite as string);
+      await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+      const page = person.page;
+      await expectConnected(page);
+      await page.getByTitle("Click to set a name").click();
+      await page.getByPlaceholder("Set a name...").fill(LONG);
+      await page.getByPlaceholder("Set a name...").press("Enter");
+      await expect(page.getByTestId("chat-name")).toHaveText(LONG);
+
+      await bot.run("send", invite.chat as string, "Build finished", "--wait", "delivered");
+      await page.setViewportSize(PHONE);
+      const row = chat(person).locator("[data-message-row]").filter({ hasText: "Build finished" });
+      await insideItsBubble(row.getByTestId("message-nick"), LONG);
+      await page.screenshot({ path: test.info().outputPath("long-name-1to1.png") });
+    } finally {
+      await bot.stop();
+    }
+  });
+
+  test("a group member's own name of one long word stays inside their message's bubble", { tag: ["@feature:app.mobile-layout", "@feature:groups.member-colors"] }, async ({ peer, relay }) => {
+    test.setTimeout(8 * 60_000);
+    const url = await relay.listen();
+    const bot = new HeadlessBot();
+    try {
+      await bot.start(url, LONG);
+      const person = await peer("long-name-member", { mobile: true, viewport: { width: 402, height: 874 } });
+      const page = person.page;
+      const group = (await bot.run("group", "create", "Long names", "--mesh")).group as string;
+      const { link } = await bot.run("group", "link", group) as { link: string };
+      const code = link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link;
+      await page.goto(`/#/join/${code}`);
+      await expect(page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 150_000 });
+      type Shown = { status?: string; members?: { me: boolean; online: boolean }[] };
+      await expect.poll(async () => {
+        const shown = await bot.run("group", "show", group) as Shown;
+        return shown.status === "active" && shown.members?.length === 2 && shown.members.every(m => m.me || m.online);
+      }, { timeout: 150_000, intervals: [2_000] }).toBe(true);
+
+      await bot.run("group", "send", group, "Build finished", "--wait", "sent", "--timeout", "120");
+      await page.setViewportSize(PHONE);
+      const row = chat(person).locator("[data-message-row]").filter({ hasText: "Build finished" });
+      await expect(row).toBeVisible({ timeout: 120_000 });
+      // Not a contact here: the name the member gave themselves, marked "~".
+      await insideItsBubble(row.getByTestId("message-nick"), `~${LONG}`);
+      await page.screenshot({ path: test.info().outputPath("long-name-group.png") });
+    } finally {
+      await bot.stop();
+    }
+  });
 });

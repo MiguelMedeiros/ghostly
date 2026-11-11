@@ -169,6 +169,59 @@ describe("group rename", () => {
   });
 });
 
+describe("group remove", () => {
+  it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
+    const { ctx, node } = fake();
+    const remove = async (member: string) => await callApi(ctx, "group.remove", { group: "Crew", member }) as Record<string, unknown>;
+    const removed = await remove("Ana");
+    expect(node.removeGroupMember).toHaveBeenCalledWith({ groupId: "g1", key: "anakey" });
+    expect(removed.warning).toBe("Ana can still join again with the group's link: ghostly group link g1 --reset gives it a new one and keeps them out");
+    // A warning names no secret, and the answer is the group as before.
+    expect(JSON.stringify(removed)).not.toContain(LINK);
+    expect(removed).toMatchObject({ id: "g1", link: "<hidden>" });
+    // No link on: nothing to say. A member the roster has no name for is "They".
+    const noLink = { ...group, entryLink: undefined } as GroupView;
+    node.getState = () => ({ links: [], groups: [noLink], settings: {}, transport: {} }) as unknown as EngineState;
+    expect(await remove("Ana")).not.toHaveProperty("warning");
+    node.getState = () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState;
+    expect((await remove("bokey")).warning).toMatch(/^They can still join again/);
+  });
+});
+
+describe("an invitation not yet joined", () => {
+  it("is refused by the admin commands, saying so, never sent to the engine as a group it has not", async () => {
+    // Before: rename, picture, link, rotate and invite answered the engine's "Group not found" (exit 1) while `group
+    // show` listed the group; remove and admin said "No member" of a roster that had not come yet.
+    const invited = (accepted: boolean) => ({ id: "g2", name: "Lab group", createdAt: 1, profile: "mesh", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+      invitation: { linkId: "chat-ana", contact: "anakey", admin: "anakey", members: 2, accepted } }) as unknown as GroupView;
+    const { ctx, node } = fake();
+    const calls = [["group.rename", { name: "Mine" }], ["group.picture", { clear: true }], ["group.link", {}], ["group.link", { on: false }], ["group.rotate", {}],
+      ["group.invite", { chat: "ana" }], ["group.remove", { member: "Ana" }], ["group.admin", { member: "Ana" }], ["group.hub", { member: "Ana" }]] as const;
+    for (const [accepted, message] of [
+      [false, 'You are not in Lab group yet: ghostly group accept "Lab group" joins it'],
+      [true, "You are not in Lab group yet: you accepted its invitation, and its admin has not let you in"],
+    ] as const) {
+      node.getState = () => ({ links: [], groups: [group, invited(accepted)], settings: {}, transport: {} }) as unknown as EngineState;
+      for (const [method, params] of calls) await expect(callApi(ctx, method, { group: "Lab group", ...params }), method).rejects.toMatchObject({ code: "refused", message });
+    }
+    expect(node.renameGroup).not.toHaveBeenCalled();
+    expect(node.rotateGroup).not.toHaveBeenCalled();
+    expect(node.removeGroupMember).not.toHaveBeenCalled();
+    // A group joined is as before.
+    await callApi(ctx, "group.rename", { group: "Crew", name: "Crew 2" });
+    expect(node.renameGroup).toHaveBeenCalledWith({ groupId: "g1", name: "Crew 2" });
+  });
+});
+
+describe("other groups under the same id", () => {
+  it("are shown beside the group held, a link hidden unless asked for", () => {
+    expect(groupJson(group)).not.toHaveProperty("others");
+    const view = { ...group, others: [{ linkId: "chat-zed", contact: "zed-key", name: "Crew", members: 3 }, { link: LINK }] };
+    expect(groupJson(view).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: "<hidden>" }]);
+    expect(groupJson(view, true).others).toEqual([{ chat: "chat-zed", name: "Crew", members: 3 }, { link: LINK }]);
+  });
+});
+
 describe("the entry link is a join secret", () => {
   it("is hidden in show, list and the admin commands unless asked for", async () => {
     const { ctx } = fake();

@@ -106,6 +106,17 @@ describe("Settings, Network: the transport line", () => {
       });
     }
   }
+
+  // Hide my IP from contacts closes the Desktop's DHT node: every read and write goes through the relays.
+  it("on the Desktop with Hide my IP on, says it reaches the DHT through the relays, not directly", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: transports.direct, settings: { relays: RELAYS, relayOnly: true } }));
+    const line = screen.getByTestId("network-protocol");
+    expect(line.textContent).toBe("Reaches the Mainline DHT (BEP44) through Pkarr relays (HTTP)");
+    expect(line).toHaveAttribute("data-kind", "relays");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-protocol").textContent).toBe("Reaches the Mainline DHT (BEP44) directly (UDP) and Pkarr relays (HTTP)");
+  });
 });
 
 describe("Settings, Network: Iroh relays", () => {
@@ -171,6 +182,40 @@ describe("Settings, Network: push relay", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: http://push.example.org/");
     expect(engine.callsTo("updateSettings")).toEqual([]);
+  });
+
+  const RELAY = "https://push-relay.example/";
+  const refused = { url: RELAY, at: 1, http: 403, text: "Origin not allowed" };
+
+  it("says under it when the saved relay answered the last wake-up but not as a push relay, with what the relay said; nothing once it forwards one", async () => {
+    // The field shows the relay as saved when the page opens.
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY } });
+    const { engine, user } = renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay")).toHaveValue(RELAY);
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    act(() => engine.update({ pushRelayRefused: refused }));
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: it did not answer as a push relay (HTTP 403). Contacts whose app is closed are not woken through it.The relay said: “Origin not allowed”");
+    // The relay's words are its own: kept apart from the sentence's direction.
+    expect(screen.getByTestId("network-push-relay-said").querySelector("bdi")?.textContent).toBe("Origin not allowed");
+    // A web page at that address says nothing of its own.
+    act(() => engine.update({ pushRelayRefused: { url: RELAY, at: 2, http: 200 } }));
+    expect(screen.getByTestId("network-push-relay-refused")).toHaveTextContent("(HTTP 200)");
+    expect(screen.queryByTestId("network-push-relay-said")).toBeNull();
+    // Another address typed in: what the saved one did is not about it.
+    await user.type(screen.getByTestId("network-push-relay"), "x");
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    await user.type(screen.getByTestId("network-push-relay"), "{Backspace}");
+    expect(screen.getByTestId("network-push-relay-refused")).toBeInTheDocument();
+    act(() => engine.update({ pushRelayRefused: undefined }));
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+  });
+
+  it("pt: says it in the app's language, the relay's words as it gave them", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
+    renderApp(<NetworkSettings />, { language: "pt" });
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "O último despertar por este relay falhou: ele não respondeu como um relay de push (HTTP 403). Contatos com o app fechado não são acordados por ele.O relay disse: “Origin not allowed”");
   });
 });
 
@@ -251,6 +296,26 @@ describe("Settings, Network: Hide my IP from contacts", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(screen.getByLabelText("TURN server URL")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
+  });
+
+  // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
+  for (const language of LANGUAGES) {
+    it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      const { engine } = renderApp(<NetworkSettings />, { language });
+      act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+      const field = screen.getByTestId("network-turn-field");
+      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+    });
+  }
+
+  it("while it is on, the TURN server's hint says so in English", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Required while Hide my IP is on: calls and chats go through it.");
+    expect(screen.getByTestId("network-turn-field")).not.toHaveTextContent("Optional");
   });
 
   it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
@@ -339,7 +404,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings")).toEqual([]);
     // Not "Use a wss:// relay address" in an Arabic page.
-    expect(hyperdht).toHaveAccessibleDescription("استخدم wss:// في عنوان المرحّل");
+    expect(hyperdht).toHaveAccessibleDescription("استخدم \u2066wss://\u2069 في عنوان المرحّل");
     expect(push).toHaveAccessibleDescription("أزِل اسم المستخدم وكلمة المرور من العنوان");
     expect(marked()).toEqual(["network-hyperdht-relay", "network-push-relay"]);
     // The error sits right under the field that points at it.
@@ -378,7 +443,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     const url = screen.getByLabelText(arNetwork.turnUrl);
     await user.type(url, "https://turn.example.org");
     await user.click(screen.getByTestId("network-save"));
-    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل turn:host:port): https://turn.example.org");
+    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): https://turn.example.org");
     expect(marked()).toEqual(["network-turn-url"]);
     expect(url).toHaveFocus();
     await user.clear(url);

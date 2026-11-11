@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createIdentity, identityFromSeedB64 } from "../src/identity";
+import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
 import { createChatInvite } from "../src/invite";
 import { CommunitySession, type CommunityFrame, type CommunityIncomingPair, type CommunityState } from "../src/groupCommunity";
 import {
-  DM_LIMITS, DmGate, GROUP_PAIR_FRAME, GroupPairInbox, GroupPairRelay, PAIR_FRESH_MS, PAIRS_PER_MINUTE,
+  DM_LIMITS, DmGate, GROUP_PAIR_FRAME, GroupPairInbox, GroupPairRelay, PAIR_FRESH_MS, PAIR_SEEN_KEPT, PAIR_SEEN_PER_MEMBER, PAIRS_PER_MINUTE,
   dmAnswer, dmRequest, readDmBody, readDmPayload, readGroupPair, sealGroupPair, type GroupPairFrame,
 } from "../src/groupDm";
 // covers: groups.protocol.private-message
@@ -35,6 +35,16 @@ describe("a private-message request", () => {
     expect(readDmBody({ t: "req", c: inviteCode, k, n: 7 })).toBeNull();
     expect(readDmBody({ t: "hello", k })).toBeNull();
     expect(readDmBody(null)).toBeNull();
+  });
+
+  it("is refused when its name has invisible or direction-changing characters, or nothing visible", () => {
+    const { inviteCode, invite } = createChatInvite();
+    const k = invite.peerParticipationKeyZ32;
+    for (const n of ["​", "Alice‮ecilA", "⁦Alice", "Al​ice", "⠀", "́"]) {
+      expect(readDmBody({ t: "req", c: inviteCode, k, n }), JSON.stringify(n)).toBeNull();
+      expect(() => dmRequest(inviteCode, n), JSON.stringify(n)).toThrow();
+    }
+    for (const n of ["Alice", "Zoë 🦊", "👩‍💻", "علي", "דנה", "さくら"]) expect(readDmBody({ t: "req", c: inviteCode, k, n })).toEqual({ t: "req", c: inviteCode, k, n });
   });
 
   it("is answered by the request's key: shown (got) or declined (no)", () => {
@@ -107,6 +117,11 @@ describe("the group-pair frame of a private group", () => {
     expect(readGroupPair({ ...frame, h: 2 })).toBeNull();
     expect(readGroupPair({ ...frame, ts: "1" })).toBeNull();
     expect(readGroupPair({ ...frame, n: "!" })).toBeNull();
+    // A pair box's key and nonce, as a community's: 32 and 24 bytes.
+    expect(readGroupPair({ ...frame, n: `${frame.n}A` })).toBeNull();
+    expect(readGroupPair({ ...frame, n: "A".repeat(4_096) })).toBeNull();
+    expect(readGroupPair({ ...frame, e: frame.e.slice(1) })).toBeNull();
+    expect(readGroupPair({ ...frame, e: "A".repeat(4_096) })).toBeNull();
     expect(() => sealGroupPair(alice, GROUP, bob.pubKeyZ32, { pad: "x".repeat(DM_LIMITS.payloadBytes) })).toThrow();
   });
 
@@ -127,6 +142,107 @@ describe("the group-pair frame of a private group", () => {
     expect(passed).toBe(PAIRS_PER_MINUTE);
     now += 60_000;
     expect(relay.pass(sealGroupPair(alice, GROUP, carol.pubKeyZ32, payload, now), ctx)).not.toBeNull();
+  });
+
+  it("is not passed on by a hub when its key or nonce is not a pair box's, which the hub cannot open to tell", () => {
+    const relay = new GroupPairRelay();
+    const ctx = { group: GROUP, edge: alice.pubKeyZ32, member };
+    const frame = sealGroupPair(alice, GROUP, bob.pubKeyZ32, payload);
+    expect(relay.pass({ ...clone(frame), n: "A".repeat(4_096) }, ctx)).toBeNull();
+    expect(relay.pass({ ...clone(frame), e: "A".repeat(4_096) }, ctx)).toBeNull();
+    expect(relay.pass(clone(frame), ctx)).toEqual({ ...frame, h: 1 });
+  });
+});
+
+// A thousand sealed frames take a few seconds.
+describe("a group-pair frame's nonce, kept as long as the frame could be fresh", { timeout: 30_000 }, () => {
+  const SEEN_FOR_MS = PAIR_FRESH_MS + 2 * 60_000;
+  const alice = createIdentity(), bob = createIdentity(), carol = createIdentity();
+  const crowd = Array.from({ length: Math.ceil(PAIR_SEEN_KEPT / PAIR_SEEN_PER_MEMBER) + 1 }, () => createIdentity());
+  const members = new Set([alice, bob, carol, ...crowd].map(m => m.pubKeyZ32));
+  const member = (key: string) => members.has(key);
+  const edge = (m: Identity) => ({ group: GROUP, edge: m.pubKeyZ32, member });
+  const ping = (from: Identity, at: number, i = 0) => sealGroupPair(from, GROUP, bob.pubKeyZ32, { x: i }, at);
+
+  it("is not forgotten after a hub sends a thousand frames of its own: the copy it kept is not taken again", () => {
+    let now = Date.now();
+    const inbox = new GroupPairInbox(bob, () => now);
+    const relay = new GroupPairRelay(() => now);
+    // Alice's answer to Bob, handed on by Carol, who keeps the copy.
+    const handed = relay.pass(sealGroupPair(alice, GROUP, bob.pubKeyZ32, { dm: dmAnswer("no", alice.pubKeyZ32) }, now), edge(alice));
+    expect(inbox.open(clone(handed), edge(carol))).not.toBeNull();
+    let taken = 0;
+    for (let i = 0; i < 1024; i++) { now += 50; if (inbox.open(ping(carol, now, i), edge(carol))) taken++; }
+    expect(inbox.open(clone(handed), edge(carol))).toBeNull();
+    // Carol's own frames past her share are refused; Alice's still come.
+    expect(taken).toBe(PAIR_SEEN_PER_MEMBER);
+    expect(inbox.open(ping(alice, now, 1), edge(alice))).not.toBeNull();
+  });
+
+  it("stays bounded under a flood of many members: past PAIR_SEEN_KEPT a new frame waits, none is forgotten", () => {
+    let now = Date.now();
+    const inbox = new GroupPairInbox(bob, () => now);
+    const first = ping(alice, now);
+    expect(inbox.open(clone(first), edge(alice))).not.toBeNull();
+    let taken = 1;
+    for (const m of crowd) for (let i = 0; i < PAIR_SEEN_PER_MEMBER + 4; i++) { now += 10; if (inbox.open(ping(m, now, i), edge(m))) taken++; }
+    expect(inbox.open(clone(first), edge(alice))).toBeNull();
+    expect(taken).toBe(PAIR_SEEN_KEPT);
+    expect(inbox.open(ping(carol, now, 1), edge(carol))).toBeNull();
+    // The first frame can no longer be fresh: its room is free for one new frame, and it is refused as stale.
+    now = first.ts + SEEN_FOR_MS + 1;
+    expect(inbox.open(clone(first), edge(alice))).toBeNull();
+    expect(inbox.open(ping(carol, now, 2), edge(carol))).not.toBeNull();
+    expect(inbox.open(ping(carol, now, 3), edge(carol))).toBeNull();
+  });
+
+  it("is known until a frame two minutes ahead can no longer be fresh, and that frame is refused as stale after", () => {
+    let now = Date.now();
+    const inbox = new GroupPairInbox(bob, () => now);
+    const ahead = ping(alice, now + 2 * 60_000);
+    expect(inbox.open(clone(ahead), edge(alice))).not.toBeNull();
+    now += SEEN_FOR_MS;
+    expect(inbox.open(clone(ahead), edge(alice))).toBeNull();
+    now += 1;
+    expect(inbox.open(clone(ahead), edge(alice))).toBeNull();
+    expect(inbox.open(ping(alice, now), edge(alice))).not.toBeNull();
+  });
+
+  it("leaves normal traffic from several members as it was", () => {
+    let now = Date.now();
+    const inbox = new GroupPairInbox(bob, () => now);
+    const relay = new GroupPairRelay(() => now);
+    let taken = 0, again = 0;
+    for (let round = 0; round < 6; round++) {
+      for (const m of [alice, carol, crowd[0]]) for (let i = 0; i < 5; i++) {
+        const frame = ping(m, now, i);
+        if (inbox.open(clone(frame), edge(m))) taken++;
+        if (inbox.open({ ...clone(frame), h: 1 }, edge(carol))) again++;
+        if (relay.pass(clone(frame), { ...edge(m), member: () => true })) taken++;
+      }
+      now += 5 * 60_000;
+    }
+    expect(again).toBe(0);
+    expect(taken).toBe(2 * 6 * 3 * 5);
+  });
+
+  it("is not forgotten by a hub that passed PAIR_SEEN_KEPT within the window: it passes none until room frees", () => {
+    let now = Date.now();
+    const relay = new GroupPairRelay(() => now);
+    const anyone = () => true;
+    const first = sealGroupPair(alice, GROUP, bob.pubKeyZ32, { x: 0 }, now);
+    expect(relay.pass(clone(first), { ...edge(alice), member: anyone })).not.toBeNull();
+    let passed = 1;
+    const senders = Array.from({ length: Math.ceil(PAIR_SEEN_KEPT / PAIRS_PER_MINUTE) }, () => createIdentity());
+    for (const m of senders) for (let i = 0; i < PAIRS_PER_MINUTE; i++) {
+      if (relay.pass(sealGroupPair(m, GROUP, bob.pubKeyZ32, { x: i }, now), { ...edge(m), member: anyone })) passed++;
+    }
+    expect(relay.pass(clone(first), { ...edge(alice), member: anyone })).toBeNull();
+    expect(passed).toBe(PAIR_SEEN_KEPT);
+    now += 60_000;
+    expect(relay.pass(sealGroupPair(alice, GROUP, bob.pubKeyZ32, { x: 1 }, now), { ...edge(alice), member: anyone })).toBeNull();
+    now = first.ts + SEEN_FOR_MS + 1;
+    expect(relay.pass(sealGroupPair(alice, GROUP, bob.pubKeyZ32, { x: 2 }, now), { ...edge(alice), member: anyone })).not.toBeNull();
   });
 });
 
