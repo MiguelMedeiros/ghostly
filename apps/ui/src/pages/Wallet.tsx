@@ -234,8 +234,10 @@ export function Wallet() {
                 </div>
               )}
             </div>
-            {/* Ecash sent in a chat deleted since and not taken: the chat's Take it back went with it. */}
-            <SentEcash wallet={wallet.forNetwork(network)} network={network} awaiting={state.networks?.[network]?.awaiting} />
+            {/* Ecash sent in a chat deleted since and not taken: the chat's Take it back went with it. Once the last is
+                taken back, the keys go to the total it came back to (or the network's tab, with no card left). */}
+            <SentEcash wallet={wallet.forNetwork(network)} network={network} awaiting={state.networks?.[network]?.awaiting}
+              after={() => page.current?.querySelector<HTMLElement>("[data-testid=wallet-total-bitcoin]") ?? document.getElementById(`wallet-network-tab-${network}`)} />
             {selected && <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${selected.id}`} data-testid="wallet-panel" data-network={selected.network} className="space-y-6">
               <p className="flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid="wallet-panel-title">
                 <NetworkTag network={selected.network} testId="wallet-panel-network" />
