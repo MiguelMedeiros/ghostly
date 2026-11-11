@@ -1148,7 +1148,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
-            <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
+            <p data-testid="chat-created" className="mb-3 px-4 text-center chat-text-note text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
                 {t("common.chatCreated", {date: new Intl.DateTimeFormat(language, {dateStyle:"medium", timeStyle:"short"}).format(session.createdAt)})}
               </time>
@@ -1167,7 +1167,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {!inviteCode && !pairing.show && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
-                <p className="text-text-muted text-xs">
+                <p data-testid="chat-empty" className="text-text-muted chat-text-system">
                   {t("chat.empty")}
                 </p>
               </div>
