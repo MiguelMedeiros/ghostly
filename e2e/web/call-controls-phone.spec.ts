@@ -69,6 +69,30 @@ for (const width of [320, 375]) {
   });
 }
 
+test("a video call ringing on a 320 px phone: a long name with no space in it wraps inside the screen", { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 640 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  // The longest name a contact can be given, one word: it was drawn in one line past both of the screen's edges, the
+  // ringing card's text widened with it.
+  const name = "W".repeat(30);
+  await bob.page.getByTitle("Click to set a name").click();
+  await bob.page.getByPlaceholder("Set a name...").fill(name);
+  await bob.page.getByPlaceholder("Set a name...").press("Enter");
+  await expect(bob.page.getByTestId("chat-name")).toHaveText(name);
+  await alice.page.getByTestId("call-video").click();
+  const ringing = bob.page.getByTestId("incoming-call");
+  await expect(ringing.getByText(name, { exact: true })).toBeVisible();
+  const outside = () => ringing.evaluate((card) => {
+    const width = document.documentElement.clientWidth;
+    return [...card.querySelectorAll("p")].map((p) => p.getBoundingClientRect())
+      .filter((r) => r.left < 0 || r.right > width).map((r) => `${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
+  });
+  await expect.poll(outside).toEqual([]);
+  await bob.page.getByTitle("Decline").click();
+});
+
 /** Plays an iPhone 17's safe area (Chromium's DevTools protocol): the status bar and Dynamic Island, the home indicator. */
 async function safeArea(page: Page, insets: { top: number; right: number; bottom: number; left: number }) {
   const cdp = await page.context().newCDPSession(page);
