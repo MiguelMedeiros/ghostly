@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BackupProgress } from "../../components/BackupProgress";
 import { DeleteChatDialog } from "../../components/DeleteChatDialog";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { Select } from "../../components/ui/Select";
 import { I18nProvider } from "../../contexts/I18nContext";
 import { SettingsProvider } from "../../contexts/SettingsContext";
@@ -55,6 +57,8 @@ function Chat() {
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState(false);
   const [provider, setProvider] = useState(false);
+  const [ringing, setRinging] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   return (
     <>
       <h1>Chat</h1>
@@ -70,6 +74,10 @@ function Chat() {
       {menu && <ChatMenu onClose={() => setMenu(false)} onDelete={() => setAsking(true)} />}
       {asking && <DeleteChatDialog name="Bob" onClose={() => setAsking(false)} onConfirm={() => { setAsking(false); nav.home(); }} />}
       {busy && <Busy onClose={() => setBusy(false)} />}
+      <button onClick={() => setRinging(true)}>Ring</button>
+      {ringing && <IncomingCallNotification peerName="Bob" hasVideo={false} onAcceptAudio={() => {}} onAcceptVideo={() => {}} onReject={() => setRinging(false)} />}
+      <button onClick={() => setBackingUp(true)}>Back up</button>
+      {backingUp && <BackupProgress job={{ kind: "backup", sealed: true, stage: "writing", files: 1, filesTotal: 3, bytes: 10, bytesTotal: 30 }} onCancel={() => setBackingUp(false)} />}
     </>
   );
 }
@@ -215,6 +223,21 @@ describe("Back with a layer open", () => {
     // Its entry stays (closed another way than Back), and Back from it leaves the chat in one press.
     await back();
     await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it.each([
+    ["an incoming call", "Ring", "incoming-call"],
+    ["backup progress", "Back up", "backup-progress"],
+  ])("Back over %s leaves it and the chat under it as they were: the next Back does too", async (_what, opens, testId) => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: opens }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    for (const _press of [1, 2]) {
+      await back();
+      await waitFor(() => expect(layerEntry()).toBe(true));
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      expect(where()).toBe("/chat/s1");
+    }
   });
 
   it("Back from the entry a menu closed by Escape left, over a layer still open, goes to that layer, not out of the chat", async () => {
