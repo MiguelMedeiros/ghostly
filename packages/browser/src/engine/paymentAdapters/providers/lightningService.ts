@@ -342,8 +342,8 @@ export class LightningService {
     paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
-      // The source answered: a card that could not read its balance reads it now (the payment changed it).
-      this.sources.answered(quote.provider);
+      // The source answered: a card that could not read its balance reads it now; one paid reads it now anyway (it changed).
+      if (result.state === "paid") this.sources.balanceChanged(quote.provider); else this.sources.answered(quote.provider);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
       if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
@@ -427,6 +427,7 @@ export class LightningService {
             // Written only over the state that was asked about: the source's own report wins.
             if ((await this.get("out", op.paymentHash))?.state !== "unknown") continue;
             await this.put({ ...op, state: outcome, error: outcome === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (outcome === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, outcome === "paid");
           } catch { missed(op); }
           continue;
@@ -451,7 +452,7 @@ export class LightningService {
             this.invoiceAsk.forget(op.paymentHash);
             this.sources.answered(provider);
             if (!(await unchanged())) continue;
-            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
+            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.sources.balanceChanged(provider); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
             else invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
           } else {
@@ -462,6 +463,7 @@ export class LightningService {
             // Written only over the state that was asked about: anything newer wins.
             if (!(await unchanged())) continue;
             await this.put({ ...op, state: status.state, fee: status.fee ?? op.fee, error: status.state === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (status.state === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, status.state === "paid");
           }
         } catch {
