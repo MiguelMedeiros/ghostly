@@ -651,8 +651,16 @@ export async function startRelay(options = {}) {
   }, 60_000)
   forgetRoom.unref?.()
 
+  // Set as close() starts: while it waits for its clients, a client that redials on its 1001 would be let in again and
+  // cut with 1006 at the end of the wait, and a health check would keep sending new ones.
+  let stopping = false
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
+    if (request.url === '/healthz' && stopping) {
+      response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: false, stopping: true }))
+      return
+    }
     if (request.url === '/healthz') {
       // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
       // Anyone may read it (behind a proxy every caller is on loopback), so only the node's state: the client counts
@@ -678,13 +686,14 @@ export async function startRelay(options = {}) {
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.
-    const refuse = (status, why) => {
+    const refuse = (status, why, headers = '') => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
       if (why) refusals.line('refused', why)
       socket.on('error', () => {})
-      socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
+      socket.end(`HTTP/1.1 ${status}\r\n${headers}Connection: close\r\n\r\n`)
     }
+    if (stopping) return refuse('503 Service Unavailable', 'stopping', 'Retry-After: 1\r\n')
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     const room = clients.size >= limits.clients ? makeRoom(address) : undefined
     if (room === null) return refuse('503 Service Unavailable', 'full')
@@ -853,8 +862,9 @@ export async function startRelay(options = {}) {
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
-    // one that has not closed within `stopMs` is cut.
+    // one that has not closed within `stopMs` is cut. Meanwhile a new client is refused (503) and /healthz reads 503.
     async close({ stopMs = 1000 } = {}) {
+      stopping = true
       for (const ws of clients) ws.close(1001, 'The relay is stopping')
       if (clients.size) {
         let timer

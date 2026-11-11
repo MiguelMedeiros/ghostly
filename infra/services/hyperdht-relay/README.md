@@ -112,7 +112,9 @@ an `.env` file next to it):
 (`{"ok":true,"firewalled":false,"nodes":20}`). Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
+says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its
+going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
+and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.
 
 ## Cost, measured
