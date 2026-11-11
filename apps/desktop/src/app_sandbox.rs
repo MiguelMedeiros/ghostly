@@ -170,8 +170,13 @@ const RUNNER: &str = r#"<!doctype html>
   const known = Object.create(null);
   for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
   const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
+  // A file's bytes come as base64 (`bytes_response`), up to 64 MiB: the engine's own decoder where it has one (WebKit
+  // decodes 64 MiB in about 40 ms with it, 250 ms a character at a time), taken before any app code can change it.
+  const fromBase64 = typeof Uint8Array.fromBase64 === "function" ? Uint8Array.fromBase64 : null;
+  const decode = atob;
   const bytesOf = (text) => {
-    const raw = atob(text);
+    if (fromBase64) return reflectApply(fromBase64, Uint8Array, [text]).buffer;
+    const raw = decode(text);
     const out = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
     return out.buffer;
