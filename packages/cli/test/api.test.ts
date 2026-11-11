@@ -508,6 +508,20 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("group send names what the secret guard found, as send does", async () => {
+    const { ctx, node } = fake();
+    const cases: [string, RegExp][] = [
+      ["cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ", /looks like a Cashu token \(money anyone who reads it can take\); send it with --force/],
+      ["legal winner thank year wave sausage worth useful legal winner thank yellow", /looks like a secret \(a seed or a private key\); send it with --force/],
+      [`__cookie__:${"ab".repeat(32)}`, /looks like a secret \(a login to a node: .*\); send it with --force/],
+    ];
+    for (const [text, said] of cases) {
+      await expect(callApi(ctx, "group.send", { group: "Crew", text })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(said) });
+      await expect(callApi(ctx, "chat.send", { chat: "Alice", text })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(said) });
+    }
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+  });
+
   it("an edit past 16 KiB is a bad request as a send is, refused before the secret guard reads it", async () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me" })]);
     const editMessage = vi.fn(async () => ({ error: null, messageId: "me_1" }));
