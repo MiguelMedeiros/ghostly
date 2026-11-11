@@ -11,6 +11,7 @@ import { axeViolations } from "../axe";
  * An invite link the app refuses (here a damaged one: its end cut off) opened while the app is locked: it leaves the address at once,
  * but the refusal is said once the lock is passed, not under the lock screen where nobody reads it. Locked or not, the
  * notice stays until it is closed (its ×, Escape), as a group link's refusal does, and the focus goes back where it was.
+ * A good link that comes next takes the notice away: left there, it would read as the refusal of the chat that opened.
  */
 
 const lock = vi.hoisted(() => ({ isLocked: true }));
@@ -107,6 +108,33 @@ it("a good invite opened while locked still makes its chat after the unlock, wit
   const { rerender } = render(<Root />);
   await waitFor(() => expect(window.location.hash).toBe("#/"));
   expect(listSessions()).toHaveLength(0);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(1));
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${listSessions()[0].id}`));
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+}, 60_000);
+
+it("a refused link's notice goes when a good invite comes next: it would read as the new chat's refusal", async () => {
+  lock.isLocked = false;
+  render(<Root />);
+  await screen.findByTestId("sidebar");
+  go(`#/${damaged()}`);
+  expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent(REFUSAL);
+
+  go(`#${createChatInvite().inviteCode}`);
+  await waitFor(() => expect(listSessions()).toHaveLength(1));
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${listSessions()[0].id}`));
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+}, 60_000);
+
+it("locked, a damaged link and then a good one: after the unlock the chat opens with no refusal over it", async () => {
+  window.location.hash = `#/${damaged()}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  go(`#${createChatInvite().inviteCode}`);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
 
   lock.isLocked = false;
   rerender(<Root />);
