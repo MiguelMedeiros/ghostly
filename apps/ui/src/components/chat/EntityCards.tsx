@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { unspoiledText } from "../../lib/parse";
 import { MAX_ENTITY_CARDS, entityKey, findEntities } from "../../lib/parse/entities";
 import { IdentityEntityCard } from "./EntityCardIdentity";
 import { GroupEntityCard, InviteEntityCard } from "./EntityCardInvite";
@@ -6,11 +7,11 @@ import { NostrEntityCard } from "./EntityCardNostr";
 
 /**
  * The cards under a text message, one per invite, group link, Nostr code or identity it names (see
- * `lib/parse/entities.ts`), the text itself left as it is. `from` is the sender's name when the message is a
+ * `lib/parse/entities.ts`) outside a spoiler (a card would say what it hides), the text itself left as it is. `from` is the sender's name when the message is a
  * contact's; `peerPubKey` is the chat's contact, whose proofs come first on an identity card.
  */
 export function EntityCards({ text, mine, from, peerPubKey }: { text: string; mine: boolean; from?: string; peerPubKey?: string }) {
-  const entities = useMemo(() => findEntities(text).slice(0, MAX_ENTITY_CARDS), [text]);
+  const entities = useMemo(() => findEntities(unspoiledText(text)).slice(0, MAX_ENTITY_CARDS), [text]);
   if (entities.length === 0) return null;
   return (
     <div data-testid="entity-cards" className="clear-both">
