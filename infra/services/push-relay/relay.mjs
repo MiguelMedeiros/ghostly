@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 
+// The per-minute counts read a monotonic clock: a host clock set back (an NTP step, a resumed VM) would otherwise keep
+// every request before the step in its minute, refusing an address or subscription near its limit for the whole step.
+const monotonicNow = () => performance.now()
+
 /**
  * A push relay for Ghostly's wake-up push (WISP 401 § Wake-up push). A browser page may not post to a push
  * service itself (the services answer without CORS), so the app can hand the finished request to a relay the
@@ -172,6 +176,7 @@ export function refusalLog (log) {
  * and says whether it was under its limit; a newcomer to a full table drops the idle (a scan at most once a second),
  * else the entry seen longest ago that is under its limit (the oldest of all only when every one is at it). Dropped at
  * its limit, a key would start its minute over: newcomers enough would buy it another `perMinute`.
+ * `now` is a monotonic time (monotonicNow), so a clock step neither extends nor shortens a minute.
  */
 function minuteCounts (perMinute, tracked) {
   const recent = new Map()
@@ -221,7 +226,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const flush = () => { refusals.flush(); forwards.flush(); failures.flush() }
   // Forwards waiting on the push service: counted once it answers, so the ones a stop cuts are said apart.
   let forwarding = 0
-  const pruning = setInterval(() => { prune(Date.now()); flush() }, 60_000)
+  const pruning = setInterval(() => { prune(monotonicNow()); flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
@@ -257,7 +262,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
     }
-    if (!addresses.take(ip, Date.now())) return refuse('rate', 429, { error: 'Too many' })
+    if (!addresses.take(ip, monotonicNow())) return refuse('rate', 429, { error: 'Too many' })
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
@@ -273,7 +278,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       // Counted only for a request it would forward: a refused one wakes nobody.
-      const taken = Date.now()
+      const taken = monotonicNow()
       if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
       forwarding++
       try {
