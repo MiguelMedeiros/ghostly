@@ -43,6 +43,23 @@ describe("the HyperDHT relay's health check (infra/services/hyperdht-relay)", ()
     }
   }, 30_000);
 
+  it("answers a monitor's HEAD and a query string as its GET /healthz, and only those methods", async () => {
+    const relay = await startRelay({ testnet: 3 });
+    try {
+      const url = `${relay.url.replace(/^ws/, "http")}/healthz`;
+      const { body } = await health(relay.url);
+      const busted = await fetch(`${url}?x=1`);
+      expect(busted.status).toBe(200);
+      expect(Object.keys(await busted.json()).sort()).toEqual(Object.keys(body).sort());
+      const head = await fetch(`${url}?x=1`, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe("");
+      expect((await fetch(url, { method: "POST" })).status).toBe(426);
+    } finally {
+      await relay.close();
+    }
+  }, 30_000);
+
   it("reads the same to a stranger before, during and after an allowed browser's connection", async () => {
     const relay = await startRelay({ testnet: 3, origins: ["https://app.example"] });
     try {

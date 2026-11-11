@@ -30,6 +30,23 @@ describe("the push relay's health check (infra/services/push-relay)", () => {
     expect(relay.stats()).toEqual({ forwarded: 0, failed: 1, refused: 3, tracked: 1 });
   });
 
+  it("answers a monitor's HEAD /healthz as its GET, with no body and no refusal in the log", async () => {
+    const logged: string[] = [];
+    const relay = await startRelay({ log: (...words: string[]) => { logged.push(words.join(" ")); } });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}`;
+    for (const path of ["/healthz", "/healthz?x=1"]) {
+      const head = await fetch(`${url}${path}`, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(head.headers.get("cache-control")).toBe("no-store");
+      expect(await head.text()).toBe("");
+    }
+    expect(relay.stats()).toMatchObject({ refused: 0 });
+    await close();
+    close = undefined;
+    expect(logged.filter((line) => line.includes("refused"))).toEqual([]);
+  });
+
   it("reads the same to a stranger before and after an allowed client's push", async () => {
     const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], origins: ["https://app.example"] });
     close = relay.close;
