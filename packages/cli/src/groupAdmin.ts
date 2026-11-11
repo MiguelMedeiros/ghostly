@@ -15,14 +15,21 @@ import { groupJson } from "./views";
 /**
  * A member by key, unique key prefix or name; never this profile itself (`myName`: its name, which its own row lacks).
  * A whole key is that member, whatever another member calls itself; a prefix and a name stand side by side (two
- * members is an error, not a guess).
+ * members is an error, not a guess). For a grant (`byKeyOnly`: admin, a pinned hub) a member found only by the name it
+ * gave itself is refused, with its key: another member could call itself that name while the one meant is away, as
+ * `findOwnNamedChat` refuses a contact's own name.
  */
-export function findMember(group: GroupView, ref: string, myName?: string) {
+export function findMember(group: GroupView, ref: string, myName?: string, byKeyOnly = false) {
   const lower = ref.toLowerCase();
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
-  if (matches.length === 1) return matches[0];
+  if (matches.length === 1) {
+    if (byKeyOnly && !matches[0].key.startsWith(ref)) {
+      throw new CliError("bad_request", `${JSON.stringify(ref)} names a member only by the name it gave itself: use its key`, { member: matches[0].key, name: matches[0].nick ?? null });
+    }
+    return matches[0];
+  }
   throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
 }
 
@@ -82,8 +89,8 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
 }
 
-/** The member `params.member` names in `group`, this profile's own name said to be it. */
-const member = (ctx: ApiContext, group: GroupView, params: Params) => findMember(group, str(params, "member", true), state(ctx).settings.nick);
+/** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
+const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), state(ctx).settings.nick, grant);
 
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
@@ -107,14 +114,14 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.admin"(ctx, params) {
     const group = joined(ctx, params);
-    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params).key });
+    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params, true).key });
     return view(ctx, group.id, params);
   },
   async "group.hub"(ctx, params) {
     const group = joined(ctx, params);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
-    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role as "pin" | "exclude" });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
