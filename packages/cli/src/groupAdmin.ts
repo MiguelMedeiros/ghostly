@@ -68,6 +68,20 @@ async function picture(params: Params): Promise<string | null> {
   return pictureFrom(str(params, "path", true));
 }
 
+/**
+ * A group this profile administers or is in, not only an invitation: before, the engine answered `group rename`,
+ * `picture`, `link`, `rotate` and `invite` on an invitation not yet joined with "Group not found" (engine, exit 1),
+ * while `group show` listed it, and `remove`/`admin` said "No member" of a member list it had not received yet.
+ */
+function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
+  const group = groupOf(ctx, params, twin);
+  if (group.status || !group.invitation) return group;
+  const ref = str(params, "group", true), shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+  throw new CliError("refused", group.invitation.accepted
+    ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
+    : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
+}
+
 /** The member `params.member` names in `group`, this profile's own name said to be it. */
 const member = (ctx: ApiContext, group: GroupView, params: Params) => findMember(group, str(params, "member", true), state(ctx).settings.nick);
 
@@ -75,14 +89,14 @@ const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ct
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
     const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
   async "group.remove"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     const removed = member(ctx, group, params);
     await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
     // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
@@ -92,19 +106,19 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
       ...(linkOn && { warning: `${removed.nick ?? "They"} can still join again with the group's link: ghostly group link ${group.id} --reset gives it a new one and keeps them out` }) };
   },
   async "group.admin"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params).key });
     return view(ctx, group.id, params);
   },
   async "group.hub"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
     await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params).key, role: role === "auto" ? null : role as "pin" | "exclude" });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
-    const group = groupOf(ctx, params, "chat rename <chat> <name...>");
+    const group = joined(ctx, params, "chat rename <chat> <name...>");
     const name = groupNameOf(params);
     // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
     guardText(name, bool(params, "force"), "group's name", "rename it");
@@ -112,12 +126,12 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return view(ctx, group.id, params);
   },
   async "group.rotate"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     await node(ctx).rotateGroup({ groupId: group.id });
     return view(ctx, group.id, params);
   },
   async "group.link"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     if (params.on === false) {
       await node(ctx).disableGroupLink({ groupId: group.id });
       return { group: group.id, link: null };
@@ -126,7 +140,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return { group: group.id, link };
   },
   async "group.picture"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     await node(ctx).setGroupPicture({ groupId: group.id, picture: await picture(params) });
     return { group: group.id, picture: !bool(params, "clear") };
   },
