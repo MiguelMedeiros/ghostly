@@ -5,6 +5,8 @@
  * cannot turn a contact's app into a request generator.
  */
 
+import { IdentityCheckUnavailable } from '@ghostly/core';
+
 export interface Jwk {
   kty: string; kid?: string; use?: string; alg?: string; key_ops?: string[];
   n?: string; e?: string; crv?: string; x?: string; y?: string;
@@ -60,9 +62,13 @@ export class JwksCache {
     if (running) return running;
     const task = (async () => {
       if (!allowedUrl(url)) throw new Error('Provider key URL refused');
-      const response = await fetcher(url, { maxBytes: JWKS_MAX_BYTES });
-      if (response.status !== 200) throw new Error(`Provider keys unavailable (${response.status})`);
-      const keys = parseKeys(response.text);
+      // Keys that could not be read (not reached, an error status, a page that is not a key set) say nothing of the token.
+      let response: Awaited<ReturnType<JwksFetch>>;
+      try { response = await fetcher(url, { maxBytes: JWKS_MAX_BYTES }); }
+      catch (e) { throw e instanceof IdentityCheckUnavailable ? e : new IdentityCheckUnavailable(`Provider keys could not be fetched: ${e instanceof Error ? e.message : String(e)}`); }
+      if (response.status !== 200) throw new IdentityCheckUnavailable(`Provider keys unavailable (${response.status})`);
+      let keys: Jwk[];
+      try { keys = parseKeys(response.text); } catch (e) { throw new IdentityCheckUnavailable((e as Error).message); }
       const fetched = this.now();
       const entry = { keys, fetched, expires: fetched + ttl(response.cacheControl) };
       this.entries.set(url, entry);
