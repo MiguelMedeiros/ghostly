@@ -186,32 +186,35 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 }
 
 /**
- * The `ghostly-revoke.json` beside a bundle, as a client reads it beside each bundle URL: beside the URL (without its
- * query), or beside the file. None there, one that does not answer, or one a client would not read, revokes nothing.
+ * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
+ * answer, or one a client would not read, revokes nothing.
  */
-async function revocationsBeside(source: string, isUrl: boolean): Promise<{ file: string; revocations: SignedAppRevocation[] }> {
-  let file: string;
+async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
-    if (isUrl) {
-      const at = new URL(source);
-      at.search = "";
-      at.hash = "";
-      file = new URL(APP_REVOKE_FILE, at).href;
-      bytes = await fetchBundle(file);
-    } else {
-      file = join(dirname(userPath(source)), APP_REVOKE_FILE);
-      if (!existsSync(file)) return { file, revocations: [] };
-      bytes = readBundleFile(file);
-    }
-  } catch { return { file: source, revocations: [] }; }
+    if (isUrl) bytes = await fetchBundle(file);
+    else if (!existsSync(file)) return [];
+    else bytes = readBundleFile(file);
+  } catch { return []; }
   const read = readAppRevocations(bytes);
-  return { file, revocations: read.ok ? read.revocations : [] };
+  return read.ok ? read.revocations : [];
+}
+
+/** The `ghostly-revoke.json` beside a bundle URL, its query and fragment left out; none for what is not a URL. */
+function besideUrl(url: string): string[] {
+  try {
+    const at = new URL(url);
+    at.search = "";
+    at.hash = "";
+    return [new URL(APP_REVOKE_FILE, at).href];
+  } catch { return []; }
 }
 
 /**
  * A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. A version its
- * publisher revoked in the `ghostly-revoke.json` beside it is refused: a client stops it, with no "Run anyway".
+ * publisher revoked is refused, as a client stops it, with no "Run anyway": in the `ghostly-revoke.json` beside it and,
+ * for a URL, beside each of the manifest's `sources` too (WISP 1200 · Revocation: a client reads them there, where a
+ * publisher revokes a version a store's pinned URL still holds). A file is checked offline: beside it only.
  */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
@@ -219,10 +222,13 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
   const m = read.bundle.manifest;
-  const { file, revocations } = await revocationsBeside(source, isUrl);
-  const revocation = appRevocationFor({ ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest }, revocations);
-  if (revocation) {
-    throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+  const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
+  const files = isUrl ? new Set([source, ...(m.sources ?? [])].flatMap(besideUrl)) : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
+  for (const file of files) {
+    const revocation = appRevocationFor(version, await revocationsIn(file, isUrl));
+    if (revocation) {
+      throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+    }
   }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
