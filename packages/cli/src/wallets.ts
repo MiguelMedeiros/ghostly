@@ -95,7 +95,21 @@ async function federationsOpen(ctx: ApiContext, ms = 30_000): Promise<void> {
   while (connecting() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
-/** One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. */
+/**
+ * An Arkade, Bark or Spark balance, known only once the wallet is open and read it: until then the view holds 0, which
+ * the app's total shows as "?" (walletTotals). `null` with `status` `locked` or `reading`, never a 0 a script takes for
+ * the balance.
+ */
+function readBalance(view: { locked: boolean; read?: true; balance: number } | undefined): { balance: number | null; status: string | null } {
+  if (!view) return { balance: null, status: null };
+  if (view.locked) return { balance: null, status: "locked" };
+  return view.read ? { balance: view.balance, status: null } : { balance: null, status: "reading" };
+}
+
+/**
+ * One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. A balance not read yet
+ * is `null`, with `status` saying why (`locked`, `reading`, `error`).
+ */
 export function walletJson(instance: WalletInstanceView, s: EngineState) {
   const view = netView(s, instance.network);
   let balance: number | string | null = null, unit = "sat", address: string | null = null, status: string | null = null, error: string | null = null;
@@ -108,11 +122,19 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
       balance = (card?.providerId === CASHU_MINT_SOURCE ? view?.balance : card?.balance) ?? null; status = card?.status ?? null; error = card?.error ?? null;
       break;
     }
-    case "arkade": balance = view?.ark?.balance ?? null; address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
-    case "bark": balance = view?.bark?.balance ?? null; error = view?.bark?.error ?? null; break;
-    case "spark": balance = view?.spark?.balance ?? null; address = view?.spark?.address ?? null; error = view?.spark?.error ?? null; break;
+    case "arkade": ({ balance, status } = readBalance(view?.ark)); address = view?.ark?.address ?? null; error = view?.ark?.error ?? null; break;
+    case "bark": ({ balance, status } = readBalance(view?.bark)); error = view?.bark?.error ?? null; break;
+    case "spark": ({ balance, status } = readBalance(view?.spark)); address = view?.spark?.address ?? null; error = view?.spark?.error ?? null; break;
     case "bitcoin": balance = view?.bitcoin?.balance ?? null; address = view?.bitcoin?.address ?? null; status = view?.bitcoin?.status ?? null; error = view?.bitcoin?.error ?? null; break;
-    case "fedimint": balance = view?.fedimint?.balance ?? null; error = view?.fedimint?.error ?? null; break;
+    case "fedimint": {
+      // Every federation read, or the balance is not known (the app's total says "?"): one that did not answer could hold the most.
+      const federations = view?.fedimint?.federations ?? [];
+      const known = federations.every((f) => f.read && f.status === "ready");
+      balance = known ? view?.fedimint?.balance ?? null : null;
+      status = known ? null : federations.some((f) => f.status === "error") ? "error" : "reading";
+      error = view?.fedimint?.error ?? federations.find((f) => f.error)?.error ?? null;
+      break;
+    }
     case "usdt": balance = view?.usdt?.balance ?? null; unit = "token-base"; address = view?.usdt?.address ?? null; error = view?.usdt?.error ?? null; break;
   }
   return {
