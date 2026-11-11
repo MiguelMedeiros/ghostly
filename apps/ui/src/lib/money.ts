@@ -1,4 +1,5 @@
 import { findBolt11, findLightningDestination, parseLightningDestination, type Bolt11Invoice, type LightningDestination } from "@ghostly/core";
+import { unspoiledText } from "./parse";
 import { findLinkMoney, findMoreMoney, type MoreMoney } from "./parse/money-more";
 
 const CASHU_PATTERN = /\b(cashu[AB][A-Za-z0-9_\-=+/]{20,}|creq[AB][A-Za-z0-9_\-=]{10,})/i;
@@ -13,9 +14,23 @@ export type MoneyInText =
  * A Lightning invoice, an ecash token, a Cashu payment request, an LNURL or a Lightning address pasted
  * into a message. A Lightning address looks like an email address, so it only counts when it is the whole
  * message (or prefixed `lightning:` / ⚡); an `lnurl…` is money wherever it is. Then the other formats
- * (apps/ui/src/lib/parse/money-more.ts): `bitcoin:` links first, the rest last.
+ * (apps/ui/src/lib/parse/money-more.ts): `bitcoin:` links first, the rest last. Not one a spoiler hides: its card
+ * would show the amount, the memo, the mint or the address the spoiler covers, so it stays a covered text.
  */
 export function findMoney(text: string): MoneyInText | null {
+  const money = moneyIn(text);
+  if (!money || !text.includes("||")) return money;
+  const shown = unspoiledText(text);
+  return shown === text || sameMoney(moneyIn(shown), money) ? money : null;
+}
+
+/** The same payment, whatever the words around it (`rest`). */
+function sameMoney(a: MoneyInText | null, b: MoneyInText): boolean {
+  const key = (money: MoneyInText) => JSON.stringify({ ...money, rest: undefined }, (_, value) => (typeof value === "bigint" ? value.toString() : value));
+  return a !== null && key(a) === key(b);
+}
+
+function moneyIn(text: string): MoneyInText | null {
   const link = findLinkMoney(text);
   // A link that must not be paid stays text: the invoice or address inside it is not read as money on its own.
   if (link === "refused") return null;

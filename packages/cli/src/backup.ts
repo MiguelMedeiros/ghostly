@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -84,8 +85,9 @@ export const BACKUP_METHODS: Record<string, Method> = {
     if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
     const paths = ctx.runtime.paths;
     // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
-    // any ghostly restores, this one or an older one.
-    const store = join(paths.db, `backup-store-${process.pid}.bin`);
+    // any ghostly restores, this one or an older one. Its name is this backup's own: two at once in one daemon shared
+    // one by the process id, and the first packed the other's store as its own, or removed it under the other.
+    const store = join(paths.db, `backup-store-${process.pid}-${randomBytes(6).toString("hex")}.bin`);
     // The settings before the store: a hold that ends in between is then in the backup with its chat already back on
     // its live link (the restored daemon ends it, nothing more), never the chat on DHT only with no hold to end.
     const settings: { name: string; text: string }[] = [];
