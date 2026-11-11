@@ -39,7 +39,7 @@ export function handoffProfileHost(): HandoffProfileHost | null {
 export const WALLET_SDK_PINS: Readonly<Record<string, string>> = {
   ark: "0.4.76",
   bark: "0.27.0",
-  breez: "0.26.0",
+  breez: "0.28.2",
   fedimint: "eea6a3c98909",
 };
 
