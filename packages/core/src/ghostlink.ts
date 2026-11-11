@@ -4380,6 +4380,9 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) && !this.pinnedSince(channel, paired) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
+          // A session a move replaced, still reading while its channel retires: it says nothing of the one now.
+          const retiring = this.channel !== channel ? this.retiring.get(channel) : undefined;
+          if (retiring) { clearTimeout(retiring.timer); retiring.close(); return; }
           // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
           if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
           // Dialled in and unproven, started before a pin made by another path, a connection that carried nothing in
@@ -4417,12 +4420,14 @@ export class GhostLink {
             if (files && migration.plan && paired.supports("files/2")) { files.rebind(channel); carried = files; } else files?.closeAll();
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
-            oldPaired?.stop();
             // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then. Only
             // that connection: the contact's offer back to WebRTC can be under way on the link by then (its own old
             // session retired first), and closing it left the move to its 8 s and the 20 s retry (bh-zero43).
             const oldRtc = oldBinding ? null : this.dataLink.connection;
-            if (oldChannel) this.retire(oldChannel, () => { if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
+            // The old session reads on while its channel retires: a text or a receipt the contact sent on it before its
+            // own side moved still arrives (`onApplication`). Stopped here, it dropped those of the move's moment.
+            if (oldChannel) this.retire(oldChannel, () => { oldPaired?.stop(); if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
+            else oldPaired?.stop();
             // A move that lands on a native transport while its own WebRTC try still connects (the contact's app ended
             // and is back over the chat's native transport, which the move allows): that try goes to the app that
             // ended, and held the data link until it failed (30 s on the CLI's WebRTC), so the next move to WebRTC
@@ -4492,9 +4497,12 @@ export class GhostLink {
           if (replaced) { this.options.events?.onDataLinkState?.("open"); this.emitFilesSession(true); }
         },
         onApplication: async data => {
-          if (this.channel !== channel) return;
+          // A session a move replaced, while its channel retires: only the contact's texts and receipts are read on it.
+          const retired = this.channel !== channel;
+          if (retired && !this.retiring.has(channel)) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++;
+          if (!retired) { this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++; }
+          else if (typeof data !== "string") return;
           if (typeof data !== "string") {
             // app-ranges/1 beside files/4: a served file's bytes, for a request of this side's.
             if (data[0] === APP_RANGE_DATA_KIND) {
@@ -4512,6 +4520,7 @@ export class GhostLink {
           if (data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
+          if (retired && frame?.t !== "paired-message" && frame?.t !== "paired-received") return;
           // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.
           if (frame && typeof frame === "object" && !QUIET_FRAMES.has(String(frame.t))) this.activityAt = Date.now();
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
@@ -4750,8 +4759,10 @@ export class GhostLink {
             // A card that does not hold is left out: the message shows its text, as an older app shows it.
             const card = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
             await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }), ...(card && { card }) });
-            if (this.channel === channel && this.isDataLinkOpen)
-              channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
+            // Read on a session a move replaced (or one that moved while it was shown): its receipt goes on the one now.
+            const live = this.channel;
+            if (live && (live === channel || this.retiring.has(channel)) && this.isDataLinkOpen)
+              live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {
