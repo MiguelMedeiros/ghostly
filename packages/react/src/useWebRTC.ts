@@ -1024,6 +1024,10 @@ export function useWebRTC({
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
       setNoAnswer(false);
+      // A call that ended without a hang-up (one that found no path) left its offer's time behind: until this
+      // attempt's own goes out, a contact's offer is the earlier one (WISP 601, "Both call at once").
+      myOfferTimestampRef.current = 0;
+      myOfferFingerprintRef.current = "";
       try {
         setFastPoll(true);
         callHadVideoRef.current = withVideo;
