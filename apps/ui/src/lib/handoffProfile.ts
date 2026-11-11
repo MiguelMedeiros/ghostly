@@ -10,6 +10,7 @@ import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource }
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, recoverProfilePointer, registryKey } from "./profiles";
 import { dropWalletStorageOf } from "./profileData";
+import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -402,13 +403,26 @@ class Staging implements HandoffStaging {
   }
 }
 
+/**
+ * The microphone, camera and speaker this device chose for the profile, from the namespace it ran before onto the one
+ * staged: a move never carries the giver's (`writeProfileBackup`), whose ids name that browser's devices. Taking the
+ * profile back, a device uses its own headset again; a device the profile never ran on uses the system's defaults.
+ */
+function keepOwnDevices(old: string, staged: string): void {
+  const prefix = (ns: string) => (ns ? `ghostly_${ns}_` : "ghostly_");
+  try {
+    const own = localStorage.getItem(`${prefix(spaceOf(old))}${MEDIA_DEVICES_SUFFIX}`);
+    if (own !== null) localStorage.setItem(`${prefix(spaceOf(staged))}${MEDIA_DEVICES_SUFFIX}`, own);
+  } catch { /* the defaults, as on a device the profile never ran on */ }
+}
+
 const staging: HandoffStagingHost = {
   async open(database) {
     return new Staging(database ? spaceOf(database) : newSpace());
   },
   // Installed, the staged namespace is the profile's own: its notes only served a pull that had not finished, and one
   // key per file would stay outside every profile's prefix for as long as this copy lives (bug hunt, 2026-11-04).
-  async install(old, staged) { pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
+  async install(old, staged) { keepOwnDevices(old, staged); pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);
