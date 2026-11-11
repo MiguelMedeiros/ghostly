@@ -848,8 +848,17 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     return { number: pr.number, branch, sha: built.sha, members: aboard };
   };
 
-  // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now.
-  for (const b of (await gh.mergedPulls(base)).filter((p) => isBatch(p, base, login))) {
+  // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now. Anyone
+  // who may edit a pull request can rewrite a merged batch's body (and so put it among the last updated): its mark
+  // counts only while the train wrote it last. Asked only of one that names a pull request still open at its head.
+  const named = (b) => readState(b.body).prs.some((s) => byNumber.get(s.number)?.sha === s.sha && !gone.has(s.number));
+  const stopped = (await gh.mergedPulls(base)).filter((p) => isBatch(p, base, login) && named(p));
+  const bodyWriters = stopped.length ? await gh.lastEditors(stopped.map((b) => b.nodeId).filter(Boolean)) : new Map();
+  for (const b of stopped) {
+    if (bodyWriters.get(b.nodeId) !== login) {
+      say(`#${b.number}: its body was last edited by ${bodyWriters.get(b.nodeId) ?? "someone else"}, so the pull requests its mark names are not closed as merged.`);
+      continue;
+    }
     for (const s of readState(b.body).prs) {
       const p = byNumber.get(s.number);
       if (p && p.sha === s.sha && !gone.has(p.number)) await landed(p, b.number);
@@ -1470,6 +1479,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
+    nodeId: p.node_id,
     title: p.title,
     body: p.body,
     draft: p.draft,
@@ -1602,15 +1612,16 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     },
     comments: (n) => all(`/issues/${n}/comments`),
     /**
-     * Who last wrote each comment (by `node_id`): its last editor, else its author, by the login REST gives (a bot's
-     * with "[bot]"). A comment GitHub no longer has, or whose account is gone, is left out. One GraphQL request per 100
-     * comments (REST does not say who edited one), none when there is none.
+     * Who last wrote each comment, or each pull request's body (by `node_id`): its last editor, else its author, by the
+     * login REST gives (a bot's with "[bot]"). One GitHub no longer has, or whose account is gone, is left out. One
+     * GraphQL request per 100 (REST does not say who edited one), none when there is none.
      */
     lastEditors: async (ids) => {
       const out = new Map();
       const name = (a) => (a?.login ? `${a.login}${a.__typename === "Bot" ? "[bot]" : ""}` : null);
+      const fields = "id author { __typename login } editor { __typename login } lastEditedAt";
       for (let i = 0; i < ids.length; i += 100) {
-        const query = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id author { __typename login } editor { __typename login } lastEditedAt } } }";
+        const query = `query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { ${fields} } ... on PullRequest { ${fields} } } }`;
         const r = await api("POST", "/graphql", { query, variables: { ids: ids.slice(i, i + 100) } }, "");
         // A comment deleted since it was listed is a NOT_FOUND error beside a null node.
         const error = r.data?.errors?.find((e) => e.type !== "NOT_FOUND");
