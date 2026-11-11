@@ -209,7 +209,9 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
 `group.message` that mentions this profile or presses a button of a question it sent, becomes one `agent.turn` (a
 press on another member's question is not). A mention learned later (the message first
-came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
+came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. A
+press learned later the same way is a `button.pressed` that carries the reply as `message`, and its turn then, with
+`source: "button.pressed"`. Nothing else is one (my own messages, edits,
 reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
 ```json

@@ -114,7 +114,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
-  source: "message.received" | "group.message" | "group.mentioned";
+  source: "message.received" | "group.message" | "group.mentioned" | "button.pressed";
   chat?: string;
   group?: string;
   /** A group's author (their key). */
@@ -142,7 +142,7 @@ const forMe = (message: TurnMessage): boolean => !!message.mentioned || !!messag
 
 /**
  * The turn an event starts, or null: only a contact's message, and a group message that mentions this profile or
- * presses a button of its question.
+ * presses a button of its question (or the `group.mentioned`, `button.pressed` that says so later).
  */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
   const message = event.message as TurnMessage | undefined;
@@ -151,6 +151,9 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
   if (event.type === "group.message" && typeof event.group === "string" && forMe(message)) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
   if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  // A press learned after its reply was reported (that `group.message` pressed nothing): the turn it did not start then.
+  // Only such a `button.pressed` carries the reply.
+  if (event.type === "button.pressed" && typeof event.group === "string" && message.press) return turn(event, "button.pressed", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
 }
 
