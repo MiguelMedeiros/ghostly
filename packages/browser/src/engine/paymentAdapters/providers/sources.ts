@@ -328,19 +328,24 @@ export class ProviderSources<P extends Connectable> {
   }
 
   /**
-   * Whether the saved source is this provider with these very settings (the same wallet added twice). Its secrets are
-   * unsealed here to compare, and never leave.
+   * Whether the saved source is this provider reaching the same wallet (the same wallet added twice): the provider's
+   * `wallet` says which one (an NWC URI spelled another way, or another app connection to it, is the same), else these
+   * very settings. Its secrets are unsealed here to compare, and never leave.
    */
   async holds(providerId: string, settings: ProviderSettings): Promise<boolean> {
     const stored = this.stored;
     if (!stored || stored.providerId !== providerId) return false;
+    const unseal = async () => stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
+    const wallet = this.find(providerId)?.wallet;
+    if (wallet) {
+      const secrets = await unseal();
+      try { return wallet({ config: stored.config, secrets }) === wallet(settings); } catch { return false; }
+    }
     const same = (a: Record<string, string>, b: Record<string, string>) => {
       const keys = Object.keys(a).sort();
       return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every((k) => a[k] === b[k]);
     };
-    if (!same(stored.config, settings.config)) return false;
-    const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
-    return same(secrets, settings.secrets);
+    return same(stored.config, settings.config) && same(await unseal(), settings.secrets);
   }
 
   /**
