@@ -1,6 +1,7 @@
 import { useI18n } from "../contexts/I18nContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { externalLinkProps } from "../lib/externalLink";
+import { updateFailure } from "../lib/updateFailure";
 
 /**
  * A new version exists. Nothing happens until the user says so: applying one
@@ -9,12 +10,15 @@ import { externalLinkProps } from "../lib/externalLink";
  */
 export function UpdateBanner() {
   const { t } = useI18n();
-  const { update, dismissed, stage, progress, error, install, dismiss, downloadUrl } = useUpdate();
+  const { update, dismissed, stage, progress, error, failed, install, dismiss, downloadUrl } = useUpdate();
 
   if (!update || dismissed) return null;
 
   const installing = stage === "installing";
   const percent = Math.round(progress * 100);
+  // Only an install that failed takes the warning's place, said in words (the updater's English is in Settings' ⓘ):
+  // a later check that failed leaves the update found standing, and what Reload does still needs saying.
+  const why = failed === "install" && error ? updateFailure(error) : null;
 
   return (
     <div
@@ -30,8 +34,8 @@ export function UpdateBanner() {
             ? percent > 0
               ? t("updates.downloading", { percent: String(percent) })
               : t("updates.installing")
-            : error
-              ? error
+            : why
+              ? t(why === "unknown" ? "updates.installFailed" : `updates.why.${why}`)
               : t(update.apply === "manual" ? "updates.manualHint" : "updates.applyHint")}
         </p>
       </div>
