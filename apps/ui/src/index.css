@@ -1819,3 +1819,35 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
   [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
 }
+
+/* Forced colors: the place you are on (`aria-current`) in the chat list, on the rail, Saved and Tasks above the list,
+   the account bar and the phone's tab bar. Its background and accent colour were all that marked it, and forced colors
+   replace both, so it looked like every other place. One mark for all of them: a bar in Highlight, the bar the rail
+   already draws in the accent beside its open chat. At the start side of a place stacked in a column; under a place in
+   a row (`current-mark-under`: the tab bars), where a start-side bar would sit between two neighbours. Not a Highlight
+   fill (it needs `forced-color-adjust: none`, which keeps a row's muted line in its theme colour on Highlight), nor an
+   outline (the keyboard focus's mark). A ::before inside the place (which is positioned), so nothing moves; only the
+   bar itself keeps its colour. Logical sides: the start is the right in Arabic. Only the place's mark here. */
+@media (forced-colors: active) {
+  .current-mark[aria-current]:not([aria-current="false"])::before {
+    content: "";
+    position: absolute;
+    inset-block: 0.5rem;
+    inset-inline-start: 0;
+    inline-size: 0.25rem;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 9999px;
+    background: Highlight;
+    forced-color-adjust: none;
+    pointer-events: none;
+  }
+  .current-mark.current-mark-under[aria-current]:not([aria-current="false"])::before {
+    inset-block: auto 0;
+    inset-inline: 25%;
+    inline-size: auto;
+    block-size: 0.25rem;
+    border-start-start-radius: 9999px;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 0;
+  }
+}
