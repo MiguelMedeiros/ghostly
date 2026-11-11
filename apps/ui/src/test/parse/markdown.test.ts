@@ -216,7 +216,7 @@ describe("[text](url) links", () => {
     // Dots drawn like one at the baseline or a little above, and letters and digits that look like one.
     for (const dot of [
       "\u02d9", "\u0660", "\u06f0", "\u0702", "\u0f0b", "\u1427", "\u16eb", "\u2022", "\u2219", "\u22c5", "\u2e31", "\u2e33",
-      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}",
+      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}", "\u{1d16d}", "\u2981", "\u0323",
     ]) {
       expect(labelMisleads(`paypal${dot}com`, "https://evil.example/login"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(true);
       expect(labelMisleads(`ghostly${dot}tools`, "https://ghostly.tools"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(false);
