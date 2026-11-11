@@ -130,7 +130,7 @@ import { WorkingLine } from "../components/chat/WorkingMark";
 import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { panelCard, routineStacksReader } from "../lib/statusCards";
+import { appCardsShown, panelCard, routineStacksReader } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
@@ -554,6 +554,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showServices, setShowServices] = useState(false);
   // Mini-apps in this 1:1 chat (WISP 1200), where Apps shows: + → Apps.
   const appsOn = useAppsAvailable();
+  // An app card shows as a card here, so its quote and the pinned bar read it as one; else its text (appCardsShown).
+  const appCards = appCardsShown(paired ? chatLink?.id : undefined, appsOn);
   const [showApps, setShowApps] = useState(false);
   // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
   // app always is).
@@ -822,7 +824,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
   const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? lineName : undefined;
-  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
+  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t, appCards),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
@@ -866,7 +868,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
-    <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
+    <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
@@ -1132,7 +1134,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
-      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
@@ -1198,7 +1200,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
                 onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
-                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf, t) : undefined}
+                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf, t, appCards) : undefined}
                 // A press is a reply: only a paired chat carries one.
                 buttons={paired ? buttonsOf.get(row.message.id) : undefined}
                 compactPress={paired && presses.has(row.message.id)}

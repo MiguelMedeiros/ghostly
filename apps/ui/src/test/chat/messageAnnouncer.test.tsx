@@ -2,6 +2,7 @@ import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "../apps/showApps";
 import { fakeEngine, paymentView } from "../fakeEngine";
 import { TEST_MINT } from "../payments/fixtures";
 
@@ -118,10 +119,14 @@ describe("a new message, read out to a screen reader", () => {
 
   it("an app card reads as the card names it, in the app's language, not its English fallback with the bundle's link", () => {
     const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp", opened: true } as const;
-    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
-    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
-    wait(ANNOUNCE_WINDOW_MS);
-    expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+    // A 1:1 chat where Apps shows: its bubble draws the card (elsewhere both say its text, appCardLineWhereShown.test.tsx).
+    showApps();
+    try {
+      const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
+      view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
+      wait(ANNOUNCE_WINDOW_MS);
+      expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+    } finally { hideApps(); }
   });
 
   it("a voice message or a video reads as the chat list says it, in the app's language, not the history's English line", () => {
