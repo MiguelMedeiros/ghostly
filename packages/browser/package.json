@@ -41,7 +41,7 @@
   "devDependencies": {
     "@types/react": "^19.3.0",
     "@types/ws": "8.18.2",
-    "fake-indexeddb": "^6.2.5",
+    "fake-indexeddb": "^6.2.8",
     "hyperdht": "6.36.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.6",
