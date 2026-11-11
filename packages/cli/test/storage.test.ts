@@ -6,7 +6,7 @@ import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
-import { TreeFile } from "../src/runtime/sqlTree";
+import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
 /** Every disk sync the store asks for. */
@@ -1308,6 +1308,67 @@ describe("messages kept in rows.db", () => {
       request.onerror = () => reject(request.error);
     });
     expect(links).toEqual([{ id: "chat", seedB64: "seed" }]);
+  });
+
+  it("a backup's export leaves the event loop turns while it reads rows.db, and holds the store as it was when it began", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages", "settings"], (s) => { for (let i = 0; i < 3000; i++) s.messages.put(message(i)); s.settings.put("before", "mark"); });
+    const before = await all(store.factory);
+    // The export's first read of rows.db: from then on, each turn of the event loop is one the export left to others,
+    // and the first of them writes both kinds of store (one kept in rows.db, one in memory).
+    const range = vi.spyOn(TreeFile.prototype, "range");
+    let turns = 0, done = false, landed = false, wrote: Promise<void> | undefined;
+    const spin = () => {
+      if (done) return;
+      if (range.mock.calls.length > 0) {
+        turns++;
+        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }).then(() => { landed = true; });
+      }
+      setImmediate(spin);
+    };
+    setImmediate(spin);
+    const exported = join(folder(), "store.bin");
+    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); }
+    const landedDuring = landed;
+    await wrote;
+    expect(turns).toBeGreaterThan(5);
+    expect(landedDuring).toBe(true);
+    expect(await all(store.factory)).toHaveLength(3000);
+
+    // The export holds neither half of the write that landed while it ran.
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    expect(await all(elsewhere.factory)).toEqual(before);
+    const there = await db(elsewhere.factory);
+    expect(await read(there.transaction("settings").objectStore("settings").get("mark"))).toBe("before");
+    there.close();
+    d.close();
+  });
+
+  it("a fold while a backup's export reads rows.db syncs what the export's reader held back in the WAL", async () => {
+    const sqlite = await import("node:sqlite");
+    const path = join(folder(), "rows.db");
+    const trees = openTreeFile(sqlite, path, Error);
+    const tree = trees.tree(trees.treeId("ghostly", "messages"), true, false);
+    tree.put({ key: "a", value: 1 });
+    trees.complete(null, 1);
+    trees.apply(1);
+    const reader = openTreeReader(sqlite, path, Error);
+    try {
+      tree.put({ key: "b", value: 2 });
+      trees.complete(null, 2);
+      trees.apply(2);
+      // The checkpoint stops at the reader's point: the entry after it is only in the WAL, which must be on disk.
+      const before = syncs.count;
+      trees.sync();
+      expect(syncs.count).toBe(before + 1);
+      expect([...tree.at(reader).getAllRecords()]).toEqual([{ key: "a", value: 1 }]);
+    } finally { reader.db.close(); trees.db.close(); }
   });
 
   describe("a chat's old ratchet states (WISP 4xx) do not stay on the disk", () => {
