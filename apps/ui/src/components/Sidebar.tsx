@@ -394,6 +394,7 @@ export function Sidebar() {
       <ChatRow
         key={session.id}
         chatId={session.id}
+        paired={session.profile === "paired-chat/1"}
         density={density}
         active={isActive}
         label={peerLabel}

@@ -36,9 +36,10 @@ describe("a voice message or a video quoted or pinned, in Portuguese", () => {
     const app: ChatMessage = { id: `peer_${"A".repeat(22)}`, text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, sender: "peer", timestamp: 1_700_000_002_000,
       card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } };
     const zh = translateWith(locales.zh, "zh");
-    expect(messageSnippet(app, zh)).toBe("🧩 应用：Chess 1.2.0");
-    expect(quoteFor({ id: "A".repeat(22), snippet: "", from: "peer", messageId: app.id }, replyIndex([app]), () => "Ana", zh).snippet).toBe("🧩 应用：Chess 1.2.0");
-    renderApp(<PinnedBar pin={{ id: "A".repeat(22), messageId: app.id } as never} index={replyIndex([app])} />, { language: "zh" });
+    // In a chat that draws it as a card (a 1:1 chat where Apps shows; elsewhere its text, appCardLineWhereShown.test.tsx).
+    expect(messageSnippet(app, zh, true)).toBe("🧩 应用：Chess 1.2.0");
+    expect(quoteFor({ id: "A".repeat(22), snippet: "", from: "peer", messageId: app.id }, replyIndex([app]), () => "Ana", zh, true).snippet).toBe("🧩 应用：Chess 1.2.0");
+    renderApp(<PinnedBar pin={{ id: "A".repeat(22), messageId: app.id } as never} index={replyIndex([app])} appCards />, { language: "zh" });
     expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
   });
 

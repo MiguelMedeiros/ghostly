@@ -8,7 +8,8 @@ import { isGroupFile } from "../../lib/fileStatus";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { paymentLine, storedPaymentLine } from "../paymentWords";
-import { appCardLine, cardLine, showsCard } from "../../lib/statusCards";
+import { appCardLine, appCardsShown, cardLine, showsCard } from "../../lib/statusCards";
+import { useAppsAvailable } from "../../lib/apps/flag";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
 export interface Announceable {
@@ -37,16 +38,17 @@ const PREVIEW_CHARS = 80;
 
 /**
  * What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), a voice message's
- * or a video's (filePreview, as the chat list), else its text.
+ * or a video's (filePreview, as the chat list), else its text. An app card's line only where the chat's bubbles draw it
+ * as a card (`appCards`: `appCardsShown`), its text elsewhere, as the bubble shows it.
  */
-function spoken(message: Announceable, t: Translate): string {
+function spoken(message: Announceable, t: Translate, appCards: boolean): string {
   if (showsCard(message.card)) return cardLine(message.card);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
   if (payment) return paymentLine(t, payment, wallet!.getState());
   // A payment the wallet does not know (yet): its stored English line, said as the bubble says it.
   if (message.paymentId) return storedPaymentLine(t, message.text, message.sender === "me");
-  return appCardLine(message.card, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
+  return appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
 const short = (text: string) => {
@@ -93,8 +95,13 @@ const heardNow = (message: Announceable & { file: ChatFile }, since: number): Fi
  * and read are not said. What the chat had as it opened is not said either; steps that come together are one line,
  * a count when there are several.
  */
-export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
+export function MessageAnnouncer({ chat, linkId, messages, nameOf, active = true }: {
   chat: string;
+  /**
+   * The chat as its bubbles are given it (`MessageBubble`'s `linkId`): an app card is read as its card where they draw
+   * one (`appCardsShown`), as its text where they show its text (a group, a v0.4 chat, Apps off).
+   */
+  linkId?: string;
   messages: readonly Announceable[];
   nameOf(message: Announceable): string;
   /** The chat is on screen. A chat kept open behind another one reads nothing out. */
@@ -107,8 +114,9 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
   const seen = useRef<{ chat: string; ids: Set<string>; last?: string; at: number } | null>(null);
   const pending = useRef<Announceable[]>([]);
   const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout>; turns?: ReturnType<typeof setTimeout> }>({});
-  const words = useRef({ t, nameOf, active, online });
-  words.current = { t, nameOf, active, online };
+  const appCards = appCardsShown(linkId, useAppsAvailable());
+  const words = useRef({ t, nameOf, active, online, appCards });
+  words.current = { t, nameOf, active, online, appCards };
   /** My texts that can still take a step (not delivered yet), by message id: a change to not sent or waiting is said. */
   const watched = useRef(new Map<string, Watched>());
   /** My texts that took such a step since the last line, by id: said together once the window is over. */
@@ -183,7 +191,7 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
     if (!turns.current.size || timers.current.turns) return;
     timers.current.turns = setTimeout(() => {
       timers.current.turns = undefined;
-      const { t, active, online } = words.current;
+      const { t, active, online, appCards } = words.current;
       // Only what still stands: a text sent again (or delivered after all) within the window is no news.
       const batch = [...turns.current.values()].filter(({ message, turn }) => turnOf(watched.current.get(message.id)?.delivery) === turn);
       turns.current.clear();
@@ -193,7 +201,7 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       // One text: a sentence of its own with what it says inside it. Not the line a message is read in ("Not sent: …"),
       // which a contact named "Not sent" would say word for word with any text it sends.
       const line = (list: Announceable[], one: "chat.announce.notSent" | "chat.announce.waiting", count: "chat.announce.notSentCount" | "chat.announce.waitingCount") =>
-        list.length === 1 ? t(one, { text: short(spoken(list[0], t)) }) : t(count, { count: list.length });
+        list.length === 1 ? t(one, { text: short(spoken(list[0], t, appCards)) }) : t(count, { count: list.length });
       if (failed.length) sayRef.current(line(failed, "chat.announce.notSent", "chat.announce.notSentCount"));
       if (waiting.length) sayRef.current(line(waiting, "chat.announce.waiting", "chat.announce.waitingCount"));
     }, ANNOUNCE_WINDOW_MS);
@@ -246,12 +254,12 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       timers.current.flush = undefined;
       const batch = pending.current;
       pending.current = [];
-      const { t, nameOf, active } = words.current;
+      const { t, nameOf, active, appCards } = words.current;
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));
       const offer = batch.length === 1 && batch[0].file ? fileOfferLine(batch[0].file, servicesPlatform?.getTransfer(batch[0].file.id) ?? null, nameOf(batch[0]), t) : null;
       const line = offer ?? (batch.length === 1
-        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t)) })
+        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t, appCards)) })
         : names.size === 1
         ? t("chat.announce.messagesFrom", { count: batch.length, name: [...names][0] })
         : t("chat.announce.messages", { count: batch.length }));
