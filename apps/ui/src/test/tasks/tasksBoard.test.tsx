@@ -297,6 +297,17 @@ describe("the Tasks board", () => {
     expect(cardIds("running")).toHaveLength(100);
   });
 
+  it("keeps the chosen view, grouping and tag filled in forced colors, where the accent's background is gone", async () => {
+    const { user } = profile([...rowsOfThree(), row("link-1", task({ id: "t", tags: ["core"] })), row("group:g1", routine(), { member: "hermes-key" })]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    await user.click(screen.getAllByTestId("tasks-tag")[0]);
+    const pills = [screen.getByTestId("tasks-view-tasks"), screen.getByTestId("tasks-view-routines"), ...screen.getAllByRole("radio"), ...screen.getAllByTestId("tasks-tag")];
+    const chosen = (el: HTMLElement) => el.getAttribute("aria-pressed") === "true" || el.getAttribute("aria-checked") === "true";
+    expect(pills.filter(chosen).map((el) => el.dataset.testid)).toEqual(["tasks-view-tasks", "tasks-group-bot", "tasks-tag"]);
+    for (const pill of pills) expect(pill.classList.contains("forced-colors:bg-[color:Highlight]"), pill.dataset.testid).toBe(chosen(pill));
+  });
+
   it("lists routines on their own tab, a line each, never in the columns", async () => {
     const rows = [...rowsOfThree(), row("group:g1", routine({ lastRun: { at: NOW - 3_600_000, result: "ok" } }), { member: "hermes-key" })];
     const { user } = profile(rows);
@@ -589,6 +600,15 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[2]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps the chosen tab filled in forced colors, where the accent's background is gone", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    await user.click(tabs[3]);
+    expect(tabs.map((tab) => tab.classList.contains("forced-colors:bg-[color:Highlight]"))).toEqual([false, false, false, true, false]);
   });
 
   it("keeps the columns off screen out of Tab and the screen reader: Tab from a tab goes into its own column", async () => {
