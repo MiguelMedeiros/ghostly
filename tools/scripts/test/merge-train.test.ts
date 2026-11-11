@@ -1383,6 +1383,28 @@ describe("a run of the train", () => {
     expect(repo.tips["epic/x"]).toBe(tested);
   });
 
+  it("never closes as merged a pull request someone wrote into an open epic batch's mark", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { base: "epic/x" });
+    repo.add(12, { base: "epic/x" });
+    const b = (await repo.run({ base: "epic/x" })).inFlight as number;
+    repo.settle();
+    // A writer adds a queued pull request the batch does not hold to its mark, at that pull request's head.
+    repo.add(13, { base: "epic/x" });
+    const p = repo.pulls.get(b)!;
+    p.body = p.body.replace(/(<!-- merge-train:batch )(\{.*\})( -->)/, (_, a, json, z) => {
+      const state = JSON.parse(json);
+      return `${a}${JSON.stringify({ ...state, prs: [...state.prs, { number: 13, sha: repo.pulls.get(13)!.sha }] })}${z}`;
+    });
+    expect(readState(p.body).prs.map((s) => s.number)).toEqual([11, 12, 13]);
+    const r = await repo.run({ base: "epic/x" });
+    expect(repo.tips["epic/x"]).toBe("epic0");
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toContain(b);
+    expect(repo.pulls.get(13)!.open).toBe(true);
+    expect(repo.comments.get(13)?.at(-1)?.body).not.toBe(`Merged via #${b}.`);
+  });
+
   it("leaves a pull request in line when its branch moved after its CI was read", async () => {
     const repo = fakeRepo();
     repo.add(11);
