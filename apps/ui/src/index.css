@@ -1724,6 +1724,22 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   padding-inline-end: max(0.75rem, env(safe-area-inset-right));
 }
 
+/* With the keyboard up it ends where the keyboard starts: iOS keeps the page's height, and the field the person types
+   in, at the app's bottom, was under the keyboard. So does an app in a chat on a phone, which covers the whole screen
+   (components/apps/chat-app-panel.css). */
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .fixed.inset-0.app-alone {
+    bottom: calc(100% - var(--app-height, 100%));
+  }
+}
+@media (pointer: coarse) and (max-width: 767px) {
+  /* Its `height: 100%` would win over `bottom`. */
+  html[data-keyboard="true"] .chat-app-panel {
+    bottom: calc(100% - var(--app-height, 100%));
+    height: auto;
+  }
+}
+
 /* Forced colors (Windows Contrast themes, Edge and Chrome's forced colors): the keyboard focus's mark. Most controls
    show the focus with a Tailwind ring alone (`focus-visible:outline-none focus-visible:ring-2`), a box-shadow, which
    forced colors drops, and Tailwind 4's `outline-none` is `outline-style: none`: nothing marked the focus there. A
