@@ -6,7 +6,8 @@
  *   `load`. Nothing an app sends names it; extra fields in a request are never read.
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
- * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
+ * - Requests are `{id, type, args}`, at most 66 KiB as JSON (a 64 KiB stored value with its key) and 50 a second;
+ *   answers `{id, ok, value | error}`; events
  *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file`,
  *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
  * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
@@ -187,7 +188,7 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
 /**
  * At least how many bytes `value` takes as JSON, counted only until it passes `budget`: a string by its length (UTF-8
  * and escapes only add), anything else by its fewest. Binary data (an ArrayBuffer or a view on one) and a value too
- * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
+ * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 66 KiB is refused
  * without JSON.stringify writing it whole: a 16 MiB Uint8Array took that 1.6 s on the page's thread.
  */
 function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_JSON {
