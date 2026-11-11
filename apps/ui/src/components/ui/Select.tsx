@@ -25,6 +25,11 @@ export interface SelectProps<V extends string = string> {
   /** Submits the value with a form, through a hidden input. */
   name?: string;
   disabled?: boolean;
+  /**
+   * Working on a choice just made: it opens no list and takes no keys but Tab, yet keeps the focus. `disabled` would drop
+   * a keyboard's focus to the page.
+   */
+  busy?: boolean;
   /** `sm` for tight places (a chat bubble). */
   size?: "md" | "sm";
   /** As wide as its value (up to the line) instead of the whole line: for a `Row`'s control. */
@@ -54,7 +59,7 @@ type Place = { left: number; width: number; maxHeight: number } & ({ top: number
  * Enter/Space to choose, Escape to close without choosing, Tab to choose and move on).
  */
 export function Select<V extends string = string>({
-  value, options, onChange, placeholder = "", id, name, disabled = false, size = "md", fit = false,
+  value, options, onChange, placeholder = "", id, name, disabled = false, busy = false, size = "md", fit = false,
   "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId, ref,
 }: SelectProps<V>) {
   const uid = useId();
@@ -89,7 +94,7 @@ export function Select<V extends string = string>({
   const start = () => (selected >= 0 ? selected : first());
 
   const show = (at: number) => {
-    if (disabled || !options.length) return;
+    if (disabled || busy || !options.length) return;
     setHost(trigger.current?.closest("dialog") ?? document.body);
     setPlace(null);
     setActive(at);
@@ -120,7 +125,7 @@ export function Select<V extends string = string>({
   const printable = (e: KeyboardEvent) => e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
 
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (disabled) return;
+    if (disabled || busy) return;
     const handled = () => { e.preventDefault(); e.stopPropagation(); };
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") { handled(); show(start()); }
@@ -234,12 +239,14 @@ export function Select<V extends string = string>({
         data-testid={testId}
         data-value={value}
         disabled={disabled}
+        aria-disabled={busy || undefined}
+        aria-busy={busy || undefined}
         title={current ? [current.label, current.description].filter(Boolean).join(" — ") : undefined}
         onClick={() => (open ? setOpen(false) : show(start()))}
         onKeyDown={onKeyDown}
         // Space would click the button again on release in some browsers, reopening what Space just closed.
         onKeyUp={e => { if (e.key === " ") e.preventDefault(); }}
-        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
+        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
         {/* A label is often not the app's words (a microphone's, a mint's, a card's name): laid out by its own letters, so
