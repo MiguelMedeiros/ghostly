@@ -28,7 +28,8 @@ const greenTested = [
 function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
   const events = new Map<number, { event: string; label?: { name: string }; created_at: string }[]>();
-  const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
+  /** `editor`: who last wrote the comment, when not its author (an edit by another login). */
+  const comments = new Map<number | string, { id: number; node_id?: string; body: string; user?: { login: string }; editor?: string }[]>();
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
@@ -115,15 +116,20 @@ function fakeRepo() {
       return first && moved && moved > first ? moved : first;
     },
     comments: async (n: number) => read(comments.get(n) ?? []),
+    lastEditors: async (ids: string[]) => {
+      const all = [...comments.values()].flat();
+      return new Map(ids.flatMap((id) => all.filter((c) => c.node_id === id).map((c) => [id, c.editor ?? c.user?.login])));
+    },
     branchSha: async (base: string) => tips[base],
     behindBy: async (tip: string, head: string) => (sitsOn.get(head) === tip ? 0 : 3),
     comment: async (n: number, body: string) => {
-      const c = { id: ids++, body, user: { login: "train" } };
+      const id = ids++;
+      const c = { id, node_id: `IC_${id}`, body, user: { login: "train" } };
       comments.set(n, [...(comments.get(n) ?? []), c]);
       return { id: c.id };
     },
     editComment: async (id: number, body: string) => {
-      for (const list of comments.values()) for (const c of list) if (c.id === id) c.body = body;
+      for (const list of comments.values()) for (const c of list) if (c.id === id) Object.assign(c, { body, editor: "train" });
     },
     deleteComment: async (id: number) => {
       for (const [n, list] of comments) comments.set(n, list.filter((c) => c.id !== id));
@@ -1049,6 +1055,54 @@ describe("a run of the train", () => {
     repo.runs.set("h12later", green);
     const again = await repo.run();
     expect(again.dropped).toEqual([12]); // the train's own record (h12) counts, not the planted one
+  });
+
+  it("trusts the marks of its position comment only while it wrote it last: edited by another login, the pull request counts as queued again", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red }); // waits in line, so its position comment records h11
+    await repo.run();
+    // An account that may edit any comment pushes a head nobody reviewed, and edits the train's comment to vouch for it.
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    repo.pushed.set("h11b", "2026-10-08T00:05:00Z");
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace("merge-train:head h11 ", "merge-train:head h11b "), editor: "admin" });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(r.log).toContain("#11: its position comment was last edited by admin, so its marks do not count.");
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(11)!.map((x) => x.body)).toEqual([expect.stringMatching(/h11b was pushed after `queue` was added/)]);
+  });
+
+  it("rewrites a position comment another login edited, and trusts it again once it wrote it", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red });
+    await repo.run();
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace("merge-train:head h11 ", "merge-train:head 0000000 "), editor: "admin" }); // would read as new commits
+    expect((await repo.run()).dropped).toEqual([]);
+    expect(repo.comments.get(11)).toHaveLength(1);
+    expect(repo.comments.get(11)![0]).toMatchObject({ editor: "train", body: expect.stringMatching(/merge-train:head h11 /) });
+    repo.pulls.get(11)!.sha = "h11c"; // the train's own record counts again
+    repo.runs.set("h11c", green);
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
+  it("does not land a head that another login's edit of its alone mark names", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    expect(repo.alone(11)).toMatchObject({ baseSha: "dev0" });
+    // A push of an unreviewed head that sits on dev's tip and is green, and the alone mark edited to name it.
+    repo.pulls.get(11)!.sha = "h11x";
+    repo.runs.set("h11x", green);
+    repo.sitsOn.set("h11x", "dev0");
+    repo.pushed.set("h11x", "2026-10-08T00:05:00Z");
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace(/"sha":"[^"]+"/, '"sha":"h11x"'), editor: "admin" });
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.dropped).toEqual([11]);
   });
 
   it("needs its own login", async () => {
@@ -3470,6 +3524,30 @@ describe("GitHub over REST", () => {
     const gh = restLayer("t", "o/r", { budget: 0, fetchImpl: async () => answers.shift(), wait: async (ms: number) => void waits.push(ms) });
     expect(await gh.branchSha("dev")).toBe("abc");
     expect(waits).toEqual([5000, 7000]);
+  });
+
+  it("reads who last wrote each comment in one GraphQL request: the editor, else the author, a bot by its REST login", async () => {
+    const sent: { url: string; body: { query: string; variables: { ids: string[] } } }[] = [];
+    const nodes = [
+      { id: "IC_1", author: { __typename: "Bot", login: "queue-app" }, editor: null },
+      { id: "IC_2", author: { __typename: "Bot", login: "queue-app" }, editor: { __typename: "User", login: "admin" } },
+      { id: "IC_3", author: { __typename: "Bot", login: "queue-app" }, editor: { __typename: "Bot", login: "queue-app" } },
+      { id: "IC_4", author: null, editor: null }, // its author's account is gone
+      { id: "IC_5", author: { __typename: "Bot", login: "queue-app" }, editor: null, lastEditedAt: "2026-10-08T00:00:00Z" }, // its editor's account is gone
+      null, // deleted since it was listed
+    ];
+    const errors = [{ type: "NOT_FOUND", message: "Could not resolve to a node with the global id of 'IC_6'" }];
+    const fetchImpl = async (url: string, init: { body: string }) => (sent.push({ url, body: JSON.parse(init.body) }), reply(200, { data: { nodes }, errors }));
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.lastEditors([])).toEqual(new Map());
+    expect(sent).toEqual([]); // nothing to ask, nothing asked
+    const editors = await gh.lastEditors(["IC_1", "IC_2", "IC_3", "IC_4", "IC_5", "IC_6"]);
+    expect(editors).toEqual(new Map([["IC_1", "queue-app[bot]"], ["IC_2", "admin"], ["IC_3", "queue-app[bot]"]]));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("https://api.github.com/graphql");
+    expect(sent[0].body.variables.ids).toEqual(["IC_1", "IC_2", "IC_3", "IC_4", "IC_5", "IC_6"]);
+    const failing = restLayer("t", "o/r", { fetchImpl: async () => reply(200, { errors: [{ message: "Something went wrong" }] }), wait: async () => {} });
+    await expect(failing.lastEditors(["IC_1"])).rejects.toThrow(/Something went wrong/);
   });
 
   it("keeps the status of an HTML error page readable once retries run out", async () => {
