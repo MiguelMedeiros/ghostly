@@ -98,6 +98,10 @@ describe("help", () => {
       [["daemon", "frob"], "Unknown command: daemon frob: ghostly daemon takes status, stop or restart (ghostly help daemon)"],
       [["help", "profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
       [["help", "x401", "key", "frob"], "Unknown command: x401 key frob: ghostly x401 key takes new (ghostly help x401 key)"],
+      // `status` and `daemon` are commands and groups: `help status frob` answered status's help with exit 0.
+      [["status", "frob"], "Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)"],
+      [["help", "status", "frob"], "Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)"],
+      [["help", "daemon", "frob"], "Unknown command: daemon frob: ghostly daemon takes status, stop or restart (ghostly help daemon)"],
       [["wallet", "frob", "--help"], expect.stringMatching(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/)],
     ] as const) {
       const result = await ghostly([...args]);
@@ -119,6 +123,9 @@ describe("help", () => {
       [["grup", "list"], "Unknown command: grup list (did you mean group list? ghostly help group list)"],
       [["chat", "lst"], "Unknown command: chat lst (did you mean chat list? ghostly help chat list)"],
       [["help", "sned"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      // Before: "Too many arguments: ghostly status", as if `status` took a word.
+      [["status", "shwo"], "Unknown command: status shwo (did you mean status show? ghostly help status show)"],
+      [["status", "sett", "hi"], "Unknown command: status sett (did you mean status set? ghostly help status set)"],
       [["send", "ecp", "hi", "--wiat", "sent"], "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"],
       [["chat", "history", "ecp", "--limt", "5"], "Unknown option --limt for ghostly chat history (did you mean --limit? ghostly help chat history)"],
       [["chat", "list", "--show-secrets"], "Unknown option --show-secrets for ghostly chat list (did you mean --show-secret? ghostly help chat list)"],
