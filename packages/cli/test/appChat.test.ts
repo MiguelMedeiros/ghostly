@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appCardId } from "@ghostly/core";
+import { appCardId, checkStatusCard } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { reportAppFrames } from "../src/appEvents";
@@ -42,6 +42,15 @@ describe("app open", () => {
     expect(await callApi(ctx, "app.open", { chat: "Alice", ref: "chess" })).toEqual({ chat: "chat-one", app: REF, version: "2.3.0", card: "me_1", peer: null, live: false });
     expect(node.appOpen).toHaveBeenCalledWith({ linkId: "chat-one", ref: REF, version: "2.3.0" });
     expect(node.sendMessage).toHaveBeenCalledWith({ linkId: "chat-one", text: "", card: { kind: "app", id: appCardId(REF), ref: REF, digest: CHESS.digest, sequence: 4, title: "Chess", version: "2.3.0", url: CHESS.url, opened: true } });
+  });
+
+  it("leaves out a version longer than a card takes, as a person's app does, so the card still goes", async () => {
+    const version = "1.2.0-beta.3+20261106.a1b2c3d4e5f6a7b8";
+    const { ctx, node } = fake({ served: [{ ...CHESS, version }] });
+    expect(await callApi(ctx, "app.open", { chat: "Alice", ref: "chess" })).toMatchObject({ version, card: "me_1" });
+    const { card } = (node.sendMessage.mock.calls[0] as unknown as [{ card: Record<string, unknown> }])[0];
+    expect(card).not.toHaveProperty("version");
+    expect(checkStatusCard(card)).not.toHaveProperty("error");
   });
 
   it("sends no card when the contact's app is open there already, or with noCard", async () => {
