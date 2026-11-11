@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -3622,6 +3622,105 @@ describe("the bases with a train", () => {
     // A bases job cancelled after it started (by hand, or its time ran out) listed nothing: that wake is served here.
     const cut = [job("Bases with a train", "cancelled", [{ name: "List the bases", conclusion: "cancelled" }])];
     expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
+  });
+
+  // A red batch (or lone pull request) is held while CI Success on the base's tip still runs, and only that CI ending
+  // moves it: CI on a push to the base woke nothing, so it waited for the schedule (20 to 64 minutes apart).
+  it("woken by CI on a push to a base are that base, while the commit is its tip and the base has a train", () => {
+    const a = "a".repeat(40), tip = "1".repeat(40), old = "2".repeat(40), epicTip = "3".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("epic/x", "c".repeat(40), [LABEL.queue])];
+    const tips = { dev: tip, "epic/x": epicTip };
+    expect(trainBases(pulls, tip, tips)).toEqual(["dev"]);
+    expect(trainBases(pulls, epicTip, tips)).toEqual(["epic/x"]);
+    // A commit the base has moved past: a newer push's CI (or a push's own run of the train) serves the tip.
+    expect(trainBases(pulls, old, tips)).toEqual([]);
+    // A base with no train: nothing to hold, nothing to run.
+    expect(trainBases([pr("epic/x", "c".repeat(40), [LABEL.queue])], tip, tips)).toEqual([]);
+    // With the tips unread (or a base whose tip is not known), a base's commit wakes nothing, as before.
+    expect(trainBases(pulls, tip)).toEqual([]);
+    expect(trainBases(pulls, [old, tip], tips)).toEqual(["dev"]);
+  });
+
+  /** The workflow's view of `repo` for --list-bases: every open pull request, and this run alone among its runs. */
+  const listing = (repo: ReturnType<typeof fakeRepo>) => {
+    const reads: string[] = [];
+    const gh = {
+      ...repo.gh,
+      pulls: async () => [...repo.pulls.values()].filter((p) => p.open).map((p) => ({ ...p, labels: [...p.labels] })),
+      queueRuns: async () => [{ id: 7, conclusion: null, display_title: "Merge queue: CI ended on x" }],
+      runJobs: async () => [],
+      branchSha: async (base: string) => (reads.push(base), repo.gh.branchSha(base)),
+    };
+    return { gh, reads };
+  };
+  const DEV = "d".repeat(40);
+
+  it("woken by dev's own CI ending: a red batch held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    // dev's CI ends green: its run wakes the workflow, which lists dev, and the train blames the batch's own red.
+    repo.runs.set(DEV, green);
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, DEV, 7)).toEqual(["dev"]);
+    expect(reads).toEqual(["dev"]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.members()).toEqual([11]);
+    // Ended red: listed too; the train then says the hold is for dev's red, not its CI still running.
+    const pending = fakeRepo();
+    pending.tips.dev = DEV;
+    for (const n of [11, 12]) pending.add(n);
+    await pending.run();
+    pending.runs.set(DEV, running);
+    pending.settle([11, 12]);
+    await pending.run();
+    pending.runs.set(DEV, red);
+    expect(await listBases(listing(pending).gh, DEV, 7)).toEqual(["dev"]);
+    expect((await pending.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is red/);
+  });
+
+  it("woken by dev's own CI ending: a lone pull request held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #11: .*itself is still running/);
+    repo.runs.set(DEV, green);
+    expect(await listBases(listing(repo).gh, DEV, 7)).toEqual(["dev"]);
+    const first = repo.pulls.get(11)!.sha;
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    // Its one more run on a fresh rebase, as for any lone pull request red on a green base.
+    expect(repo.pulls.get(11)!.sha).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ retried: true });
+  });
+
+  it("woken by a pull request's CI are as before: dev's tip is read, and lists dev once at most", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11);
+    repo.pulls.set(20, { number: 20, title: "draft", body: "", draft: true, sha: "e".repeat(40), branch: "wip", fork: false, labels: [], createdAt: "", open: true, base: "dev" });
+    const queued = "f".repeat(40);
+    repo.pulls.get(11)!.sha = queued;
+    // A draft's CI, or any commit that heads nothing in line and is no base's tip: no train.
+    expect(await listBases(listing(repo).gh, "e".repeat(40), 7)).toEqual([]);
+    expect(await listBases(listing(repo).gh, "0".repeat(40), 7)).toEqual([]);
+    // A queued one's CI: dev, once, even when a replaced wake was dev's own CI.
+    expect(await listBases(listing(repo).gh, queued, 7)).toEqual(["dev"]);
+    expect(trainBases([...repo.pulls.values()], [queued, DEV], { dev: DEV })).toEqual(["dev"]);
+    // Not woken by CI (the schedule, a label, a push, by hand): every base with a train, and no tip is read.
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, undefined, 7)).toEqual(["dev"]);
+    expect(await listBases(gh, "", 7)).toEqual(["dev"]);
+    expect(reads).toEqual([]);
   });
 
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
