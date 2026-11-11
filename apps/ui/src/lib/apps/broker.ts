@@ -465,7 +465,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       case "storage.set": {
         const key = storageKey(args[0]);
         const value = args[1];
-        if (!isJsonValue(value) || utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
+        // No value is a request the call does not take, not one too large (`storage.delete` removes a key).
+        if (!isJsonValue(value)) refuse("bad-request");
+        if (utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
         await host.storage.set(launch.ref, scope, key, value as MiniAppJson);
         return {};
       }
