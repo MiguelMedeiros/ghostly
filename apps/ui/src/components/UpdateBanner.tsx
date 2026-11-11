@@ -11,6 +11,8 @@ import { updateFailure } from "../lib/updateFailure";
  * reloads the tab.
  * While it installs its buttons are busy, not disabled: that would drop a keyboard's focus to the page, and on Desktop
  * an install can take long or fail.
+ * Its lines wrap, never cut with an ellipsis: on a phone the warning beside Reload (or why an install failed) is what
+ * the person reads before pressing it, and a cut one ended mid-word in most languages.
  */
 export function UpdateBanner() {
   const { t } = useI18n();
@@ -56,8 +58,8 @@ export function UpdateBanner() {
           data-testid="update-banner"
         >
           <div className="min-w-0 flex-1">
-            <p className="text-text-primary text-xs font-semibold m-0 truncate">{title}</p>
-            <p className="text-text-muted text-[11px] m-0 truncate">
+            <p className="text-text-primary text-xs font-semibold m-0 break-words">{title}</p>
+            <p className="text-text-muted text-[11px] m-0 break-words">
               {installing
                 ? downloading(Math.round(progress * 100))
                 : whyText
