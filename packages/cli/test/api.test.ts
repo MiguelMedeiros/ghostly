@@ -525,6 +525,21 @@ describe("chats", () => {
     for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
   });
 
+  // A message to a private group with nobody else in it reaches nobody, not even who joins later: `--wait sent` waited its
+  // whole time and said it goes when an edge opens.
+  it("group send in a private group with nobody else in it answers at once and says nobody gets it", async () => {
+    const alone = { ...group, profile: "mesh", members: [group.members[0]] } as GroupView;
+    const node = { getState: () => ({ links: [], groups: [alone] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:0" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const ctx = { runtime: { server: { node } }, mode: "one-shot" } as unknown as ApiContext;
+    const note = "Nobody else is in this group: nobody gets this message, not even someone who joins later";
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi", wait: "sent", timeout: 1 })).resolves.toEqual({ group: "g1", messageId: "mekey:0:0", sent: false, edges: 0, note });
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi" })).resolves.toMatchObject({ sent: false, edges: 0, note });
+    // Another member: no note, whether an edge took it yet or not.
+    const crew = { ...alone, members: group.members } as GroupView;
+    Object.assign(node, { getState: () => ({ links: [], groups: [crew] }) });
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "hi" })).not.toHaveProperty("note");
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
