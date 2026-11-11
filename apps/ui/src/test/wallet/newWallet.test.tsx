@@ -34,6 +34,12 @@ describe("a profile with no wallet yet", () => {
     expect(screen.queryByRole("tablist", { name: "Wallet integrations" })).not.toBeInTheDocument();
   });
 
+  it("takes a tap on 44 px of the New in its sentence on a phone (where a tap lands is a browser's measure: e2e/web/phone-touch-targets.spec.ts)", async () => {
+    const { engine } = renderApp(<Wallet />);
+    engine.update({ wallet: empty() });
+    expect(await screen.findByTestId("wallet-first-new")).toHaveClass("tap-target");
+  });
+
   it("makes Cashu and USDT on the network chosen, one after the other, and then shows their cards", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: empty() });
@@ -615,7 +621,9 @@ describe("real money and test money, two wallets apart", () => {
     expect(tab("mainnet")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
     expect(tab("testnet")).toHaveFocus();
-    // Tab leaves the tablist for the network's deck, on its chosen card.
+    // Tab leaves the tablist for the network's total over the deck, then the deck, on its chosen card.
+    await user.tab();
+    expect(screen.getByTestId("wallet-total-bitcoin")).toHaveFocus();
     await user.tab();
     expect(screen.getByTestId("wallet-card-cashu-testnet")).toHaveFocus();
   });

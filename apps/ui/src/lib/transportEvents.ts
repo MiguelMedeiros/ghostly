@@ -166,10 +166,13 @@ export interface TransportOption {
 /**
  * Why this app lacks a transport, and how to get it where there is a way. Iroh or HyperDHT this app runs (the web on
  * its Iroh relays or its HyperDHT relay) that did not start is not lacking: its relays in Settings, Network are where to look.
+ * With "Hide my IP from contacts" on (`relayOnly`), the Desktop leaves its own Iroh and HyperDHT out for contacts, and
+ * HyperDHT runs only through a HyperDHT relay (packages/browser/src/engine/node.ts `nativeFactoriesFor`): that is why.
  */
-function missing(transport: PairedTransport, link: OwnTransports, tr: Translate): string {
+function missing(transport: PairedTransport, link: OwnTransports, tr: Translate, relayOnly: boolean): string {
   if (transport === "webrtc/1") return tr("connection.option.noWebrtc");
   if (link.runnableTransports?.includes(transport)) return tr("connection.option.relayUnreached", { transport: name(transport) });
+  if (relayOnly) return transport === "hyperdht/1" ? tr("connection.option.relayOnlyHyperdht") : tr("connection.option.relayOnlyOff");
   if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
   return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
@@ -187,13 +190,14 @@ export function ownTransports(link: OwnTransports): PairedTransport[] {
 /**
  * What the chat's Connection menu offers: transports this app runs and the contact's app supports on this link
  * (per its last word; unknown before a first session, then only this app's side is known). Never one this app lacks.
+ * `relayOnly`: the profile's "Hide my IP from contacts" is on.
  */
-export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTransports" | "transportErrors" | "relayedTransports">, tr: Translate = englishT): TransportOption[] {
+export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTransports" | "transportErrors" | "relayedTransports">, tr: Translate = englishT, relayOnly = false): TransportOption[] {
   const mine = ownTransports(link), theirs = link.peerTransports;
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
     // The engine's error in a few words of the app's language, as the line below the choices says it; its next step stays there.
-    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, link, tr) };
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, link, tr, relayOnly) };
     if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: tr("connection.option.contactLacks", { transport: name(transport) }) };
     return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
@@ -425,7 +429,10 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
     : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
     : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]
     : relayed ? [tr("connection.summary.noDirectShort"), tr("connection.summary.noDirect", { transport: t })]
-    : [tr("connection.event.automatic"), transport === "webrtc/1" ? tr("connection.summary.automaticWebrtc")
+    // Both apps run Iroh: Automatic comes back over it first, then moves the session to WebRTC (WISP 100, revision
+    // 2026-11-08). Not with Fallback off: then it puts WebRTC first, as before.
+    : [tr("connection.event.automatic"), transport === "webrtc/1"
+      ? tr(link.transportFallback !== false && ownTransports(link).includes("iroh/1") && !!link.peerTransports?.includes("iroh/1") ? "connection.summary.automaticWebrtcIroh" : "connection.summary.automaticWebrtc")
       : tr(noWebrtc ? "connection.summary.automaticNoWebrtc" : "connection.summary.automatic", { transport: t })];
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [tr("connection.ms", { ms: link.transportRttMs })] : [];

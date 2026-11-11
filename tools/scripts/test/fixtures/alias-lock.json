@@ -1,0 +1,29 @@
+{
+  "name": "alias-fixture",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "alias-fixture",
+      "dependencies": {
+        "lodash": "4.17.20",
+        "old-lodash": "npm:lodash@4.17.15"
+      }
+    },
+    "node_modules/lodash": {
+      "version": "4.17.20",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz"
+    },
+    "node_modules/old-lodash": {
+      "name": "lodash",
+      "version": "4.17.15",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.15.tgz"
+    },
+    "node_modules/@scope/pinned": {
+      "name": "@other/real",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/@other/real/-/real-2.0.0.tgz",
+      "dev": true
+    }
+  }
+}

@@ -6,8 +6,12 @@ import { useSyncExternalStore } from "react";
 import type { Translate } from "../../locales/translate";
 import type { LinkedFilesHost } from "../platform";
 
-/** How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one). */
-export interface OpenAppOptions { runAnyway?: boolean }
+/**
+ * How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one).
+ * `again`: Open again under a chat's stopped app, that app's run: it starts only if the chat still shows that one once it
+ * can start, so a panel closed meanwhile stays closed.
+ */
+export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
@@ -37,14 +41,16 @@ export function useAppOpener(): AppOpener | null {
  * `failed`: the app stopped on its own (its frame navigated, broke the protocol, or never started; § the runner, step 7).
  * `unresponsive`: it held its thread past the watchdog's bound, and the page stopped it; it may be opened again.
  * `offline`: it never started, the person being offline (the web runner page never loaded).
+ * `focus`: it kept taking the page's focus by script, and the page stopped it (`holdFocus`).
  */
-export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" };
+export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" } | { why: "focus" };
 
 /** "Chess was stopped: its maker revoked this version", where the app ran. */
 export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
+  if (takedown.why === "focus") return t("apps.view.stoppedFocus", { title });
   return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
 }
 
@@ -75,6 +81,9 @@ export function appsRunning(): boolean {
 
 /** Why an open that the profile's lock overtook did not start. */
 export const LOCKED = "The profile locked before the app started";
+
+/** Why an open in a chat that closed meanwhile (the person went elsewhere) did not start. */
+export const CHAT_CLOSED = "The chat closed before the app started";
 
 /** How many times the profile locked (`stopRunningApps`): an open still on its way when it locks never starts. */
 let locks = 0;

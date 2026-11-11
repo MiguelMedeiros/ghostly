@@ -8,6 +8,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, positionals } from "../src/commands";
+import { asCliError } from "../src/errors";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.files
 
@@ -77,6 +78,31 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: file })).rejects.toMatchObject({ code: "not_found", message: `${file} is a file, not a folder` });
   });
 
+  // Root writes into any folder: nothing to refuse.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a folder it may not write is named, never the save's own hidden temporary file", async () => {
+    const folder = join(dir, "readonly");
+    mkdirSync(folder, { mode: 0o555 });
+    // As the socket and the CLI answer it.
+    const save = (params: Record<string, unknown>) => callApi(ctx, "file.save", params).catch((error: unknown) => { throw asCliError(error); });
+    const message = `Not allowed to write or read ${folder}`;
+    await expect(save({ file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({ code: "refused", message });
+    await expect(save({ file: "chat-one-in-r", path: join(folder, "x.txt") })).rejects.toMatchObject({ code: "refused", message });
+    expect(readdirSync(folder)).toEqual([]);
+  });
+
+  it("a --path that ends in a separator names a folder, never the file's name, whether the folder is there or not", async () => {
+    // Before, resolve() dropped the slash: "--path downloads/" with no downloads folder left a file named downloads.
+    const missing = join(dir, "newfolder");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
+      code: "bad_request", message: `${missing}/ names a folder: name a file, or use --dir ${missing} (dir over the socket)`,
+    });
+    const file = join(dir, "slash.txt");
+    writeFileSync(file, "x");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${file}/`, force: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(readdirSync(dir)).not.toContain("newfolder");
+    expect(readFileSync(file, "utf8")).toBe("x");
+  });
+
   it("a voice message goes into --dir under the name Ghostly makes for it, never the sender's", async () => {
     const folder = join(dir, "voice");
     mkdirSync(folder);
@@ -140,5 +166,7 @@ describe("file save to a folder", () => {
     expect(() => params(["chat-one-in-r", "--path", ""])).toThrow(expect.objectContaining({ code: "usage", message: "--path needs a file" }));
     expect(() => params(["chat-one-in-r", "--dir", ""])).toThrow(expect.objectContaining({ code: "usage", message: "--dir needs a folder" }));
     expect(params(["chat-one-in-r", "--path", "out.txt"])).toMatchObject({ path: join(process.cwd(), "out.txt") });
+    // The separator that makes it a folder reaches the daemon.
+    expect(params(["chat-one-in-r", "--path", "downloads/"])).toMatchObject({ path: `${join(process.cwd(), "downloads")}/` });
   });
 });

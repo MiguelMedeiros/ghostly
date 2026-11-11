@@ -16,8 +16,17 @@ export interface OptionSpec {
   choices?: readonly string[];
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
-/** The command a line is parsed for, as its unknown options name it: `send`, and whether text comes on its line. */
-export interface ParseFor { command: string; text?: boolean }
+
+/**
+ * A number as typed on the command line, in decimal digits only (`21`, `-5`, `12.5`); NaN for any other word.
+ * `Number()` alone read `1e3` as 1,000, `0x10` as 16 and `" 21"` as 21: `chat pay bob 2e3`, a typo of 23, paid 2,000.
+ */
+export const decimalNumber = (value: string): number => /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
+/**
+ * The command a line is parsed for, as its unknown options name it: `send`, whether text comes on its line, and which
+ * positionals take a number (`<sats>`): there a word like `-5` is that number, refused as one, not an unknown option.
+ */
+export interface ParseFor { command: string; text?: boolean; number?: (index: number) => boolean }
 
 /**
  * Options every command takes. They may come anywhere on the line.
@@ -37,7 +46,9 @@ export const GLOBAL_OPTIONS: Record<string, OptionSpec> = {
  * the ghostly-cli lesson of #208). So is a positional that `idSlot` says takes an id, a key or a draft: there a word
  * that starts with `-`, is longer than two characters and is no option of the command is the value (`--` starts one
  * id in 4096; `-x` stays an option). Any other positional that starts with `-` is refused instead of sent: a
- * mistyped flag must not reach a contact as text. Put `--` before a message that starts with a dash.
+ * mistyped flag must not reach a contact as text. Put `--` before a message that starts with a dash. Where `parsing`
+ * says a number comes, a word of a dash and a digit (`-5`) that is no option is that number, for the command to refuse
+ * in its own words (`<sats> takes a whole number from 1 up, not -5`); no option's name starts with a digit.
  *
  * An unknown option names the command `parsing` gives, the nearest of its options and its help.
  */
@@ -58,6 +69,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") { positionals.push(...argv.slice(i + 1)); break; }
+    if (/^-\d/.test(arg) && parsing?.number?.(positionals.length) && !isOption(arg)) { positionals.push(arg); continue; }
     if (arg.startsWith("-") && arg.length > 2 && idSlot(positionals.length) && !isOption(arg)) { positionals.push(arg); continue; }
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2 && arg !== "-")) {
       let name: string, inline: string | undefined;
@@ -94,7 +106,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       }
       if (option.type === "number") {
         // Number("") and Number(" ") are 0: an unset variable must not read as 0 and be acted on.
-        const number = value.trim() === "" ? NaN : Number(value);
+        const number = decimalNumber(value);
         if (!Number.isFinite(number)) throw new CliError("usage", `--${name} takes a number, not ${JSON.stringify(value)}`);
         options[name] = number;
       } else if (option.type === "list") {
@@ -115,15 +127,23 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
  * `Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)`. The `--` hint only where text comes
  * and for a word with one dash, which may be text (`-1`, `-x`): `version -x` has no text to put after `--`.
  */
-function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined): CliError {
+function unknownOption(arg: string, all: Record<string, OptionSpec>, parsing: ParseFor | undefined, help = parsing ? `ghostly help ${parsing.command}` : undefined): CliError {
   const names = Object.entries(all).flatMap(([name, o]) => (o.type === "boolean" ? [name, `no-${name}`] : [name]));
   const near = nearest(arg.replace(/^--?/, ""), names);
   const hints = [
     ...(near ? [`did you mean --${near}?`] : []),
     ...(parsing?.text && /^-[^-]/.test(arg) ? ["put -- before text that starts with a dash;"] : []),
-    ...(parsing ? [`ghostly help ${parsing.command}`] : []),
+    ...(help ? [help] : []),
   ];
   return new CliError("usage", `Unknown option ${arg}${parsing ? ` for ghostly ${parsing.command}` : ""}${hints.length ? ` (${hints.join(" ")})` : ""}`);
+}
+
+/**
+ * A first word that starts with a dash and is no global option (`ghostly --porfile bot send …`, `ghostly -x status`):
+ * `Unknown option --porfile (did you mean --profile? ghostly help)`, as after the command. Before, "Unknown command".
+ */
+export function unknownGlobalOption(arg: string): CliError {
+  return unknownOption(arg.startsWith("--") ? arg.split("=")[0] : arg, GLOBAL_OPTIONS, undefined, "ghostly help");
 }
 
 /**

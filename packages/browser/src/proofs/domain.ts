@@ -113,11 +113,13 @@ export async function dohQuery(name: string, type: DnsType, options: DomainLooku
  * contacted, so a proof cannot make a contact's app probe their own network.
  * The browser resolves again when it fetches; a name that changes its answer in
  * between (rebinding) is not fully excluded by this check — see the draft.
+ * No address at all (the name does not exist, or has no A or AAAA record) is the resolver's answer about the
+ * domain, not something this side's network did: a DomainCheckError, so a re-check stops confirming the proof.
  */
 export async function assertPublicHost(domain: string, options: DomainLookupOptions): Promise<void> {
   const [v4, v6] = await Promise.all([dohQuery(domain, 'A', options), dohQuery(domain, 'AAAA', options)]);
   const addresses = [...v4.answers, ...v6.answers].map(a => a.data);
-  if (!addresses.length) throw new IdentityCheckUnavailable(`${domain} has no address`);
+  if (!addresses.length) throw new DomainCheckError(`${domain} has no address`);
   if (!addresses.every(isPublicAddress)) throw new IdentityCheckUnavailable(`${domain} points to a private network address, so it was not contacted`);
 }
 

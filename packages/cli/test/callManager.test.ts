@@ -505,6 +505,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     stack.deaf(false);
   });
 
+  // The watch's timer runs before the packets that came meanwhile are read: after a stall of the daemon's own (a loop
+  // held by other work, the process stopped or swapped out), the contact read as silent for as long, while it was not.
+  it("a stall of the daemon's own is not read as the contact's silence: the call stays on", async () => {
+    const { a, b } = pairOfManagers({ stall: { afterMs: 800, endMs: 3000 } });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const placed = await a.calls.start("chat-ab", {}) as { audio: { socket: string } };
+    const alice = await program(placed.audio.socket);
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // The loop held past the watch's end: the contact's packets wait in the connection meanwhile.
+    const held = performance.now() + 3500;
+    while (performance.now() < held) { /* held */ }
+    await new Promise((r) => setTimeout(r, 1500));
+
+    expect(a.events.filter((e) => e.type === "call.stalled" || e.type === "call.ended")).toEqual([]);
+    expect(a.calls.get(undefined)).toMatchObject({ state: "connected", stalled: false });
+    await a.calls.hangup("chat-ab");
+    await alice.ended;
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+  });
+
   // Its codecs' delete throwing (a broken Opus module: "memory access out of bounds") went up through the media's close
   // and stopped the call's end there: no hang-up to the contact, no call.ended, the connection left open.
   it("a call whose codecs throw as it ends still ends: the contact is told, call.ended goes out, the connection closes", async () => {
@@ -609,6 +631,86 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await a.calls.hangup(undefined);
     await a.calls.stopAll();
     await b.calls.stopAll();
+  });
+
+  describe("the device's clock set back or ahead (a phone or a VM fixing its time)", () => {
+    const back = 5 * 60_000;
+
+    it("call.ended says how long the call lasted, not the jump", async () => {
+      let at = Date.now();
+      const { a, b } = pairOfManagers({ now: () => at });
+      b.calls.setAuto({ on: true, from: [], rate: 16000 });
+      await a.calls.start("chat-ab", {});
+      await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+      await new Promise((r) => setTimeout(r, 1200));
+      at -= back;
+      await a.calls.hangup("chat-ab");
+      const ended = await until(() => a.events.find((e) => e.type === "call.ended"));
+      expect(ended.duration).toBeGreaterThanOrEqual(1000);
+      expect(ended.duration).toBeLessThan(back);
+      await b.calls.stopAll();
+    });
+
+    it("a connected call's audio goes on both ways, and the call stays on, when the clock goes back and then ahead", async () => {
+      const real = Date.now.bind(Date);
+      let offset = 0;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => real() + offset);
+      try {
+        const { a, b } = pairOfManagers();
+        b.calls.setAuto({ on: true, from: [], rate: 16000 });
+        await a.calls.start("chat-ab", {});
+        await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+        const frames = (side: Side) => (side.calls.list()[0] as { stats: { framesIn: number; framesOut: number } }).stats;
+        // A second's frames, 50 each way, give or take a busy runner.
+        const flows = async () => {
+          const before = [frames(a), frames(b)];
+          await new Promise((r) => setTimeout(r, 1000));
+          const after = [frames(a), frames(b)];
+          for (const [i, side] of after.entries()) {
+            expect(side.framesOut - before[i].framesOut).toBeGreaterThan(25);
+            expect(side.framesIn - before[i].framesIn).toBeGreaterThan(25);
+          }
+        };
+        await flows();
+        offset = -back;
+        await flows();
+        offset = back;
+        await flows();
+        expect(a.events.concat(b.events).filter((e) => e.type === "call.ended" || e.type === "call.stalled")).toEqual([]);
+        await a.calls.stopAll();
+        await b.calls.stopAll();
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it("a call placed after this side's last one ended unanswered waits CALL_PACE_MS at most, not the jump", async () => {
+      let at = Date.now();
+      const { a, b } = pairOfManagers({ now: () => at });
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"));
+      await a.calls.hangup(undefined);
+      await until(() => b.events.find((e) => e.type === "call.ended"));
+      at -= back;
+      await a.calls.start("chat-ab", {});
+      expect(a.calls.list()).toMatchObject([{ direction: "out", state: "ringing" }]);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
+
+    it("a contact's call that rang while the clock went back is not taken for a burst: their next call rings", async () => {
+      let at = Date.now();
+      const { a, b } = pairOfManagers({ now: () => at, callPaceMs: 0 });
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"));
+      at -= back;
+      await a.calls.hangup(undefined);
+      await until(() => b.events.find((e) => e.type === "call.ended"));
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2, 2000);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
   });
 
   it("a call answered seconds after it rang sends its answer at once, though the STUN server never answers: its candidates were gathered as it rang", async () => {
@@ -1088,6 +1190,53 @@ describe("two call managers", { timeout: 60_000 }, () => {
         expect(rang()).toBe(4);
         expect(signalsOf(callee.side, "o")).toEqual([]);
         await caller.side.calls.stopAll();
+        await callee.side.calls.stopAll();
+        await until(() => counted.open() === 0);
+      });
+    });
+
+    // The daemon's log (daemon.log) only grows: a line per call a contact's loop places would fill the disk at its pace.
+    it("a contact ringing and hanging up over and over writes one line to the daemon's log for the burst, not one per call", async () => {
+      const at = Date.now();
+      const { caller, offer, hangUp } = await offered();
+      const callee = lone("chat-ba", { now: () => at });
+      const logged: string[] = [];
+      const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { logged.push(String(chunk)); return true; });
+      try {
+        for (let i = 0; i < 200; i++) {
+          callee.side.calls.onSignal("chat-ba", offer());
+          callee.side.calls.onSignal("chat-ba", hangUp());
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      } finally {
+        write.mockRestore();
+      }
+      expect(callee.side.events.filter((e) => e.type === "call.incoming")).toHaveLength(1);
+      expect(logged.filter((line) => line.includes("kept as missed"))).toHaveLength(1);
+      await caller.side.calls.stopAll();
+      await callee.side.calls.stopAll();
+    });
+
+    it("an answered call that never connects says once in the daemon's log that it ignores the caller's further offers", async () => {
+      await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+        const { caller, offer } = await offered();
+        await caller.side.calls.stopAll();
+        const counted = countingStack();
+        const callee = lone("chat-ba", { stack: counted });
+        callee.side.calls.onSignal("chat-ba", offer());
+        await callee.side.calls.answer(undefined, {});
+        const logged: string[] = [];
+        const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { logged.push(String(chunk)); return true; });
+        try {
+          for (let i = 0; i < 200; i++) {
+            callee.side.calls.onSignal("chat-ba", offer());
+            if (i < 2 * MAX_REDIALS) await new Promise((r) => setTimeout(r, 150));
+          }
+        } finally {
+          write.mockRestore();
+        }
+        expect(signalsOf(callee.side, "a")).toHaveLength(1 + MAX_REDIALS);
+        expect(logged.filter((line) => line.includes("past the last start-over"))).toHaveLength(1);
         await callee.side.calls.stopAll();
         await until(() => counted.open() === 0);
       });

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { MAX_NICK_LENGTH } from "@ghostly/core";
-import { cleanName } from "./apiKit";
+import { cleanName, shownName } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import { runtimePath } from "./privateFolder";
@@ -48,18 +48,29 @@ export function checkProfileName(name: string): string {
 
 /**
  * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
- * cleaned as a group's name is (`cleanName`: a tab or a line break is a space, invisible characters go), then up to 64
- * characters; empty (or spaces) is no name. `settings set nick` took any length and every one took a line break,
- * printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field` names
- * it in the refusal.
+ * cleaned as a group's name is (`shownName`: a tab or a line break is a space, invisible characters go), then up to 64
+ * characters as stored; empty (or spaces) is no name. `settings set nick` took any length and every one took a line
+ * break, printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field`
+ * names it in the refusal.
  */
 export function checkShownName(name: unknown, field = "name"): string {
   if (typeof name !== "string") throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
   if (!name.trim()) return "";
-  const shown = cleanName(name, MAX_NICK_LENGTH);
-  if (shown === undefined) throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
-  if (!shown) throw new CliError("bad_request", `${field} needs a character that shows (an empty one is no name)`);
-  return shown;
+  return shownName(name, MAX_NICK_LENGTH, field, " (an empty one is no name)");
+}
+
+/**
+ * `--name` of `profile create` and `profile set`, checked before the profile opens: `checkShownName`'s rule, counted as
+ * it counts (code points once cleaned, so a line break is a space and e + a combining accent is one), refused as a
+ * usage error (exit 2) that names the option, as `app init --title` is. It was the engine's `bad_request` (exit 1),
+ * "name must be up to 64 characters on one line", which named neither the option nor the length given.
+ */
+export function checkShownNameOption(name: string): string {
+  const shown = cleanName(name, Infinity) ?? "";
+  const length = [...shown].length;
+  if (length > MAX_NICK_LENGTH) throw new CliError("usage", `--name is up to ${MAX_NICK_LENGTH} characters, not ${length} characters`);
+  if (name.trim() && !shown) throw new CliError("usage", "--name needs a character that shows (an empty one is no name)");
+  return checkShownName(name);
 }
 
 export function currentProfile(home: string, option?: string): string {
@@ -150,8 +161,12 @@ export function listProfiles(home: string): string[] {
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
+/** A profile this home lacks, as `profile use` and `--profile` both say it: quoted, with how to list or make one. */
+export const noProfile = (name: string): CliError =>
+  new CliError("not_found", `No profile ${JSON.stringify(name)} (ghostly profile list, or ghostly profile create ${name})`);
+
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw new CliError("not_found", `No profile ${name}`);
+  if (!profileExists(home, name)) throw noProfile(name);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }

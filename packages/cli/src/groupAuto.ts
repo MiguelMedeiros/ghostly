@@ -16,10 +16,11 @@ export interface AutoJoin { on: boolean; from: string[] }
 /** A chat auto-join accepts invitations over, and its contact's key when it was named. */
 interface Grant { chat: string; contact: string }
 
-/** What auto-join needs of the engine: its state, and `group accept`. */
+/** What auto-join needs of the engine: its state, `group accept`, and picking another group kept under an id. */
 export interface GroupAutoEngine {
   getState(): EngineState;
   acceptGroupInvitation(params: { groupId: string }): Promise<void>;
+  switchGroup(params: { groupId: string; to: string }): Promise<void>;
 }
 
 export interface GroupAutoHost {
@@ -40,6 +41,8 @@ export class GroupAutoJoin {
   private readonly accepting = new Set<string>();
   /** Per invitation: the last reason its accept failed, said once (it is tried again on the next change). */
   private readonly failed = new Map<string, string>();
+  /** Invitations over a granted chat kept beside a group that is not just an invitation, said once each. */
+  private readonly heldSaid = new Set<string>();
 
   constructor(private readonly host: GroupAutoHost) {
     this.path = join(host.profileDir, FILE);
@@ -53,9 +56,10 @@ export class GroupAutoJoin {
       this.grants = [];
     } else {
       if (!next.from?.length) throw new CliError("bad_request", "Auto-join needs the chats whose invitations it accepts: group auto on --from <chat>");
-      // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`.
-      const links = this.host.engine.getState().links;
-      const grants = next.from.map((ref) => findOwnNamedChat(links, ref)).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
+      // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`; a group's
+      // name or id is refused as one ("is a group, not a chat", with its id), as there.
+      const { links, groups } = this.host.engine.getState();
+      const grants = next.from.map((ref) => findOwnNamedChat(links, ref, groups)).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
       this.grants = grants.filter((g, i) => grants.findIndex((x) => x.chat === g.chat) === i);
     }
     this.save();
@@ -84,7 +88,9 @@ export class GroupAutoJoin {
   /**
    * Accepts the invitations that wait over a granted chat: on start (those that came while the daemon was down) and on
    * every change of the engine's state. One whose accept fails (the contact is not connected yet) is tried again on a
-   * later change.
+   * later change. Another contact who knows the group's id may have invited first: the engine then keeps the granted
+   * one beside it (`others`), and it is the one taken (`switchGroup`, which tells the other contact no), as long as the
+   * group held is only an invitation not answered yet. One beside a group joined or accepted waits for the person.
    */
   check(state: EngineState): void {
     if (!this.host.joins || !this.grants.length) return;
@@ -95,21 +101,30 @@ export class GroupAutoJoin {
       this.grants = this.grants.filter((g) => !changed.includes(g));
       this.save();
     }
+    const granted = (chat: string) => this.grants.some((g) => g.chat === chat && links.get(chat)?.peerPubKeyZ32 === g.contact);
     for (const group of state.groups) {
+      if (this.accepting.has(group.id)) continue;
       const invitation = waiting(group);
-      if (!invitation || this.accepting.has(group.id)) continue;
-      const grant = this.grants.find((g) => g.chat === invitation.linkId);
-      if (!grant || links.get(grant.chat)?.peerPubKeyZ32 !== grant.contact) continue;
-      void this.accept(group.id, grant.chat);
+      if (invitation && granted(invitation.linkId)) { void this.accept(group.id, invitation.linkId); continue; }
+      const other = group.others?.find((o) => "linkId" in o && granted(o.linkId));
+      if (!other || !("linkId" in other)) continue;
+      const held = group.invitation;
+      if (group.status === undefined && held && !held.accepted && !held.viaLink) { void this.accept(group.id, other.linkId, true); continue; }
+      const said = `${group.id}:${other.linkId}`;
+      if (this.heldSaid.has(said)) continue;
+      this.heldSaid.add(said);
+      this.log(`group auto: an invitation to group ${group.id} from chat ${other.linkId} is kept beside another group under the same id: it waits for you (ghostly group show ${group.id})`);
     }
   }
 
-  private async accept(groupId: string, chat: string): Promise<void> {
+  /** `switched`: the invitation is the one kept beside another contact's under its id, which it takes the place of first. */
+  private async accept(groupId: string, chat: string, switched = false): Promise<void> {
     this.accepting.add(groupId);
     try {
+      if (switched) await this.host.engine.switchGroup({ groupId, to: chat });
       await this.host.engine.acceptGroupInvitation({ groupId });
       this.failed.delete(groupId);
-      this.log(`group auto: accepted the invitation to group ${groupId} from chat ${chat}`);
+      this.log(`group auto: accepted the invitation to group ${groupId} from chat ${chat}${switched ? " (another contact's under the same id declined)" : ""}`);
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
       if (this.failed.get(groupId) !== why) this.log(`group auto: the invitation to group ${groupId} from chat ${chat} waits: ${why}`);

@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
+import { callTrace, watchCalls } from "../support/callTrace";
 import type { Peer } from "../support/fixtures";
 import { expect, pairWithWeb, PKG, test, type AndroidApp } from "./support/android";
+import { deviceNetwork } from "./support/network";
 
 /**
  * A call keeps going with the app out of sight: in the background (Home) or with the screen off. Android silences the
@@ -18,25 +20,11 @@ const STEP_MS = 5_000;
 const SILENCED_AFTER_MS = 15_000;
 const clock = /^\d{1,2}:\d{2}$/;
 
-/** Every RTCPeerConnection the web page makes from now on. */
-async function recordConnections(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const own = window.RTCPeerConnection;
-    const all: RTCPeerConnection[] = [];
-    (window as unknown as { __pcs: RTCPeerConnection[] }).__pcs = all;
-    window.RTCPeerConnection = class extends own {
-      constructor(...args: ConstructorParameters<typeof RTCPeerConnection>) {
-        super(...args);
-        all.push(this);
-      }
-    } as typeof RTCPeerConnection;
-  });
-}
-
 /** Audio packets received so far on the call's connections, and the newest connection's state. */
 async function audioIn(page: Page): Promise<{ packets: number; state: string }> {
   return page.evaluate(async () => {
-    const pcs = (window as unknown as { __pcs: RTCPeerConnection[] }).__pcs ?? [];
+    // The connections support/callTrace.ts `watchCalls` records.
+    const pcs = ((window as unknown as { __callPcs?: { pc: RTCPeerConnection }[] }).__callPcs ?? []).map((rec) => rec.pc);
     let packets = 0;
     for (const pc of pcs) {
       (await pc.getStats()).forEach((s) => {
@@ -77,11 +65,18 @@ function silenced(app: AndroidApp): boolean {
 
 /** The web peer calls the app, the app answers; then the app is away for AWAY_MS, and back. */
 async function callAndAway(app: AndroidApp, web: Peer, away: () => void, back: () => void, label: string) {
-  await recordConnections(web.page);
+  if (app.noHostRoute) throw new Error(app.noHostRoute);
+  await watchCalls(web.page);
+  await watchCalls(app.page);
   app.adb.run("shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO");
   await web.page.getByTestId("call-audio").click();
-  await app.page.getByTitle("Accept audio call").click({ timeout: 60_000 });
-  for (const page of [web.page, app.page]) await expect(page.getByText(clock).first()).toBeVisible({ timeout: 60_000 });
+  try {
+    await app.page.getByTitle("Accept audio call").click({ timeout: 60_000 });
+    for (const page of [web.page, app.page]) await expect(page.getByText(clock).first()).toBeVisible({ timeout: 60_000 });
+  } catch (error) {
+    await attachCallDiagnostics(app, web);
+    throw error;
+  }
   // Soft: without it, the packets below still say what the app away does to the call.
   await expect.soft.poll(() => callService(app), { message: "the call service runs, of type microphone" }).toMatch(/^foreground .*microphone/);
 
@@ -109,6 +104,18 @@ async function callAndAway(app: AndroidApp, web: Peer, away: () => void, back: (
   back();
   console.log(`  [${label}] in front ${front.join(", ")} per ${STEP_MS / 1000} s; away:\n    ${seen.join("\n    ")}`);
   return { front, late, seen };
+}
+
+/**
+ * A call that never connected: both sides' connections (states, candidates, the pairs ICE tried, from `getStats`) and
+ * the device's network (addresses, routes, rules), so the report says which address could not be reached.
+ */
+async function attachCallDiagnostics(app: AndroidApp, web: Peer): Promise<void> {
+  const info = test.info();
+  const read = (page: Page) => callTrace(page).catch((error: unknown) => `(unreadable: ${error})`);
+  await info.attach("ice-web.txt", { body: await read(web.page), contentType: "text/plain" });
+  await info.attach("ice-app.txt", { body: await read(app.page), contentType: "text/plain" });
+  await info.attach("device-network.txt", { body: deviceNetwork(app.adb), contentType: "text/plain" });
 }
 
 /** The web peer hangs up: the app's call service goes with the call. */

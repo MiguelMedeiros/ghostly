@@ -33,10 +33,12 @@ export function callHoldsService(state: CallState, localStream: MediaStream | nu
  * stop and a start: from the background Android would refuse the start), and stops it with the call or the chat.
  * The notification's Hang up calls `hangUp`. Notifications never asked for are asked for once the call is on: the
  * call's notification is how a person out of the app gets back to it or ends it.
+ * `locked`: the app lock is on. The notification then names no one, as every notice of the app does: the shade of an
+ * unlocked phone would say who the call is with while the app itself is out of reach behind its lock.
  */
-export function useCallService(call: CallNotice | null, hangUp: () => void): void {
+export function useCallService(call: CallNotice | null, hangUp: () => void, locked = false): void {
   const on = call !== null && androidApp();
-  const name = call?.name ?? "";
+  const name = locked ? "" : call?.name ?? "";
   const video = call?.video ?? false;
   const hangUpRef = useRef(hangUp);
   hangUpRef.current = hangUp;

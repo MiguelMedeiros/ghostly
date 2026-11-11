@@ -60,6 +60,24 @@ describe("the edited mark", () => {
     expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
   });
 
+  // A picture link draws its time on a chip over the picture, not beside a text: the mark goes there too.
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  it.each([["mine", "me"], ["the contact's", "peer"]] as const)("on %s picture, a text edited into it says edited on the chip over it", (_, sender) => {
+    const { container } = renderApp(<MessageBubble message={mine({ sender, id: `${sender}_${WIRE}`, text: PNG, edit: edited() })} peerPubKey="peer" />);
+    const mark = screen.getByTestId("message-edited");
+    expect(mark).toHaveTextContent("edited");
+    expect(mark.getAttribute("title")).toMatch(/^Edited /);
+    expect(mark.closest("[data-picture-time]")).not.toBeNull();
+    expect(container.querySelector("[data-picture-time]")).toHaveTextContent(/^edited/);
+  });
+
+  it("a picture never edited has no mark on its chip", () => {
+    const { container } = renderApp(<MessageBubble message={mine({ text: PNG })} peerPubKey="peer" />);
+    expect(container.querySelector("[data-picture-time]")).not.toBeNull();
+    expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
+  });
+
   it("the details list the earlier versions, the original first", () => {
     const model = buildDetails(mine({ text: "Done", edit: edited() }), null);
     const section = model.sections.find(s => s.id === "edits")!;

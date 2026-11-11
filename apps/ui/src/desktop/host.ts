@@ -459,11 +459,15 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
     readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
+    // The WebView's copy cannot mark one sensitive, and every system keeps copies somewhere: Android's preview and
+    // keyboards, Windows' clipboard history and cloud clipboard, clipboard managers on macOS and Linux. A secret (an
+    // invite, a device's link, ecash) is copied natively, marked so (Kotlin on Android, arboard on Desktop).
+    copySecret: (text: string) => invoke<void>("copy_secret", { text }),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
-    async openService(peerPubKeyZ32, serviceId, tag) {
+    async openService(peerPubKeyZ32, serviceId, tag, relayOnly) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       if (service?.name) openedNames.set(`${peerPubKeyZ32} ${serviceId}`, service.name);
       // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
@@ -472,8 +476,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
       const t = profileT();
       // Its window is titled "<title> — Ghostly": the title says whose app it is, never the contact's name for it alone.
       const { label } = serviceFraming(service?.name ?? serviceId, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t);
-      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable") });
+      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window. With
+      // Hide my IP from contacts on, its pages load nothing but their own origin (`SERVICE_CSP_RELAY_ONLY`).
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable"), relayOnly });
     },
     forgetServices: forgetServiceWindows,
   });

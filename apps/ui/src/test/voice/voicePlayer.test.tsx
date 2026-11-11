@@ -406,6 +406,8 @@ describe("a voice message in the chat", () => {
     const button = screen.getByRole("button", { name: "Send again" });
     expect(button).toHaveAttribute("data-testid", "voice-retry");
     expect(button).toHaveAttribute("data-tone", "danger");
+    // On a phone a tap lands on 44 × 44 px around it (index.css), as on the play button it replaces.
+    expect(button).toHaveClass("tap-target");
     fireEvent.click(button);
     expect(retryFile).toHaveBeenCalledWith(mine.file!.id);
     expect(button).toHaveAttribute("aria-busy", "true");
@@ -444,6 +446,8 @@ describe("a voice message in the chat", () => {
     expect(within(sent).getByTestId("voice-status")).toHaveTextContent("Not moving · 0% of 1.2 KB");
     expect(within(received).getByTestId("voice-status")).toHaveTextContent("Waiting for connection · 50% done");
     expect(within(sent).getByTestId("voice-resend")).toHaveAttribute("data-tone", "neutral");
+    expect(within(sent).getByTestId("voice-resend")).toHaveClass("tap-target");
+    expect(within(received).getByTestId("voice-request")).toHaveClass("tap-target");
     fireEvent.click(within(sent).getByTestId("voice-resend"));
     fireEvent.click(within(received).getByTestId("voice-request"));
     await vi.waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([

@@ -27,6 +27,12 @@ export const LIMITS = {
   maxConcurrentRequestsPerPeer: 32,
   /** Requests a client keeps in flight; the rest wait in a queue. */
   maxClientInFlight: 16,
+  /**
+   * Requests, and their bodies' bytes, a client keeps waiting for a slot: past either, a request is refused at once
+   * (`busy`), so whatever asks (a contact's app in a viewer) cannot make it hold unbounded memory.
+   */
+  maxClientWaiting: 64,
+  maxClientWaitingBodyBytes: 64 * 1024 * 1024,
   maxChatMessageBytes: 16 * 1024,
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */

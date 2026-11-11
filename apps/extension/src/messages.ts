@@ -5,11 +5,22 @@ export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
   /** The peer stopped for good ("Clear all data"): its document closes and a new one starts. */
   | { target: "background"; type: "restart-engine" }
-  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; page?: ViewerPage }
+  /**
+   * `relayOnly`: Hide my IP from contacts is on, and no tab opens (background.ts `RELAY_ONLY_REFUSED`). `profile`: the
+   * page's profile (`EngineStatus.profile`); the tab opens only while the peer runs that one.
+   */
+  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; profile: string; page?: ViewerPage; relayOnly?: boolean }
   /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
   | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
   | { target: "background"; type: "open-payment-link"; uri: string }
+  /** The offscreen peer asks whether profile `profile` may reach `origin` for a contact (localAllowList.ts): a boolean. */
+  | { target: "background"; type: "local-access-allowed"; profile: string; origin: string }
+  /**
+   * The peer heard a message while no tab was open: the worker shows a notification with `body`, which opens `chat`
+   * when clicked (apps/extension/src/attentionNotices.ts).
+   */
+  | { target: "background"; type: "notify"; body: string; chat?: string }
   /**
    * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
    * worker shows the app itself (apps/ui/src/lib/notifications.ts).
@@ -19,6 +30,8 @@ export type RuntimeMessage =
   | { target: "engine"; type: "ping" }
   /** The worker is about to close the peer's document, to start it again as another profile. */
   | { target: "engine"; type: "stop" }
+  /** Chrome took back these host patterns (`permissions.onRemoved`): the apps at those hosts stop being shared. */
+  | { target: "engine"; type: "local-access-removed"; origins: string[] }
   | {
       target: "engine";
       type: "http-request";
@@ -75,7 +88,8 @@ export interface EngineStatus {
   activeId?: string;
   /**
    * The peer stopped for good (its document is closing for a switch, or "Clear all data" ran) and its document stays
-   * on with no peer: the page that would ask for a new one went away, or the worker did. Absent from an older build.
+   * on with no peer: the page that would ask for a new one went away, or the worker did. Or its start failed (the
+   * profile's database did not open) a while ago: the next ask tries again. Absent from an older build.
    */
   stopped?: boolean;
 }

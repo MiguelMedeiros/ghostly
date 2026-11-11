@@ -28,7 +28,15 @@ interface Payload1 { format: typeof FORMAT_1; createdAt: number; store: string; 
 type BackupRecord =
   | { t: "profile"; format: typeof FORMAT; createdAt: number; files: number; bytes: number; light?: LightMark & { ids: string[] } }
   | { t: "file"; kind: "store" | "file"; path?: string; size: number }
+  | { t: "setting"; name: string; text: string }
   | { t: "end"; files: number; bytes: number };
+
+/**
+ * The profile's settings kept beside its store, which name its chats and their contacts' keys: auto-join (`groups.json`)
+ * and auto-answer (`calls.json`). Each travels as a `setting` record (an older CLI skips it); a backup without them
+ * restores with both off.
+ */
+const SETTINGS = ["groups.json", "calls.json"];
 
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
@@ -100,6 +108,10 @@ export const BACKUP_METHODS: Record<string, Method> = {
       for (const file of files) {
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
         await copyIn(writer, join(paths.files, file.name), file.size);
+      }
+      for (const name of SETTINGS) {
+        const text = await readFile(join(paths.dir, name), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+        if (text !== null) await put({ t: "setting", name, text });
       }
       await put({ t: "end", files: files.length, bytes });
       const written = await writer.finish();
@@ -250,6 +262,12 @@ export async function restoreProfile(home: string, name: string, file: string, p
         if (out) { if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); await out.handle.close(); out = null; }
         const value = parse(record.json);
         if (value.t === "end") { ended = value.files === files && value.bytes === bytes; if (!ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); continue; }
+        if (value.t === "setting") {
+          if (SETTINGS.includes(value.name) && typeof value.text === "string") {
+            try { await writeFile(join(paths.dir, value.name), value.text, { mode: 0o600, flag: "wx" }); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", "This backup is damaged: it was changed or cut short") : error; }
+          }
+          continue;
+        }
         if (value.t !== "file" || !Number.isSafeInteger(value.size) || value.size < 0) continue;
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }

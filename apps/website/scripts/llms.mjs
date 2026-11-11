@@ -80,6 +80,7 @@ ${[
   line("Ghostly", `${SITE}/`, "what the app does: chats, wallets, identity proofs, files, calls and groups"),
   line("Web app", "https://app.ghostly.tools", "Ghostly in the browser, nothing to install"),
   line("Download", `${REPO}/releases/latest`, "macOS, Windows, Linux, the browser extension and the Android APK"),
+  line("Android", `${SITE}/android`, "installing the Android APK, its updates, and the signing certificate's SHA-256 fingerprint to check it"),
   line("Roadmap", `${SITE}/roadmap`, "what comes next, in dependency order, with no dates"),
 ].join("\n")}
 

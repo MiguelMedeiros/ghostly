@@ -30,7 +30,8 @@ function startApp(name: string, side: Side, contact: { side: Side; name: string 
         "iroh/1": { id: native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] },
         "hyperdht/1": { publicKey: native.key("hyperdht/1", contact.name) },
       },
-      peerTransports: ["webrtc/1", "iroh/1", "hyperdht/1"], peerFallback: true, automatic: true,
+      // Live on WebRTC first, where the person chose it (Automatic puts Iroh first).
+      peerTransports: ["webrtc/1", "iroh/1", "hyperdht/1"], peerFallback: true, preferred: "webrtc/1", automatic: false,
     },
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,

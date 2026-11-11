@@ -197,6 +197,23 @@ const ENTRY_LINGER_MS = 20_000;
 const FULL_TELL_MS = 5 * 60_000;
 const FULL_LINGER_MS = 5_000;
 const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
+/**
+ * Whether this device can let in no one new now (WISP 903 § Admissions while the admin is away): members signed
+ * `COMMUNITY_LIMITS.memberAdmissions` admissions in a row, counted as the session's `commit` counts them. Its hub
+ * answered every knock all the same: an entry session, an invite, the joiner told it was in "in a moment", and then
+ * the accept refused, every turn of the door for as long as the admin was away.
+ */
+function admissionsHeld(s: CommunitySession): boolean {
+  if (s.isAdmin) return false;
+  const admin = s.admin, chain = s.state.chain;
+  let n = 0;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const c = chain[i];
+    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
+    if (c.k === "add") n++;
+  }
+  return n >= COMMUNITY_LIMITS.memberAdmissions;
+}
 const RELAYED_KEPT = 4096;
 /**
  * Someone the chain took out while its app was closed comes back believing it is a member: it asks in a hub's lobby,
@@ -239,6 +256,8 @@ const LEFT_FOLLOW_MS = 10 * 60_000;
  */
 const LEFT_HAND_ON_MS = 1_000;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
+/** The newest hand-over in a chain. */
+const lastRole = (chain: readonly { k: string; by: string; s?: string }[]) => { for (let i = chain.length - 1; i >= 0; i--) if (chain[i].k === "role") return chain[i]; return undefined; };
 
 /**
  * A member key for a joiner whose entry session the member's side dials. Of a paired session's two
@@ -396,7 +415,7 @@ export class Communities {
    * Communities I left, gone from here but for their session and edges, which follow the chain a while
    * (`LEFT_FOLLOW_MS`): the leave I said, whose leaves I heard since, and when a role that reached me goes on.
    */
-  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number }>();
+  private readonly leftBehind = new Map<string, { session: CommunitySession; frame: CommunityLeaveFrame; since: number; heard: Set<string>; handOnAt?: number; askedAt?: number }>();
   /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
   private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
@@ -799,16 +818,39 @@ export class Communities {
   private async leftMoved(groupId: string, now: number): Promise<void> {
     const left = this.leftBehind.get(groupId), s = left?.session;
     if (!left || !s) return;
-    if (!rosterHas(s.roster, s.myKey)) await this.dropLeftBehind(groupId);
+    // Out, but the role I handed is still with a member whose leave I heard (an older hub committed my leave at once):
+    // its app may reach the group only through me, so I follow on until its hand-on comes (`handedToLeaver`).
+    if (!rosterHas(s.roster, s.myKey) && !this.handedToLeaver(left)) await this.dropLeftBehind(groupId);
     else if (now - left.since > LEFT_FOLLOW_MS) await this.dropLeftBehind(groupId);
+    else if (!rosterHas(s.roster, s.myKey)) left.handOnAt = undefined;
     else if (s.admin !== s.myKey) left.handOnAt = undefined;
-    else if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
-    else if (now >= left.handOnAt) await this.handOn(groupId, now);
+    else {
+      // The secret of my tip went missing (a fresh one sealed to me was lost): asked of whoever I am connected to, as a
+      // member catches up, now and then until it comes. It is of an epoch before the commit that takes me out.
+      if (s.leftWaitsForSecret && now - (left.askedAt ?? 0) >= 5_000) {
+        left.askedAt = now;
+        const ready = [...this.host.edges(groupId)].filter(([key, id]) => key !== s.myKey && this.host.linkReady(id, 2) && rosterHas(s.roster, key)).map(([key]) => key);
+        for (const key of ready.slice(0, 3)) s.catchUp(key);
+      }
+      if (left.handOnAt === undefined) left.handOnAt = now + LEFT_HAND_ON_MS;
+      else if (now >= left.handOnAt) await this.handOn(groupId, now);
+    }
   }
 
   /**
-   * Whom a role that reached my leave goes on to: the member whose commit gave it to me (the admin who handed it, or the
-   * member who committed a leave that put the role back), while it stays; else the first other member whose edge is up,
+   * The role I handed on before I left is still with the member I gave it to, and that member's leave reached me: its
+   * hand-on (`handOn`) may reach the group only through my edges, even once a hub committed my own leave (WISP 903,
+   * "A role that reaches a leave": an older hub does not keep my request while the admin's waits).
+   */
+  private handedToLeaver(left: { session: CommunitySession; heard: Set<string> }): boolean {
+    const s = left.session, admin = s.admin, role = lastRole(s.state.chain);
+    return !!admin && admin !== s.myKey && role?.by === s.myKey && role.s === admin
+      && (left.heard.has(admin) || s.state.pendingLeaves.some(r => r.s === admin));
+  }
+
+  /**
+   * Whom a role that reached my leave goes on to: the member whose `role` commit gave it to me (`by`, whatever was
+   * committed on top since), while it stays; else the first other member whose edge is up,
    * else the first in the roster. Never one whose leave I heard, nor one I handed the role to myself (an admin who left):
    * with two leavers the role would go back and forth between them.
    */
@@ -1808,7 +1850,7 @@ export class Communities {
     if (!s.adminWork || !s.entryKey || !s.state.entry.seedB64) return;
     // Full: a knock is answered all the same, with `group-full` (`entryReady`), at most every `FULL_TELL_MS` per joiner.
     // By the door alone, not the other hubs in turn: each keeps its own count, and two told the joiner twice as often.
-    const full = s.roster.length >= COMMUNITY_LIMITS.members;
+    const full = s.roster.length >= COMMUNITY_LIMITS.members, held = admissionsHeld(s);
     for (const [key, at] of live.fullTold) if (now - at >= FULL_TELL_MS) live.fullTold.delete(key);
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
@@ -1846,7 +1888,7 @@ export class Communities {
       const stillKnocking = now - ts < 2 * this.timings.slowKnockMs;
       if (rosterHas(s.roster, key)) {
         if (!stillKnocking || ts < this.addedAt(s, key) + this.timings.knockFallbackMs) continue;
-      } else if (full && (door !== s.myKey || live.fullTold.has(key))) continue;
+      } else if (full ? door !== s.myKey || live.fullTold.has(key) : held) continue;
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
       const seen = live.knocksSeen.get(key);
@@ -1982,6 +2024,12 @@ export class Communities {
       live.pendingEntries.delete(peer);
       live.fullTold.set(peer, now);
       live.lingering.set(linkId, now + FULL_LINGER_MS);
+      return true;
+    }
+    // Opened before the last admission members may sign went in: no invite the accept would refuse (`admissionsHeld`).
+    if (!rosterHas(s.roster, peer) && admissionsHeld(s)) {
+      live.pendingEntries.delete(peer);
+      void this.host.closeEdge(linkId).catch(() => {});
       return true;
     }
     try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }

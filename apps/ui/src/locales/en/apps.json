@@ -10,6 +10,7 @@
     "storeNewer": "You have this store already. This link holds a newer copy of it.",
     "storeOlder": "This is an older copy of a store you have. Yours is newer and stays as it is.",
     "storeReads": "Ghostly reads it from {{host}}, which learns your IP address.",
+    "storeRemovedOlder": "You removed this store when its list was newer than this copy. To add it again, use a link to its newest list.",
     "title": "Add an app or a store",
     "updateStore": "Update store"
   },
@@ -61,11 +62,13 @@
     "title": "Apps with {{name}}"
   },
   "errors": {
+    "damaged": "Its files on this device are damaged. Get its files again.",
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
     "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",
     "host": "Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.",
     "hostProblem": "The host had a problem (error {{status}}). Try again later.",
+    "locked": "The profile locked before the app opened. Open it again.",
     "needsFiles": "Its files are not on this device yet.",
     "network": "Could not reach the host.",
     "notListed": "This store no longer lists that app.",
@@ -100,6 +103,7 @@
     "note": "Nothing is copied: {{app}} reads what you pick, on this device."
   },
   "install": {
+    "asksChanged": "What this app asks for changed. Look at it again before you install it.",
     "equivocation": "Two different copies of this version exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
     "foundBy": "Found by {{name}}",
@@ -154,6 +158,7 @@
     "title": "Open {{title}} in a chat"
   },
   "store": {
+    "clockLate": "This store's list is dated ahead of this device's clock. Check the date and time on this device.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -175,8 +180,10 @@
     "removeNamed": "Remove {{name}}",
     "removeNone": "To add it again, you will need its link.",
     "removeTitle": "Remove {{name}}?",
+    "rollback": "This store's link now holds an older list than yours. Ghostly kept yours.",
     "showMore": "Show more ({{count}})",
-    "stale": "Out of date since {{date}}"
+    "stale": "Out of date since {{date}}",
+    "tooLarge": "This store's list is too large for Ghostly to read."
   },
   "title": "Apps",
   "view": {
@@ -188,6 +195,7 @@
     "resumeSharing": "sharing a file",
     "sharingWith": "sharing a file with {{name}}",
     "stoppedFailed": "{{title}} stopped working and was closed. If it keeps happening, tell its publisher.",
+    "stoppedFocus": "{{title}} was stopped: it kept taking the keyboard",
     "stoppedOffline": "{{title}} couldn't start: you are offline. Open it again once you're connected.",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its publisher revoked this version",

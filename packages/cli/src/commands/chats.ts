@@ -117,7 +117,7 @@ export const commands: Record<string, Command> = {
   },
   "message delete": {
     method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]]",
-    summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
+    summary: "Forget a message on this device (the contact keeps theirs; a waiting text of yours is cancelled, or deleted for everyone if a relay may have it); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"],
     options: {
       everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },

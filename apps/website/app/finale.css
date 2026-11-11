@@ -280,6 +280,33 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
 .fin-card--wide > .fin-dl {
   justify-self: start;
 }
+/* The Android app: a whole row, its text and button, and on a computer the QR code that opens /android on a phone. */
+.fin-card--android {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px 32px;
+}
+.fin-android-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  margin-top: 6px;
+}
+.fin-qr {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.fin-qr-code {
+  width: 132px;
+  height: 132px;
+}
+.fin-qr .caption {
+  text-align: center;
+}
 .fin-card-head {
   display: flex;
   align-items: center;
@@ -424,7 +451,8 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   .fin-card--wide {
     grid-column: auto;
   }
-  .fin-cards > :last-child {
+  .fin-cards > :last-child,
+  .fin-card--android {
     grid-column: 1 / -1;
   }
 }
@@ -529,5 +557,19 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   }
   .fin-card--wide > .fin-dl {
     justify-self: stretch;
+  }
+  /* A phone does not scan its own screen: the APK's row and the install page's link, no QR code. */
+  .fin-card--android {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fin-qr {
+    display: none;
+  }
+  .fin-android-actions {
+    display: grid;
+    gap: 14px;
+  }
+  .fin-android-actions > .fin-dl {
+    border-top: 1px solid var(--line);
   }
 }

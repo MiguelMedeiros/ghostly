@@ -118,6 +118,12 @@ export interface OpenedService {
 export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
 /**
+ * The policy while Hide my IP from contacts is on (`relayOnly`): no `https:`, so the page loads nothing but its own
+ * origin. A picture or script from a server the contact names would show that server this machine's address.
+ */
+export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
+
+/**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
  * early connections). Only the contact's server is reached.
@@ -135,6 +141,9 @@ export function withoutReports(value: string): string {
     .join(", ");
 }
 
+/** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
+export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
+
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(text);
@@ -145,8 +154,10 @@ function plain(response: ServerResponse, status: number, text: string, headers: 
  * cookies and storage are its own, apart from any other app on 127.0.0.1 or localhost, and a name that merely
  * resolves here (DNS rebinding) is not it. Only a browser given the link (which sets `OPEN_COOKIE`) is served; anyone
  * else on this machine who finds the port gets 404. The body streams through, bounded by `MAX_RESPONSE_BYTES`.
+ * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`).
  */
-export async function openServiceServer(send: ServiceSend, port = 0): Promise<OpenedService> {
+export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly = false }: { relayOnly?: boolean } = {}): Promise<OpenedService> {
+  const policy = relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP;
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
@@ -172,14 +183,14 @@ export async function openServiceServer(send: ServiceSend, port = 0): Promise<Op
       }
       chunks.push(chunk);
     });
-    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies); });
+    request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
   host = `${name}:${(server.address() as AddressInfo).port}`;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
-async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>): Promise<void> {
+async function proxy(request: IncomingMessage, response: ServerResponse, chunks: Buffer[], send: ServiceSend, cookies: Set<string>, policy: string): Promise<void> {
   // A browser that goes away stops the contact's answer too.
   const stop = new AbortController();
   response.on("close", () => { if (!response.writableFinished) stop.abort(); });
@@ -205,7 +216,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         if (policy) out[lower] = [...((out[lower] as string[] | undefined) ?? []), policy];
       } else out[lower] = value;
     }
-    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), OPENED_SERVICE_CSP];
+    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -287,6 +298,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
     if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
+    // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
+    // (a STUN server the contact names would see this machine's address), so none opens while it is on.
+    if (state(ctx).settings?.relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;

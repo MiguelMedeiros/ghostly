@@ -32,7 +32,7 @@ The signed bytes are the statement itself, or the statement followed by one `LF`
 ```
 
 - `signature`: exactly one OpenPGP signature packet (binary, then base64url), of type 0x00 (binary) or 0x01 (text). A clearsigned text is reduced to its signature packet; a message with several signatures is refused.
-- `key`: a minimal transferable public key, made of the primary key, its revocation and direct-key signatures, each valid user ID with its self-certifications only, and the one subkey that signed with its binding signatures. Third-party certifications, user attributes (photos) and unused subkeys are removed before sharing.
+- `key`: a minimal transferable public key, made of the primary key, its revocation and direct-key signatures, each valid user ID with its self-certifications only, and the one subkey that signed with its binding signatures. Third-party certifications, user attributes (photos) and unused subkeys are removed before sharing, and so are superseded self-signatures: of each kind, only the newest valid now and the newest valid when the statement was signed are kept, and revocations that verify.
 
 No other fields are allowed. Limits, enforced before parsing: 1.5 KiB for the signature packet and 9 KiB for the minimal key, so the JSON fits the contract's 16 KiB of evidence (an RSA-4096 key with eight user IDs does); 16 user IDs of at most 256 bytes. Pasted input is bounded too: 16 KiB for a signature, 256 KiB for a public key (a flooded key is refused, not trimmed).
 
@@ -40,8 +40,8 @@ No other fields are allowed. Limits, enforced before parsing: 1.5 KiB for the si
 
 A verifier (the contact's app, locally, fetching nothing) MUST refuse the proof unless all of the following hold:
 
-1. The key parses as exactly one public key, of version 4 or 6. v3 keys and the LibrePGP v5 format are refused. A private key is refused without being echoed.
-2. The primary key and the key that signed use an allowed algorithm: Ed25519 (both the RFC 9580 algorithm 27 and the legacy EdDSA form), Ed448, ECDSA on P-256, P-384, P-521 or brainpoolP256r1/P384r1/P512r1, or RSA with a modulus of at least 2048 bits. DSA, ElGamal and secp256k1 are refused.
+1. The key parses as exactly one public key, of version 4 or 6. v3 keys and the LibrePGP v5 format are refused. A private key is refused without being echoed. It has the minimal shape above, checked before any signature is verified: at most 16 user IDs and no user attributes or third-party certifications, at most one subkey, at most 2 signatures of each kind on each part (self-certifications of a user ID, binding signatures, revocations, direct-key signatures), and at most 20 signatures in all, back-signatures included. Then every signature in it verifies; a key with one that does not is refused, not trimmed.
+2. The primary key and the key that signed use an allowed algorithm: Ed25519 (both the RFC 9580 algorithm 27 and the legacy EdDSA form), Ed448, ECDSA on P-256, P-384, P-521 or brainpoolP256r1/P384r1/P512r1, or RSA with a modulus of 2048 to 8192 bits. DSA, ElGamal and secp256k1 are refused. Every RSA key in the key, primary and subkeys, has a modulus of at most 8192 bits and a public exponent of at most 64 bits, checked before any signature on it is verified.
 3. The signature's hash is SHA-256, SHA-384, SHA-512, SHA-224, SHA3-256 or SHA3-512. SHA-1, MD5 and RIPEMD-160 are refused. Self-signatures on the key may still use SHA-1, because older keys carry them; MD5 and RIPEMD-160 are refused there too.
 4. The key's primary fingerprint is the one the statement names (the statement's external identity); a valid signature by any other key is refused.
 5. The signature's issuer (key ID, and the issuer fingerprint subpacket when present) is the primary key or one of its subkeys.

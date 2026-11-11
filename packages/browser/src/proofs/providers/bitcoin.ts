@@ -1,5 +1,5 @@
 import { BitcoinAddressError, decodeAnyBitcoinAddress, verifyBitcoinMessage, type BitcoinMessageVerdict, type BitcoinProofNetwork, type BitcoinScriptType, type IdentityStatement } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider, InstructionStep } from "../contract";
+import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type InstructionStep, type ProviderSay } from "../contract";
 import { BITCOIN_PROOF_LIMITS, BITCOIN_WALLET_GUIDES, guidesFor, type BitcoinWalletGuide } from "../bitcoinWallets";
 
 /**
@@ -29,7 +29,8 @@ export interface BitcoinEvidence {
 const MAX_SIGNATURE = 8192;
 const SIGNATURE = /^(smp|ful|pof)?[A-Za-z0-9+/]+={0,2}$/;
 
-const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
+/** Each address type's name, said under `scripts.<type>` (exported for the app's drift guard). */
+export const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
   p2wpkh: "native SegWit (bc1q…)", p2tr: "Taproot (bc1p…)", p2sh: "nested SegWit (3…)", p2pkh: "legacy (1…)",
   p2wsh: "script / multisig (P2WSH)", "witness-unknown": "future SegWit version",
 };
@@ -53,23 +54,31 @@ function shortAddress(address: string): string {
 }
 
 /** Wallet steps for this statement's address: the guide's own, or why this wallet cannot sign for it. */
-function walletInstructions(guide: BitcoinWalletGuide, statement: IdentityStatement) {
+function walletInstructions(guide: BitcoinWalletGuide, statement: IdentityStatement, say: ProviderSay) {
   const address = statement.binding.subject;
   const info = decodeAnyBitcoinAddress(address);
   const steps: InstructionStep[] = [];
+  const at = `wallets.${guide.id}`;
   if (!guide.scripts.includes(info.type)) {
     const others = guidesFor(info.type).filter(g => g.id !== "other").map(g => g.name);
-    steps.push({ text: `${guide.name} cannot sign for a ${SCRIPT_NAMES[info.type]} address in a format Ghostly accepts.${others.length ? ` Try ${others.join(" or ")}, or another wallet that signs BIP-322.` : " Use a wallet that signs BIP-322."}` });
+    const cannot = { wallet: guide.name, type: say(`scripts.${info.type}`, SCRIPT_NAMES[info.type]) };
+    steps.push({ text: others.length
+      ? say("steps.cannotSignTry", "{{wallet}} cannot sign for a {{type}} address in a format Ghostly accepts. Try {{others}}, or another wallet that signs BIP-322.",
+        { ...cannot, others: others.reduce((a, b) => say("steps.either", "{{a}} or {{b}}", { a, b })) })
+      : say("steps.cannotSign", "{{wallet}} cannot sign for a {{type}} address in a format Ghostly accepts. Use a wallet that signs BIP-322.", cannot) });
   } else {
-    steps.push({ text: "Sign exactly this statement, as one line, without adding a line break:", copy: statement.text });
-    steps.push({ text: "With this address:", copy: address });
-    for (const text of guide.steps) steps.push({ text });
-    if (guide.id === "bitcoin-core") steps.push({ text: `Command line${info.network === "testnet" ? " (add -signet, -testnet4 or -regtest)" : ""}:`, copy: `bitcoin-cli signmessage "${address}" '${statement.text}'` });
-    if (info.network === "testnet" && guide.testnet) steps.push({ text: `Test networks: ${guide.testnet}` });
-    if (guide.note) steps.push({ text: guide.note });
+    steps.push({ text: say("steps.statement", "Sign exactly this statement, as one line, without adding a line break:"), copy: statement.text });
+    steps.push({ text: say("steps.address", "With this address:"), copy: address });
+    guide.steps.forEach((text, i) => steps.push({ text: say(`${at}.step${i + 1}`, text) }));
+    if (guide.id === "bitcoin-core") steps.push({
+      text: info.network === "testnet" ? say("steps.commandTestnet", "Command line (add -signet, -testnet4 or -regtest):") : say("steps.command", "Command line:"),
+      copy: `bitcoin-cli signmessage "${address}" '${statement.text}'`,
+    });
+    if (info.network === "testnet" && guide.testnet) steps.push({ text: say("steps.testnet", "Test networks: {{how}}", { how: say(`${at}.testnet`, guide.testnet) }) });
+    if (guide.note) steps.push({ text: say(`${at}.note`, guide.note) });
   }
-  steps.push({ text: "This shows you can sign for the address. It does not show a balance, a past payment, or that you would pay." });
-  return { steps, paste: { label: "Signature", placeholder: "smp… (BIP-322) or the base64 signature your wallet shows", multiline: true } };
+  steps.push({ text: say("steps.limits", "This shows you can sign for the address. It does not show a balance, a past payment, or that you would pay.") });
+  return { steps, paste: { label: say("paste.label", "Signature"), placeholder: say("paste.placeholder", "smp… (BIP-322) or the base64 signature your wallet shows"), multiline: true } };
 }
 
 function cleanSignature(pasted: string): string {
@@ -91,7 +100,7 @@ function walletSigner(guide: BitcoinWalletGuide): ExternalToolSigner<BitcoinEvid
   return {
     id: guide.id, kind: "external-tool", label: guide.name,
     description: guide.format === "legacy" ? "Legacy message signature: for a legacy 1… address only." : "BIP-322 message signature.",
-    instructions: statement => walletInstructions(guide, statement),
+    instructions: (statement, say = englishSay) => walletInstructions(guide, statement, say),
     parse(pasted, statement) {
       const signature = cleanSignature(pasted);
       // Say right away when it does not match, while the wallet is still open.

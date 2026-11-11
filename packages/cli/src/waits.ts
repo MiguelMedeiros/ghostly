@@ -1,5 +1,5 @@
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { node, type ApiContext } from "./apiKit";
+import { noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -16,8 +16,11 @@ const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 
 /**
  * What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. A one-shot's
  * `edit` and `group edit` said "while this profile is online" too, as it was about to leave. Ctrl-C says the same.
+ * On a chat nobody joined yet nothing goes before they do: it said "goes with this profile's next command".
  */
-const goesOn = (ctx: ApiContext) => ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
+export const goesOn = (ctx: ApiContext, chat?: string) => chat !== undefined && nobodyJoinedChat(ctx, chat)
+  ? `goes once the contact joins this chat (nobody has yet)${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}`
+  : ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
 
 /**
  * A daemon that stops (`ApiContext.stopping`) ends every wait still open at once, with what it knows, as a timeout:
@@ -37,9 +40,9 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
   const until = performance.now() + ms;
   for (;;) {
     const message = await node(ctx).getMessage(chat, messageId);
-    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!message) throw noMessage(messageId, { group: false, ref: chat });
     if (!message.edit?.pending) return message;
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, known(ctx, { messageId, edits: message.edit.seq }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx, chat)}`, known(ctx, { messageId, edits: message.edit.seq }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -48,7 +51,7 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
 export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
   const until = performance.now() + ms;
   while (node(ctx).removalPending({ linkId: chat, messageId })) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, known(ctx, { messageId }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx, chat)}`, known(ctx, { messageId }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -85,7 +88,7 @@ export const ONE_SHOT_RECEIPT_MS = 2_000;
 export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
   const until = performance.now() + ms;
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, known(ctx, { chat }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx, chat)}`, known(ctx, { chat }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -119,7 +122,7 @@ async function waitForDelivery(ctx: ApiContext, chat: string, messageId: string,
       try {
         const done = look(message);
         if (done) finish(null, done);
-        else if (last) finish(new CliError("timeout", `${ended(ctx, ms)}: the message is ${message?.delivery ?? "not sent yet"} and ${goesOn(ctx)}`, known(ctx, { messageId, delivery: message?.delivery ?? null })));
+        else if (last) finish(new CliError("timeout", `${ended(ctx, ms)}: the message is ${message?.delivery ?? "not sent yet"} and ${goesOn(ctx, chat)}`, known(ctx, { messageId, delivery: message?.delivery ?? null })));
       } catch (error) { finish(error); }
     }, finish);
     const giveUp = () => check(true);

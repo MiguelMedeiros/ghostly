@@ -253,7 +253,8 @@ it("a race dial started offline while the WebRTC offer stands: let go with its o
   const link = new GhostLink({
     params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: true, autoConnect: true, offline: () => offline,
     pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
-    native: { fallback: true, automatic: true, peerFallback: true },
+    // WebRTC first (chosen; on Automatic, Iroh goes first and nothing races an offer).
+    native: { preferred: "webrtc/1", fallback: true, automatic: false, peerFallback: true },
     transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
     createPeerConnection: () => { offers.push(Date.now()); return fakePeerConnection("offline-side"); },
     localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,

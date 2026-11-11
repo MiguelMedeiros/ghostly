@@ -18,6 +18,10 @@ export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-sho
 function oneShotWait(method: string, params: Record<string, unknown>): string | undefined {
   const group = typeof params.group === "string" || (typeof params.chat === "string" && params.chat.startsWith("group:"));
   switch (method) {
+    // On a chat nobody joined yet these answer at once (apiKit `oneShotWaits`); a notice comes only if a call is still
+    // going after WAIT_NOTICE_MS.
+    case "chat.send": return "sent";
+    case "chat.edit": return "confirmed";
     case "file.send": case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
     // `--all` reports to each 1:1 chat in turn, each waiting as one named would.
     case "usage.send": return group ? undefined : "sent";
@@ -59,6 +63,17 @@ export interface WaitNotice {
 
 const word = (value: unknown): string | undefined => typeof value === "string" && value.trim() ? value : undefined;
 
+/**
+ * A state `chat wait --until` waits for, as a sentence says it (`to`: the wait's timeout and notice, `not`: Ctrl-C).
+ * The flag's word after "to be" read "to be text" and "was not text yet".
+ */
+const CHAT_STATES: Record<string, { to: string; not: string }> = {
+  live: { to: "to be live", not: "was not live yet" },
+  text: { to: "to carry text", not: "could not carry text yet" },
+  paired: { to: "to be paired", not: "was not paired yet" },
+};
+export const chatState = (until: string): { to: string; not: string } => CHAT_STATES[until] ?? { to: `to be ${until}`, not: `was not ${until} yet` };
+
 /** What a call waits for, in a person's words, or null for a call that does not wait. */
 export function waitNotice(method: string, given: Record<string, unknown>, mode: "daemon" | "one-shot"): WaitNotice | null {
   const params = waitOf(method, given, mode);
@@ -67,8 +82,8 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
   const seconds = typeof params.timeout === "number" ? params.timeout : waits;
   const upTo = `up to ${seconds} s; Ctrl-C stops waiting`;
   if (method === "chat.wait") {
-    const chat = word(params.chat) ?? "the chat", until = word(params.until) ?? "live";
-    return { waiting: `waiting for chat ${chat} to be ${until} (${upTo})`, stopped: `chat ${chat} was not ${until} yet` };
+    const chat = word(params.chat) ?? "the chat", state = chatState(word(params.until) ?? "live");
+    return { waiting: `waiting for chat ${chat} ${state.to} (${upTo})`, stopped: `chat ${chat} ${state.not}` };
   }
   if (method === "file.wait" || method === "file.save") {
     const file = word(params.file) ?? "the file";

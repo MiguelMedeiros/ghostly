@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Delivered (receipt received)",
-    "failed": "Failed",
+    "failed": "Not sent",
     "held": "Held for the contact",
     "queued": "Not confirmed yet, sends again by itself",
     "sending": "Sending",
@@ -161,6 +161,12 @@
     "timing": "Timing",
     "voice": "Voice",
     "wire": "Wire"
+  },
+  "send": {
+    "failed": "failed",
+    "failedBecause": "failed: {{error}}",
+    "sending": "sending",
+    "sent": "sent"
   },
   "storage": {
     "blob": "the whole file in IndexedDB",

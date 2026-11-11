@@ -10,6 +10,7 @@
     "storeNewer": "Vous avez déjà cette boutique. Ce lien en contient une copie plus récente.",
     "storeOlder": "C'est une copie plus ancienne d'une boutique que vous avez déjà. La vôtre est plus récente et reste telle quelle.",
     "storeReads": "Ghostly la lit depuis {{host}}, qui apprend votre adresse IP.",
+    "storeRemovedOlder": "Vous avez retiré cette boutique quand sa liste était plus récente que cette copie. Pour l'ajouter à nouveau, utilisez un lien vers sa liste la plus récente.",
     "title": "Ajouter une app ou une boutique",
     "updateStore": "Mettre à jour la boutique"
   },
@@ -61,11 +62,13 @@
     "title": "Apps avec {{name}}"
   },
   "errors": {
+    "damaged": "Ses fichiers sur cet appareil sont endommagés. Récupérez ses fichiers à nouveau.",
     "equivocation": "Ce lien contient une autre copie d'une version que vous avez. Ghostly a gardé la vôtre.",
     "expired": "C'était trop long. Vérifiez l'app à nouveau.",
     "githubLink": "Cette page GitHub n'est pas une app. Collez le lien du dépôt ou celui du fichier de l'app.",
     "host": "Les apps viennent seulement de GitHub (raw.githubusercontent.com) ou de jsDelivr à un commit.",
     "hostProblem": "Le serveur a eu un problème (erreur {{status}}). Réessayez plus tard.",
+    "locked": "Le profil s'est verrouillé avant que l'app ne s'ouvre. Ouvrez-la à nouveau.",
     "needsFiles": "Ses fichiers ne sont pas encore sur cet appareil.",
     "network": "Impossible de joindre le serveur.",
     "notListed": "Cette boutique ne propose plus cette app.",
@@ -100,6 +103,7 @@
     "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
   },
   "install": {
+    "asksChanged": "Ce que cette app demande a changé. Revoyez-le avant de l'installer.",
     "equivocation": "Deux copies différentes de cette version existent. Ghostly a gardé celle que vous avez.",
     "fetching": "Vérification de l'app…",
     "foundBy": "Trouvée par {{name}}",
@@ -154,6 +158,7 @@
     "title": "Ouvrir {{title}} dans une discussion"
   },
   "store": {
+    "clockLate": "La liste de cette boutique est datée après l'horloge de cet appareil. Vérifiez la date et l'heure de cet appareil.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -175,8 +180,10 @@
     "removeNamed": "Retirer {{name}}",
     "removeNone": "Pour l'ajouter à nouveau, il vous faudra son lien.",
     "removeTitle": "Retirer {{name}} ?",
+    "rollback": "Le lien de cette boutique contient maintenant une liste plus ancienne que la vôtre. Ghostly a gardé la vôtre.",
     "showMore": "Afficher plus ({{count}})",
-    "stale": "Pas à jour depuis le {{date}}"
+    "stale": "Pas à jour depuis le {{date}}",
+    "tooLarge": "La liste de cette boutique est trop volumineuse pour que Ghostly la lise."
   },
   "title": "Apps",
   "view": {
@@ -188,6 +195,7 @@
     "resumeSharing": "partage un fichier",
     "sharingWith": "partage un fichier avec {{name}}",
     "stoppedFailed": "{{title}} a cessé de fonctionner et a été fermée. Si cela se reproduit, prévenez son éditeur.",
+    "stoppedFocus": "{{title}} a été arrêtée : elle prenait sans cesse le clavier",
     "stoppedOffline": "{{title}} n'a pas pu démarrer : vous êtes hors ligne. Rouvrez-la une fois connecté.",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
     "stoppedRevoked": "{{title}} a été arrêtée : son éditeur a révoqué cette version",

@@ -47,9 +47,9 @@ export function DevicesSection() {
   const [removed, setRemoved] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const [secret, setSecret] = useState<{ busy?: boolean; done?: boolean; error?: Problem }>({});
-  const newSecret = async () => {
+  const newSecret = async (fromOffer = false) => {
     setSecret({ busy: true });
-    try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
+    try { await engine.call("deviceNewSecret"); setSecret({ done: true }); if (fromOffer) setAnswered({}); }
     catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? said(key, t) : problemText(cause, t) }); }
   };
   // What the engine refused of "Not now" on the secret offer and of "Let <device> try again": said under each.
@@ -66,6 +66,15 @@ export function DevicesSection() {
   // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
   const [refocus, setRefocus] = useState<string | null>(null);
   const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
+  // "Let <device> try again" done: its row goes at the next read, and the keyboard focus that was on it goes to that
+  // device's row, not to the page.
+  const wrongPassword = handoff?.failure === "password" && handoff.role === "giver";
+  const [allowed, setAllowed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!allowed || wrongPassword) return;
+    setAllowed(null);
+    setRefocus(allowed);
+  }, [allowed, wrongPassword]);
   // Remove done: the device's row goes, and the ⋮ that opened the dialog with it. The keyboard focus goes to its Removed row.
   const removedBox = useRef<HTMLDivElement>(null);
   const [focusRemoved, setFocusRemoved] = useState(false);
@@ -96,6 +105,18 @@ export function DevicesSection() {
   // its key: two devices may have the same name.
   const stopped = view?.secretOffer?.key ? devices.find((device) => !device.self && device.key === view.secretOffer!.key) : undefined;
   const waiting = listNamesFor(view?.waiting?.map((w) => w.name) ?? [], language);
+  // Not now or a new secret on the takeover's offer: its row goes at the next read, with the button that had the keyboard
+  // focus. Once it is gone, the focus goes to the stopped device's row (Move to, else its ⋮), else to Add a device.
+  const [answered, setAnswered] = useState<{ key?: string } | null>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const offered = !!view?.secretOffer;
+  useEffect(() => {
+    if (!answered || offered) return;
+    setAnswered(null);
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected) return;
+    if (answered.key && devices.some((device) => device.key === answered.key)) setRefocus(answered.key);
+    else addButton.current?.focus();
+  }, [answered, offered, devices]);
   // The handoff keeps the name the device had when it started: the set has its name after a Rename.
   const handoffDevice = handoff ? devices.find((device) => device.key === handoff.key)?.name || handoff.device : "";
   return (
@@ -103,7 +124,7 @@ export function DevicesSection() {
       {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
       <Row testId={full ? "device-add-full" : undefined} label={t("devices.section.lead")} hint={full ? t("devices.section.full") : t("devices.section.leadHint")}
         info={full ? t("devices.section.fullInfo") : t("devices.section.info")}>
-        <Button data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
+        <Button ref={addButton} data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
       </Row>
       {/* The other way round: this device, with a profile from another device. Offered while this profile has no other device. */}
       {canSwitch && view && devices.length <= 1 && !view.foreignSet && (
@@ -139,8 +160,8 @@ export function DevicesSection() {
           {view.secretOffer.lost && <Button data-testid="device-secret-offer-lost" onClick={() => setLost(true)}>{t("devices.remove.lost")}</Button>}
           {stopped
             ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{fillNames(t("devices.secret.removeOffer"), { device: stopped.name })}</Button>
-            : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>}
-          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss"))}>{t("devices.secret.notNow")}</Button>
+            : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret(true)}>{t("devices.secret.button")}</Button>}
+          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss").then(() => setAnswered({ key: stopped?.key })))}>{t("devices.secret.notNow")}</Button>
         </Row>
       )}
       {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
@@ -161,12 +182,14 @@ export function DevicesSection() {
           {secret.error && <Notice problem={secret.error} testId="device-secret-error" />}
         </div>
       )}
-      {handoff?.failure === "password" && handoff.role === "giver" && (
+      {/* "Let <device> try again" only once that device is refused (15 with no success, WISP 06 § Authorizing a handoff):
+          before that, pressing it would start its count again before any limit. */}
+      {wrongPassword && (
         <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoffDevice })}>
-          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>
+          {handoff.refused && <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }).then(() => setAllowed(handoff.key)))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoffDevice })}</Button>}
         </Row>
       )}
-      {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
+      {wrongPassword && refused.allow &&<div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
       {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = handoffDevice || t("devices.join.otherDevice");
@@ -179,7 +202,7 @@ export function DevicesSection() {
       {/* A pull this device's wallets or a call on it kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
         <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoffDevice, wallet: walletNameOf(handoff.wallet) })}
-          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
+          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : nextOf(FAILURES[handoff.failure], t)} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}

@@ -10,6 +10,7 @@
     "storeNewer": "你已经有这个商店了。这个链接里是它的较新副本。",
     "storeOlder": "这是你已有商店的较旧副本。你的那份更新，保持不变。",
     "storeReads": "Ghostly 从 {{host}} 读取它，该主机会知道你的 IP 地址。",
+    "storeRemovedOlder": "你移除这个商店时，它的列表比这份副本更新。要重新添加，请使用指向其最新列表的链接。",
     "title": "添加应用或商店",
     "updateStore": "更新商店"
   },
@@ -61,11 +62,13 @@
     "title": "与 {{name}} 一起用的应用"
   },
   "errors": {
+    "damaged": "它在此设备上的文件已损坏。请重新获取文件。",
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "hostProblem": "主机出了问题（错误 {{status}}）。请稍后再试。",
+    "locked": "应用打开前个人资料已锁定。请再次打开。",
     "needsFiles": "它的文件还不在此设备上。",
     "network": "无法连接到主机。",
     "notListed": "这个商店不再列出该应用。",
@@ -100,6 +103,7 @@
     "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
   },
   "install": {
+    "asksChanged": "此应用请求的权限已变更。安装前请再查看一遍。",
     "equivocation": "此版本存在两个不同的副本。Ghostly 保留了你已有的那个。",
     "fetching": "正在检查应用…",
     "foundBy": "由 {{name}} 找到",
@@ -154,6 +158,7 @@
     "title": "在聊天中打开 {{title}}"
   },
   "store": {
+    "clockLate": "该商店列表的日期晚于此设备的时钟。请检查此设备的日期和时间。",
     "count": "{{count}} 个应用",
     "count_one": "{{count}} 个应用",
     "count_other": "{{count}} 个应用",
@@ -175,8 +180,10 @@
     "removeNamed": "移除 {{name}}",
     "removeNone": "要再次添加，你需要它的链接。",
     "removeTitle": "移除 {{name}}？",
+    "rollback": "该商店的链接现在提供的列表比你的更旧。Ghostly 保留了你的那份。",
     "showMore": "显示更多 ({{count}})",
-    "stale": "自 {{date}} 起已过期"
+    "stale": "自 {{date}} 起已过期",
+    "tooLarge": "该商店的列表太大，Ghostly 无法读取。"
   },
   "title": "应用",
   "view": {
@@ -188,6 +195,7 @@
     "resumeSharing": "正在共享文件",
     "sharingWith": "正在与 {{name}} 共享文件",
     "stoppedFailed": "{{title}} 已停止运行并被关闭。如果反复出现，请告知其发布者。",
+    "stoppedFocus": "{{title}} 已停止：它不断抢占键盘",
     "stoppedOffline": "你处于离线状态，{{title}} 无法启动。连接网络后请重新打开。",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
     "stoppedRevoked": "{{title}} 已停止：其发布者撤销了此版本",

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, noteOpened, openedServices } from "../../../../web/src/svc/forget";
+import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, forgetServicesOfGone, noteOpened, openedServices } from "../../../../web/src/svc/forget";
 import { clearSite, dropSharedCookies } from "../../../../web/src/svc/clearSite";
 import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PAGE, BRIDGE_READY, CLEAR_COOKIES, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
 
@@ -89,6 +89,27 @@ describe("the contacts' apps this device opened", () => {
     } finally { bridge.stop(); }
     expect(bridge.asked).toEqual([serviceOrigin(host, label("y")), serviceOrigin(host, label("b"))]);
     expect(openedServices().map((o) => o.label)).toEqual([label("y")]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  it("of a profile deleted while no bridge answered are cleared at the next start, never a listed profile's", async () => {
+    vi.useFakeTimers();
+    for (const c of "abc") noteOpened({ profile: "gone000001", tag: `chat-${c}`, label: label(c) });
+    noteOpened({ profile: "work000001", tag: "chat-w", label: label("w") });
+    noteOpened({ profile: "", tag: "chat-y", label: label("y") });
+    // Delete profile on a device that is offline: no bridge loads, and the profile leaves the list all the same.
+    const done = forgetServices(host, { profile: "gone000001" });
+    await vi.advanceTimersByTimeAsync(3 * CLEAR_ORIGIN_MS);
+    await done;
+    expect(openedServices().filter((o) => o.profile === "gone000001")).toHaveLength(3);
+    vi.useRealTimers();
+    // The next start, online: the profiles on the list are "" and work000001.
+    const bridge = bridges();
+    try {
+      await forgetServicesOfGone(host, ["", "work000001"]);
+    } finally { bridge.stop(); }
+    expect(bridge.asked).toEqual([...("abc")].map((c) => serviceOrigin(host, label(c))));
+    expect(openedServices()).toEqual([{ profile: "work000001", tag: "chat-w", label: label("w") }, { profile: "", tag: "chat-y", label: label("y") }]);
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
@@ -252,5 +273,16 @@ describe("the bridge's clear of its origin", () => {
     });
     await clearSite(host.suffix);
     expect([...files]).toEqual([]);
+  });
+
+  it("deletes the storage buckets too: what an app put in its own bucket's IndexedDB, caches and files goes with it", async () => {
+    const buckets = new Set(["kept", "other"]);
+    vi.stubGlobal("navigator", {
+      storage: { getDirectory: async () => ({ async *keys() {}, removeEntry: async () => {} }) },
+      storageBuckets: { keys: async () => [...buckets], delete: async (name: string) => { buckets.delete(name); } },
+      serviceWorker: { getRegistrations: async () => [] },
+    });
+    await clearSite(host.suffix);
+    expect([...buckets]).toEqual([]);
   });
 });
