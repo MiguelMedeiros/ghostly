@@ -1317,6 +1317,15 @@ html .toast-place.toast-place-page[data-at="top"] {
 /* A card's line of a set height (Tailwind's leading-4 and leading-5), growing with its words. */
 .chat-text-leading-4 { line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-leading-5 { line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+/* A payment, an invoice, a token or a payment request in a chat (InvoiceBubble, MoneyFormatsBubble, PaymentBubble,
+   GroupPaymentNote): its label, a memo, an address, its lines and its state. Only their size: each keeps its own line
+   height. The amount, its unit, the network's tag, the buttons and a form to pay keep theirs. */
+.chat-text-pay-title { font-size: calc(15rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-memo { font-size: calc(13rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-detail { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-mono { font-size: calc(11.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-label { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }

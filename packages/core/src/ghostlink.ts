@@ -252,8 +252,9 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
 /**
  * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
  * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
+ * Its files/3 frames too (a cancel, a pause, a file's check): `ChatFiles` answers them on the session now.
  */
-const RETIRING_FRAMES = new Set(["paired-message", "paired-received", REACTION_FRAME, REACTED_FRAME, PIN_FRAME, PINNED_FRAME, EDIT_FRAME, EDITED_FRAME]);
+const RETIRING_FRAMES = new Set(["paired-message", "paired-received", REACTION_FRAME, REACTED_FRAME, PIN_FRAME, PINNED_FRAME, EDIT_FRAME, EDITED_FRAME, ...FILE_FRAMES]);
 /**
  * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
  * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).

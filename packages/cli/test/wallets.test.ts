@@ -108,6 +108,26 @@ describe("wallets", () => {
     expect((await list())[3]).toEqual(["fedimint", 7, null, null]);
   });
 
+  it("a USDT balance not read yet (or locked) is null with a status, never \"0\"", async () => {
+    // Found in a bug hunt: a USDT wallet's view holds "0" until its RPC answered (a slow one takes a minute, one that is
+    // down never does), and `wallet list` answered that "0" with no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    let usdt: Record<string, unknown> = { configured: true, locked: true, balance: "0", gasBalance: "0" };
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [{ id: "usdt:testnet", type: "usdt", network: "testnet", config: {} }];
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, usdt } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { balance: string | null; status: string | null }[] }).wallets.map((w) => [w.balance, w.status]);
+    expect(await list()).toEqual([[null, "locked"]]);
+    usdt = { configured: true, locked: false, balance: "0", gasBalance: "0" };
+    expect(await list()).toEqual([[null, "reading"]]);
+    usdt = { configured: true, locked: false, read: true, balance: "1500000", gasBalance: "0" };
+    expect(await list()).toEqual([["1500000", null]]);
+  });
+
   it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bark" })).rejects.toMatchObject({ code: "unavailable" });

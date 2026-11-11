@@ -60,6 +60,7 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { WINDOW_FROM, useListWindow } from "../hooks/useListWindow";
 import { useComposition } from "../hooks/useComposition";
 import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
@@ -345,6 +346,14 @@ export function Sidebar() {
   const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search,
     onMove: (id, index) => announceMove(byFolders ? moveInPart(id, index) : movePinnedBeside(id, index), byFolders),
     folders: { rows: movable, of: partOf, onDrop: setChatFolder } });
+  // A long list draws the rows near its view only (hooks/useListWindow.ts); the others are a space of their height. The
+  // open chat's row, an invitation answered from its row and a row in the hand are always drawn.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const rowWindow = useListWindow(rowsRef, { on: !collapsed && listReady && foundCount >= WINDOW_FROM, fallback: density === "compact" ? 66 : 80 });
+  // (Compared one by one: a Set of them built here kept the React Compiler from memoizing the component.)
+  const invitations = shownGroups.filter(invitationRow).map(g => groupChat(g.id));
+  /** The row at place `at` of its part (keyed as `useListWindow` keys rows: a chat's id, `group:<id>`) is drawn. */
+  const drawn = (key: string, at: number) => key === activeSessionId || key === reorder.dragging || key === `group:${activeGroupId}` || invitations.includes(key) || rowWindow.drawn(key, at);
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
@@ -435,8 +444,11 @@ export function Sidebar() {
   };
 
   // The list or the rail, whichever is drawn: the open chat's row is brought into sight in it (a reload, a link).
-  const rowsRef = useRef<HTMLDivElement>(null);
   useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
+  /** A row of the list while it is far from the view: the room it takes. */
+  const rowSpace = (key: string) => (
+    <div key={key} data-row-space={key} aria-hidden="true" style={{ height: rowWindow.space(key) }} {...(reorder.rowProps(key)["data-reorder-id"] ? { "data-reorder-id": key } : {})} />
+  );
 
   return (
     <div
@@ -549,7 +561,7 @@ export function Sidebar() {
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
                 {itsGroups.filter(invitationRow).map(groupRow)}
-                {(folderRows.get(folder.id) ?? []).map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
+                {(folderRows.get(folder.id) ?? []).map((row, at) => (!drawn(row.key, at) ? rowSpace(row.key) : row.group ? groupRow(row.group) : chatRow(row.session!)))}
                 {itsGroups.length === 0 && itsChats.length === 0 && <p data-testid="chat-folder-empty" className="m-0 px-3 py-3 text-[13px] text-text-muted">{t("sidebar.folder.empty")}</p>}
               </div>}
             </div>
@@ -567,10 +579,10 @@ export function Sidebar() {
             <div id={OTHER_CHATS_ID} data-testid="chat-folder-others-rows">
               {byFolders ? <>
                 {looseGroups.filter(invitationRow).map(groupRow)}
-                {looseRows.map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
+                {looseRows.map((row, at) => (!drawn(row.key, at) ? rowSpace(row.key) : row.group ? groupRow(row.group) : chatRow(row.session!)))}
               </> : <>
-                {looseGroups.map(groupRow)}
-                {loose.map(chatRow)}
+                {looseGroups.map((group, at) => (drawn(groupChat(group.id), at) ? groupRow(group) : rowSpace(groupChat(group.id))))}
+                {loose.map((session, at) => (drawn(session.id, looseGroups.length + at) ? chatRow(session) : rowSpace(session.id)))}
               </>}
             </div>
           )}

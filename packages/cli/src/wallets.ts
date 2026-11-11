@@ -96,11 +96,11 @@ async function federationsOpen(ctx: ApiContext, ms = 30_000): Promise<void> {
 }
 
 /**
- * An Arkade, Bark or Spark balance, known only once the wallet is open and read it: until then the view holds 0, which
- * the app's total shows as "?" (walletTotals). `null` with `status` `locked` or `reading`, never a 0 a script takes for
- * the balance.
+ * An Arkade, Bark, Spark or USDT balance, known only once the wallet is open and read it: until then the view holds 0
+ * (USDT "0", also offline for good), which the app's total shows as "?" (walletTotals). `null` with `status` `locked` or
+ * `reading`, never a 0 a script takes for the balance.
  */
-function readBalance(view: { locked: boolean; read?: true; balance: number } | undefined): { balance: number | null; status: string | null } {
+function readBalance<T extends number | string>(view: { locked: boolean; read?: true; balance: T } | undefined): { balance: T | null; status: string | null } {
   if (!view) return { balance: null, status: null };
   if (view.locked) return { balance: null, status: "locked" };
   return view.read ? { balance: view.balance, status: null } : { balance: null, status: "reading" };
@@ -135,7 +135,7 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
       error = view?.fedimint?.error ?? federations.find((f) => f.error)?.error ?? null;
       break;
     }
-    case "usdt": balance = view?.usdt?.balance ?? null; unit = "token-base"; address = view?.usdt?.address ?? null; error = view?.usdt?.error ?? null; break;
+    case "usdt": ({ balance, status } = readBalance(view?.usdt)); unit = "token-base"; address = view?.usdt?.address ?? null; error = view?.usdt?.error ?? null; break;
   }
   return {
     id: instance.id, type: instance.type, network: instance.network,

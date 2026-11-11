@@ -288,3 +288,75 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     expect(got).toBe(false);
   });
 });
+
+describe("the clipboard guard's Trusted Types default policy", () => {
+  type Rules = Record<string, ((input: string, type: string, sink: string) => string | null) | undefined>;
+  class Policy { constructor(readonly name: string, readonly rules: Rules) {} }
+  class Factory {
+    defaultPolicy: Policy | null = null;
+    createPolicy(name: string, rules: Rules) {
+      if (name === "default" && this.defaultPolicy) throw new TypeError(`Policy with name "default" already exists.`);
+      const policy = new Policy(name, rules);
+      if (name === "default") this.defaultPolicy = policy;
+      return policy;
+    }
+  }
+  /** A window with Trusted Types, the guard run in it; `html` and `navigate` are what the browser asks the default policy. */
+  function guarded() {
+    class Doc { execCommand() { return true; } }
+    const types = new Factory();
+    const w = {
+      Reflect, Object, String, TypeError,
+      Document: Doc,
+      Event: class { get eventPhase() { return 0; } },
+      EventTarget: { prototype: { addEventListener() {} } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: {} },
+      NodeList: { prototype: { get length() { return 0; } } },
+      MutationObserver: class { observe() {} },
+      get length() { return 0; },
+      trustedTypes: types,
+      document: null as unknown,
+    };
+    Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+    w.document = new Doc();
+    new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
+    const ask = (kind: string, input: string, sink: string) => types.defaultPolicy!.rules[kind]!(input, kind, sink);
+    return {
+      types,
+      html: (input: string) => ask("createHTML", input, "Element innerHTML"),
+      script: (input: string) => ask("createScript", input, "eval"),
+      navigate: (url: string) => ask("createScript", url, "Location href"),
+    };
+  }
+
+  it("passes every string but a javascript: URL on, while the app made no default policy of its own", () => {
+    const page = guarded();
+    expect(page.types.defaultPolicy?.name).toBe("default");
+    expect(page.html("<b>hi</b>")).toBe("<b>hi</b>");
+    expect(page.script("1 + 1")).toBe("1 + 1");
+    expect(page.navigate("javascript:alert(1)")).toBeNull();
+  });
+
+  it("lets the app make its own, and hands it every string but a javascript: URL", () => {
+    const page = guarded();
+    const sinks: string[] = [];
+    const own = page.types.createPolicy("default", {
+      createHTML: (input, _type, sink) => { sinks.push(sink); return input.replace("<b>", "<i>"); },
+      createScript: (input) => input,
+    });
+    expect(own).toBe(page.types.defaultPolicy);
+    expect(own.name).toBe("default");
+    expect(page.html("<b>hi</b>")).toBe("<i>hi</b>");
+    expect(sinks).toEqual(["Element innerHTML"]);
+    expect(page.script("1 + 1")).toBe("1 + 1");
+    // The app's policy would pass it: the guard's refusal comes first.
+    expect(page.navigate("javascript:alert(1)")).toBeNull();
+    // A rule the app did not give refuses the string, as its own default policy would.
+    expect(page.types.defaultPolicy!.rules.createScriptURL!("/a.js", "createScriptURL", "HTMLScriptElement src")).toBeNull();
+    // Once, as in a browser; other names go to the browser's own.
+    expect(() => page.types.createPolicy("default", {})).toThrow(/already exists/);
+    expect(page.types.createPolicy("mine", {}).name).toBe("mine");
+    expect(() => guarded().types.createPolicy("default", { createHTML: "no" as never })).toThrow(TypeError);
+  });
+});

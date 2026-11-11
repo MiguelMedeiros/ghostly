@@ -127,8 +127,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     const fullscreen = theater ? platform?.fullscreenWindow : null;
     if (!fullscreen) return;
     void fullscreen(true).catch(() => {});
-    // Spent: a notice at the top that also answers Escape stays.
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setTheater(false); } };
+    // Spent: a notice at the top that also answers Escape stays. Not one from a menu over it (a call's Devices): the menu
+    // closes, and the video stays as it is.
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || (event.target instanceof Element && event.target.closest("[data-menu]"))) return;
+      event.preventDefault();
+      setTheater(false);
+    };
     document.addEventListener("keydown", onKey);
     // A call that rings or starts is drawn under it: it makes way, as a contact's app drawn over the app does.
     const stop = onCallWindowShown(() => setTheater(false));

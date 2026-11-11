@@ -23,7 +23,9 @@
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
  *   (an empty frame's first load fires as it is put in the page) and as the page changes, each `srcdoc` frame gets
  *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
- *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is).
+ *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
+ *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
+ *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them).
  * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
@@ -68,6 +70,7 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const removeAttribute = elements.removeAttribute;
     const attachShadow = elements.attachShadow;
     const size = describe(w.NodeList.prototype, "length").get;
+    let passing = false;
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null) return;
@@ -77,7 +80,9 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         if (end >= 0) at = end + close.length;
       }
       if (apply(slice, doc, [at, at + own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
@@ -161,13 +166,31 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         return apply(run, this, args);
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
-      if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+      const types = w.trustedTypes;
+      if (types && !types.defaultPolicy) {
         try {
-          w.trustedTypes.createPolicy("default", {
-            createHTML: (input) => input,
-            createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-            createScriptURL: (input) => input,
-          });
+          let rules = null;
+          const rule = (kind) => (input, type, sink) => {
+            if (kind === "createScript" && sink === "Location href") return null;
+            if (passing || rules === null) return input;
+            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+          };
+          const members = ["createHTML", "createScript", "createScriptURL"];
+          const create = types.createPolicy;
+          const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+          const Mistyped = w.TypeError;
+          w.Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+            if (this !== types || rules !== null || text(name) !== "default") return apply(create, this, arguments);
+            const given = { createHTML: null, createScript: null, createScriptURL: null };
+            for (let i = 0; i < members.length; i++) {
+              const found = options ? options[members[i]] : undefined;
+              if (found === undefined || found === null) continue;
+              if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+              given[members[i]] = found;
+            }
+            rules = given;
+            return policy;
+          };
         } catch (e) {}
       }
       const reopen = proto.open;
@@ -236,4 +259,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-56VCOgGPZ/Nzrd0JvzKoTsGjoDTnwzWAVSy9Hqpw4pw='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-VQmaFzhHMo1TP1ODnuXq72M52+6qthD/ZZHQsQiYAdY='";
