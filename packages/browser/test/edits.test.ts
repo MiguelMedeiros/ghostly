@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DhtDelivery, EDIT_BUFFER_MS, nextPinNumber, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type GroupEdit, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
@@ -216,16 +217,24 @@ describe("editing my message", () => {
     await vi.waitFor(() => expect(t.contactEdits).toHaveLength(EDIT_SEND_LIMIT));
     const queue = (t.node as unknown as { editQueues: Map<string, EditQueue> }).editQueues.get(t.id)!;
     await queue.flush();
-    const transactions = vi.spyOn(IDBDatabase.prototype, "transaction");
-    await queue.flush();
-    const flushed = transactions.mock.calls.length;
-    transactions.mockClear();
-    await queue.received(String(0).padStart(22, "B"), 1);
-    const received = transactions.mock.calls.length;
+    // Only the look's and the confirmation's own transactions count: the node looks on its own too (a mailbox read, a
+    // session opened again, the cards' restore), and on a busy machine its reads came while they went (received: 6).
+    const [measuring, open] = [new AsyncLocalStorage<true>(), IDBDatabase.prototype.transaction];
+    let counted = 0;
+    const transactions = vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (this: IDBDatabase, ...args: Parameters<IDBDatabase["transaction"]>) {
+      if (measuring.getStore()) counted++;
+      return open.apply(this, args);
+    });
+    const count = async (step: () => Promise<void>) => { counted = 0; await measuring.run(true, step); return counted; };
+    // A look that joins one the node already has under way reads nothing of its own.
+    const flushed = await count(() => queue.flush());
+    const nodeOwn = Promise.all([0, 1, 2].map(() => db.getMessages(t.id)));
+    const received = await count(() => queue.received(String(0).padStart(22, "B"), 1));
+    await nodeOwn;
     transactions.mockRestore();
     expect((await t.row(`me_${now - K}`)).edit?.pending).toBeUndefined();
     // Before: one transaction per row on its way, at every look and every confirmation (K of them, all at once).
-    expect({ flushed, received }).toEqual({ flushed: expect.toBeOneOf([1, 2]), received: expect.toBeOneOf([1, 2, 3, 4]) });
+    expect({ flushed, received }).toEqual({ flushed: expect.toBeOneOf([0, 1, 2]), received: expect.toBeOneOf([1, 2, 3, 4]) });
   });
 
   it("refuses what cannot be edited: the contact's messages, files, payments, notices, empty text, the 101st edit", async () => {
