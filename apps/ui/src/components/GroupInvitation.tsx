@@ -51,9 +51,9 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
 const rowOpen = (groupId: string) =>
   [...document.querySelectorAll<HTMLElement>('[data-testid="group-row"]')].find(row => row.dataset.group === groupId)?.querySelector<HTMLElement>('[data-testid="group-row-open"]') ?? null;
 
-/** The open button of the chat list's row after this group's, if there is one and it is drawn (not a space far from the view). */
+/** The open button of the chat list's row after this group's, if there is one. */
 export function rowAfter(groupId: string): HTMLElement | null {
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"], [data-row-space]')];
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
   const at = rows.findIndex(row => row.dataset.group === groupId);
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
 }
