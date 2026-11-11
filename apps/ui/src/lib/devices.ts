@@ -120,11 +120,14 @@ const readDeviceSet = () => engine.call("deviceSet").then((next) => {
   return next;
 });
 
+/** How often a screen that lists the devices reads the set again. */
+export const DEVICE_SET_EVERY_MS = 3_000;
+
 /**
  * The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read.
  * Not read behind a hidden window, and the same object while the set says the same (`useShownPoll`).
  */
-export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
+export function useDeviceSet(everyMs = DEVICE_SET_EVERY_MS): DeviceSetView | null {
   return useShownPoll(readDeviceSet, everyMs);
 }
 

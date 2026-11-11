@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { listNamesFor, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
+import { DEVICE_SET_EVERY_MS, listNamesFor, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
 import { usePlatformValue } from "../../hooks/useServicesPlatform";
 import { servicesPlatform } from "../../lib/platform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
@@ -58,7 +58,8 @@ export function DevicesSection() {
     setRefused((was) => ({ ...was, [which]: undefined }));
     void work.catch((cause: unknown) => setRefused((was) => ({ ...was, [which]: problemText(cause, t) })));
   };
-  const handoff = useHandoffView(!moving);
+  // No move here (a profile on one device, a new one): asked as often as the set, not twice a second while Profile is open.
+  const handoff = useHandoffView(!moving, DEVICE_SET_EVERY_MS);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
   // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
   // closed ("You can keep using Ghostly"), or one the other device started with Use here.
