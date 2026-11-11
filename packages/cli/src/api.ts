@@ -12,7 +12,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { nobodyElseIn, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -780,7 +780,10 @@ const METHODS: Record<string, Method> = {
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
+    return {
+      group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}),
+      ...(messageId && nobodyElseIn(ctx, group.id) ? { note: "Nobody else is in this group: nobody gets this message, not even someone who joins later" } : {}),
+    };
   },
   /**
    * WISP 902 § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members

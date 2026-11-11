@@ -8,7 +8,8 @@ import { callApi, type ApiContext } from "../src/api";
  * or group (synchronous work on the daemon's one thread, about 120 ms at 10,000 messages).
  */
 const link = (id: string, label: string) => ({ id, label, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" } }) as unknown as LinkView;
-const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
+const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
+  members: [{ key: "mine", role: "admin", me: true, online: true }, { key: "anakey", role: "member", me: false, online: true }] } as unknown as GroupView;
 const row = (linkId: string, id: string, fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId, id, text: "t " + id, sender: "peer", timestamp: 1, via: "datalink", ...fields });
 
 function fake() {
