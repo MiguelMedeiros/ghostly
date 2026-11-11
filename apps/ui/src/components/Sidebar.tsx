@@ -61,6 +61,7 @@ import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatR
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
 import { WINDOW_FROM, useListWindow } from "../hooks/useListWindow";
+import { useKeptScroll } from "../hooks/useKeptScroll";
 import { useComposition } from "../hooks/useComposition";
 import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
@@ -349,6 +350,8 @@ export function Sidebar() {
   // A long list draws the rows near its view only (hooks/useListWindow.ts); the others are a space of their height. The
   // open chat's row, an invitation answered from its row and a row in the hand are always drawn.
   const rowsRef = useRef<HTMLDivElement>(null);
+  // On a phone Back from a chat finds the list where it was, not at its top (hooks/useKeptScroll.ts).
+  useKeptScroll(rowsRef);
   const rowWindow = useListWindow(rowsRef, { on: !collapsed && listReady && foundCount >= WINDOW_FROM, fallback: density === "compact" ? 66 : 80 });
   // (Compared one by one: a Set of them built here kept the React Compiler from memoizing the component.)
   const invitations = shownGroups.filter(invitationRow).map(g => groupChat(g.id));
