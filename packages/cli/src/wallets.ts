@@ -145,9 +145,13 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
 }
 
 export function paymentJson(p: PaymentView) {
+  // Ecash before the invoice, as `chat pay-request` pays a request that carries both; a request lists every way.
+  const methods = p.target ? [p.target.method] : [
+    ...(p.federation || p.federations ? ["fedimint"] : p.mint || p.mints ? ["cashu"] : []), ...(p.invoice ? ["lightning"] : []),
+  ];
   return {
     id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
-    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
+    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: methods[0] ?? null, ...(p.kind === "request" ? { methods } : {}),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
 }

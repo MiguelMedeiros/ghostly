@@ -369,8 +369,8 @@ ghostly wallet faucet cashu                        # test coins
 ghostly wallet list                                # balances
 ghostly chat request alice 100 --memo "coffee"     # ask; a payment.updated event says when it is settled
 ghostly chat pay alice 21 --memo "tip"             # ecash to the contact
-ghostly payment list --chat alice
-ghostly chat pay-request alice <payment id>        # pay the contact's request
+ghostly payment list --chat alice                  # a request's methods: every way it can be paid, e.g. ["cashu","lightning"]
+ghostly chat pay-request alice <payment id>        # pay the contact's request (ecash first; --via lightning pays its invoice)
 ```
 
 A complete payment bot: the package's `examples/payment-bot.mjs`.
