@@ -2,6 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
+import { setDataKey } from "@ghostly/browser/engine/dataKey";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
@@ -60,6 +61,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   let groupAuto: GroupAutoJoin | undefined;
   const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
   try {
+    // An encrypted profile's key, in the engine's one slot before anything of the engine reads the store.
+    if (options.dataKey) setDataKey(options.dataKey);
     runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();

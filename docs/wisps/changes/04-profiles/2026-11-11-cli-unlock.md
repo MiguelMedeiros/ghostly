@@ -1,0 +1,1 @@
+The CLI's part of slice 9 is split: its start gate and `profile passphrase` are built (Headless clients); `encrypt`, `decrypt` and the compaction of the journal and `rows.db` wait for the migration of slice 4, which is not built yet.

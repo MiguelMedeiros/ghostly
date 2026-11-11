@@ -83,6 +83,8 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
 | `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
+| `daemon --passphrase-file <f>` or `GHOSTLY_PROFILE_PASSPHRASE` | An encrypted profile's passphrase (WISP 04, Encrypted profile): asked before its engine starts, by the daemon and by a command that runs with no daemon (a file or `/dev/fd/<n>`, else the variable, else a prompt on a terminal; else a usage error, exit 2). A command that goes through a running daemon needs none. A profile that is not encrypted asks nothing |
+| `profile passphrase [--passphrase-file f] [--new-passphrase-file f]` | Change an encrypted profile's passphrase: its key is wrapped again, nothing else is rewritten |
 
 Only one process opens a profile at a time.
 
