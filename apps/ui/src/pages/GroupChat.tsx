@@ -77,7 +77,7 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
-import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
+import { groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
@@ -145,23 +145,9 @@ function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
   return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
 }
 
-/** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
-function noteIdOf(payments: Payments, paymentId: string): string {
-  const payment = payments[paymentId];
-  return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
-}
-
-/**
- * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
- * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
- */
+/** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
 function captionOf(payments: Payments, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
-  const payment = payments[message.paymentId!];
-  // Said once, under the request (or the payment) itself: not again under a payment that answers it.
-  if (payment?.kind === "payment" && payment.requestId) return undefined;
-  const note = notes.get(noteIdOf(payments, message.paymentId!));
-  const starter = message.sender === "me" ? myKey : message.member;
-  return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
+  return groupPayCaption(message, payments[message.paymentId!], id => notes.get(id), myKey);
 }
 
 /** What the engine writes after "Group created. " and "You joined. ": who can read what (GROUP_READ_NOTE), in the interface's words. */
@@ -733,8 +719,7 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.filter(m => captionOf(payments, notes, m, group.myKey) || payments[m.paymentId!]?.requestId)
-    .map(m => noteIdOf(payments, m.paymentId!)));
+  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey) ?? []));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));

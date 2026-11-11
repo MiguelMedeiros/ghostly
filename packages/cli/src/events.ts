@@ -3,7 +3,7 @@ import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -785,13 +785,19 @@ export class EventHub {
     this.reactions(chat, group, messages, quiet);
     const files: [string, string][] = [];
     const cutoff = this.now() - SEEN_KEEP_MS;
+    // A group's payment lines that say a payment note again (`groupPayTwins`), worked out once, when an event needs them.
+    let twinLines: ReadonlyMap<string, string> | undefined;
+    const twins = () => twinLines ??= group
+      ? groupPayTwins(messages, new Map(messages.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : []))), this.state?.payments ?? {},
+        this.state?.groups.find((g) => g.id === group)?.myKey)
+      : new Map();
     for (const message of messages) {
       present.add(message.id);
       if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
       let state = stateOf(message);
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
-      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
+      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group), twins().get(message.id)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
       if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.

@@ -2,6 +2,7 @@ import { AWAITING_PEER_MS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayU
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
+import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
@@ -30,7 +31,7 @@ import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState } from "./waitNotice";
-import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -381,7 +382,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group history");
-    return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
+    return historyOf(ctx, link.id, params, async () => (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group send", "[text...]");
@@ -758,7 +759,10 @@ const METHODS: Record<string, Method> = {
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params, "chat history <chat>");
-    return historyOf(ctx, `group:${group.id}`, params, (m) => groupMessageJson(m, group));
+    return historyOf(ctx, `group:${group.id}`, params, async (page) => {
+      const twins = await groupPayTwinsOf(ctx, group, page);
+      return (m) => groupMessageJson(m, group, twins.get(m.id));
+    });
   },
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params, "send <chat> [text...]");
@@ -1134,9 +1138,11 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
 
 /**
  * A page of a chat's or a group's history: only that page is read from the store (the newest, those before `before`,
- * or the oldest after `after`), so a long chat's is as quick as a short one's.
+ * or the oldest after `after`), so a long chat's is as quick as a short one's. `linesOf`: how the page's messages are
+ * printed, once the page is read.
  */
-async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
+type LinesOf = (page: readonly StoredMessage[]) => Promise<(message: StoredMessage) => MessageJson>;
+async function historyOf(ctx: ApiContext, chat: string, params: Params, linesOf: LinesOf = async () => messageJson) {
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const bound = (side: "before" | "after"): string | number | undefined => {
     const value = params[side] ?? undefined;
@@ -1151,7 +1157,25 @@ async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (m
     throw noMessage(String(missing), { group, ref: str(params, group ? "group" : "chat", true) });
   });
   const originals = await originalsNow(ctx, chat, page.messages);
+  const json = await linesOf(page.messages);
   return { messages: page.messages.map((m) => quoteChecked(json(m), m, originals)), more: page.more };
+}
+
+/**
+ * The payment lines of a group's history page that are twins of a payment note's line (`groupPayTwins`), as the app
+ * tells them. A note whose line is not on the page is read as its one row, as the originals of replies are.
+ */
+async function groupPayTwinsOf(ctx: ApiContext, group: GroupView, page: readonly StoredMessage[]): Promise<ReadonlyMap<string, string>> {
+  const rows = page.filter((m) => m.paymentId && !m.groupPay);
+  if (!rows.length) return new Map();
+  const payments = state(ctx).payments ?? {};
+  const notes = new Map(page.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : [])));
+  for (const id of new Set(rows.map((m) => groupPayNoteId(m.paymentId!, payments[m.paymentId!])))) {
+    if (notes.has(id)) continue;
+    const note = (await node(ctx).getMessage(`group:${group.id}`, groupPayLineId(id)))?.groupPay;
+    if (note) notes.set(note.id, note);
+  }
+  return groupPayTwins(rows, notes, payments, group.myKey);
 }
 
 /** Past this many originals outside a page, its history is read once instead of row by row. */
