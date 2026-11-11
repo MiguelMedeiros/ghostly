@@ -163,6 +163,14 @@ export const RACE_DIRECT_MS = 8_000;
  */
 export const RACE_RELAYED_MS = 40_000;
 /**
+ * A relayed transport dialled ahead of the others (Automatic's Iroh through its relay, WISP 100 revision 2026-11-08) has
+ * this long before the next ranked one is dialled too, the first still going: whichever goes live first carries the
+ * chat. Through a relay that answers it connects well within it (0.1-0.9 s measured); one that reaches nobody (the
+ * relay down, the contact no longer on it) gives up only at Iroh's connect timeout, 20 s, and held the WebRTC offer back
+ * that long at every return: 26-30 s to live between two CLIs with the Iroh relay down, 4 s with WebRTC chosen.
+ */
+export const RELAYED_FIRST_MS = 3_000;
+/**
  * A WebRTC offer this side made that was answered, and has not connected this long after the answer was applied: where
  * a path exists ICE finds it in a second or two, so there is none (a VPN's NAT, a firewall that drops UDP, and no TURN
  * server), and every transport ranked after WebRTC is dialled now, the relayed ones too, the attempt still standing.
@@ -2598,6 +2606,8 @@ export class GhostLink {
       const ordered = choices.length > 1 ? [...choices.filter(t => !demoted(t)), ...choices.filter(demoted)] : choices;
       // Native transports dialled before WebRTC in this attempt that did not connect (a chosen one goes first).
       const failedFirst: PairedTransport[] = [];
+      // A relayed one dialled ahead of the rest that has not connected within `RELAYED_FIRST_MS`, still going.
+      let ahead: Promise<true | Error> | undefined;
       for (const [index, transport] of ordered.entries()) {
         if (index > 0 && !fallback) break;
         if (transport === "webrtc/1") {
@@ -2638,11 +2648,20 @@ export class GhostLink {
           for (const joined of next.rest) if (!ordered.includes(joined)) ordered.push(joined);
           continue;
         }
-        const result = await this.dialNative(transport, epoch);
+        const dialled = this.dialNative(transport, epoch);
+        let result: true | Error | "slow";
+        if (fallback && !ahead && index < ordered.length - 1 && relayed.includes(transport)) {
+          let headStart: ReturnType<typeof setTimeout> | undefined;
+          result = await Promise.race([dialled, new Promise<"slow">(resolve => { headStart = setTimeout(() => resolve("slow"), RELAYED_FIRST_MS); })]);
+          clearTimeout(headStart);
+          if (result === "slow") { ahead = dialled; continue; }
+        } else result = await dialled;
         if (result === true) return;
         lastError = result;
         failedFirst.push(transport);
       }
+      // Nothing after it connected: the one dialled ahead may still.
+      if (ahead) { const result = await ahead; if (result === true) return; lastError = result; }
       throw lastError ?? new Error("No permitted transport could connect");
     } catch (error) {
       if (epoch === this.connectionEpoch) this.attemptEnded(error instanceof Error ? error.message : String(error));
