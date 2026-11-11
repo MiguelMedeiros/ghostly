@@ -393,6 +393,7 @@ const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-sa
 
 interface PausedRequest {
   requestId: string;
+  resourceType?: string;
   request: {
     url: string;
     method: string;
@@ -569,6 +570,27 @@ function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string
 
 const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline", "unknown-peer"]);
 
+/** The types a tab shows as a page; Chrome saves any other as a file. */
+const SHOWN_TYPES = new Set([
+  "text/html", "text/plain", "text/css", "text/javascript", "text/xml", "application/xml", "application/xhtml+xml", "application/json", "application/javascript",
+  "image/svg+xml", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+]);
+
+/**
+ * Whether Chrome would show this answer to a page's navigation, not save it as a file. The sandbox keeps a contact's
+ * page from starting a download, but it comes with a document: the tab's own navigation to the app (`openViewer`, a
+ * reload, back) has none, so an answer it would save is shown as the error page, as Desktop and the web view save no
+ * file a contact's app sends. Fail closed: no type, an unknown one, several, or a disposition other than inline.
+ */
+function shownAsPage(status: number, headers: [string, string][]): boolean {
+  const named = (name: string) => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+  if (status === 204 || status === 205 || (status >= 300 && status < 400 && named("location").length)) return true;
+  if (named("content-disposition").some((value) => value.split(";")[0].trim().toLowerCase() !== "inline")) return false;
+  const types = named("content-type").flatMap((value) => value.split(","));
+  return types.length === 1 && SHOWN_TYPES.has(types[0].split(";")[0].trim().toLowerCase());
+}
+
 async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   const binding = await bindingOf(tabId);
   // Not a tab this worker opened, or not any more: no command goes to it. Chrome only sends events from a
@@ -610,6 +632,9 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
+  }
+  if (reply.ok && paused.resourceType === "Document" && !shownAsPage(reply.status, viewerResponseHeaders(reply.headers))) {
+    reply = { ok: false, code: "download", message: "The app answered a page with a file to save" };
   }
 
   if (reply.ok) {

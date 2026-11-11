@@ -344,6 +344,47 @@ describe("viewer tabs", () => {
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
   });
 
+  it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {
+    // The worker opens the app (`tabs.update`), and so do the person's reload and back: Chrome saves such an answer
+    // with no question. Desktop and the web view save no file a contact's app sends either.
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const page = async (headers: [string, string][], status = 200, resourceType = "Document") => {
+      engineControl().respond = async () => okResponse("#!/bin/sh\n", status, headers);
+      return (await pauseRequest(world, tabId, { url }, resourceType)).params;
+    };
+    const refused = (params: Record<string, unknown>) => {
+      expect(params.responseCode).toBe(502);
+      expect(params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+      expect(params.responseHeaders).not.toContainEqual(expect.objectContaining({ name: expect.stringMatching(/^content-disposition$/i) }));
+      expect(bodyText(params)).not.toContain("#!/bin/sh");
+    };
+    refused(await page([["Content-Type", "application/octet-stream"], ["Content-Disposition", 'attachment; filename="Ghostly-update.command"']]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "ATTACHMENT"]]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "x-other; filename=a.exe"]]));
+    refused(await page([["content-type", "application/octet-stream"]]));
+    refused(await page([["content-type", "application/x-sh"]]));
+    refused(await page([["content-type", "text/html, application/zip"]]));
+    refused(await page([["content-type", "text/html"], ["content-type", "application/zip"]]));
+    refused(await page([]));
+    refused(await page([["content-type", "application/octet-stream"]], 404));
+    refused(await page([["content-type", "application/octet-stream"]], 302));
+
+    // What a tab shows goes through as before, and so does a redirect: its target is asked for as a page too.
+    const served = (params: Record<string, unknown>, status = 200) => {
+      expect(params.responseCode).toBe(status);
+      expect(bodyText(params)).toBe("#!/bin/sh\n");
+    };
+    served(await page([["Content-Type", "text/html; charset=utf-8"]]));
+    served(await page([["content-type", "text/plain"], ["content-disposition", "inline; filename=notes.txt"]]));
+    served(await page([["content-type", "image/png"]]));
+    served(await page([["content-type", "application/json"]]));
+    served(await page([["location", "/f"]], 302), 302);
+    served(await page([], 204), 204);
+    // A script's fetch or a picture is no navigation: it saves nothing, whatever it says.
+    served(await page([["content-type", "application/octet-stream"], ["content-disposition", "attachment"]], 200, "XHR"));
+  });
+
   it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
     // A popup is no viewer: no DevTools on it, no binding, so no close (lock, profile switch, Hide my IP) reaches it.
     const sandboxes = (params: Record<string, unknown>) =>
