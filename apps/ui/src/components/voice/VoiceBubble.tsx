@@ -526,7 +526,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
             onKeyDown={onWaveKey}
           />
           {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place. */}
-          <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-text-primary/65" data-testid="voice-meta">
+          <div className="flex items-center gap-1 mt-1 min-h-[18px] chat-text-media-meta text-text-primary/65" data-testid="voice-meta">
             {active ? (
               <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />
             ) : (
@@ -560,7 +560,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
         </div>
       )}
       {problem && (
-        <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
+        <p className="chat-text-media-line text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
           {saveUrl && <a href={saveUrl} download={downloadName(file, timestamp)} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
