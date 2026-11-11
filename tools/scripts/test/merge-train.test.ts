@@ -981,6 +981,19 @@ describe("a run of the train", () => {
     expect(repo.comments.get(60)!.map((c) => c.body)).toEqual([expect.stringMatching(/merge commit/)]);
   });
 
+  // A squash would drop `main` as a parent, so the next `dev` → `main` merge would conflict over everything (1.1.7).
+  it.each(["chore/back-merge-1.1.7", "release/1.2.1"])("drops %s from the line instead of squashing it", async (branch) => {
+    const repo = fakeRepo();
+    repo.add(60);
+    repo.add(61);
+    repo.pulls.get(60)!.branch = branch;
+    const r = await repo.run();
+    expect(r.dropped).toEqual([60]);
+    expect(repo.landed).toEqual(["#61"]);
+    expect(repo.pulls.get(60)!.labels).toEqual([]);
+    expect(repo.comments.get(60)!.map((c) => c.body)).toEqual([expect.stringMatching(/merge commit/)]);
+  });
+
   it("drops an already-landed pull request without calling it a conflict", async () => {
     const repo = fakeRepo();
     repo.add(11);
