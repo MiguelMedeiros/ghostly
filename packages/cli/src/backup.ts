@@ -39,7 +39,19 @@ type BackupRecord =
  * passed meanwhile at its start). Each travels as a `setting` record (an older CLI skips it); a backup without them
  * restores with auto-join and auto-answer off and no hold.
  */
-const SETTINGS = ["groups.json", "calls.json", "holds.json"];
+const HOLDS = "holds.json";
+const SETTINGS = ["groups.json", "calls.json", HOLDS];
+
+/** A setting's text, or null for one the profile never wrote. */
+const readSetting = (dir: string, name: string) => readFile(join(dir, name), "utf8").catch(unlessGone);
+
+/** The holds a read of holds.json names (`holds.ts`), none for a file that does not parse, as the daemon reads it. */
+function parseHolds(text: string | undefined): Record<string, unknown> {
+  try {
+    const holds: unknown = JSON.parse(text ?? "{}");
+    return holds && typeof holds === "object" && !Array.isArray(holds) ? holds as Record<string, unknown> : {};
+  } catch { return {}; }
+}
 
 /**
  * Null for a file the profile removed since it was named (a deleted or disappearing message's, a group's files): the
@@ -96,14 +108,21 @@ export const BACKUP_METHODS: Record<string, Method> = {
     // any ghostly restores, this one or an older one. Its name is this backup's own: two at once in one daemon shared
     // one by the process id, and the first packed the other's store as its own, or removed it under the other.
     const store = join(paths.db, `backup-store-${process.pid}-${randomBytes(6).toString("hex")}.bin`);
-    // The settings before the store: a hold that ends in between is then in the backup with its chat already back on
-    // its live link (the restored daemon ends it, nothing more), never the chat on DHT only with no hold to end.
+    // The settings before the store, and the holds again after it, the backup keeping both reads' holds: a hold that
+    // ends in between is in the backup with its chat already back on its live link (the restored daemon ends it,
+    // nothing more), and one that starts in between (`holdChat` writes it before the chat goes on DHT only) is in it
+    // too. Never the chat on DHT only with no hold to end.
     const settings: { name: string; text: string }[] = [];
     for (const name of SETTINGS) {
-      const text = await readFile(join(paths.dir, name), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+      const text = await readSetting(paths.dir, name);
       if (text !== null) settings.push({ name, text });
     }
     await ctx.runtime.store.exportSnapshot(store);
+    const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
+    if (after !== null && after !== holds?.text) {
+      const text = JSON.stringify({ ...parseHolds(holds?.text), ...parseHolds(after) }) + "\n";
+      if (holds) holds.text = text; else settings.push({ name: HOLDS, text });
+    }
     const light = bool(params, "light");
     const found = await Promise.all((await walk(paths.files)).map(async (name) => {
       const file = await stat(join(paths.files, name)).catch(unlessGone);
