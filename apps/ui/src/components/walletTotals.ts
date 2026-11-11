@@ -80,8 +80,8 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
   const cashuCard = shown.find((c) => c.rail === "cashu");
   const sparkCard = shown.find((c) => c.rail === "spark");
   const fedimintCard = shown.find((c) => c.rail === "fedimint");
-  // What the network's Spark wallet holds, when read: a Breez Lightning card showing the same is that wallet.
-  const sparkAmount = sparkCard ? bitcoinPart("spark", networkState(state, network)).amount : undefined;
+  // Whether the network's Spark wallet's balance is read: a Breez Lightning card that is that wallet is counted there.
+  const sparkCounted = !!sparkCard && bitcoinPart("spark", networkState(state, network)).state === "counted";
   const bitcoin: TotalRow<number>[] = [], usdt: TotalRow<bigint>[] = [];
   let decimals: number | undefined, test = network === "testnet";
   for (const card of shown) {
@@ -102,7 +102,9 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
       bitcoin.push(cashuCard && part.state === "counted" ? { ...base, ...part, state: "shared", sharedWith: cashuCard.name, note: undefined } : { ...base, ...part });
       continue;
     }
-    if (card.rail === "lightning" && s.lightning?.providerId === "breez" && sparkCard && part.state === "counted" && part.amount === sparkAmount) {
+    // The engine says which card is the Spark wallet (the same Breez database), never the two amounts: read at
+    // different moments they differ, and another wallet may hold the same.
+    if (card.rail === "lightning" && s.lightning?.sameWalletAs === "spark" && sparkCard && sparkCounted && part.state === "counted") {
       bitcoin.push({ ...base, ...part, state: "shared", sharedWith: sparkCard.name });
       continue;
     }
