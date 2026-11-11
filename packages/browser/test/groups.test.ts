@@ -813,6 +813,19 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
       });
 
+      it("that was far behind on the chain (70 changes while away) gets every commit between, and is told", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        for (let i = 0; i < 70; i++) { await alice.rotate(groupId); await world.settle(); }
+        await alice.remove(groupId, bobKey); await world.settle();
+        // Bob is back: the edge opens once, and he says where he is once.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: alice.views()[0].epoch });
+      });
+
       it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
         const { world, alice, bob, carol, groupId, key, edge } = await trio();
         const bobKey = key(bob);

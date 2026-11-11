@@ -540,8 +540,6 @@ function invitationClaims(frame: Record<string, unknown>): { e: number; n: numbe
 const MAX_FAREWELLS = 8;
 /** Syncs of a removed member answered with the commits it lacks, per farewell: it needs one. */
 const FAREWELL_ANSWERS = 3;
-/** Commits sent to a removed member that was behind when it left, at most. */
-const FAREWELL_COMMITS = 64;
 /**
  * The commit of epoch `e` for a removed member, with no secret: with the admin's `left` mark on a removal of someone who
  * left on their own, or its app says that the admin removed them (WISP 902 § Admission and departure).
@@ -1603,7 +1601,8 @@ export class Groups {
     if ((farewell.answered ?? 0) >= FAREWELL_ANSWERS) return;
     farewell.answered = (farewell.answered ?? 0) + 1;
     try {
-      for (let e = Math.max((from as number) + 1, farewell.e - FAREWELL_COMMITS); e <= farewell.e; e++) {
+      // Every one from where it is: it takes them only one after the other, as a member's sync answer gives them.
+      for (let e = (from as number) + 1; e <= farewell.e; e++) {
         if (session.state.chain[e]) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
       }
     } catch { /* it closed: the next sync */ }
