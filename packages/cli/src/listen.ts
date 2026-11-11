@@ -242,7 +242,7 @@ export const EVENT_TYPES: readonly string[] = [
   "app.closed", "app.message", "app.opened",
   "button.pressed",
   "call.connected", "call.ended", "call.incoming", "call.outgoing", "call.resumed", "call.stalled",
-  "chat.announced", "chat.connection", "chat.created", "chat.held", "chat.joined", "chat.pairing", "chat.pinned", "chat.released", "chat.removed", "chat.renamed",
+  "chat.announced", "chat.connection", "chat.created", "chat.held", "chat.joined", "chat.pairing", "chat.pinned", "chat.released", "chat.removed", "chat.renamed", "chat.status",
   "daemon.started",
   "events.gap",
   "file.done", "file.failed", "file.offered", "file.stage",

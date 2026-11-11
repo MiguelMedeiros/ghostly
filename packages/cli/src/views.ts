@@ -1,5 +1,6 @@
 import type { GroupView, LinkView, MessageFile, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import type { StatusCard } from "@ghostly/core";
+import { liveStatus, type Presence, type StatusCard } from "@ghostly/core";
+import { statusJson, type StatusJson } from "./ownStatus";
 
 /**
  * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 1100), kept
@@ -42,6 +43,13 @@ export interface ChatJson {
   compatibility: boolean;
   /** The contact sent a picture (checked by the engine; `engine getState` has it). */
   peerPicture: boolean;
+  /**
+   * The status the contact set (WISP 401 § Presence and status), as `status show` gives this profile's: each field null
+   * when not set; null when they set none, or its `until` is past. Heard on a live session, kept until the daemon stops.
+   */
+  status: StatusJson | null;
+  /** `active` or `idle` while the contact is on a live session and shares when they are online; null otherwise. */
+  presence: Presence | null;
 }
 
 /**
@@ -95,6 +103,8 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
     compatibility: !link.profile,
     peerPicture: !!link.peerAvatar,
+    status: statusJson(liveStatus(link.peerStatus)).status,
+    presence: link.peerPresence ?? null,
   };
 }
 

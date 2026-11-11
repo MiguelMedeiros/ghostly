@@ -7,7 +7,7 @@ import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type Gho
 import { toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
-// covers: headless.events, headless.typing, headless.files
+// covers: headless.events, headless.typing, headless.files, headless.presence
 
 /**
  * The stream derived from the engine's own events: each fact once, with a stable id, across restarts; a first run
@@ -148,6 +148,24 @@ describe("the event stream", () => {
       { type: "typing.started", chat: "c1", kind: "thinking", status: undefined },
       { type: "typing.started", chat: "c1", kind: "thinking", status: "Transcribing your audio…" },
       { type: "typing.stopped", chat: "c1", kind: undefined, status: undefined },
+    ]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("says when a contact sets or clears a status, or their presence changes, once per change (chat.status)", async () => {
+    const { h, events } = await hub("peer-status.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    const lunch = { availability: "busy", emoji: "🍕", text: "At lunch", until: Date.now() + 3_600_000 } as const;
+    h.sink.post({ kind: "state", state: state([link("c1", { peerStatus: lunch })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerStatus: { ...lunch } })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerStatus: lunch, peerPresence: "idle" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerPresence: "active" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    expect(events.map(({ type, chat, status, presence }) => ({ type, chat, status, presence }))).toEqual([
+      { type: "chat.status", chat: "c1", status: { ...lunch }, presence: null },
+      { type: "chat.status", chat: "c1", status: { ...lunch }, presence: "idle" },
+      { type: "chat.status", chat: "c1", status: null, presence: "active" },
+      { type: "chat.status", chat: "c1", status: null, presence: null },
     ]);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
