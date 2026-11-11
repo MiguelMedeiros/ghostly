@@ -9,6 +9,7 @@ import {
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
@@ -232,8 +233,12 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
 const nameFrom = (folder: string) => folder.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 /** An app's name as a title: `my-app` is `My app`. */
 const titleFrom = (name: string) => (name[0]!.toUpperCase() + name.slice(1)).replace(/-/g, " ");
-/** A path as one word of a POSIX shell line: as typed when it is plain, else single-quoted (`My App` is `'My App'`). */
-const shellWord = (word: string) => /^[\w@%+=:,./~-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+/**
+ * A path as one word of a POSIX shell line: as typed when it is plain, else single-quoted (`My App` is `'My App'`).
+ * None for a path the JSON answer would print other than it is (a `"`, a backslash, a control) or holding a `'`, whose
+ * quoting takes a backslash: a line copied from the answer would be another command.
+ */
+const shellWord = (word: string) => /^[\w@%+=:,./~-]+$/.test(word) ? word : word.includes("'") || jsonOut(word) !== `"${word}"` ? null : `'${word}'`;
 
 /**
  * `app init <dir> [--name <name>] [--title <title>] [--force]`: a small working app in `<dir>` (made when missing),
@@ -275,11 +280,12 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
   }
   mkdirSync(dir, { recursive: true });
   for (const [path, text] of files) writeWhole(join(dir, path), new TextEncoder().encode(text));
-  // A line to paste: a folder with a space, a quote or a `$` stays one word, the folder given.
+  // A line to paste: a folder with a space or a `$` stays one word, the folder given; one the answer cannot print as it
+  // is (a quote, a backslash) is left to the person, named in `dir`.
   const typed = shellWord(dirArg);
   return {
     dir, name, title, files: files.map(([path]) => path), ...(held.length ? { replaced: held } : {}),
-    next: `ghostly app publish ${typed} --key <a key file outside ${typed}>`,
+    next: typed === null ? "ghostly app publish <the folder> --key <a key file outside it>" : `ghostly app publish ${typed} --key <a key file outside ${typed}>`,
   };
 }
 
