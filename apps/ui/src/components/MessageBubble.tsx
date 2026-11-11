@@ -20,7 +20,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { CardTime, StatusCardView } from "./chat/StatusCard";
-import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
+import { STATUS_TONE, appCardsShown, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { ConverterNotLoaded, downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
@@ -939,9 +939,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   // Its row stays in the page while its details are open, however many messages come meanwhile.
   useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
-  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
+  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it. The
+  // same rule (`appCardsShown`) says what its quote, the pinned bar, the chat list, Saved and the screen reader read.
   const appsOn = useAppsAvailable();
-  const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  const appCard = message.card?.kind === "app" && appCardsShown(linkId, appsOn) ? message.card : undefined;
   // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
   const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
