@@ -40,6 +40,18 @@ export function switchTheme(scheme: "dark" | "light", colorTheme: ColorTheme, ro
   root.removeAttribute("data-theme-switch");
 }
 
+/**
+ * The browser's bar (the installed app's status bar) takes the header colour of the theme on the page. Here, not in
+ * App: the lock screen and a standby device's screen show no App, and the theme still changes under them (System follows
+ * the OS), while the bar kept what the boot guard wrote at load.
+ */
+function syncThemeColor(root: HTMLElement = document.documentElement): void {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const color = getComputedStyle(root).getPropertyValue("--theme-panel-header").trim();
+  if (color) meta.setAttribute("content", color);
+}
+
 function getSystemTheme(): "dark" | "light" {
   if (typeof window === "undefined") return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -69,7 +81,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => applyWindowTheme(settings.colorScheme), [settings.colorScheme]);
 
   // Before the page is drawn, with what changed it (a swatch pressed): the switch is one style change.
-  useLayoutEffect(() => switchTheme(effectiveScheme, settings.colorTheme), [effectiveScheme, settings.colorTheme]);
+  useLayoutEffect(() => {
+    switchTheme(effectiveScheme, settings.colorTheme);
+    syncThemeColor();
+  }, [effectiveScheme, settings.colorTheme]);
 
   return (
     <ThemeContext.Provider
