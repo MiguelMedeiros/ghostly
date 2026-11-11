@@ -85,7 +85,14 @@ test("formatted text is sent as typed and shows formatted on both sides", {
     const now = new Date();
     const at = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 14);
     const sameDay = new Date(at).toDateString() === now.toDateString();
-    return new Date(at).toLocaleString([], { ...(sameDay ? {} : { month: "short", day: "numeric" }), hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+    const format = new Intl.DateTimeFormat([], { ...(sameDay ? {} : { month: "short", day: "numeric" }), hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+    // The app keeps the day period on the time's line with a no-break space (#6320, lib/time.ts), where ICU may give a
+    // plain one: the same rule here (as the UI tests' heldTime.ts), not between "PM" and the zone.
+    const clock = new Set(["hour", "minute", "second", "fractionalSecond"]);
+    const parts = format.formatToParts(at);
+    const beside = (i: number) =>
+      (parts[i - 1]?.type === "dayPeriod" && clock.has(parts[i + 1]?.type ?? "")) || (parts[i + 1]?.type === "dayPeriod" && clock.has(parts[i - 1]?.type ?? ""));
+    return parts.map((p, i) => (p.type === "literal" && beside(i) ? p.value.replace(/ /g, "\u00a0") : p.value)).join("");
   });
   await expect(time.getByRole("button", { name: "14:00 UTC" })).toHaveAttribute("title", `${local} your time`);
   await time.getByRole("button", { name: "14:00 UTC" }).click();
