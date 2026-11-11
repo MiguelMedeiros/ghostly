@@ -4,8 +4,7 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
  * The list keeps its place while it is hidden. On a phone the open chat takes the chat list's place, and the list is
  * `display: none` meanwhile (App.tsx): a browser drops the scroll of a box it does not draw, so Back from a chat opened
  * far down a long list came to the list's top. Where the person last had it is kept from its scrolls while it shows,
- * and it is put back there in the first draw that shows it again, before it is painted. Called before
- * `useListWindow`, which then finds the rows near that place, not near the top.
+ * and it is put back there in the first draw that shows it again, before it is painted.
  */
 export function useKeptScroll(box: RefObject<HTMLElement | null>) {
   const kept = useRef<{ el: HTMLElement; top: number; hidden: boolean; stop: () => void } | null>(null);
