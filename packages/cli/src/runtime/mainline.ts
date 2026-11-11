@@ -197,10 +197,16 @@ export class Mainline {
     });
   }
 
-  destroy(): Promise<void> {
+  /** Closes the node and its socket, if it started; the next thing asked of it starts it again. */
+  stop(): Promise<void> {
     const node = this.node;
-    this.closed = true;
+    this.node = null;
     return node ? new Promise((resolve) => node.dht.destroy(() => resolve())) : Promise.resolve();
+  }
+
+  destroy(): Promise<void> {
+    this.closed = true;
+    return this.stop();
   }
 }
 
@@ -284,9 +290,15 @@ export class RelaysAndDht implements PkarrTransport {
   /** Background reads on the DHT in the relays' place, at their background share (`DhtBackgroundBudget`). */
   private readonly dhtBackground = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length);
 
-  constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
+  /** Off while the profile keeps to the relays (Hide my IP from contacts, `configure`'s `dhtDirect: false`). */
+  private direct = true;
+
+  constructor(private readonly mainline: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
   }
+
+  /** The DHT this transport reaches now: none while the profile keeps to the relays. */
+  private get dht(): Mainline | null { return this.direct ? this.mainline : null; }
 
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
@@ -406,7 +418,9 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
-    const packet = await this.dht!.get(pubKeyZ32);
+    // The switch turned while a read was on its way to the DHT: it does not go.
+    if (!this.dht) throw new Error("The DHT is not reached while the profile keeps to the relays");
+    const packet = await this.dht.get(pubKeyZ32);
     if (packet) this.relays.sawTimestamp(pubKeyZ32, packet.timestampMicros);
     return packet;
   }
@@ -454,7 +468,16 @@ export class RelaysAndDht implements PkarrTransport {
   /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
   publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
-  configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
+  /**
+   * `dhtDirect: false` (Hide my IP from contacts): no packet is put on or read from the DHT, and its node is closed, so
+   * no UDP goes from this machine to a DHT node; true again starts it at the next put or read. Absent leaves it as it is.
+   */
+  configure({ relays, dhtDirect }: { relays: string[]; readRelays: boolean; dhtDirect?: boolean }): void {
+    if (!this.pinned) this.relays.setRelays(relays);
+    if (dhtDirect === undefined) return;
+    this.direct = dhtDirect;
+    if (!dhtDirect) this.mainline?.stop().catch(() => {});
+  }
   /**
    * The relays' side only: the DHT side keeps nothing per key it puts. What it keeps per key it reads is bounded
    * (`missing`, `MISSING_KEPT`; the background budget's two-minute window).
