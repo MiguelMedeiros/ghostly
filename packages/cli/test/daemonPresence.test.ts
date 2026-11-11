@@ -93,7 +93,7 @@ describe("a contact sees a daemon's presence", { timeout: 240_000 }, () => {
 
   it("none by default; on, off and on again while the daemon runs; gone when it stops; back when it starts", async () => {
     for (const dir of [alice, bob]) ok(await as(dir, "settings", "set", "relays", JSON.stringify([relay.url])));
-    let aliceDaemon = await start(alice);
+    const aliceDaemon = await start(alice);
     await start(bob);
     const invite = ok(await as(alice, "invite", "create", "--label", "bob"));
     ok(await as(bob, "invite", "join", invite.link as string, "--label", "alice"));
@@ -114,7 +114,7 @@ describe("a contact sees a daemon's presence", { timeout: 240_000 }, () => {
     await waitPresence(undefined, 60_000);
     // Kept with the profile: the next daemon says it from its start.
     expect(ok(await as(alice, "settings", "get"))).toMatchObject({ daemonPresence: true });
-    aliceDaemon = await start(alice);
+    await start(alice);
     ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "90"));
     await waitPresence("active");
   });
