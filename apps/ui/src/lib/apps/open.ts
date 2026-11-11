@@ -60,6 +60,8 @@ export interface RunningAppEntry {
   /** The digest its entry had: the installed one may be another by now. */
   digest: string;
   runAnyway: boolean;
+  /** The chat it runs in (null: alone), where its opener has nothing that goes with the chat (a Desktop window). */
+  linkId?: string | null;
   /** Stops the app and says why where it ran. */
   takeDown(takedown: AppTakedown): void;
   /** Stops the app and says nothing: the person uninstalled it. */
@@ -102,6 +104,14 @@ export function lockedSince(): () => boolean {
 export function stopRunningApps(): void {
   locks += 1;
   for (const entry of [...running]) entry.stop();
+}
+
+/**
+ * Stops every app still running in the chat `linkId` and says nothing: the chat was deleted, and the engine refuses its
+ * storage and its frames from now on. The web's panel went with the chat already; a Desktop app window has no panel.
+ */
+export function stopAppsIn(linkId: string): void {
+  for (const entry of [...running]) if (entry.linkId === linkId) entry.stop();
 }
 
 const inputListeners = new Set<() => void>();
