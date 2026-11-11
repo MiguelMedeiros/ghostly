@@ -217,7 +217,7 @@ export interface WalletState {
    * The Lightning card of this network the calls act on: the one a platform is bound to (`forLightning`), else the
    * network's default for receiving. Its source (the Cashu mints by default) and its latest operations.
    */
-  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive">>;
+  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive" | "sameWalletAs">>;
   /** Every Lightning card of this network, in the order they were added. */
   lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this network, if one is set up. */
