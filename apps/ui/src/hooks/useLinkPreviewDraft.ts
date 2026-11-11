@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { canonicalUrl, linksIn, type LinkPreview } from "@ghostly/core";
 import { previewableLink } from "../lib/parse/linkPreview";
 import { linkPreviewFor } from "../lib/linkPreviewFetch";
@@ -20,7 +20,7 @@ export interface LinkPreviewDraft {
  * when it is sent now: only a finished preview whose link is still in the text.
  */
 export function useLinkPreviewDraft(text: string, enabled: boolean) {
-  const link = enabled ? previewableLink(text) : null;
+  const link = useMemo(() => (enabled ? previewableLink(text) : null), [enabled, text]);
   const key = link ? canonicalUrl(link) ?? link : null;
   const [draft, setDraft] = useState<LinkPreviewDraft | null>(null);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
