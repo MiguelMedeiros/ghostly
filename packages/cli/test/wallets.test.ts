@@ -86,6 +86,28 @@ describe("wallets", () => {
     expect(listed.wallets.map((w) => [w.id, w.balance])).toEqual([["cashu:testnet", 30], ["lightning:testnet:cashu", 30], ["lightning:testnet:nwc1", 500]]);
   });
 
+  it("a Spark, Arkade, Bark or Fedimint balance not read yet (or locked) is null with a status, never 0", async () => {
+    // Found in a bug hunt: those views hold 0 until the wallet read its balance, and `wallet list` answered that 0 with
+    // no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const federation = (read: boolean, status: string, error?: string) => ({ federationId: "f", balance: 7, status, lightning: true, invite: "fed1", ...(read ? { read: true } : {}), ...(error ? { error } : {}) });
+    let fedimint = [federation(true, "ready"), federation(false, "connecting")];
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = (["spark", "arkade", "bark", "fedimint"] as const).map((type) => ({ id: `${type}:testnet`, type, network: "testnet", config: {} }));
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, spark: { configured: true, locked: true, balance: 0 }, ark: { configured: true, locked: false, balance: 0 },
+        bark: { configured: true, locked: false, read: true, balance: 9 }, fedimint: { balance: 7, federations: fedimint, history: [] } } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { type: string; balance: number | null; status: string | null; error: string | null }[] }).wallets.map((w) => [w.type, w.balance, w.status, w.error]);
+    expect(await list()).toEqual([["spark", null, "locked", null], ["arkade", null, "reading", null], ["bark", 9, null, null], ["fedimint", null, "reading", null]]);
+    fedimint = [federation(true, "ready"), federation(false, "error", "unreachable")];
+    expect((await list())[3]).toEqual(["fedimint", null, "error", "unreachable"]);
+    fedimint = [federation(true, "ready")];
+    expect((await list())[3]).toEqual(["fedimint", 7, null, null]);
+  });
+
   it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bark" })).rejects.toMatchObject({ code: "unavailable" });
