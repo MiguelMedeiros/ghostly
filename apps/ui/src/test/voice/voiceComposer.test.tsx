@@ -278,6 +278,29 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("leaves Enter and Esc to an input method composing in a field: a candidate picked or dropped sends and deletes nothing", async () => {
+    await locked();
+    await wait(2_000);
+    const search = document.createElement("input");
+    document.body.append(search);
+    search.focus();
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    // WebKit: compositionend first, then the Enter that confirmed the candidate, no longer composing.
+    fireEvent.compositionEnd(search, { data: "日本" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("voice-bar")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    // The next Enter is the person's.
+    await wait(500);
+    fireEvent.keyDown(search, { key: "Enter" });
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    search.remove();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
