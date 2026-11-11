@@ -17,7 +17,7 @@
 //   node tools/scripts/test-shards.mjs --record a.json …  # tools/scripts/test-durations.json from Vitest JSON reports
 //
 // CI's packages shards upload their JSON reports (artifact "packages-test-reports-<shard>"): download them all and
-// --record them after adding a slow test file.
+// --record them after adding a slow test file. --plan and shard 1 warn when over a tenth of the files have no time.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -124,6 +124,19 @@ function units() {
   return out;
 }
 
+/**
+ * A warning when more than a tenth of the test files have no recorded time (each counts as a typical file, so the
+ * shards drift apart as slow new files pile up), or null. As a GitHub annotation, it shows on the CI run.
+ * @param {{ files: string[] }[]} units
+ * @param {Record<string, number>} seconds
+ */
+export function staleWarning(units, seconds) {
+  const files = units.flatMap((u) => u.files);
+  const missing = files.filter((f) => !(f in seconds)).length;
+  if (missing * 10 <= files.length) return null;
+  return `::warning::${missing} of the ${files.length} test files have no time in tools/scripts/test-durations.json, so the packages shards are uneven: download the packages-test-reports-* artifacts of a green run and node tools/scripts/test-shards.mjs --record them.`;
+}
+
 const describe = (shards) => shards.map((s, i) => `  ${i + 1}: about ${Math.round(s.load)} s of test time: ${s.units.map((u) => (u.alone ? u.id : `${u.id} (${u.files.length} file${u.files.length === 1 ? "" : "s"})`)).join(", ") || "nothing"}`).join("\n");
 
 function main(argv) {
@@ -155,6 +168,8 @@ function main(argv) {
     const all = units();
     const shards = split(all, seconds(), of);
     console.log(`${of} shards:\n${describe(shards)}`);
+    const stale = staleWarning(all, seconds());
+    if (stale) console.log(stale);
     const every = all.flatMap((u) => u.files).sort();
     const assigned = shards.flatMap((s) => s.units.flatMap((u) => u.files)).sort();
     if (every.join("\n") !== assigned.join("\n") || new Set(every).size !== every.length) {
@@ -172,9 +187,13 @@ function main(argv) {
   const reportDir = reportIndex >= 0 ? resolve(rest[reportIndex + 1]) : null;
   if (reportDir) mkdirSync(reportDir, { recursive: true });
 
-  const shards = split(units(), seconds(), of);
+  const all = units();
+  const shards = split(all, seconds(), of);
   const mine = shards[shard - 1];
   console.log(`Shard ${shard}/${of} of npm run test:packages. All shards:\n${describe(shards)}`);
+  const stale = staleWarning(all, seconds());
+  // One annotation per run, not one per shard.
+  if (stale && shard === 1) console.log(stale);
   let failed = 0;
   for (const unit of mine.units) {
     // A whole package runs as `npm test` runs it; part of one runs by its files, which Vitest must select exactly.

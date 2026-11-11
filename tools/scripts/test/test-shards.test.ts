@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, packages, split } from "../test-shards.mjs";
+import { ALONE, WORKERS, packages, split, staleWarning } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -53,6 +53,14 @@ describe("the packages shards", () => {
     const seconds = { b1: 50, b2: 50, c1: 10 };
     const shards = split([{ ...unit("big", ["b1", "b2"]), whole: true }, unit("c", ["c1"])], seconds, 1);
     expect(shards[0].units.map((u) => [u.id, u.files, u.whole])).toEqual([["big", ["b1", "b2"], true], ["c", ["c1"], undefined]]);
+  });
+
+  it("warn when more than a tenth of the files have no recorded time", () => {
+    const files = Array.from({ length: 20 }, (_, i) => `f${i}`);
+    const seconds = Object.fromEntries(files.map((f) => [f, 1]));
+    expect(staleWarning([unit("a", files)], seconds)).toBeNull();
+    expect(staleWarning([unit("a", files), unit("b", ["new1", "new2"])], seconds)).toBeNull();
+    expect(staleWarning([unit("a", files), unit("b", ["new1", "new2", "new3"])], seconds)).toMatch(/^::warning::3 of the 23 test files have no time/);
   });
 
   it("need a shard for each file that runs alone", () => {
