@@ -409,6 +409,37 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-files").className).toContain("[overflow-wrap:anywhere]");
   });
 
+  it("finds a chat by name as Forward does, the arrow keys going from the search to the chats found; the next share lists them all again", async () => {
+    // Thirty contacts spoken to lately: Ana, spoken to never, is past a phone's screen.
+    for (let i = 0; i < 30; i++) {
+      saveSession({ id: `c${i}`, mySeedB64: "s", peerPubKeyB64: `peer${i}`, encKeyB64: "e", nick: `Contact ${i + 1}`, createdAt: 1,
+        messages: [{ id: "x", text: "hi", sender: "peer", timestamp: 10_000 - i }] } as unknown as ChatSession);
+    }
+    receiveShare(share({ text: "one" }), { queue: true });
+    receiveShare(share({ text: "two" }), { queue: true });
+    const { user } = picker();
+    settled();
+    const search = screen.getByTestId("share-search");
+    expect(search).toHaveAccessibleName("Search chats");
+    // Not on the search by itself: the picker may open on its own, and a phone's keyboard would cover the list.
+    expect(search).not.toHaveFocus();
+    expect(screen.getAllByTestId("share-chat")).toHaveLength(31);
+    await user.click(search);
+    await user.keyboard("zz");
+    expect(screen.queryByTestId("share-chat")).toBeNull();
+    expect(screen.getByTestId("share-no-match")).toHaveTextContent("No chat by that name");
+    await user.clear(search);
+    await user.keyboard("aN");
+    expect(screen.getAllByTestId("share-chat").map((row) => row.querySelector("bdi")?.textContent)).toEqual(["Ana"]);
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("share-chat")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("share-text")).toHaveTextContent("two");
+    expect(screen.getByTestId("share-search")).toHaveValue("");
+    expect(screen.getAllByTestId("share-chat")).toHaveLength(31);
+    expect(takeShareFor("chat1")?.text).toBe("one");
+  });
+
   it("Cancel drops the share and goes home", async () => {
     receiveShare(share({ text: "never mind" }));
     const { user } = picker();
