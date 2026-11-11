@@ -71,6 +71,35 @@ describe("a navigation the services worker hands to the contact", () => {
     await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(4));
   });
 
+  it("with no referrer and no client (Firefox's every one), goes on through a page that renders only inside Ghostly, as it was made", async () => {
+    const { GO_KEY, GO_SCRIPT } = await import("../../../../web/src/svc/worker");
+    const page = await fetchThrough({ method: "POST", path: "/api/save?x=1", mode: "navigate", destination: "iframe", referrer: "" })!;
+    expect(page.status).toBe(200);
+    expect(page.headers.get("referrer-policy")).toBe("same-origin");
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT)));
+    expect(page.headers.get("content-security-policy"))
+      .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src 'sha256-${btoa(String.fromCharCode(...digest))}'`);
+    const token = /<script data-go="([0-9a-f-]+)">/.exec(await page.text())?.[1];
+    expect(token).toBeTruthy();
+    // Nothing reached the contact: in another site's frame the page never renders, and no one asks again.
+    expect(bridge.postMessage).not.toHaveBeenCalled();
+    // Its script asks again, its token in the referrer: the kept POST goes, body and all, once.
+    const again = { path: "/api/save?x=1", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/api/save?x=1&${GO_KEY}=${token}` };
+    void fetchThrough(again);
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(1));
+    const [message] = bridge.postMessage.mock.calls[0] as [{ method: string; path: string; body: ArrayBuffer }];
+    expect([message.method, message.path, new TextDecoder().decode(message.body)]).toEqual(["POST", "/api/save?x=1", "a=1"]);
+    void fetchThrough(again);
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(2));
+    expect((bridge.postMessage.mock.calls[1]![0] as { method: string }).method).toBe("GET");
+    // A token goes only with the address it was kept for.
+    const other = await fetchThrough({ method: "POST", path: "/api/delete", mode: "navigate", destination: "iframe", referrer: "" })!;
+    const otherToken = /data-go="([^"]+)"/.exec(await other.text())![1];
+    void fetchThrough({ path: "/account", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/?${GO_KEY}=${otherToken}` });
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(3));
+    expect((bridge.postMessage.mock.calls[2]![0] as { method: string; path: string }).method).toBe("GET");
+  });
+
   it("is never another site's: its form POST at the top or into a frame of its own, or a window it opens", async () => {
     const tries = [
       { method: "POST", path: "/api/delete", mode: "navigate", destination: "document", referrer: `${OTHER}/` },
