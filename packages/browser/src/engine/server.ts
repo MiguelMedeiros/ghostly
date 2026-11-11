@@ -42,6 +42,12 @@ export class EngineServer implements PeerServer {
    * call (WISP 06 § States and events). A client that goes away (a tab closed mid-call) is taken out with it.
    */
   private readonly onCall = new Set<EngineClientSink>();
+  /**
+   * The clients whose last presence word (`setPresence`) was `active`: the engine hears `idle` only once none is, so a
+   * tab hidden, locked or closed does not tell the contacts the profile is idle while another tab is in use. A client
+   * that goes away is taken out with it.
+   */
+  private readonly present = new Set<EngineClientSink>();
   /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
@@ -156,6 +162,7 @@ export class EngineServer implements PeerServer {
       this.node.appsCloseAll();
     }
     if (this.onCall.delete(client)) this.node.setCallOn({ on: this.onCall.size > 0 });
+    if (this.present.delete(client) && this.present.size === 0) this.node.setPresence({ presence: "idle" });
   }
 
   async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
@@ -170,6 +177,16 @@ export class EngineServer implements PeerServer {
       else this.onCall.delete(client);
       params = { on: this.onCall.size > 0 };
     }
+    // One page's presence: `active` is told as it comes (it keeps the engine from going idle by itself); another word
+    // only once no page is active, else it is answered and not told.
+    let tell = true;
+    if (request.method === "setPresence") {
+      if ((request.params as { presence?: unknown } | undefined)?.presence === "active") this.present.add(client);
+      else {
+        this.present.delete(client);
+        tell = this.present.size === 0;
+      }
+    }
     try {
       // A group's newest page and its history are reads of the store: they answer once the groups are loaded, not after
       // every chat's whole history is read and every link started. A group shown at start stayed empty until then.
@@ -178,7 +195,7 @@ export class EngineServer implements PeerServer {
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
       // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
-      response.result = await method.call(this.node, params);
+      if (tell) response.result = await method.call(this.node, params);
     } catch (error) {
       response.error = errorLine(error);
     }
