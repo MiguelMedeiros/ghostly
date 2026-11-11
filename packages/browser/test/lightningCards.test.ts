@@ -8,6 +8,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { sealSeed, newDeviceKey } from "../src/engine/paymentAdapters/persistence";
 import { CASHU_MINT_SOURCE, cashuMint } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
+import { nwc } from "../src/engine/paymentAdapters/providers/nwcProvider";
 import { CASHU_CARD, LEGACY_CARD, LightningCards, cardsKey, loadLightningCards } from "../src/engine/paymentAdapters/providers/lightningCards";
 import type { LightningEvents, LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import { LIGHTNING_PROVIDERS } from "../src/engine/paymentAdapters/providers/registry";
@@ -140,6 +141,25 @@ describe("several cards on one network", () => {
     await expect(registry.add("fake-node", { alias: "Down" })).rejects.toThrow("connection refused");
     expect(await keys(), "nothing half-made").toEqual(before);
     expect(registry.views()).toHaveLength(3);
+  });
+
+  it("an NWC wallet is refused twice however its URI is spelled, and through another app connection; another wallet is not", async () => {
+    // The real NWC form, connecting to a fake: only the first card connects, the others are refused before.
+    const wallet = "ab".repeat(32), secret = "cd".repeat(32), relay = "wss%3A%2F%2Frelay.example";
+    const nwcFake: LightningProviderDescriptor = { ...nwc, create: async () => new FakeLightningProvider({ alias: "Hub via relay.example", settleMs: 600_000 }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, nwcFake], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    await registry.add("nwc", { uri: `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}` });
+    for (const uri of [
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}`,
+      `nostrwalletconnect://${wallet}?relay=${relay}&secret=${secret}`,
+      `nostr+walletconnect://${wallet.toUpperCase()}?relay=${relay}&secret=${secret}`,
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}&lud16=hub%40example.com`,
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${"ef".repeat(32)}`,
+    ]) await expect(registry.add("nwc", { uri }), uri.slice(0, 40)).rejects.toThrow("That wallet is already your card “Hub (NWC)”");
+    await registry.add("nwc", { uri: `nostr+walletconnect://${"12".repeat(32)}?relay=${relay}&secret=${secret}` });
+    expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2"]);
   });
 
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
