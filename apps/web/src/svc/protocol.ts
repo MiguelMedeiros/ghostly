@@ -41,6 +41,8 @@ export const LABEL = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{32}$/;
 /**
  * The services host, as the build was given it (`VITE_SERVICES_HOST`): `https://*.svc.example` or, for tests,
  * `http://*.localhost:4173`. Null when it is not one: then the web app opens no contact's app.
+ * `port` is as the browser writes it in an origin: empty for the scheme's own (`:443` on HTTPS, `:80` on HTTP), so
+ * every origin named from it (`serviceOrigin`) is the one a message from that origin carries.
  */
 export interface ServicesHost { protocol: "https:" | "http:"; suffix: string; port: string }
 
@@ -50,11 +52,23 @@ export function parseServicesHost(value: string | undefined): ServicesHost | nul
   const protocol = `${match[1]}:` as ServicesHost["protocol"];
   // Plain HTTP only on this machine: a service worker needs a secure context.
   if (protocol === "http:" && match[2] !== "localhost") return null;
-  return { protocol, suffix: match[2]!, port: match[3] ?? "" };
+  let port: string;
+  // The browser's form of the port: none for the scheme's own, no leading zeros; past 65535 is no port at all.
+  try { port = new URL(`${protocol}//x.${match[2]}${match[3] ? `:${match[3]}` : ""}`).port; } catch { return null; }
+  return { protocol, suffix: match[2]!, port };
 }
 
 export function serviceOrigin(host: ServicesHost, label: string): string {
   return `${host.protocol}//${label}.${host.suffix}${host.port ? `:${host.port}` : ""}`;
+}
+
+/**
+ * The app's own origin, as the build was given it (`VITE_SERVICES_APP_ORIGIN`), in the browser's form (no `:443` on
+ * HTTPS, no `:80` on HTTP): the one the bridge's messages from the app's page carry. Null when it is not an origin.
+ */
+export function parseAppOrigin(value: string | undefined): string | null {
+  if (!/^https?:\/\/[a-z0-9.-]+(:\d+)?$/.test(value ?? "")) return null;
+  try { return new URL(value!).origin; } catch { return null; }
 }
 
 /** Whether `hostname` is one app's own name under this services host (the bridge and the worker run nowhere else). */
