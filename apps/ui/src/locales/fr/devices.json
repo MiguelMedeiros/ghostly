@@ -257,6 +257,12 @@
       "offline": "Passez en ligne pour modifier vos appareils."
     },
     "go": "Retirer",
+    "home": {
+      "bark": "Une sortie ou un envoi encore en cours là-bas ne peut pas être terminé ici.",
+      "fedimint": "Ici, il est récupéré auprès de sa fédération ; cette récupération n’est pas encore éprouvée.",
+      "line": "{{wallet}} vit sur {{device}}. Après le retrait, il s’ouvre ici.",
+      "usdt": "L’envoi reste désactivé ici jusqu’à ce que vous confirmiez sa dernière transaction sur la chaîne."
+    },
     "lost": "Perdu ou volé",
     "removing": "Retrait…",
     "text": "Il ne pourra plus prendre ce profil.",
@@ -355,6 +361,12 @@
       "first": "Un profil vide prend sa place ici.",
       "go": "Retirer",
       "hint": "Ses discussions, clés et portefeuilles sont effacés de cet appareil. Vos autres appareils gardent le profil.",
+      "home": {
+        "bark": "Une sortie ou un envoi encore en cours ici ne peut pas être terminé sans cela.",
+        "fedimint": "Vos autres appareils le récupèrent auprès de sa fédération ; cette récupération n’est pas encore éprouvée.",
+        "line": "{{wallet}} vit sur cet appareil. Ce qu’il garde ici n’est pas sur vos autres appareils.",
+        "usdt": "Vos autres appareils ne peuvent pas envoyer depuis ce portefeuille tant que vous n’avez pas confirmé sa dernière transaction sur la chaîne."
+      },
       "removing": "Retrait…",
       "title": "Retirer {{name}} de cet appareil ?"
     },

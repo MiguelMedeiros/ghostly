@@ -2,8 +2,9 @@ import { useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { lostWalletLines, removeErrorKey } from "../../lib/devices";
+import { lostWalletLines, removeErrorKey, walletsAtHomeOn } from "../../lib/devices";
 import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./DeviceDialog";
+import { HomeWallets } from "./HomeWallets";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
@@ -18,6 +19,9 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
+  // The wallets at home on that device (WISP 06 § Wallets that stay home): once it is removed, they open here instead.
+  const wallet = useSyncExternalStore(subscribe, walletOf);
+  const homes = walletsAtHomeOn(wallet, deviceKey);
   const remove = async () => {
     setBusy(true); setError(null);
     try {
@@ -34,6 +38,7 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
     <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={onClose} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
+      <HomeWallets wallets={homes} device={device} testId="device-remove-homes" />
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
       <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>

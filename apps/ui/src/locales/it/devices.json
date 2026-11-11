@@ -257,6 +257,12 @@
       "offline": "Vai online per cambiare i tuoi dispositivi."
     },
     "go": "Rimuovi",
+    "home": {
+      "bark": "Un’uscita o un invio ancora aperti lì non si possono completare qui.",
+      "fedimint": "Qui viene recuperato dalla sua federazione; questo recupero non è ancora collaudato.",
+      "line": "{{wallet}} vive su {{device}}. Dopo la rimozione si apre qui.",
+      "usdt": "Gli invii restano disattivati qui finché non confermi la sua ultima transazione sulla blockchain."
+    },
     "lost": "Perso o rubato",
     "removing": "Rimozione…",
     "text": "Non potrà più prendere questo profilo.",
@@ -355,6 +361,12 @@
       "first": "Un profilo vuoto prende il suo posto qui.",
       "go": "Rimuovi",
       "hint": "Le sue chat, chiavi e portafogli vengono cancellati da questo dispositivo. Gli altri tuoi dispositivi mantengono il profilo.",
+      "home": {
+        "bark": "Un’uscita o un invio ancora aperti qui non si possono completare senza di esso.",
+        "fedimint": "Gli altri tuoi dispositivi lo recuperano dalla sua federazione; questo recupero non è ancora collaudato.",
+        "line": "{{wallet}} vive su questo dispositivo. Ciò che conserva qui non è sugli altri tuoi dispositivi.",
+        "usdt": "Gli altri tuoi dispositivi non possono inviare da esso finché non confermi la sua ultima transazione sulla blockchain."
+      },
       "removing": "Rimozione…",
       "title": "Rimuovere {{name}} da questo dispositivo?"
     },
