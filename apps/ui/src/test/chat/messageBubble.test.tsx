@@ -415,6 +415,19 @@ describe("MessageBubble: money in a message", () => {
     expect(screen.getByTestId("invoice-bubble")).toBeInTheDocument();
   });
 
+  it("reads the words around an invoice as any message's text: a spoiler stays covered, formatting and links show", () => {
+    // They were drawn as typed: `||the answer||` showed uncovered, markers and all, above the card.
+    const { container } = bubble({ text: `||the answer|| **soon** https://example.com ${INVOICE}` });
+    const spoiler = screen.getByTestId("rich-spoiler");
+    expect(spoiler).not.toHaveAttribute("data-shown");
+    expect(spoiler).toHaveTextContent("the answer");
+    expect(container).not.toHaveTextContent("||");
+    expect(container).not.toHaveTextContent("**");
+    expect(container.querySelector("strong")).toHaveTextContent("soon");
+    expect(screen.getByRole("link", { name: "https://example.com" })).toBeInTheDocument();
+    expect(spoiler.compareDocumentPosition(screen.getByTestId("invoice-bubble")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows an ecash token as a card, once the wallet read it", async () => {
     fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 100, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
     const { engine } = bubble({ text: `here you go ${TOKEN}` });
