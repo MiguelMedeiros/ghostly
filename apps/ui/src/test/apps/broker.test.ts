@@ -237,6 +237,8 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.get", [""])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.get", [7])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.set", ["k", "x".repeat(MINI_APP_LIMITS.storageValueBytes)])).toMatchObject({ ok: false, error: "too-large" });
+    // A set with no value was answered too-large.
+    expect(await ask("storage.set", ["k"])).toMatchObject({ ok: false, error: "bad-request" });
   });
 
   it("takes a value of 64 KiB under the longest key: the request has room for both", async () => {
