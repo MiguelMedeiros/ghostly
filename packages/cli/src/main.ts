@@ -238,8 +238,11 @@ const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear",
 ]);
 
-/** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
-export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoDownloads", "serveFiles"]);
+/**
+ * Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). A one-shot
+ * says no presence (`daemonPresence`): only a daemon does, from its start or at once when it is the one that sets it.
+ */
+export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoDownloads", "serveFiles", "daemonPresence"]);
 
 /**
  * Said on a live session only (WISP 401 § Typing, WISP 902 · Group Mesh § Typing). A one-shot starts the chat or group
@@ -522,7 +525,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
+  ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
