@@ -55,15 +55,32 @@ describe("app init", () => {
 
   it("says the next command with the folder quoted for a shell when it needs it", async () => {
     const root = tmp();
-    for (const folder of ["Bad Name", "it's mine", "a$b", "plain-folder"]) {
+    for (const folder of ["Bad Name", "a$b", "a`b`", "plain-folder"]) {
       const dirArg = join(root, folder);
-      const { next } = ok(await ghostly(["app", "init", dirArg])) as { next: string };
+      const result = await ghostly(["app", "init", dirArg]);
+      const { next } = ok(result) as { next: string };
+      // Printed as it is: no backslash a copy from the answer would carry into the shell.
+      expect(result.stdout).toContain(`"next":"${next}"`);
       // The words a POSIX shell reads in the command, up to the key the person fills in.
       const command = next.slice(0, next.indexOf(" --key "));
       const words = execFileSync("sh", ["-c", `printf '%s\\0' ${command}`], { encoding: "utf8" }).split("\0").slice(0, -1);
       expect(words).toEqual(["ghostly", "app", "publish", dirArg]);
     }
     expect(ok(await ghostly(["app", "init", join(root, "plain")])).next).toBe(`ghostly app publish ${join(root, "plain")} --key <a key file outside ${join(root, "plain")}>`);
+  });
+
+  it("says the next command as it pastes from the printed answer, never with a folder the JSON escapes", async () => {
+    const root = tmp();
+    for (const folder of ["it's mine", "x'; echo HI #", 'say "hi"', "back\\slash", "two\nlines"]) {
+      const dirArg = join(root, folder);
+      const result = await ghostly(["app", "init", dirArg]);
+      const { next, dir } = ok(result) as { next: string; dir: string };
+      // What the person reads and copies: the printed text between the quotes, not the parsed value.
+      const shown = /"next":"((?:[^"\\]|\\.)*)"/.exec(result.stdout)![1];
+      expect(shown).toBe(next);
+      expect(next).toBe("ghostly app publish <the folder> --key <a key file outside it>");
+      expect(dir).toBe(resolve(dirArg));
+    }
   });
 
   it("writes nothing over a file that is there, unless --force", async () => {
