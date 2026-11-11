@@ -8,6 +8,7 @@ import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
 import { CliError, localFileError } from "./errors";
+import { ENCRYPTED_BACKUP, PROFILE_KEY } from "./profileKey";
 import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from "./profiles";
 
 /**
@@ -88,6 +89,10 @@ export const BACKUP_METHODS: Record<string, Method> = {
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");
     if (!passphrase && !unsealed) throw new CliError("bad_request", "passphrase is required (or noPassphrase: true for a backup anyone can read)");
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
+    // An encrypted profile's secrets are sealed under its data key, which a backup does not carry (WISP 04, Backups:
+    // decrypted inside the bundle's own encryption comes with a later version). Refused rather than a bundle that
+    // restores to secrets nobody can open.
+    if (existsSync(join(ctx.runtime.paths.dir, PROFILE_KEY))) throw new CliError("refused", ENCRYPTED_BACKUP);
     // The folder it goes in, checked first: a missing one is named, not the file written beside `path`.
     const folder = dirname(path);
     if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
@@ -13,6 +13,7 @@ import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
+import { changeProfilePassphrase, checkedPassphrase, ENCRYPTED_BACKUP, readProfileKey, unlockProfile } from "./profileKey";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
@@ -377,6 +378,12 @@ const TURNS_WAIT_MS = 60_000;
  * A `listen` with no daemon opens it the same way, as the daemon (`mode`).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
+  // An encrypted profile with no daemon: its passphrase before the engine starts (a daemon that answers needs none).
+  if (!options.dataKey && readProfileKey(g.paths.dir)) {
+    const client = await connectDaemon(g.paths);
+    if (client) return client;
+    options = { ...options, dataKey: (await unlockProfile(g.paths.dir, g.profile)) ?? undefined };
+  }
   const { openHost } = await engineHost();
   const from = performance.now();
   // The process that holds the profile, as last seen, and since when.
@@ -510,10 +517,11 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
-  ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
+  ["profile passphrase [--passphrase-file f] [--new-passphrase-file f]", "Change an encrypted profile's passphrase (its data stays as it is)", { "passphrase-file": o("string", "The current passphrase, from this file (else GHOSTLY_PROFILE_PASSPHRASE, else asked)"), "new-passphrase-file": o("string", "The new one, from this file (else GHOSTLY_PROFILE_NEW_PASSPHRASE, else asked twice)") }],
+  ["daemon [--detach] [--timeout s] [--passphrase-file f]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)"), "passphrase-file": o("string", "An encrypted profile's passphrase, from this file or /dev/fd/<n> (else GHOSTLY_PROFILE_PASSPHRASE, else asked)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
-  ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
+  ["daemon restart [--timeout s] [--passphrase-file f]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step"), "passphrase-file": o("string", "An encrypted profile's passphrase, from this file or /dev/fd/<n> (else GHOSTLY_PROFILE_PASSPHRASE, else asked)") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
@@ -739,6 +747,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" }, force: { type: "boolean", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
+    passphrase: { "passphrase-file": { type: "string", description: "" }, "new-passphrase-file": { type: "string", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
   const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
@@ -809,6 +818,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
+      if (readProfileKey(g.paths.dir)) throw new CliError("refused", ENCRYPTED_BACKUP);
       // The passphrase is read before the profile opens, and the backup only reads the store: offline.
       const path = here(out) as string;
       const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
@@ -829,6 +839,14 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (parsed.options.use) selectProfile(g.home, name);
       // Whether --use made it the current profile, as profile create says it.
       print({ restored: name, folder: paths.dir, protection, current: currentProfile(g.home) === name });
+      return;
+    }
+    case "passphrase": {
+      noMoreThan(0, parsed.positionals, "profile passphrase [--passphrase-file f] [--new-passphrase-file f]");
+      knownProfile(g);
+      const file = parsed.options["passphrase-file"], newFile = parsed.options["new-passphrase-file"];
+      await changeProfilePassphrase(g.paths.dir, g.profile, typeof file === "string" ? here(file) : undefined, typeof newFile === "string" ? here(newFile) : undefined);
+      print({ profile: g.profile, passphrase: "changed" });
       return;
     }
     default:
@@ -887,17 +905,20 @@ const DETACHED_CHILD = "GHOSTLY_DAEMON_DETACHED";
  * service manager's restart) is waited for until `seconds`, as `daemon --detach` waits for it: the first look used to be
  * the answer, and the profile was left with no daemon. A daemon that comes up meanwhile is the answer instead.
  */
-async function runDaemon(g: Globals, seconds: number): Promise<void> {
+async function runDaemon(g: Globals, seconds: number, passphraseFile?: unknown): Promise<void> {
   requireProfile(g);
   const detached = process.env[DETACHED_CHILD] === "1";
   delete process.env[DETACHED_CHILD]; // not handed to the hooks it runs
-  dropSecretEnv(); // a backup's passphrase comes as a call parameter: nothing the daemon runs gets it
+  // An encrypted profile's data key, before anything of the engine starts: no passphrase, no start (WISP 04).
+  let dataKey: CryptoKey | null;
+  try { dataKey = await unlockProfile(g.paths.dir, g.profile, passphraseFile); } catch (error) { throw childAnswer(detached, error); }
+  dropSecretEnv(); // a backup's passphrase comes as a call parameter, the profile's was read above: nothing the daemon runs gets them
   const { keepServing, openHost, serve } = await engineHost();
   const until = performance.now() + seconds * 1000;
   let host: Host;
   for (;;) {
     if (await connectDaemon(g.paths)) throw childAnswer(detached, new CliError("busy", `A daemon already runs profile ${g.profile}`));
-    try { host = await openHost(g.paths, "daemon", VERSION); break; }
+    try { host = await openHost(g.paths, "daemon", VERSION, dataKey ? { dataKey } : {}); break; }
     catch (error) {
       if (detached) throw childAnswer(detached, error);
       if (!(error instanceof CliError) || error.code !== "busy" || performance.now() >= until) throw error;
@@ -926,9 +947,10 @@ function childAnswer(detached: boolean, error: unknown): unknown {
 
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
-  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } }, undefined, { command: commandOf("daemon", sub) });
+  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" }, ...(sub === "status" || sub === "stop" ? {} : { "passphrase-file": { type: "string", description: "" } }) }, undefined, { command: commandOf("daemon", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
+  const passphraseFile = typeof parsed.options["passphrase-file"] === "string" ? here(parsed.options["passphrase-file"]) : undefined;
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
@@ -963,18 +985,21 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
     requireProfile(g);
     ownProfile(g.paths.dir);
+    // Checked before the running daemon is stopped: a missing or wrong passphrase leaves it running.
+    const passphrase = await checkedPassphrase(g.paths.dir, g.profile, passphraseFile);
     const unclaim = claimForDaemon(g.paths);
-    try { await restartDaemon(g, stopFor, startFor); } finally { unclaim(); }
+    try { await restartDaemon(g, stopFor, startFor, passphrase); } finally { unclaim(); }
     return;
   }
   if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
-  if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
-  print(await startDetached(g, startFor));
+  if (!parsed.options.detach) { await runDaemon(g, startFor, passphraseFile); return; }
+  requireProfile(g);
+  print(await startDetached(g, startFor, await checkedPassphrase(g.paths.dir, g.profile, passphraseFile)));
 }
 
 /** `daemon restart`, while the profile is kept for the daemon it starts. */
-async function restartDaemon(g: Globals, stopFor: number, startFor: number): Promise<void> {
+async function restartDaemon(g: Globals, stopFor: number, startFor: number, passphrase: string | null): Promise<void> {
   const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
   // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
   // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
@@ -986,7 +1011,7 @@ async function restartDaemon(g: Globals, stopFor: number, startFor: number): Pro
   if (ended?.listen) process.stderr.write(listenEnded(ended.pid));
   const before = (await probe)?.version ?? null;
   let started: Awaited<ReturnType<typeof startDetached>>;
-  try { started = await startDetached(g, startFor); }
+  try { started = await startDetached(g, startFor, passphrase); }
   catch (error) {
     // A start that failed after the stop leaves the profile with no daemon: the answer says so, and how to start one.
     if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
@@ -1097,7 +1122,7 @@ function processAlive(pid: number): boolean {
  * `send` every 200 ms, which takes the profile in the gap of a restart) is waited for, and so is one that took it
  * between the look and the child's start; one that still holds it at `seconds` is the answer, busy with its pid.
  */
-async function startDetached(g: Globals, seconds: number) {
+async function startDetached(g: Globals, seconds: number, passphrase: string | null) {
   requireProfile(g);
   // Before the log is opened in the profile's folder; the child checks again before it takes the profile (`openHost`).
   ownProfile(g.paths.dir);
@@ -1108,7 +1133,7 @@ async function startDetached(g: Globals, seconds: number) {
     for (;;) {
       if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
       if (lockOwner(g.paths) === null) {
-        const started = await spawnDaemon(g, until);
+        const started = await spawnDaemon(g, until, passphrase);
         if (started) return started;
       }
       if (performance.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
@@ -1118,10 +1143,15 @@ async function startDetached(g: Globals, seconds: number) {
 }
 
 /** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
-async function spawnDaemon(g: Globals, until: number) {
+async function spawnDaemon(g: Globals, until: number, passphrase: string | null) {
   const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...childEnv(process.env), [DETACHED_CHILD]: "1" } });
+  // An encrypted profile's passphrase goes to the child on a pipe of its own: never in its arguments or environment.
+  const unlock = passphrase === null ? [] : ["--passphrase-file", "/dev/fd/3"];
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile, ...unlock], { detached: true, stdio: ["ignore", log, log, ...(passphrase === null ? [] : ["pipe" as const])], env: { ...childEnv(process.env), [DETACHED_CHILD]: "1" } });
   closeSync(log); // the child has its own
+  // Closed once written: the child reads it from the kernel's buffer, and the open pipe would keep this process alive.
+  const pipe = child.stdio?.[3] as Socket | null | undefined;
+  if (pipe && passphrase !== null) { pipe.on("error", () => {}); pipe.end(passphrase, () => pipe.destroy()); }
   child.unref();
   const spawned = { error: null as Error | null };
   // A spawn that fails outright (EAGAIN, EMFILE) sets `exitCode` to the errno before the "error" event, so the loop below

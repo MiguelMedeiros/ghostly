@@ -179,6 +179,8 @@ The CLI uses the same engine, so the same fields are sealed in its store; its jo
 - The daemon and a one-shot with no daemon read the passphrase from `--passphrase-file <path>` (a path, or `/dev/fd/<n>` for a descriptor), else `GHOSTLY_PROFILE_PASSPHRASE`, else a prompt when stdin is a TTY, else exit with a usage error before the engine starts. Never from the command line, as for backup passphrases. A command that goes through a running daemon needs nothing.
 - A profile without the record works as today.
 
+Built so far on the CLI: the start gate (the daemon, `daemon --detach` and `restart`, and one-shots read the passphrase as above and set the engine's key slot before the store is read) and `profile passphrase`. `encrypt` and `decrypt`, with the journal and `rows.db` compaction, wait for the migration (slice 4). `profile backup` refuses an encrypted profile until slice 8.
+
 ### Slice manifest
 
 Each slice is one PR of about 400 changed lines, tests included, in order; each leaves the app working with the setting off.

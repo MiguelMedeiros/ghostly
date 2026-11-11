@@ -213,6 +213,11 @@ export interface RuntimeOptions {
   autoJoins?: (linkId: string) => boolean;
   /** The start keeps each history's newest rows that many, for the host's event check (`EngineServer.takeStartNewest`). */
   keepNewest?: number;
+  /**
+   * An encrypted profile's data key, unwrapped with its passphrase before the runtime starts (`unlockProfile`): set in
+   * the engine's slot by `openHost` before the store opens (WISP 04, Encrypted profile).
+   */
+  dataKey?: CryptoKey;
 }
 
 /**

@@ -33,7 +33,7 @@ describe("help", () => {
     // `daemon` itself first, with its own options, then the commands under it: its --timeout was shown nowhere.
     for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
       const { stdout } = await ghostly(args);
-      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\] \[--passphrase-file f\]\n/);
       expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds it waits for a command that holds the profile, and --detach for it to start/);
       expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
       expect(stdout.indexOf("--detach for it to start"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
@@ -89,7 +89,7 @@ describe("help", () => {
   it("profile and settings name their commands as every group does, and help for a word a group does not take is unknown", async () => {
     // `profile frob` said "ghostly profile create|list|use|show|set|picture|backup|restore", `settings frob` "ghostly
     // settings get | settings set <key> <json-value>"; `help chat histroy` printed the chat group's list with exit 0.
-    const profile = "create, list, use, show, set, backup, restore or picture";
+    const profile = "create, list, use, show, set, backup, restore, passphrase or picture";
     for (const [args, message] of [
       [["profile"], `ghostly profile takes a command: ${profile} (ghostly help profile)`],
       [["profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
