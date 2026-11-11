@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { identityStatement, newIdentityBinding, type IdentityStatement } from '@ghostly/core';
+import { IdentityCheckUnavailable, identityStatement, newIdentityBinding, type IdentityStatement } from '@ghostly/core';
 import type { IdentityFetch, RedirectSigner, SignerContext } from '../src/proofs/contract';
 import type { OidcHost } from '../src/host';
 import { createOidcIdentityProvider, type OidcEvidence } from '../src/proofs/providers/oidc';
@@ -111,6 +111,29 @@ describe('OpenID Connect identity provider', () => {
     const gone = network(test, () => []);
     const elsewhere = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
     await expect(verifyIdentity([elsewhere], s, { token: await token(key, s) }, ctx(gone.fetch, later))).rejects.toThrow(/does not publish the key/);
+  });
+
+  it('could not run, rather than failed, while the provider keys cannot be fetched', async () => {
+    const key = await testKey('k1', 'ES256');
+    const s = statementFor(ISSUER);
+    const evidence = { token: await token(key, s) };
+    const answer = (status: number, text = ''): IdentityFetch => async () => ({ status, contentType: 'application/json', text, bytes: new TextEncoder().encode(text) });
+    const outages: IdentityFetch[] = [
+      async () => { throw new TypeError('fetch failed'); },
+      async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); },
+      answer(503), answer(500), answer(429), answer(404), answer(200, '<html>'),
+    ];
+    for (const fetch of outages) {
+      // A fresh cache each time: one per contact's app.
+      const provider = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
+      const failure = await verifyIdentity([provider], s, evidence, ctx(fetch)).catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(IdentityCheckUnavailable);
+    }
+    // A key set it did read, without the key that signed the token, is still a failed proof.
+    const provider = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
+    const missing = await verifyIdentity([provider], s, evidence, ctx(answer(200, '{"keys":[]}'))).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/does not publish the key/);
   });
 
   it('refuses a token from another issuer, or for another subject, and account IDs it cannot show', async () => {
