@@ -1304,6 +1304,19 @@ html .toast-place.toast-place-page[data-at="top"] {
 .chat-text-audio-name { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
 .chat-text-media-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
 .chat-text-media-meta { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A person's, a Nostr profile's or an invite's card, a task's, a routine's or a usage card (chat/EntityCardFrame.tsx,
+   StatusCard.tsx, RoutineCard.tsx, UsageMeter.tsx): only their size; a line of a set height takes chat-text-leading-*.
+   Their icons, buttons, badges and time keep theirs. */
+.chat-text-card-heading { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-name { font-size: calc(13rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-nick { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-mono { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-small { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-meta { font-size: calc(11.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-label { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A card's line of a set height (Tailwind's leading-4 and leading-5), growing with its words. */
+.chat-text-leading-4 { line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-leading-5 { line-height: calc(20rem / 16 * var(--chat-text-scale)); }
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
