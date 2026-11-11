@@ -29,6 +29,7 @@ import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
+import { fillNames } from "../lib/fillNodes";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
@@ -835,7 +836,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const wakeNotice = (wakeCall.waking || wakeCall.gaveUp) && (
     <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
       className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
-      <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+      <span>{fillNames(t(wakeCall.waking ? "calls.waking" : "calls.wakeGaveUp"), { name: shownName })}</span>
       {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
     </div>
   );
