@@ -495,6 +495,18 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("group send says what a refused text looks like, as send does", async () => {
+    const { ctx, node } = fake();
+    const cashu = "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ";
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const cookie = `__cookie__:${"01".repeat(32)}`;
+    for (const text of [cashu, seed, cookie]) {
+      const said = await callApi(ctx, "chat.send", { chat: "Alice", text }).catch((error: Error) => error.message);
+      await expect(callApi(ctx, "group.send", { group: "Crew", text })).rejects.toMatchObject({ code: "confirm", message: said });
+    }
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+  });
+
   it("a text past 16 KiB is a bad request, never handed to the engine, in a chat or a group", async () => {
     const { ctx, node } = fake();
     // 8193 two-byte letters: 16386 bytes. It used to come back as "unavailable", which reads as "try again later".
