@@ -5,6 +5,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { updateFailure } from "../lib/updateFailure";
+import { reducedMotion } from "../lib/motion";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
@@ -238,7 +239,7 @@ export function Settings() {
   const pick = (to: SettingsSection) => {
     wanted.current = to;
     wantedField.current = null;
-    glide.current = settings.reduceMotion ? "auto" : "smooth";
+    glide.current = reducedMotion() ? "auto" : "smooth";
     document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: glide.current });
     setInView(to);
     // The page stays where it is; its address names the section, so a reload comes back to it.
