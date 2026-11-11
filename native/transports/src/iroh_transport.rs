@@ -8,10 +8,17 @@ use std::{net::SocketAddr, time::Duration};
 
 pub const ALPN: &[u8] = b"ghostly/paired-chat/1";
 pub const MAX_FRAME: usize = 60 * 1024;
-/// Bytes a contact may send on the chat's stream before this side confirms them. QUIC's default, 1.25 MB, is sized
-/// for 100 ms: a file is about 1.37 bytes on the stream per byte of it (base64url text), so at 150 ms it carried 5.25 MiB/s
-/// on a 100 Mbit path. 4 MiB is more than a chat's files have in flight (`chatWindowBytes`, 2 MiB, as text).
-pub const STREAM_WINDOW: u32 = 4 * 1024 * 1024;
+/// Bytes a contact may send on the chat's stream before this side reads them. QUIC's default, 1.25 MB, is sized for
+/// 100 ms: a file is about 1.37 bytes on the stream per byte of it (base64url text), so at 150 ms it carried 5.25 MiB/s
+/// on a 100 Mbit path.
+///
+/// 2 MiB and no more: since noq 1.4.0 (iroh 1.4) the receiving side closes the whole connection ("too many gaps in
+/// stream buffer") once one stream holds about 2,048 packets that were not read yet, in order or not, as each full
+/// packet stays a piece of its own. 2 MiB is about 1,800 packets of QUIC's smallest size (1,200 bytes), so a reader
+/// that falls a whole window behind (an app busy for a moment, a lost packet ahead of all that is in flight) keeps its
+/// connection; 4 MiB, more than a chat's files have in flight (`chatWindowBytes`, 2 MiB, as text), did not. Raise it
+/// again on a noq that merges those pieces (n0-computer/noq#866, merged after 1.4.0).
+pub const STREAM_WINDOW: u32 = 2 * 1024 * 1024;
 /// Bytes a contact may send on all of a connection's streams before this side confirms them: QUIC's default has no
 /// bound, so each stream the contact opened and nobody here reads could hold a window of its own.
 pub const CONNECTION_WINDOW: u32 = 2 * STREAM_WINDOW;
@@ -423,10 +430,11 @@ mod limits {
         b.close().await;
     }
 
-    /// What a contact may send before this side confirms it: a chat's files in flight on the chat's stream (QUIC's
-    /// 1.25 MB held a file at 5.25 MiB/s on a 150 ms path), and no more than two such windows over all its streams.
+    /// What a contact may send before this side reads it: a whole window on a stream (more than QUIC's 1.25 MB, which
+    /// held a file at 5.25 MiB/s on a 150 ms path), and no more than two such windows over all its streams. Nothing
+    /// is read meanwhile, and the connection stays: noq 1.4.0 closed it under a 4 MiB window (`STREAM_WINDOW`).
     #[tokio::test]
-    async fn a_contact_may_have_a_chats_files_in_flight_on_its_stream_and_no_more_in_all() {
+    async fn a_contact_may_have_a_window_unread_per_stream_and_two_in_all() {
         let a = endpoint([13; 32], true, None).await.unwrap();
         let b = endpoint([14; 32], true, None).await.unwrap();
         let addr = address(&b);
@@ -438,7 +446,8 @@ mod limits {
         .await
         .unwrap();
         let outgoing = outgoing.unwrap();
-        // Nothing is read on b: a write finishes only as far as b lets a have bytes unconfirmed.
+        // Nothing is read on b: a write finishes only as far as b lets a have bytes unconfirmed. A write that fails
+        // (the connection closed) does not count as finished.
         let write = |bytes: usize| {
             let outgoing = outgoing.clone();
             async move {
@@ -446,18 +455,21 @@ mod limits {
                 let written =
                     tokio::time::timeout(Duration::from_secs(3), send.write_all(&vec![7; bytes]))
                         .await;
-                (written.is_ok(), send)
+                (matches!(written, Ok(Ok(()))), send)
             }
         };
         let window = STREAM_WINDOW as usize;
-        let (whole, _first) = write(3 * 1024 * 1024).await;
-        assert!(whole, "3 MiB in flight on one stream");
-        let (rest, _second) = write(window - 3 * 1024 * 1024).await;
-        assert!(rest, "the rest of a window on another stream");
-        let (third, _third) = write(window).await;
-        assert!(third, "a third stream up to the connection's bound");
+        let (whole, _first) = write(window).await;
+        assert!(whole, "a whole window in flight on one stream");
+        let (second, _second) = write(window).await;
+        assert!(second, "a second stream up to the connection's bound");
         let (past, _past) = write(64 * 1024).await;
         assert!(!past, "past two windows over all streams, a contact waits");
+        assert!(
+            outgoing.close_reason().is_none() && incoming.close_reason().is_none(),
+            "a reader two windows behind keeps its connection: {:?}",
+            incoming.close_reason()
+        );
         drop(incoming);
         a.close().await;
         b.close().await;
