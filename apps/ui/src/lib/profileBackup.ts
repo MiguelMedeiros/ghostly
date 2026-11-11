@@ -13,7 +13,7 @@ import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shar
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
-import { getPrefix, getStorageProfile, ownsKey } from "./storage";
+import { getPrefix, getStorageProfile, keyOwner } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, hasBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
@@ -248,7 +248,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   const writer = await BackupWriter.start(sink, passphrase, signal, devices ? DEVICE_SET_BACKUP_VERSION : 2);
 
   const prefix = active ? getPrefix() : `ghostly_${ns}_`;
-  const owns = (key: string) => (active ? ownsKey(key) : key.startsWith(prefix));
+  const owns = active ? keyOwner() : (key: string) => key.startsWith(prefix);
   const storage: Record<string, string> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
