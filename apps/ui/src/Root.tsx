@@ -67,7 +67,8 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
  * out of the history: the address must not wait for the password. The chat
  * itself is made once the lock is passed and a limited start's question answered, as a group's link is joined, and
  * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`). A link it refuses is said then too,
- * not under the lock screen, and the notice stays until closed (`ClosableTopNotice`), as a group link's refusal does.
+ * not under the lock screen, and the notice stays until closed (`ClosableTopNotice`), as a group link's refusal does,
+ * or until a link it takes comes next.
  */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
@@ -115,13 +116,15 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { setInvalid(null); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    if (isDeviceCode(rest)) { setInvalid(null); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
+      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+      setInvalid(null);
       if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
       else open(reading.keys);
       return;
@@ -221,7 +224,7 @@ function ChatNotStoredNotice() {
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
  * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
- * the ⓘ), there until closed.
+ * the ⓘ), there until closed or until the next link is taken.
  * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
  * counted once the engine has loaded its groups.
  */
@@ -242,7 +245,8 @@ function GroupLinkIntake() {
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
-    else setCode(link);
+    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+    else { setProblem(null); setCode(link); }
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
   useEffect(() => {

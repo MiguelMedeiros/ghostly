@@ -99,8 +99,10 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
           unregister();
           const mine = !running || chatApp(linkId)?.running === running;
           const why = takenDown ?? warnStop(entry.title, reason);
-          // Taken down, or stopped on its own: the panel stays, shown, and says why until the person closes it.
-          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, runAnyway, stopped: why });
+          // Taken down, or stopped on its own: the panel stays and says why until the person closes it. One the person
+          // went Back from stays behind Back (its way back says it stopped): over the chat, it took the message field's focus.
+          const was = chatApp(linkId);
+          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: was?.shown ?? true, wide: was?.wide ?? false, view: entry.view ?? "chat", running: running!, runAnyway, stopped: why });
           else if (mine) setChatApp(linkId, null);
           onStop?.(ref, reason);
         },

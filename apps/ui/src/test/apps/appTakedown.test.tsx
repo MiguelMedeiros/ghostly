@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
-import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
+import { ChatAppPanel, ChatAppResume } from "../../components/apps/ChatAppPanel";
 import { setAppOpener, takedownText, type AppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { LOCALES as locales } from "../i18n/locales";
@@ -70,7 +70,7 @@ afterEach(() => {
 
 function chatPanel(phone = false) {
   windowIs(phone);
-  const view = renderApp(<div className="chat-pane"><div className="chat-column"><textarea aria-label="Message" /></div>
+  const view = renderApp(<div className="chat-pane"><div className="chat-column"><ChatAppResume linkId="link-1" /><textarea aria-label="Message" /></div>
     <ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" /></div>);
   act(() => fakeEngine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1" })] }));
   return view;
@@ -421,4 +421,39 @@ describe("an app in a chat that stops while the focus is in it", () => {
     expect(screen.getByTestId("mini-app-stopped")).toBeVisible();
     expect(document.activeElement).toBe(field);
   });
+});
+
+// On a phone the person went Back to the chat and types there: an app that stops meanwhile stays behind Back. Its way
+// back says it stopped, and the panel says why once the person goes back to it.
+describe("an app in a chat the person went Back from, that stops", () => {
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); setAppOpener(open); });
+  afterEach(() => { setAppOpener(null); });
+
+  for (const reason of ["revoked", "unresponsive", "navigated"]) {
+    it(`${reason}: the chat keeps the focus and stays in reach, and the way back says it stopped`, async () => {
+      const { user } = chatPanel(true);
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      await user.click(within(app).getByTestId("mini-app-back"));
+      const field = screen.getByRole("textbox", { name: "Message" });
+      await user.click(field);
+      await user.keyboard("Hi");
+      if (reason === "revoked") await checked({ status: "revoked" });
+      else act(() => started[0]!.stop(reason));
+      expect(app).not.toBeVisible();
+      expect(document.activeElement).toBe(field);
+      expect(document.querySelector(".chat-column")).not.toHaveAttribute("inert");
+      await user.keyboard(" Ana");
+      expect(field).toHaveValue("Hi Ana");
+      const resume = screen.getByTestId("mini-app-resume");
+      expect(within(resume).getByTestId("mini-app-resume-stopped")).toHaveTextContent("Stopped");
+
+      await user.click(resume);
+      expect(app).toBeVisible();
+      expect(within(app).getByTestId("mini-app-stopped")).toBeVisible();
+      await user.click(within(app).getByRole("button", { name: "Close" }));
+      expect(chatApp("link-1")).toBeUndefined();
+      expect(screen.queryByTestId("mini-app-resume")).not.toBeInTheDocument();
+    });
+  }
 });

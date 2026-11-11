@@ -63,6 +63,10 @@ export function DevicesSection() {
   // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
   // closed ("You can keep using Ghostly"), or one the other device started with Use here.
   const running = thisActive && !moving && handoff?.role === "giver" && handoff.step !== "failed" ? handoff : null;
+  // Add a device and a new device secret, which the engine refuses while a move runs: off then, after the password was
+  // typed is too late to say so. `aria-disabled`, not disabled, which would drop a keyboard's focus to the page when the
+  // other device starts the move; the move's steps right below say what is going on.
+  const notDuringMove = running ? { "aria-disabled": true, className: "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed" } as const : {};
   // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
   const [refocus, setRefocus] = useState<string | null>(null);
   const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
@@ -124,7 +128,8 @@ export function DevicesSection() {
       {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
       <Row testId={full ? "device-add-full" : undefined} label={t("devices.section.lead")} hint={full ? t("devices.section.full") : t("devices.section.leadHint")}
         info={full ? t("devices.section.fullInfo") : t("devices.section.info")}>
-        <Button ref={addButton} data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || full}>{t("devices.add.button")}</Button>
+        <Button ref={addButton} data-testid="device-add-open" onClick={() => { if (!running) setAdding(true); }} disabled={!view || full}
+          {...notDuringMove}>{t("devices.add.button")}</Button>
       </Row>
       {/* The other way round: this device, with a profile from another device. Offered while this profile has no other device. */}
       {canSwitch && view && devices.length <= 1 && !view.foreignSet && (
@@ -173,7 +178,7 @@ export function DevicesSection() {
       )}
       {thisActive && devices.length > 1 && (
         <Row label={t("devices.secret.button")} hint={t("devices.secret.hint")} info={t("devices.secret.info")} testId="device-secret">
-          <Button data-testid="device-secret-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.make")}</Button>
+          <Button data-testid="device-secret-new" disabled={secret.busy} onClick={() => { if (!running) void newSecret(); }} {...notDuringMove}>{t("devices.secret.make")}</Button>
         </Row>
       )}
       {(secret.done || secret.error) && (
