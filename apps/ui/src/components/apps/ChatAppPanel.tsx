@@ -226,6 +226,7 @@ function TabTrap({ root }: { root: RefObject<HTMLElement | null> }) {
 /**
  * On a phone, an app the person went Back from: still running, one tap away, under the chat's header. While it serves
  * a file to the contact, it says so here too (WISP 1200 § A read lane to the contact): the panel's header is hidden.
+ * One that stopped meanwhile (a takedown, the watchdog) says "Stopped" here, and why once it is shown.
  */
 export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
@@ -242,6 +243,10 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
         {/* A line of its own: beside the title, a narrow phone cut the app's name in some languages. */}
         {app.serving && <span data-testid="mini-app-resume-sharing" className="block truncate text-[12px] font-normal text-text-secondary">
           <span className="sr-only">, </span>{t("apps.view.resumeSharing")}
+        </span>}
+        {/* Stopped while the person was in the chat: the panel says why once they go back to it. */}
+        {app.stopped && <span data-testid="mini-app-resume-stopped" className="block truncate text-[12px] font-normal text-danger-ink">
+          <span className="sr-only">, </span>{t("apps.app.stopped")}
         </span>}
       </span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
