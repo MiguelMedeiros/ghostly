@@ -340,12 +340,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       pending.delete(this._rollbackLog);
       trees?.abort(this._rollbackLog);
     }
-    const dispatched = dispatch.call(this, event);
-    // fake-indexeddb keeps every transaction a database ever ran in its list (its scheduler only skips the finished
-    // ones), each with its requests, results and rollback log: a daemon's heap grew by about 100 KB a message, without
-    // end. Nothing looks for a finished one there again, so it goes once its last event is out (`dropEnded`).
-    if ((event.type === "complete" || event.type === "abort") && this._state === "finished") dropEnded(this.db._rawDatabase, this);
-    return dispatched;
+    // A finished transaction leaves its database's list by fake-indexeddb itself (6.2.7 on): kept, each held its
+    // requests, results and rollback log, and a daemon's heap grew by about 100 KB a message (storage.test.ts).
+    return dispatch.call(this, event);
   };
   const deleteDatabase = factory.deleteDatabase.bind(factory);
   factory.deleteDatabase = (name: string) => {
@@ -774,23 +771,6 @@ function readWithoutCopy(classes: RawClasses) {
     }
     return values;
   };
-}
-
-/** Transactions whose last event is out, by database, and dropped from its list at the next turn: all at once. */
-const ended = new WeakMap<object, Set<unknown>>();
-
-/** A finished transaction's place in its database's list, given back: one walk of the list for all that ended in a turn. */
-function dropEnded(db: { transactions: unknown[] }, transaction: unknown) {
-  let gone = ended.get(db);
-  if (gone) { gone.add(transaction); return; }
-  ended.set(db, (gone = new Set([transaction])));
-  setImmediate(() => {
-    ended.delete(db);
-    const list = db.transactions;
-    let kept = 0;
-    for (const held of list) if (!gone.has(held)) list[kept++] = held;
-    list.length = kept;
-  });
 }
 
 /** The classes whose scheduler starts every transaction it can in one pass: shared by every store opened. */
