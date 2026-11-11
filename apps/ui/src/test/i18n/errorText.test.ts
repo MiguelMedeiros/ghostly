@@ -279,6 +279,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["No mint could create an invoice: mint.example did not answer", `${BROWSER}/engine/wallet.ts`, "No mint could create an invoice: "],
   ["This wallet has no test mint to ask for test coins", `${BROWSER}/engine/wallet.ts`],
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
+  ["mint.example has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."],
+  ["mint.example:3338 has not answered yet. The ecash is added to your wallet as soon as it does.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The ecash is added to your wallet as soon as it does."],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
   // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
@@ -1037,6 +1039,18 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
     expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {
+    const pay = "testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.";
+    const redeem = "testnut.cashu.space has not answered yet. The ecash is added to your wallet as soon as it does.";
+    expect(problemText(new Error(pay), english)).toEqual({ tone: "error", title: "testnut.cashu.space hasn't answered yet", next: "The payment wasn't made. The sats set aside for it come back to your wallet a few minutes after the mint answers." });
+    expect(problemText(new Error(redeem), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space ainda não respondeu", next: "O ecash entra na sua carteira assim que ele responder." });
+    for (const language of LANGUAGES) for (const raw of [pay, redeem]) {
+      const { title, next } = problemText(new Error(raw), translators[language]);
+      expect(title, language).toContain("testnut.cashu.space");
+      expect(next, language).toBeTruthy();
+    }
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
