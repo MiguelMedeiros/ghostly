@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
+import { keyOrder, openPersistentIndexedDb, peekStores, type PersistentIndexedDb } from "../src/runtime/storage";
 import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
@@ -1593,5 +1593,33 @@ describe("messages kept in rows.db", () => {
     expect(newest).toEqual(["m029", "m026", "m023"]);
     expect((await read(messages.index("byCard").getAll("task"))).map((m) => (m as { id: string }).id)).toEqual(["m000", "m012", "m024", "m004", "m016", "m028", "m008", "m020"]);
     expect(await read(messages.index("byLink").count("chat-0"))).toBe(10);
+  });
+});
+
+describe("peekStores", () => {
+  it("reads inline stores from the files of a store another holds: the snapshot, then the journal's puts, deletes and clears", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["settings", "messages"], (s) => { s.settings.put({ publicKey: "first" }, "profileDid"); s.settings.put(1, "gone"); s.messages.put({ linkId: "a", id: "1" }); });
+    await store.compact();
+    // After the snapshot: in the journal only, with the store still open.
+    await tx(d, ["settings"], (s) => { s.settings.put(2, "later"); s.settings.delete("gone"); });
+    const seen = peekStores(dir, "ghostly", ["settings", "messages", "none"]);
+    expect(Object.fromEntries(seen.get("settings")!)).toEqual({ profileDid: { publicKey: "first" }, later: 2 });
+    expect(seen.get("messages")!.size, "a store kept in rows.db is not read").toBe(0);
+    expect(seen.get("none")!.size).toBe(0);
+    expect(peekStores(dir, "other", ["settings"]).get("settings")!.size).toBe(0);
+
+    await tx(d, ["settings"], (s) => { s.settings.clear(); s.settings.put(3, "after"); });
+    expect(Object.fromEntries(peekStores(dir, "ghostly", ["settings"]).get("settings")!)).toEqual({ after: 3 });
+    // A journal that follows another snapshot (a fold between the two reads) is not read over this one.
+    const stale = readFileSync(join(dir, "journal.bin"));
+    await tx(d, ["settings"], (s) => { s.settings.put(4, "after"); });
+    await store.compact();
+    writeFileSync(join(dir, "journal.bin"), stale);
+    expect(Object.fromEntries(peekStores(dir, "ghostly", ["settings"]).get("settings")!)).toEqual({ after: 4 });
+    expect(peekStores(folder(), "ghostly", ["settings"]).get("settings")!.size, "no store yet").toBe(0);
   });
 });

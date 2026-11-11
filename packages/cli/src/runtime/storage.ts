@@ -911,6 +911,50 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
 }
 
 /**
+ * A few small stores of the store in `dir`, read from its files without opening it and never written: the snapshot,
+ * then the whole entries of the journal after it. The process that holds the store (a daemon) may write meanwhile: a
+ * journal that follows another snapshot (a fold in between) is read again with that one. Only stores kept inline and
+ * their string keys; a store kept in rows.db reads as empty, and so does one the files do not have.
+ */
+export function peekStores(dir: string, db: string, names: string[]): Map<string, Map<string, unknown>> {
+  for (let attempt = 0; ; attempt++) {
+    const found = new Map(names.map((name) => [name, new Map<string, unknown>()]));
+    const saved = existsSync(join(dir, SNAPSHOT)) ? (deserialize(readFileSync(join(dir, SNAPSHOT))) as Snapshot) : null;
+    for (const store of saved?.databases.find((one) => one.name === db)?.stores ?? []) {
+      const into = found.get(store.name);
+      if (!into || store.onDisk || store.rows) continue;
+      for (const [key, value] of store.records) if (typeof key === "string") into.set(key, value);
+    }
+    let journal: Buffer;
+    try { journal = readFileSync(join(dir, JOURNAL)); } catch { return found; }
+    const named = follows(journal);
+    if (named !== undefined && saved?.journal !== undefined && named !== saved.journal) {
+      if (attempt < 2) continue;
+      return found;
+    }
+    for (let offset = 0; offset + 4 <= journal.length;) {
+      const length = journal.readUInt32BE(offset);
+      if (offset + 4 + length > journal.length) break;
+      let ops: Op[];
+      try { ops = deserialize(journal.subarray(offset + 4, offset + 4 + length)) as Op[]; } catch { break; }
+      offset += 4 + length;
+      for (const op of ops) {
+        const into = op.db === db ? found.get(op.store) : undefined;
+        if (!into) continue;
+        if (op.kind === "clear") into.clear();
+        else if (op.kind === "put") { if (typeof op.key === "string") into.set(op.key, op.value); }
+        else {
+          const key = keyFromDisk(op.key);
+          if (key instanceof IDBKeyRange) { for (const held of [...into.keys()]) if (key.includes(held)) into.delete(held); }
+          else if (typeof key === "string") into.delete(key);
+        }
+      }
+    }
+    return found;
+  }
+}
+
+/**
  * The snapshot's records come in key order (as `writeSnapshot` walks them), so each store's tree and each index's are
  * built whole from sorted arrays: storing record by record compared every key down the tree, a 70,000-message profile
  * took seconds. A snapshot not in order (never written so) is stored record by record.
