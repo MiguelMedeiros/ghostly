@@ -41,20 +41,28 @@ type BackupRecord =
  */
 const SETTINGS = ["groups.json", "calls.json", "holds.json"];
 
+/**
+ * Null for a file the profile removed since it was named (a deleted or disappearing message's, a group's files): the
+ * daemon goes on while a backup runs, and such a file is left out of it, as one the profile no longer has.
+ */
+const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; };
+
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
   try { names = await readdir(dir); } catch { return out; }
   for (const name of names) {
     const path = join(dir, name);
-    if ((await stat(path)).isDirectory()) await walk(root, path, out);
+    const found = await stat(path).catch(unlessGone);
+    if (!found) continue;
+    if (found.isDirectory()) await walk(root, path, out);
     else out.push(relative(root, path));
   }
   return out;
 }
 
 /** A file's first `size` bytes into the backup, a frame at a time. One that got shorter meanwhile stops the backup. */
-async function copyIn(writer: BackupWriter, path: string, size: number): Promise<void> {
-  const handle = await open(path, "r");
+async function copyIn(writer: BackupWriter, path: string, size: number, opened?: FileHandle): Promise<void> {
+  const handle = opened ?? await open(path, "r");
   try {
     const buffer = new Uint8Array(FRAME_BYTES);
     for (let at = 0; at < size;) {
@@ -97,7 +105,11 @@ export const BACKUP_METHODS: Record<string, Method> = {
     }
     await ctx.runtime.store.exportSnapshot(store);
     const light = bool(params, "light");
-    const all = await Promise.all((await walk(paths.files)).map(async (name) => ({ name, size: (await stat(join(paths.files, name))).size })));
+    const found = await Promise.all((await walk(paths.files)).map(async (name) => {
+      const file = await stat(join(paths.files, name)).catch(unlessGone);
+      return file && { name, size: file.size };
+    }));
+    const all = found.filter((file) => file !== null);
     // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
     const kept = async (file: { name: string; size: number }) => keptInLight(file.size, false) || (file.size <= LIGHT_VOICE_BYTES && !!(await fileStore.get(basename(file.name)).catch(() => undefined))?.metadata?.voice);
     const files: typeof all = [], leftOut: typeof all = [];
@@ -116,19 +128,25 @@ export const BACKUP_METHODS: Record<string, Method> = {
       await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
       await copyIn(writer, store, storeSize);
+      // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
+      let copied = 0, copiedBytes = 0;
       for (const file of files) {
+        const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
+        if (!handle) continue;
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
-        await copyIn(writer, join(paths.files, file.name), file.size);
+        await copyIn(writer, path, file.size, handle);
+        copied++;
+        copiedBytes += file.size;
       }
       for (const { name, text } of settings) await put({ t: "setting", name, text });
-      await put({ t: "end", files: files.length, bytes });
+      await put({ t: "end", files: copied, bytes: copiedBytes });
       const written = await writer.finish();
       await handle.sync();
       await handle.close();
       out = null;
       // Its name only now, and never over a file that appeared meanwhile.
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
-      return { path, bytes: written, files: files.length, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
+      return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {
       // A write into the backup that found its disk full names the backup, not Node's bare "write".
       if ((error as NodeJS.ErrnoException)?.code === "ENOSPC" || (error as NodeJS.ErrnoException)?.code === "EDQUOT") throw localFileError(error, path) ?? error;
