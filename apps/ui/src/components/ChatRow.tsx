@@ -198,8 +198,9 @@ function RowOpen({ label, active, describedBy, testId, reorders }: { label: stri
     className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
+/** `chat-list-row`: drawn only near the list's view (index.css), every row still in the page. */
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
+  `chat-list-row chat-list-row-${density} group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   /** The chat's session id: what its mute is kept under. */
