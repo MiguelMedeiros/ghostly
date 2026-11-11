@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, parseGroupCommit, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
-  GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
+  CatchUpAnswers, GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -538,8 +538,13 @@ function invitationClaims(frame: Record<string, unknown>): { e: number; n: numbe
 }
 /** Members removed while away that an admin waits for, per group: each costs an edge that looks for its member. */
 const MAX_FAREWELLS = 8;
-/** Syncs of a removed member answered with the commits it lacks, per farewell: it needs one. */
+/**
+ * Syncs of a removed member answered with the commits it lacks, per farewell: it needs one. Counted per answer, however
+ * many slices it goes in; a sync while one still goes out is not counted (`farewellSync`).
+ */
 const FAREWELL_ANSWERS = 3;
+/** Who an answer to a removed member's sync goes to (`Groups.farewellAnswers`): its group and its key. */
+const farewellTo = (groupId: string, key: string) => `${groupId} ${key}`;
 /**
  * The commit of epoch `e` for a removed member, with no secret: with the admin's `left` mark on a removal of someone who
  * left on their own, or its app says that the admin removed them (WISP 902 § Admission and departure).
@@ -1494,12 +1499,15 @@ export class Groups {
     group.farewells = Object.keys(rest).length ? rest : undefined;
   }
   /**
-   * The removed members this admin still waits for: not told yet, or told a moment ago (the commit is on its way). Also
-   * after it left the group: nobody else keeps an edge to them, and the members it removed would never learn it.
+   * The removed members this admin still waits for: not told yet, told a moment ago (the commit is on its way), or with
+   * my answer to their sync still going out a slice at a time. Also after it left the group: nobody else keeps an edge
+   * to them, and the members it removed would never learn it. Never past `FAREWELL_OPEN_MS` after the edge opened.
    */
   private farewellKeys(group: StoredGroup | undefined, session: GroupSession | undefined, now: number): string[] {
     if (!group?.farewells || !session || (session.status !== "active" && !group.left)) return [];
-    return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS && (f.told === undefined || now - f.told < REMOVED_LINGER_MS)
+    const answering = (key: string) => !!this.farewellAnswers?.busy(farewellTo(group.id, key));
+    return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS
+      && (f.told === undefined || now - f.told < REMOVED_LINGER_MS || answering(key))
       && (f.opened === undefined || now - f.opened < FAREWELL_OPEN_MS)).map(([key]) => key);
   }
   /** The edges an active member keeps: what the roster (or the hubs) ask for, and those to members it removed while they were away. */
@@ -1602,21 +1610,55 @@ export class Groups {
     farewell.told ??= this.now();
     void this.store.putGroup(group).catch(() => {});
   }
-  /** The sync of a removed member I wait for: the commits it lacks up to the one that removed it, a few times at most. */
+  /**
+   * The sync of a removed member I wait for: the commits it lacks up to the one that removed it, a few times at most.
+   * Every one from where it is (it takes them only one after the other), a slice at a time as a member's sync answer
+   * goes (`farewellAnswers`): hundreds at once ended its session as more than its app holds waiting
+   * (`SESSION_RECEIVE_PENDING`), and the next tries the same, until it was never told. A sync while my answer still
+   * goes out (its app asks again every 10 s while it takes commits that bring no secret) is no new try: it adds only
+   * what that answer does not hold or has not sent yet.
+   */
   private farewellSync(groupId: string, session: GroupSession, group: StoredGroup, key: string, frame: Record<string, unknown>): void {
     const farewell = group.farewells![key], linkId = this.host.edges(groupId).get(key);
     const from = frame.e;
     if (!linkId || frame.t !== "group-sync" || !Number.isSafeInteger(from) || (from as number) < 0 || (from as number) >= farewell.e - 1) return;
-    if ((farewell.answered ?? 0) >= FAREWELL_ANSWERS) return;
-    farewell.answered = (farewell.answered ?? 0) + 1;
-    try {
-      // Every one from where it is: it takes them only one after the other, as a member's sync answer gives them.
-      for (let e = (from as number) + 1; e <= farewell.e; e++) {
-        if (session.state.chain[e]) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
-      }
-    } catch { /* it closed: the next sync */ }
+    const answers = this.farewellOut(), to = farewellTo(groupId, key), again = answers.busy(to);
+    if (!again) {
+      if ((farewell.answered ?? 0) >= FAREWELL_ANSWERS) return;
+      farewell.answered = (farewell.answered ?? 0) + 1;
+    }
+    const commits: GroupEdgeFrame[] = [];
+    for (let e = (from as number) + 1; e <= farewell.e; e++) if (session.state.chain[e]) commits.push(farewellCommit(groupId, session, e));
+    answers.handOut(to, commits);
+    if (again) return;
     farewell.told ??= this.now();
     void this.store.putGroup(group).catch(() => {});
+  }
+  /**
+   * Answers to removed members' syncs (`farewellSync`), per `farewellTo`, a slice at a time with two at most not handled
+   * yet by the member's app, as a member's catch-up goes (`CatchUpAnswers`). One ends once its edge no longer takes a
+   * frame, or the member is no longer waited for. Made at the first answer.
+   */
+  private farewellAnswers?: CatchUpAnswers<GroupEdgeFrame>;
+  private farewellOut(): CatchUpAnswers<GroupEdgeFrame> {
+    if (this.farewellAnswers) return this.farewellAnswers;
+    const edge = (to: string) => { const [groupId, key] = to.split(" "); return { groupId, key, linkId: this.host.edges(groupId).get(key) }; };
+    return this.farewellAnswers = new CatchUpAnswers<GroupEdgeFrame>({
+      send: (to, frame) => {
+        const { groupId, key, linkId } = edge(to), session = this.sessions.get(groupId);
+        if (!linkId || !session || !this.stored.get(groupId)?.farewells?.[key] || rosterHas(session.roster, key)) return false;
+        try { this.host.sendOnLink(linkId, frame); return true; } catch { return false; /* it closed: its next sync */ }
+      },
+      ...(this.host.linkHandled && {
+        handled: (to: string) => {
+          const { linkId } = edge(to);
+          return linkId && this.host.linkHandled ? this.host.linkHandled(linkId) : Promise.resolve(false);
+        },
+      }),
+      active: () => true,
+      // A commit on its way or still queued is not sent twice to a member that asks again meanwhile.
+      key: frame => frame.t === "group-commit" ? `commit:${frame.commit.e}` : undefined,
+    });
   }
 
   async makeAdmin(groupId: string, key: string): Promise<void> {
