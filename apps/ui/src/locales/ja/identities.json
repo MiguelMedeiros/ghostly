@@ -44,6 +44,7 @@
     "dayOne": "1 日",
     "days": "{{count}} 日",
     "experimental": "試験的機能: まだすべてのツールで検証されていません。",
+    "interrupted": "サインインが中断されました",
     "keepOpen": "開いたままにする",
     "keyAbout": "この証明を作れるのはこの鍵の持ち主だけです。",
     "kinds": "ID の種類",
@@ -57,6 +58,7 @@
     "redirectHint": "{{provider}} からログインを求められます。その後、署名付きトークンでアカウントを Ghostly に保証します。パスワードが Ghostly に届くことはありません。",
     "signWith": "署名方法",
     "signWithNamed": "{{signer}} で署名",
+    "tryAgain": "再試行",
     "validFor": "有効期間",
     "verifyAndSave": "検証して保存"
   },

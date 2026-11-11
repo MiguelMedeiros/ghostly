@@ -2,6 +2,7 @@ import { RTC_CONFIG } from "@ghostly/core";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { isEmptyShare, receiveShare, type IncomingShare } from "../lib/incomingShare";
 import { PLATFORM_PASTE_MAX, readPlatformFiles } from "../lib/pastedFiles";
+import { signInInterrupted } from "../lib/signInInterrupted";
 
 /*
  * What the page does only in the Android app (apps/desktop built for Android, src/android.rs): the system bars follow
@@ -33,6 +34,21 @@ export function followAppVisibility(listen: ListenWith, doc: Document = document
     away = next;
     doc.dispatchEvent(new Event("visibilitychange"));
   }).catch(() => {});
+}
+
+/**
+ * An identity sign-in's answer came after Android ended the process that started it (Rust's `oidc-interrupted`, kept
+ * for the page as the answer may be what started the app: `oidc_interrupted`). The sign-in is lost with that process;
+ * the Identities page says it was interrupted, with Try again, instead of the start screen saying nothing.
+ */
+export function heedInterruptedSignIn(invoke: Invoke, listen: Listen): void {
+  const ask = () => void invoke<boolean>("oidc_interrupted").then((was) => {
+    if (!was) return;
+    signInInterrupted();
+    if (location.hash !== "#/identities") location.hash = "#/identities";
+  }).catch(() => {});
+  void listen("oidc-interrupted", ask).catch(() => {});
+  ask();
 }
 
 /**

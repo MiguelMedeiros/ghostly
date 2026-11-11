@@ -81,6 +81,7 @@ const COMMANDS: &[&str] = &[
     "native_private_notification",
     "native_speaker_test",
     "native_unread_count",
+    "oidc_interrupted",
     "oidc_loopback_cancel",
     "oidc_loopback_start",
     "oidc_loopback_wait",
