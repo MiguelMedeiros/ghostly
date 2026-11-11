@@ -6,6 +6,7 @@ import { LightningService, readLightningJournal, type LightningEvents, type Ligh
 import { sourceKey } from "./sources";
 import { awayFrom } from "../away";
 import { breezDatabaseInUse } from "./breezDatabases";
+import { BreezLightning } from "./breez";
 import { nwc, nwcWalletName } from "./nwcProvider";
 import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
@@ -35,6 +36,11 @@ export interface LightningCardView extends LightningView {
   name: string;
   /** The network's default for receiving: chat requests and Receive use it unless another card is picked. */
   receive: boolean;
+  /**
+   * `spark`: this card is the network's Spark wallet itself (a Breez card that opened the Spark wallet's own Breez
+   * database: same phrase, same profile), so its balance is that wallet's, whatever each of the two last read.
+   */
+  sameWalletAs?: "spark";
 }
 
 /** The card of Lightning through the Cashu mints: at most one per network, shown while the network has mints. */
@@ -110,6 +116,8 @@ export interface LightningCardsHost {
   /** Whether the network has Cashu mints: the Cashu card shows only then. */
   hasMints: () => boolean;
   fetch?: typeof fetch;
+  /** The Breez database the network's Spark wallet has open, when it is open (`SparkAdapter.storage`). */
+  sparkStorage?: () => string | undefined;
 }
 
 /**
@@ -179,12 +187,21 @@ export class LightningCards {
 
   views(): LightningCardView[] {
     const receive = this.receivingId;
-    return this.shown().filter((card) => this.services.has(card.id)).map((card) => ({ ...this.services.get(card.id)!.view, card: card.id, name: card.name, receive: card.id === receive }));
+    return this.shown().filter((card) => this.services.has(card.id)).map((card) => this.cardView(card, card.id === receive));
   }
   /** The default for receiving's view: what a caller from before cards reads as the network's Lightning. None before start. */
   get view(): LightningCardView | undefined {
     const card = this.stored.cards.find((c) => c.id === this.receivingId) ?? this.stored.cards[0];
-    return card && this.services.has(card.id) ? { ...this.services.get(card.id)!.view, card: card.id, name: card.name, receive: true } : undefined;
+    return card && this.services.has(card.id) ? this.cardView(card, true) : undefined;
+  }
+  private cardView(card: StoredLightningCard, receive: boolean): LightningCardView {
+    const service = this.services.get(card.id)!;
+    return { ...service.view, card: card.id, name: card.name, receive, ...(this.isSpark(service) ? { sameWalletAs: "spark" as const } : {}) };
+  }
+  /** The card opened the Breez database the network's Spark wallet has open: one wallet behind both cards. */
+  private isSpark(service: LightningService): boolean {
+    const spark = this.options.sparkStorage?.(), active = service.sources.active;
+    return !!spark && active instanceof BreezLightning && active.storage === spark;
   }
 
   /** The card holding this quote (each card quotes through its own source). */
