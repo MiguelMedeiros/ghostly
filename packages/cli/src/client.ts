@@ -63,6 +63,14 @@ export function endedUnanswered(error: unknown): boolean {
   return error instanceof CliError && unanswered.has(error);
 }
 
+/**
+ * Whether a call ended unanswered before it was written (`endedUnanswered`, and not a call the daemon read: those are
+ * `daemon-stopped`): nothing reached the daemon, so the call may go to the daemon that runs next, whatever it does.
+ */
+export function endedUnsent(error: unknown): boolean {
+  return endedUnanswered(error) && (error as CliError).details?.reason !== "daemon-stopped";
+}
+
 export function isNotTheDaemon(error: unknown): boolean {
   return error instanceof CliError && error.code === "refused" && error.details?.reason === "not-the-daemon";
 }
