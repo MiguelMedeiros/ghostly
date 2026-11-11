@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, forIpc } from "../../lib/apps/desktopOpener";
+import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
 import { stopTakenDown } from "../../lib/apps/open";
@@ -21,11 +21,11 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
   const host = memoryHost("ghostly-app://localhost/", "ghostly-app://localhost/");
   host.entry = async (ref) => ({ ref, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<p>chess</p>", ...entry });
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
-  const calls: { command: string; args: Record<string, unknown> }[] = [];
+  const calls: { command: string; args: Record<string, unknown>; headers?: Record<string, string> }[] = [];
   let labels = 0;
   const hooks: { opened?: (label: string) => void; focused?: boolean } = {};
-  const invoke = vi.fn(async (command: string, args: Record<string, unknown> = {}) => {
-    calls.push({ command, args });
+  const invoke = vi.fn(async (command: string, args: Record<string, unknown> = {}, options?: { headers: Record<string, string> }) => {
+    calls.push(options ? { command, args, headers: options.headers } : { command, args });
     if (command === "app_focused") return hooks.focused ?? true;
     if (command === "app_open") {
       const label = `app-${++labels}`;
@@ -33,13 +33,18 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
       return label;
     }
     return undefined;
-  }) as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+  }) as unknown as DesktopOpenerOptions["invoke"];
   const listen = async <T,>(event: string, handler: (event: { payload: T }) => void) => { handlers.set(event, handler as (event: { payload: unknown }) => void); return () => {}; };
   const stops: string[] = [];
   const open = desktopOpener({ apps: () => host, invoke, listen, nameIn, windowTitle, onStop: (_, reason) => stops.push(reason), view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 200 });
   /** The app window `label` asks, as Rust hands it over. */
   const request = (label: string, message: unknown) => handlers.get(APP_REQUEST_EVENT)!({ payload: { label, request: message } });
-  const posts = (label: string) => calls.filter((c) => c.command === "app_post" && c.args.label === label).map((c) => c.args.message as Record<string, unknown>);
+  /** What the broker sent the window: JSON through `app_post`, bytes raw through `app_post_bytes` (`raw`). */
+  const posts = (label: string) => calls.flatMap((c): Record<string, unknown>[] => {
+    if (c.command === "app_post" && c.args.label === label) return [c.args.message as Record<string, unknown>];
+    if (c.command === "app_post_bytes" && c.headers?.["x-label"] === label) return [{ id: Number(c.headers["x-id"]), ok: true, raw: c.args }];
+    return [];
+  });
   const answer = async (label: string, id: number) => {
     await vi.waitFor(() => expect(posts(label).some((m) => m.id === id)).toBe(true));
     return posts(label).find((m) => m.id === id)!;
@@ -217,28 +222,35 @@ describe("opening an app on Desktop", () => {
     expect(await answer("app-1", last)).toEqual({ id: last, ok: false, error: "too-fast" });
   });
 
-  it("sends a file's bytes as base64, which the runner turns back into an ArrayBuffer", async () => {
-    const { open, request, answer, host } = setup();
+  it("sends a file's bytes to Rust raw, never as base64 in JSON on the Ghostly window's thread", async () => {
+    const { open, request, answer, host, calls } = setup();
     host.files.set(REF, new Map([["board.svg", new Uint8Array([0, 1, 2, 250, 255])]]));
     await open(REF, LINK);
     request("app-1", { id: 1, type: "writing", args: [] });
     await answer("app-1", 1);
     request("app-1", { id: 2, type: "file", args: ["board.svg"] });
-    expect(await answer("app-1", 2)).toEqual({ id: 2, ok: true, bytes: "AAEC+v8=" });
-    expect(forIpc({ id: 1, ok: true, value: "x" })).toEqual({ id: 1, ok: true, value: "x" });
+    expect(await answer("app-1", 2)).toEqual({ id: 2, ok: true, raw: new Uint8Array([0, 1, 2, 250, 255]) });
+    expect(calls.filter((c) => c.command === "app_post").map((c) => (c.args.message as { id?: number }).id)).toEqual([1]);
   });
 
-  it("encodes a file with core's encoder, not btoa, on the Ghostly window's thread (about 100 ms a MiB)", () => {
-    const btoa = vi.spyOn(globalThis, "btoa");
-    try {
-      for (const length of [0, 1, 2, 3, 0x8000 * 2 + 3, 1024 * 1024 + 1]) {
-        const bytes = new Uint8Array(length).map((_, i) => (i * 131) & 255);
-        expect(forIpc({ id: 2, ok: true, value: bytes.buffer })).toEqual({ id: 2, ok: true, bytes: Buffer.from(bytes).toString("base64") });
-      }
-      expect(btoa.mock.calls.length).toBe(0);
-    } finally {
-      btoa.mockRestore();
-    }
+  it("sends a files.read and a remote.read of 1 MiB to Rust raw: base64 on the Ghostly window cost ~2 ms a MiB at 16 MiB a second", async () => {
+    const { open, request, answer, host, calls } = setup({ permissions: ["chat", "files"] });
+    const film = new Uint8Array(2 * 1024 * 1024).map((_, i) => (i * 131) & 255);
+    await open(REF, LINK);
+    request("app-1", { id: 0, type: "writing", args: [] });
+    await answer("app-1", 0);
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
+    request("app-1", { id: 1, type: "files.pick", args: [] });
+    const [link] = (await answer("app-1", 1)).value as { id: string }[];
+    request("app-1", { id: 2, type: "files.read", args: [link!.id, { offset: 1024 * 1024, length: 1024 * 1024 }] });
+    expect(await answer("app-1", 2)).toEqual({ id: 2, ok: true, raw: film.slice(1024 * 1024) });
+    // What the contact's app serves, read through the read lane.
+    const serve = "s".repeat(22);
+    host.remote.set(serve, film);
+    request("app-1", { id: 4, type: "remote.read", args: [serve, { offset: 0, length: 1024 * 1024 }] });
+    expect(await answer("app-1", 4)).toEqual({ id: 4, ok: true, raw: film.slice(0, 1024 * 1024) });
+    expect(calls.filter((c) => c.command === "app_post_bytes").map((c) => c.headers)).toEqual([{ "x-label": "app-1", "x-id": "2" }, { "x-label": "app-1", "x-id": "4" }]);
+    expect(calls.some((c) => c.command === "app_post" && "bytes" in (c.args.message as object))).toBe(false);
   });
 
   it("sends the contact's frames to that window as events", async () => {
