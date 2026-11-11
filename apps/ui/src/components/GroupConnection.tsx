@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupEdgeView, GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
@@ -14,6 +14,7 @@ import { useOnline } from "../hooks/useOnline";
 import { useEngineValue } from "../lib/engineState";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
+import { focusLost, working } from "../lib/focus";
 
 /** Some members reachable, not all: the connected icon with a warning dot. */
 type GroupKind = ConnectionKind | "partial";
@@ -69,10 +70,21 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const iconKind: ConnectionKind = kind === "partial" ? "connected" : kind;
   const close = () => { setMenuOpen(false); trigger.current?.focus(); };
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
-  const reconnect = async (linkId: string) => {
+  // The member whose Retry now was pressed: once they are back it goes, and their row takes the focus it had.
+  const list = useRef<HTMLUListElement>(null), retried = useRef("");
+  const reconnect = async (linkId: string, key: string) => {
+    if (busy) return;
+    retried.current = key;
     setBusy(linkId); setError("");
     try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? rawError(e) || t("group.connection.reconnectFailed") : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
   };
+  useLayoutEffect(() => {
+    if (!retried.current) return;
+    const row = list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(retried.current)}"]`);
+    if (row?.querySelector("[data-testid=group-connection-reconnect]")) return;
+    retried.current = "";
+    if (focusLost() || !document.activeElement?.isConnected) (row ?? list.current)?.focus();
+  });
   // "last seen 5 min ago" moves on with the clock once a minute, not with the engine's states (it draws on what it shows only).
   useMinuteClock(root);
   const now = Date.now();
@@ -99,11 +111,12 @@ export function GroupConnection({ group }: { group: GroupView }) {
         {carried && <p className="mt-0.5 text-[11px]" data-testid="group-connection-transports">{carried.line}</p>}
         {!online && <p className="mt-1 text-[11px]">{t("group.connection.offlineHint")}</p>}
         {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{noLinksHint}</p>}
-        <ul className="mt-3 space-y-1" data-testid="group-connection-members">
+        <ul ref={list} tabIndex={-1} className="mt-3 space-y-1 focus:outline-none" data-testid="group-connection-members">
           {linked.map(m => {
             // A member reached through a hub is not down: reconnecting my own edge to them would not help.
             const down = m.edge && m.edge.state !== "open" && !m.viaHub;
-            return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-1.5">
+            return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} tabIndex={-1}
+              className={`rounded-lg bg-surface-hover px-2.5 py-1.5 focus:outline-none ${focus}`}>
               <div className="flex min-h-8 items-center gap-2">
                 <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
                 <span className="min-w-0 flex-1">
@@ -112,8 +125,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
                   <span className="block truncate text-[11px]" data-testid="group-connection-member-status">{edgeLabel(m, now, t, agoIn(language))}</span>
                 </span>
                 {/* The app reconnects by itself: this only skips the wait, so it stays a quiet secondary action. */}
-                {down && online && !noLinks && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"
-                  className={`min-h-8 shrink-0 rounded-md px-2 text-text-secondary max-md:min-h-11 hover:bg-surface-alt hover:text-accent disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.retryNow")}</button>}
+                {down && online && !noLinks && <button {...working(busy === m.edge!.linkId)} aria-disabled={busy !== "" || undefined} onClick={() => void reconnect(m.edge!.linkId, m.key)} data-testid="group-connection-reconnect"
+                  className={`min-h-8 shrink-0 rounded-md px-2 text-text-secondary max-md:min-h-11 hover:bg-surface-alt hover:text-accent aria-disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.retryNow")}</button>}
               </div>
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) only behind the ⓘ. */}
