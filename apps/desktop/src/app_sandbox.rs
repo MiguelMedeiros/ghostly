@@ -1071,7 +1071,7 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
 /// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`, or
-/// for a file `{"id", "ok", "bytes"}`, the bytes in base64, read here (`file_bytes`) or carried by the broker.
+/// for bytes `{"id", "ok", "bytes"}`, in base64, read here (`file_bytes`) or sent raw by the broker (`app_post_bytes`).
 #[tauri::command]
 pub async fn app_broker<R: Runtime>(
     app: AppHandle<R>,
@@ -1120,9 +1120,14 @@ async fn answer_to(request: &Value, receiver: oneshot::Receiver<Value>) -> Optio
 /// window's CSP and rule list block `ipc://`, so Tauri would eval a raw body into it as a JSON list of numbers,
 /// about 3.6 characters a byte, slow to build, parse and hold, and on the GTK main loop the windows share.
 fn bytes_response(id: u64, bytes: &[u8]) -> Result<tauri::ipc::Response, String> {
+    json_response(&bytes_answer(id, bytes))
+}
+
+/// An answer that carries bytes, as the runner reads it: `{"id", "ok": true, "bytes"}`, the bytes in base64.
+fn bytes_answer(id: u64, bytes: &[u8]) -> Value {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.encode(bytes);
-    json_response(&json!({ "id": id, "ok": true, "bytes": bytes }))
+    json!({ "id": id, "ok": true, "bytes": bytes })
 }
 
 /// An answer for the app window: its JSON text, sent as a JSON string, which the runner parses (`jsonOf`). Not the
@@ -1195,6 +1200,39 @@ pub fn app_post<R: Runtime>(
     message: Value,
 ) -> Result<(), String> {
     post(&app, &label, message)
+}
+
+/// An answer whose value is bytes (`files.read`, `remote.read`, a `file` the broker carried) from the Ghostly window's
+/// broker (the Ghostly window only): the raw body is the bytes, `x-label` and `x-id` say which window's request it
+/// answers. Turned into base64 here, as a `file` read by reference is (`bytes_response`): on the Ghostly window's
+/// thread, a 1 MiB read cost ~2 ms of base64 and a 1.4 MB JSON string for `app_post`.
+#[tauri::command]
+pub async fn app_post_bytes<R: Runtime>(
+    app: AppHandle<R>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected raw bytes".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| format!("Missing {name}"))
+    };
+    let id = header("x-id")?.parse().map_err(|_| "Invalid id")?;
+    post_bytes(&app, header("x-label")?, id, bytes)
+}
+
+/// The answer to `id` in window `label`: `bytes`, as the runner reads them (`bytes_answer`).
+pub fn post_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    id: u64,
+    bytes: &[u8],
+) -> Result<(), String> {
+    post(app, label, bytes_answer(id, bytes))
 }
 
 /// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
@@ -2458,6 +2496,43 @@ mod tests {
             first.try_recv(),
             Err(oneshot::error::TryRecvError::Closed)
         ));
+    }
+
+    /// `files.read` and `remote.read`: the broker sends the bytes raw (`app_post_bytes`), and the request waiting gets
+    /// them as the runner reads a file's, base64 made here rather than on the Ghostly window's thread.
+    #[test]
+    fn bytes_reach_the_request_of_their_window_as_the_runner_reads_them() {
+        let app = app();
+        let state = app.state::<AppSandboxState>();
+        {
+            let mut windows = state.windows.lock().unwrap();
+            windows.insert("app-1".into(), window("ana/cinema", true, true));
+            windows.insert("app-2".into(), window("bob/snake", true, true));
+        }
+        started(&state, "app-1");
+        started(&state, "app-2");
+        let request =
+            json!({"id": 6, "type": "files.read", "args": ["f", {"offset": 0, "length": 5}]});
+        let Admitted::Relay(_, mut first) = admitted(&state, "app-1", request.clone()).unwrap()
+        else {
+            panic!("relayed")
+        };
+        let Admitted::Relay(_, mut second) = admitted(&state, "app-2", request).unwrap() else {
+            panic!("relayed")
+        };
+        post_bytes(app.handle(), "app-1", 6, &[0, 1, 2, 250, 255]).unwrap();
+        assert_eq!(
+            first.try_recv().unwrap(),
+            json!({"id": 6, "ok": true, "bytes": "AAEC+v8="})
+        );
+        assert!(second.try_recv().is_err(), "app-2's request still waits");
+        for label in ["main", "svc-1", "app-"] {
+            assert!(post_bytes(app.handle(), label, 6, &[1]).is_err(), "{label}");
+        }
+        assert_eq!(
+            post_bytes(app.handle(), "app-9", 6, &[1]).unwrap_err(),
+            "No app window"
+        );
     }
 
     /// A pick waits for the person as long as they take, within `PICK_TIMEOUT` (as on the web); it ends when the
