@@ -831,6 +831,66 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(lines[0].text).toMatch(/ left$/);
       });
 
+      describe("keeps the names it knew for the history it keeps", () => {
+        /**
+         * The admin's edge kept to tell Bob says no name to someone out of the roster: `paired-nick` with `n: ""` as its
+         * app opens it, before the commit that removed him, and again each time it opens after. Bob's side took that for
+         * the admin removing her name: her lines in his history had no author, and she was missing from his group's names.
+         */
+        async function removedAway(viaChat: boolean) {
+          const scene = await trio();
+          const { world, alice, bob, carol, groupId, key, edge } = scene;
+          const aliceKey = key(alice), carolKey = key(carol);
+          const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+          // Their edges said their names to Bob, and each wrote a line he holds.
+          bob.edgeNick(groupId, aliceKey, "Alice"); bob.edgeNick(groupId, carolKey, "Carol"); await tick();
+          await alice.send(groupId, "from alice"); await carol.send(groupId, "from carol"); await world.settle();
+          // Bob's app is closed: the edges to him go down, and so does the chat that invited him (or he has none).
+          edge("alice", bob, false); edge("carol", bob, false);
+          world.chats.delete("chat-ab");
+          await alice.remove(groupId, key(bob)); await world.settle();
+          await alice.send(groupId, "after bob"); await world.settle();
+          // Bob is back: the admin's kept edge opens and says no name, then the commit that removed him goes over it.
+          edge("alice", bob, true);
+          bob.edgeNick(groupId, aliceKey, undefined); await tick();
+          await world.meet(); await world.settle();
+          expect(bob.views()[0]).toMatchObject({ status: "removed" });
+          // The edge opens again before the admin lets it go: no name again.
+          bob.edgeNick(groupId, aliceKey, undefined); await tick();
+          if (viaChat) world.chats.set("chat-ab", ["alice", "bob"]);
+          return { ...scene, aliceKey, carolKey };
+        }
+        /** The author's name of each of Bob's lines, as `group history` and the app read it: the roster's, then the former names. */
+        const authors = async (bob: Groups, groupId: string) => {
+          const view = bob.views()[0];
+          const name = (key: string) => view.members.find(m => m.key === key)?.nick ?? view.formerNames?.[key] ?? null;
+          return (await bob.messages(groupId)).filter(m => !m.event).map(m => [m.text, name(m.member!)]);
+        };
+
+        it("removed while away, with no chat to the admin (by the link): the admin is still named on her lines and in the group", async () => {
+          const { bob, groupId, aliceKey } = await removedAway(false);
+          expect(bob.views()[0].members.find(m => m.key === aliceKey)?.nick).toBe("Alice");
+          expect(await authors(bob, groupId)).toEqual([["from alice", "Alice"], ["from carol", "Carol"]]);
+        });
+
+        it("removed while away, invited over a contact chat: the names are kept, and go with the admin's new invitation", async () => {
+          const { alice, bob, groupId, aliceKey, carolKey } = await removedAway(true);
+          expect(await authors(bob, groupId)).toEqual([["from alice", "Alice"], ["from carol", "Carol"]]);
+          await alice.invite(groupId, "chat-ab"); await new Promise(resolve => setTimeout(resolve, 10));
+          expect(bob.views()[0].invitation).toBeDefined();
+          expect(bob.views()[0].formerNames).toMatchObject({ [aliceKey]: "Alice", [carolKey]: "Carol" });
+        });
+
+        it("a member that removes its name while I am in the group is unnamed, as before", async () => {
+          const { world, alice, bob, groupId, key } = await trio();
+          const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+          bob.edgeNick(groupId, key(alice), "Alice"); await tick();
+          bob.edgeNick(groupId, key(alice), undefined); await tick();
+          await world.settle();
+          expect(bob.views()[0].members.find(m => m.key === key(alice))?.nick).toBeUndefined();
+        });
+      });
+
       it("is still told after the admin's app restarts, and is given up after a week", async () => {
         const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
         const bobKey = key(bob), carolKey = key(carol);
