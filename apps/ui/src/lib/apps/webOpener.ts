@@ -81,6 +81,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
       const there = chatApp(linkId);
+      // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
+      if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");
       if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;

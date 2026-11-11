@@ -155,6 +155,27 @@ describe("the Android connection service", () => {
     expect(screen.queryByTestId("settings-stay-connected-open-settings")).toBeNull();
   });
 
+  it("says the system ended the app even when a link comes up before the service answered", async () => {
+    android(true);
+    tauri.killed = true;
+    // The first answer takes a while (the plugin is on Android's main thread): a link opens meanwhile.
+    let answer!: () => void;
+    tauri.invoke.mockImplementationOnce(async (_command: string, args?: unknown) => {
+      await new Promise<void>((done) => { answer = done; });
+      return { held: (args as { on: boolean }).on, killed: true };
+    });
+    fakeEngine.update({ links: [link("idle")] });
+    renderApp(<StoppedInBackgroundBanner />);
+    renderHook(() => useStayConnected());
+    await waitFor(() => expect(last()).toEqual({ on: true, links: false }));
+    // Kotlin says "killed" once a run: the calls after this one answer false.
+    tauri.killed = false;
+    act(() => fakeEngine.update({ links: [link("open")] }));
+    await waitFor(() => expect(last()).toEqual({ on: true, links: true }));
+    act(() => answer());
+    expect(await screen.findByTestId("stopped-in-background-banner")).toHaveTextContent("Android stopped Ghostly in the background");
+  });
+
   it("holds nothing outside the Android app", async () => {
     android(false);
     fakeEngine.update({ links: [link("open")] });

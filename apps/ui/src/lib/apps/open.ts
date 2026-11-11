@@ -6,8 +6,12 @@ import { useSyncExternalStore } from "react";
 import type { Translate } from "../../locales/translate";
 import type { LinkedFilesHost } from "../platform";
 
-/** How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one). */
-export interface OpenAppOptions { runAnyway?: boolean }
+/**
+ * How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one).
+ * `again`: Open again under a chat's stopped app, that app's run: it starts only if the chat still shows that one once it
+ * can start, so a panel closed meanwhile stays closed.
+ */
+export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).

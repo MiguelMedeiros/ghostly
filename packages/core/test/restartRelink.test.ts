@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ChatFiles, type FileTransferRecord } from "../src/chatFiles";
 import { CROSSED_WAIT_MS, GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { DAEMON_WATCH_PEER_IDLE_MS, RELAY_POLL_INTERVALS } from "../src/link";
@@ -985,5 +986,74 @@ describe("a reaction, a pin and an edit sent while Automatic moves the session f
     // Before: none of the three arrived, and none was confirmed.
     expect(got.sort(), "arrived").toEqual(["edit 9", "pin 8", "reaction 7"]);
     expect(receipts.sort(), "confirmed").toEqual(["edit 9", "pin 8", "reaction 7"]);
+  }, 240_000);
+});
+
+/**
+ * The same move, and a file under way each way: both senders cancel theirs the moment the first side swaps. Each
+ * cancel (`pf-abort`) was lost, and nothing said it again: the sender no longer offers a file it cancelled, and the
+ * receiver asks about an active one only after its 30 s idle nudge. Until then it showed the file moving, its progress
+ * frozen and its bytes kept.
+ * - Said by the side that had not swapped yet, it went on the session its contact had just replaced, which read only
+ *   texts, reactions, pins, edits and their receipts while it retired.
+ * - Said by the side that had just swapped, it went nowhere: that side's files are off from the swap until the contact
+ *   says what it supports on the new session, and a cancel then only ended the file here.
+ */
+describe("a file's cancel said while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each(["lower", "higher"] as const)("the app with the %s key back: each receiver has the file cancelled within 2 s", async restarted => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const file = new Uint8Array(32 * 1024 * 1024);
+    const ids = { goes: "g".padEnd(22, "x"), stays: "s".padEnd(22, "x") };
+    const apps = {} as Record<"goes" | "stays", App>, files = {} as Record<"goes" | "stays", ChatFiles>;
+    const records = { goes: new Map<string, FileTransferRecord>(), stays: new Map<string, FileTransferRecord>() };
+    const other = (who: "goes" | "stays") => who === "goes" ? "stays" : "goes";
+    const moves: string[] = [];
+    let armed = false, atMove: (string | undefined)[] = [];
+    // A chat's files on a link, as the app wires them (filesBinary.test.ts's `desk`); the bytes taken are only counted.
+    const chatFiles = (who: "goes" | "stays") => new ChatFiles({
+      send: frame => apps[who].link.sendFilesFrame(frame),
+      decide: async () => "accept",
+      openTarget: async () => ({ offset: 0, append: async () => {}, flush: async () => {}, verify: async () => true, discard: async () => {} }),
+      openSource: async () => ({ read: async (offset, length) => file.subarray(offset, offset + length), digest: async () => "x" }),
+      changed: record => { records[who].set(record.id, record); },
+      room: async () => 1024 ** 3,
+    });
+    const options = (who: "goes" | "stays") => ({ largeFilesSupport: true, events: {
+      onFilesFrame: (frame: Record<string, unknown>) => files[who].handle(frame),
+      onFilesSession: (open: boolean) => { if (open) files[who].attach(); else files[who].detach(); },
+      onTransportSwitched: (from?: string, to?: string) => {
+        moves.push(`${who} ${from}->${to}`);
+        if (!armed || moves.length !== 1) return;
+        // The side that swapped cancels the file it sends, and so does its contact, still on the old session.
+        atMove = [records[other(who)].get(ids[who])?.state, records[who].get(ids[other(who)])?.state];
+        files[who].cancel("out", ids[who]);
+        files[other(who)].cancel("out", ids[other(who)]);
+      },
+    } });
+    const start = (who: "goes" | "stays", wasLive: boolean) => {
+      files[who] = chatFiles(who);
+      const [side, contact] = who === "goes" ? [goesSide, { side: staysSide, name: "stays" }] : [staysSide, { side: goesSide, name: "goes" }];
+      apps[who] = startApp(world, who, side, contact, "auto+iroh", apps[who]?.dhtState ?? emptyDhtDeliveryState(), wasLive, undefined, false, up, options(who));
+    };
+    start("goes", false); start("stays", false);
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, apps.goes, "graceful");
+    await run(RESTART_AFTER_MS);
+    moves.length = 0; armed = true;
+    const before = channelOf(apps.stays);
+    start("goes", true);
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen && channelOf(apps.stays) !== before, 60_000)).toBeLessThan(Infinity);
+    for (const who of ["goes", "stays"] as const) files[who].offer({ id: ids[who], name: `${who}.bin`, mime: "application/octet-stream", size: file.length, timestamp: 1 });
+    expect(await until(() => moves.length === 2, 60_000)).toBeLessThan(Infinity);
+    expect(moves.map(m => m.split(" ")[1]), "the session moved on both sides").toEqual(["iroh/1->webrtc/1", "iroh/1->webrtc/1"]);
+    expect(atMove, "both files were under way at the move").toEqual(["active", "active"]);
+    await run(2_000);
+    expect([records.goes.get(ids.goes)?.state, records.stays.get(ids.stays)?.state], "the senders'").toEqual(["cancelled", "cancelled"]);
+    // Before: both still active, until each receiver's idle nudge 30 s later got its sender's answer.
+    expect({ goes: records.stays.get(ids.goes)?.state, stays: records.goes.get(ids.stays)?.state }, "the receivers'").toEqual({ goes: "cancelled", stays: "cancelled" });
   }, 240_000);
 });
