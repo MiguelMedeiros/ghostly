@@ -154,6 +154,16 @@ export const VIEWER_GUARD_HASH = "'sha256-P3jYgJwfoJ/cAS31rQz7Tk99bBwsSeN2wDDqJu
  */
 export const VIEWER_GUARD_CSP = "frame-src 'self'; object-src 'self'; require-trusted-types-for 'script'";
 
+/**
+ * `VIEWER_GUARD_CSP` for a worker's own script: no Trusted Types. A worker has no `javascript:` URL, no `execCommand`
+ * and no WebRTC for a guard to keep, and no guard runs in it to make the `default` policy, so Trusted Types there
+ * would refuse its every `importScripts`, `eval` and `new Function`.
+ */
+export const VIEWER_WORKER_GUARD_CSP = "frame-src 'self'; object-src 'self'";
+
+/** The `destination` of a worker's own script: its answer's policy is the worker's. */
+const WORKER_DESTINATIONS = new Set(["worker", "sharedworker", "serviceworker"]);
+
 /** Refuses every script of a page the guard cannot be put first in. */
 const NO_SCRIPTS_CSP = "script-src 'none'";
 
@@ -263,7 +273,8 @@ const LOOK_BYTES = 64 * 1024;
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null, guards: readonly PageGuard[] = [WEBRTC_GUARD]): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const hashes = guards.map((guard) => guard.hash);
   const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value, hashes) : value]);
-  out.push(["content-security-policy", VIEWER_GUARD_CSP]);
+  const worker = destination !== null && WORKER_DESTINATIONS.has(destination.toLowerCase());
+  out.push(["content-security-policy", worker ? VIEWER_WORKER_GUARD_CSP : VIEWER_GUARD_CSP]);
   if (destination !== null && !DOCUMENT_DESTINATIONS.has(destination.toLowerCase())) return { headers: out, body };
   const values = (name: string) => headers.filter(([n]) => n.toLowerCase() === name).map(([, value]) => value.toLowerCase().trim());
   // One type, said once: of two (two headers, or a list in one) a browser reads the last, which may not be the one read here.

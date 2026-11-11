@@ -9,6 +9,7 @@ import {
   VIEWER_GUARD_CSP,
   VIEWER_GUARD_HASH,
   VIEWER_GUARD_SCRIPT,
+  VIEWER_WORKER_GUARD_CSP,
   type HeaderList,
 } from "../src/index";
 
@@ -139,9 +140,25 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect((await noScripts([["content-type", "text/html"], ["content-type", "text/html"]], "<p>twice")).policies).toContain(REFUSED);
     expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity"], ["content-encoding", "gzip"]], "zipped")).policies).toContain(REFUSED);
     expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity, br"]], "zipped")).policies).toContain(REFUSED);
-    // A script, a picture, a worker: not a page; only the policy goes along.
+    // A script, a picture: not a page; only the policy goes along.
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched"), ).toMatchObject({ text: `${TAG}<p>fetched` });
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched", "empty")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "<p>fetched" });
-    expect(await noScripts([["content-type", "text/javascript"]], "go()", "worker")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "go()" });
+    expect(await noScripts([["content-type", "text/javascript"]], "go()", "script")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "go()" });
+  });
+
+  it("leaves Trusted Types out of a worker's own policy, where no guard makes the default policy", async () => {
+    // covers: services.web-open
+    // A worker under `require-trusted-types-for` with no default policy refuses every `importScripts`, `eval` and `new Function`.
+    for (const destination of ["worker", "sharedworker", "serviceworker", "Worker"]) {
+      const answer = await guardViewerAnswer([["content-type", "text/javascript"], ["content-security-policy", "script-src 'self'"]], chunks("importScripts('/lib.js')"), destination);
+      expect(policies(answer.headers), destination).toEqual([`script-src 'self' ${VIEWER_GUARD_HASH}`, VIEWER_WORKER_GUARD_CSP]);
+      expect(await read(answer.body)).toBe("importScripts('/lib.js')");
+    }
+    expect(VIEWER_WORKER_GUARD_CSP).toBe("frame-src 'self'; object-src 'self'");
+    // Anything else keeps it: a page, a script a page loads, an answer whose destination the browser did not say.
+    for (const destination of ["iframe", "script", "empty", null]) {
+      const answer = await guardViewerAnswer([["content-type", "text/javascript"]], chunks("go()"), destination);
+      expect(policies(answer.headers), String(destination)).toContain(VIEWER_GUARD_CSP);
+    }
   });
 });
