@@ -88,6 +88,15 @@ test.describe("join page", () => {
     await expect(page).toHaveURL(`${APP}/#${CODE}`, { timeout: 10_000 });
   });
 
+  test("a link copied with the sentence's end, ….) or ….: the chat opens, as the app reads it", async ({ page }) => {
+    await standInApp(page);
+    for (const tail of [").", "."]) {
+      await page.goto(`/#${CODE}${tail}`);
+      await expect(page.getByTestId("join-go-now")).toHaveAttribute("href", `${APP}/#${CODE}`);
+      await page.getByTestId("join-cancel").click();
+    }
+  });
+
   test("the Ghostly app: the invite is copied, with what to do next, and this device is remembered", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto(`/#${CODE}`);
