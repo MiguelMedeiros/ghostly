@@ -215,6 +215,8 @@ import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
+import { dropDataKey, hasDataKey } from "./dataKey";
+import { unlockProfile, type ProfileKeyHome } from "./profileEncryption";
 import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen, pinKey, reactionKey } from "./groups";
 import { communityEdgeIntervals } from "./communityEdgePace";
@@ -740,6 +742,12 @@ export interface NodeOptions {
    * are always `single`. No device state database is made or read for them. Default: off.
    */
   singleDevice?: boolean;
+  /**
+   * Where this profile's wrapped key record is kept, and its id (WISP 04, Encrypted profile, Unlock and lock). With a
+   * record there, `start()` waits for `unlockProfile`: until the passphrase opens it, the engine reads no store, makes
+   * no connection, no poll and no DHT read, and opens no wallet. No record: it starts at once, as before.
+   */
+  profileKey?: { home: ProfileKeyHome; profile: string };
   /**
    * Start in limited mode (WISP 06 § When a device checks): the device could not read which device is active, and the
    * person chose "Start anyway". It is the profile offline: history can be read and messages written, which wait.
@@ -2382,8 +2390,42 @@ export class GhostlyNode implements EngineImplementation {
   /** The start in progress or done, and whether it succeeded: `leaveLimited` waits for it. */
   private starting: Promise<boolean> | null = null;
 
+  /** Whether the start waits for the profile's passphrase (`profileKey`): known once `start()` read for its record. */
+  private passphraseNeeded: Promise<boolean> | null = null;
+  private waiting = false;
+  private opened: () => void = () => {};
+  private readonly passphraseGiven = new Promise<void>((resolve) => { this.opened = resolve; });
+
+  /** Whether the start waits for the profile's passphrase. */
+  get waitsForPassphrase(): boolean {
+    return this.waiting;
+  }
+
+  /** The start gate of an encrypted profile: nothing below `start()` runs before the passphrase opened it. */
+  private async startGate(): Promise<void> {
+    const key = this.options.profileKey;
+    this.passphraseNeeded = (async () => {
+      this.waiting = !!key && !hasDataKey() && !!(await key.home.read());
+      return this.waiting;
+    })();
+    if (await this.passphraseNeeded) await this.passphraseGiven;
+  }
+
+  /**
+   * The passphrase of an encrypted profile, while the start waits for it: "Wrong passphrase" reads nothing else and the
+   * start keeps waiting; the right one puts the data key in the engine's slot, finishes a migration cut short, and the
+   * start goes on. Answered before the start has ended, unlike every other call.
+   */
+  async unlockProfile(params: { passphrase: string }): Promise<void> {
+    const key = this.options.profileKey;
+    if (!key || !this.passphraseNeeded || !(await this.passphraseNeeded) || !this.waiting) throw new Error("This profile is not waiting for its passphrase");
+    await unlockProfile(key.home, params.passphrase, key.profile);
+    this.waiting = false;
+    this.opened();
+  }
+
   start(): Promise<void> {
-    const run = this.startNow();
+    const run = this.startGate().then(() => this.startNow());
     this.starting = run.then(() => true, () => false);
     return run;
   }
@@ -3016,6 +3058,9 @@ export class GhostlyNode implements EngineImplementation {
       // An outbox stopping may hand a message to the hold: the hold's writes are waited for after it.
       Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop())).then(() => this.hold.stop()),
     ]);
+    // Stopped, as "Lock and stop" or a profile switch stops it: the data key goes, with every secret opened with it and
+    // kept in memory (WISP 04, Unlock and lock). Written last: what was still being written above was sealed with it.
+    if (hasDataKey()) dropDataKey();
   }
 
   /**
