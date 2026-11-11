@@ -9,6 +9,7 @@ const COMMANDS: &[&str] = &[
     "app_focused",
     "app_open",
     "app_post",
+    "app_post_bytes",
     "app_title",
     "bitcoind_rpc",
     "call_service",
