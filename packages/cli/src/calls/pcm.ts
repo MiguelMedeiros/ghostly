@@ -41,6 +41,8 @@ export class PlaybackQueue {
   private head = 0;
   private length = 0;
   private lastPush = 0;
+  /** Half a sample was dropped (a flush, a full queue): the program's next byte is its other half, dropped too. */
+  private owed = false;
   private readonly frame: number;
   private readonly max: number;
   private readonly silence: Buffer;
@@ -58,10 +60,16 @@ export class PlaybackQueue {
   push(chunk: Buffer): number {
     if (!chunk.length) return 0;
     this.lastPush = this.now();
+    if (this.owed) {
+      this.owed = false;
+      chunk = chunk.subarray(1);
+    }
     const room = this.max - this.length;
     const kept = chunk.length <= room ? chunk : chunk.subarray(0, Math.max(0, room));
     const lost = chunk.length - kept.length;
     this.dropped += lost;
+    // The queue ends on a whole sample here, so an odd number lost ends on half of one.
+    if (lost % 2) this.owed = true;
     if (kept.length) { this.chunks.push(Buffer.from(kept)); this.length += kept.length; }
     return lost;
   }
@@ -86,6 +94,8 @@ export class PlaybackQueue {
   /** Drops everything queued; returns how much, in milliseconds. */
   flush(): number {
     const ms = this.queuedMs;
+    // Half a sample queued: its other half is the program's next byte.
+    if (this.length % 2) this.owed = true;
     this.chunks = [];
     this.head = 0;
     this.length = 0;

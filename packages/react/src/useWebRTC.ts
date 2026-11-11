@@ -1024,6 +1024,10 @@ export function useWebRTC({
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
       setNoAnswer(false);
+      // A call that ended without a hang-up (one that found no path) left its offer's time behind: until this
+      // attempt's own goes out, a contact's offer is the earlier one (WISP 601, "Both call at once").
+      myOfferTimestampRef.current = 0;
+      myOfferFingerprintRef.current = "";
       try {
         setFastPoll(true);
         callHadVideoRef.current = withVideo;
@@ -1042,11 +1046,13 @@ export function useWebRTC({
 
         const pc = await gathered(async () => {
           const pc = createPeerConnection();
-          stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-          stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+          // The call's stream as it is now: a microphone switched while a stalled connection gathered stopped this one's.
+          const sending = localStreamRef.current ?? stream;
+          sending.getAudioTracks().forEach((track) => pc.addTrack(track, sending));
+          sending.getVideoTracks().forEach((track) => pc.addTrack(track, sending));
           // An audio call still offers a video section, so a camera or a screen can
           // be turned on later without a second offer the peer cannot answer.
-          if (stream.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
+          if (sending.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
 
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -1112,8 +1118,10 @@ export function useWebRTC({
     async (offer: CallSignal, stream: MediaStream, withVideo: boolean, cancelled: () => boolean): Promise<boolean> => {
       const pc = await gathered(async () => {
         const pc = createPeerConnection();
-        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-        stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+        // The call's stream as it is now: a microphone switched while a stalled connection gathered stopped this one's.
+        const sending = localStreamRef.current ?? stream;
+        sending.getAudioTracks().forEach((track) => pc.addTrack(track, sending));
+        sending.getVideoTracks().forEach((track) => pc.addTrack(track, sending));
 
         await pc.setRemoteDescription({ type: "offer", sdp: buildSdpFromSignal(offer) });
 
