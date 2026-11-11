@@ -16,7 +16,7 @@ import { checkShownName } from "./profiles";
 import { nobodyElseIn, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
-import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
+import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
@@ -657,6 +657,7 @@ const METHODS: Record<string, Method> = {
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
+    await forgetHold(ctx, link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
