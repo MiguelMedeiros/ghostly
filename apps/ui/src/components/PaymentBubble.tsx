@@ -96,7 +96,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   const amountShown = useCountUp(celebrate ? (payment?.amount ?? 0) : 0, 650);
 
   // The message's own line, said in the app's language, until the wallet is there (or once its record is gone).
-  if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{storedPaymentLine(t, fallbackText, mine)}</span>;
+  if (!wallet || !payment) return <span className="chat-text-message">{storedPaymentLine(t, fallbackText, mine)}</span>;
 
   const run = async (task: () => Promise<void>, key: NonNullable<typeof running>) => {
     if (busy) return;
