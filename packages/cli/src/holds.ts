@@ -167,7 +167,15 @@ export function forgetHold(ctx: ApiContext, linkId: string): Promise<void> {
   });
 }
 
-/** At start: holds whose time is up end now, the others are timed again. */
+/**
+ * At start: holds whose time is up end now, the others are timed again. A hold whose chat the store does not have is
+ * dropped, with no release said: a profile restored from a backup taken while that chat was removed (the backup reads
+ * holds.json before and after its store) had it, and its end said `chat.released` for a chat it never had.
+ */
 export function resumeHolds(ctx: ApiContext): void {
-  for (const [linkId, hold] of Object.entries(readHolds(ctx))) schedule(ctx, linkId, hold.until);
+  const chats = new Set(state(ctx).links.map((link) => link.id));
+  const holds = readHolds(ctx), gone = Object.keys(holds).filter((linkId) => !chats.has(linkId));
+  for (const linkId of gone) delete holds[linkId];
+  if (gone.length) writeHolds(ctx, holds);
+  for (const [linkId, hold] of Object.entries(holds)) schedule(ctx, linkId, hold.until);
 }
