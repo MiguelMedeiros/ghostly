@@ -631,6 +631,18 @@ describe("what the contact answers about our payments", () => {
     expect(state("p")?.token).toBe("cashuBp");
   });
 
+  it("refused ecash the contact redeemed anyway is settled at its Take it back, and offered back no more", async () => {
+    const { desk, wallet, state } = setup([record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" })]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValueOnce(new Error("mint offline"));
+    await desk.onPaymentResult("l", { id: "p", ok: false, error: "No thanks" });
+    expect(state("p")).toMatchObject({ state: "failed", token: "cashuBp" });
+    wallet.receiveToken.mockRejectedValueOnce(new Error("Token already spent"));
+    await expect(desk.reclaim("p")).resolves.toBeUndefined();
+    expect(state("p")).toMatchObject({ state: "settled", token: undefined, error: undefined });
+    await expect(desk.reclaim("p")).rejects.toThrow("Nothing to reclaim");
+  });
+
   it("a payment with a target, one we received, or one already over is never changed by the contact's word", async () => {
     const { desk, wallet, state } = setup([
       record({ id: "a", kind: "payment", direction: "out", target: ark(), txid: tx("a") }),
