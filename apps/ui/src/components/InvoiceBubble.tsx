@@ -14,6 +14,7 @@ import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { cardOn } from "../lib/chatPayments";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
+import { RichText } from "./rich/RichText";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
@@ -491,7 +492,8 @@ export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: Money
   const off = !!method && offHere(method, network);
   return (
     <>
-      {money.rest && <p className="chat-text-message wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
+      {/* The words around the money read as any message's text: a spoiler among them stays covered. */}
+      {money.rest && <RichText text={money.rest} className="chat-text-message wrap-break-word whitespace-pre-wrap block m-0 mb-1.5" />}
       <Fragment key={whatItPays(money)}>
         {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}
