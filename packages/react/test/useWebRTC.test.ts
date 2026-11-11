@@ -475,6 +475,26 @@ describe("both calling at once", () => {
     expect(call.result.current.callState).toBe("incoming");
   });
 
+  // Both call back at once right after a call that found no path: the failed call's offer time was still taken as
+  // ours, so their newer offer lost here while ours, sent later, lost there, and neither side rang.
+  it("after a call that failed, their offer while ours still waits for the microphone wins", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("failed"));
+    expect(call.result.current.callState).toBe("idle");
+
+    vi.advanceTimersByTime(10_000);
+    act(() => { void call.result.current.startCall(false); });
+    call.receive(theirOffer(Date.now()));
+    devices.userMedia[1].grant();
+    await settle();
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.publishedKinds().filter((kind) => kind === "o")).toHaveLength(1);
+  });
+
   it("an offer arriving while ours is still gathering wins: ours is never sent", async () => {
     FakePeerConnection.holdGathering = true;
     const call = renderCall();
