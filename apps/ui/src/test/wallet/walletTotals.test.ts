@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { walletCards } from "../../components/walletCardData";
-import { walletTotals } from "../../components/walletTotals";
+import { sharedBalanceCards, walletTotals } from "../../components/walletTotals";
+import type { Translate } from "../../contexts/I18nContext";
 import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, sparkReady, TEST_MINT, usdtReady } from "../payments/fixtures";
@@ -93,6 +94,22 @@ describe("one balance per currency", () => {
     // Another phrase holds another balance: both count.
     const other = totalsOf({ spark: sparkReady({ read: true, balance: 4_000 }), lightning: breez(900) }, "testnet");
     expect(other.bitcoin).toMatchObject({ total: 4_900 });
+  });
+
+  it("counts a Lightning card through a joined federation once: its balance is the Fedimint card's ecash", () => {
+    const fed = federation({ balance: 5_000, modules: ["ln"] });
+    const totals = totalsOf({
+      lightning: lightningSource({ mode: "testnet", network: "regtest", providerId: "fedimint", label: "Fedimint", read: true, balance: 5_000 }),
+      fedimint: { federations: [fed, federation({ id: "cd".repeat(32), balance: 300 })], balance: 5_300, history: [] } as unknown as WalletView["fedimint"],
+    }, "testnet");
+    expect(rows(totals.bitcoin)).toEqual(["lightning:testnet: shared 5000", "fedimint:testnet: counted 5300"]);
+    expect(totals.bitcoin).toMatchObject({ total: 5_300, ready: 5_300, uncounted: 0 });
+    expect(totals.bitcoin?.rows[0]).toMatchObject({ sharedWith: "Fedimint" });
+    expect(totals.bitcoin?.rows[0].note).toBeUndefined();
+    const state = walletView({ lightning: lightningSource({ mode: "testnet", network: "regtest", providerId: "fedimint", label: "Fedimint", read: true, balance: 5_000 }),
+      fedimint: { federations: [fed], balance: 5_000, history: [] } as unknown as WalletView["fedimint"] }) as WalletState;
+    const t = ((key: string, vars?: Record<string, string>) => `${key} ${vars?.name ?? ""}`) as Translate;
+    expect(sharedBalanceCards(state, "testnet", walletCards(state), t).find((c) => c.id === "lightning:testnet")?.balance).toBe("wallet.cards.balance.shared Fedimint");
   });
 
   it("never sums Testnet and Mainnet: each network's total is its own cards'; USDT is its own total, in its base units", () => {
