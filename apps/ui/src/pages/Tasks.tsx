@@ -11,6 +11,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useTaskBoard, type TaskBoardData } from "../hooks/useTaskBoard";
+import { reducedMotion } from "../lib/motion";
 import { radioGroupKeys } from "../lib/radioGroup";
 import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
 import { getPrefix } from "../lib/storage";
@@ -171,7 +172,7 @@ export function Tasks() {
   };
 
   // A phone: the column on screen is the chosen tab's; a swipe to another column chooses its tab.
-  const motion = (smooth = true): ScrollBehavior => smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
+  const motion = (smooth = true): ScrollBehavior => smooth && !reducedMotion() ? "smooth" : "auto";
   // The column a tab's slide is on its way to: the columns it passes on the way are not chosen (each would be, for a
   // frame, and the chosen one stay inert until the slide was half way). For a second at most, and a touch on the board
   // ends it: the board's place then chooses again.
