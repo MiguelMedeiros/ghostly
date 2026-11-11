@@ -4,6 +4,7 @@ import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
+import { statusJson } from "./ownStatus";
 import { paymentJson } from "./wallets";
 
 /**
@@ -53,7 +54,7 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null; peerStatus: string }
 interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }>; pin: PinView | null }
 
 /**
@@ -80,6 +81,7 @@ export class EventHub {
   private reserved = 0;
   /** Typing changes told this run: a change's id carries it, as it takes no seq of its own (`emitLive`). */
   private typingChanges = 0;
+  private statusChanges = 0;
   private journalLines = 0;
   private journalBytes = 0;
   /**
@@ -580,6 +582,13 @@ export class EventHub {
       }
       if (shape.name !== before.name) this.emit("chat.renamed", `chat.renamed:${id}:${this.now()}`, { chat: id, name: shape.name });
       this.pinned("chat", id, before.pin, shape.pin);
+      // The contact set or cleared a status, or their presence changed (active, idle, or none once the session ends;
+      // WISP 401 § Presence and status): as `chat show` has them now. Their app says it at most every 5 s, so it is
+      // journaled, as a rename is.
+      if (shape.peerStatus !== before.peerStatus) {
+        const view = chatJson(link);
+        this.emit("chat.status", `chat.status:${id}:${this.now()}:${++this.statusChanges}`, { chat: id, status: view.status, presence: view.presence });
+      }
       // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word. What
       // it is doing (typing, recording, thinking, a bot's status) goes with the start, and a change while it lasts
       // is a start again (its id then carries a count, so two changes in one millisecond stay apart). Live only, as app
@@ -1022,6 +1031,8 @@ function chatShape(link: LinkView): ChatShape {
   return {
     stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
     typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null, pin: link.pin ?? null,
+    // What the contact said, not what still lasts: a status reaching its `until` is no new word from them.
+    peerStatus: JSON.stringify([statusJson(link.peerStatus).status, view.presence]),
   };
 }
 

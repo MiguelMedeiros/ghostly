@@ -51,7 +51,10 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
   return status;
 }
 
+/** A status with every field, null when not set: this profile's, or a contact's on its chat. */
+export interface StatusJson { text: string | null; emoji: string | null; availability: StatusAvailability | null; until: number | null }
+
 /** What `status set|clear|show` answer: the status with every field (null when not set), or null when there is none. */
-export function statusJson(status: PersonStatus | undefined): { status: { text: string | null; emoji: string | null; availability: StatusAvailability | null; until: number | null } | null } {
+export function statusJson(status: PersonStatus | undefined): { status: StatusJson | null } {
   return { status: status ? { text: status.text ?? null, emoji: status.emoji ?? null, availability: status.availability ?? null, until: status.until ?? null } : null };
 }
