@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
 import { BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
+import { runBridgeGuard } from "../pwaBridgeGuard";
 
 // covers: services.web-open
 
@@ -27,6 +28,7 @@ async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
   Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
   // The server's clear of the services host's cookies, before the app is framed.
   vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
+  runBridgeGuard();
   await import("../../../../web/src/svc/bridge");
   expect(parent.postMessage).toHaveBeenCalled();
   const { port1 } = new MessageChannel();

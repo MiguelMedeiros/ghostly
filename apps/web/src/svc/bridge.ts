@@ -42,6 +42,15 @@ export function guardedDocument(doc: Document | null): boolean {
   try {
     if (!doc || !typeOf || !urlOf) return false;
     if (apply(urlOf, doc, []) === "about:blank" || apply(typeOf, doc, []) !== "text/html") return true;
+    return guardRan(doc);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the clipboard guard ran in this document: it marked it and fixed its window's `execCommand` in place. */
+export function guardRan(doc: Document): boolean {
+  try {
     const mark = describe(doc, "ghostlyClipboardGuard");
     if (!mark || mark.value !== true || mark.configurable || mark.writable) return false;
     for (let proto = protoOf(doc) as object | null; proto; proto = protoOf(proto) as object | null) {
@@ -89,6 +98,12 @@ function refuse(reason: BridgeRefusal, text: string): void {
   window.parent.postMessage({ type: BRIDGE_REFUSED, reason }, __SERVICES_APP_ORIGIN__);
 }
 
+/** One of this page's guards did not run: what the person sees, and why for whoever runs the server. */
+function refused(guard: string): void {
+  console.error(`Ghostly: this page's Content-Security-Policy refused ${guard}; its script-src must carry the hashes of this build (nginx-services.conf).`);
+  say("This app cannot be opened here: this server's policy is out of date.");
+}
+
 /** This page's own copy of the clipboard guard, inline (its policy allows it by its hash, `bridgeHtml`). */
 function guardHere(script: string): void {
   const guard = document.createElement("script");
@@ -122,6 +137,11 @@ function start(): void {
   }, true);
   // The app's page reaches this window (same origin): its `execCommand`, and a frame it would put here, are guarded too.
   guardHere(CLIPBOARD_GUARD_SCRIPT);
+  // A policy that does not allow it (a server's stale hash for it) refuses it without a word: no app is shown then.
+  if (!guardRan(document)) {
+    refused("the clipboard guard");
+    return;
+  }
   let appPort: MessagePort | null = null;
   const workers = navigator.serviceWorker;
   workers.addEventListener("message", (event) => {
@@ -146,7 +166,13 @@ function start(): void {
     appPort = event.ports[0];
     // Hide my IP from contacts: the app's frame is on this origin and reaches this window, so the WebRTC guard runs here
     // too, before the frame is made. Inline, as this page's policy allows it by its hash (`bridgeHtml`).
-    if ((event.data as { relayOnly?: unknown }).relayOnly === true) guardHere(VIEWER_GUARD_SCRIPT);
+    if ((event.data as { relayOnly?: unknown }).relayOnly === true) {
+      guardHere(VIEWER_GUARD_SCRIPT);
+      if ("RTCPeerConnection" in window || "webkitRTCPeerConnection" in window) {
+        refused("the WebRTC guard");
+        return;
+      }
+    }
     // One left by another contact's app (any chat, any profile) is not this one's to read: not framed while it stays.
     void dropSharedCookies(host.suffix)
       .then(() => workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" }))
