@@ -119,6 +119,8 @@ export class PlaybackQueue {
     this.chunks = [];
     this.head = 0;
     this.length = 0;
+    // A flush that cut the last program's half sample owes nothing to the next program: it starts on a whole sample.
+    this.owed = false;
     return ms;
   }
 
