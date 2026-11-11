@@ -149,14 +149,16 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
   const LONG = "W".repeat(30);
   const PHONE = { width: 320, height: 568 };
 
-  /** The name line against its bubble and the screen: inside both, its text cut (it holds more than it shows). */
+  /** The name line against its bubble and the screen: inside both, its text cut where the ellipsis is (it holds more than it shows). */
   async function insideItsBubble(nick: Locator, whole: string) {
     await expect(nick).toHaveText(whole);
     await expect(nick).toHaveAttribute("title", whole);
     const at = await nick.evaluate((el) => {
+      // In a group the name is a button (it opens who the member is) and the ellipsis is on it, inside the line.
+      const cut = el.querySelector<HTMLElement>("[data-testid='message-nick-open']") ?? el;
       const line = el.getBoundingClientRect(), bubble = el.closest("[data-message-bubble]")!.getBoundingClientRect();
       return { left: line.left, right: line.right, bubbleLeft: bubble.left, bubbleRight: bubble.right, screen: window.innerWidth,
-        shown: el.clientWidth, whole: el.scrollWidth, page: document.documentElement.scrollWidth };
+        shown: cut.clientWidth, whole: cut.scrollWidth, page: document.documentElement.scrollWidth };
     });
     const seen = JSON.stringify(at);
     expect(at.left, seen).toBeGreaterThanOrEqual(at.bubbleLeft);
