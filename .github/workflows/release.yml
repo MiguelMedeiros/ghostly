@@ -192,11 +192,6 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev
 
-      - name: Install dependencies (macOS)
-        if: matrix.platform == 'macos-latest'
-        run: |
-          brew install create-dmg
-
       - name: Cache Cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -210,8 +205,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-${{ github.repository }}-
 
+      # No dependency's install script runs (better-sqlite3's would download a native binary that nothing here loads:
+      # only the Breez SDK's Node.js entry needs it, and the app bundles its web one); the root's own postinstall
+      # (the dependency patches, the built-in apps) still runs.
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run postinstall
 
       # Each platform builds its own frontend: on Windows the platform swap once matched nothing and the app shipped the
       # old chat (ghostly#1864). Seconds; before anything is uploaded.
@@ -302,8 +300,9 @@ jobs:
           node-version: "22"
           cache: "npm"
 
+      # As in build-tauri: no dependency's install script, the root's postinstall only.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run postinstall
 
       - name: Build
         run: npm run build:extension
