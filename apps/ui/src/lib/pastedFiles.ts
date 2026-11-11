@@ -88,6 +88,8 @@ let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]>; choose?
 /** The file input the platform picks a drop's files on (`choose`), and what it accepts: no file type, a mark the platform knows. */
 const DROP_INPUT_ID = "ghostly-dropped-files";
 const DROP_INPUT_ACCEPT = "application/x-ghostly-dropped-files";
+/** What `choose` fails with when the drop's files are to be read (`read`) instead. */
+const READ_INSTEAD = "read-dropped-files";
 /** How long the page waits for the platform to pick a drop's files it said it would. */
 const CHOOSE_WAIT_MS = 10_000;
 
@@ -97,7 +99,7 @@ const CHOOSE_WAIT_MS = 10_000;
  * drop's handlers ran: the platform says nothing of a drop, which it could say before the page hears of it.
  * `choose`, where the platform has it, picks the drop's files on the page's own file input instead (the desktop app on
  * Linux): Files read from the disk as they are sent, as + → Document picks them, of any size. It resolves to how many
- * it picks, 0 for none.
+ * it picks, 0 for none; it fails with `READ_INSTEAD` when the files are to be read by `read` after all.
  */
 export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window, choose?: () => Promise<number>): (over: boolean) => void {
   const drag = { over: false, read, choose, target };
@@ -125,12 +127,20 @@ const DROP_WORDS: Record<string, string> = {
  */
 export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
   if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
-  if (platformDrag.choose) return chooseDropped(platformDrag.choose, platformDrag.target.document);
-  return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true)).catch((error: unknown) => {
-    const words = DROP_WORDS[error instanceof Error ? error.message : String(error)];
+  const { read } = platformDrag;
+  const readDropped = () => read().then((clips) => readPlatformFiles(clips, new Date(), true)).catch((error: unknown) => {
+    const words = DROP_WORDS[errorText(error)];
     throw words ? new Error(words) : error;
   });
+  if (!platformDrag.choose) return readDropped();
+  // The platform can't pick these files on the input (a path WebKit can't take): it kept the drop to be read instead.
+  return chooseDropped(platformDrag.choose, platformDrag.target.document).catch((error: unknown) => {
+    if (errorText(error) === READ_INSTEAD) return readDropped();
+    throw error;
+  });
 }
+
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** The drop's files as the platform picks them on the page's file input; none when it picks none, or not in time. */
 function chooseDropped(choose: () => Promise<number>, doc: Document): Promise<File[]> {

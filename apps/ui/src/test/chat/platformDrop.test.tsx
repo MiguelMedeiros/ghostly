@@ -139,6 +139,21 @@ describe("files dragged in from another app that the webview names by address on
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
   });
 
+  it("a drop the platform's chooser can't name (a folder whose name is not UTF-8) is read by token at once, as before", async () => {
+    // What `choose_dropped_files` answers then (apps/desktop/src/dropped_files.rs): the drop stays, to be read.
+    const choose = vi.fn(async (): Promise<number> => { throw "read-dropped-files"; });
+    resetPlatformDrags();
+    over = followPlatformDrags(read, window, choose);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("relatório final.txt")).toBeInTheDocument();
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("a drop with no file to send (a folder) says so; the next drag is a link again once the drop is over", async () => {
     read.mockResolvedValueOnce([]);
     composer();

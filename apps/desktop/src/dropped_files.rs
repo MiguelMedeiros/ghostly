@@ -24,10 +24,18 @@ pub const DRAG_EVENT: &str = "file-drag";
 /// How long a drop's files wait for the page: it asks as its drop event runs, a moment later.
 const FRESH: Duration = Duration::from_secs(10);
 
+/// How long files the page asked to have picked wait for its input's chooser: the window clicks it as it answers, so
+/// WebKit asks at once, or never; no later chooser (a mini-app's frame in this window) gets them.
+const CHOSEN_FRESH: Duration = Duration::from_secs(2);
+
 /// The `accept` of the page's own file input that the window picks a drop's files on (`choose_dropped_files`): no file
 /// type, a mark. A chooser for any other input (+ → Document) is the system's dialog, as always.
 #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 const DROP_CHOOSER: &str = "application/x-ghostly-dropped-files";
+
+/// What `choose_dropped_files` answers when a drop's files can't be picked on the page's input (a path that is not
+/// UTF-8, which WebKit's chooser takes no other way): the drop stays, for the page to read by token.
+const READ_INSTEAD: &str = "read-dropped-files";
 
 /// Clicks that input as the app: WebKit opens a file chooser only for a click a person made, and a drop is none.
 const CHOOSE_SCRIPT: &str = "document.getElementById('ghostly-dropped-files')?.click()";
@@ -40,12 +48,15 @@ pub struct DroppedFiles {
     chosen: Mutex<Option<(Vec<PathBuf>, Instant)>>,
 }
 
-/// What was put a moment ago, taken; nothing after that, nor a second time.
-fn take_fresh(slot: &Mutex<Option<(Vec<PathBuf>, Instant)>>) -> Vec<PathBuf> {
-    match slot.lock().unwrap().take() {
-        Some((paths, at)) if at.elapsed() <= FRESH => paths,
-        _ => Vec::new(),
-    }
+/// What was put a moment ago (within `fresh`), taken with when it was put; nothing after that, nor a second time.
+fn take_fresh(
+    slot: &Mutex<Option<(Vec<PathBuf>, Instant)>>,
+    fresh: Duration,
+) -> Option<(Vec<PathBuf>, Instant)> {
+    slot.lock()
+        .unwrap()
+        .take()
+        .filter(|(_, at)| at.elapsed() <= fresh)
 }
 
 impl DroppedFiles {
@@ -56,13 +67,22 @@ impl DroppedFiles {
 
     /// The latest drop's files, if it was a moment ago; nothing after that, nor a second time.
     fn take(&self) -> Vec<PathBuf> {
-        take_fresh(&self.latest)
+        self.take_latest()
+            .map(|(paths, _)| paths)
+            .unwrap_or_default()
+    }
+
+    /// The latest drop's files and when it was, if it was a moment ago.
+    fn take_latest(&self) -> Option<(Vec<PathBuf>, Instant)> {
+        take_fresh(&self.latest, FRESH)
     }
 
     /// The files the drop chooser picks, if the page asked a moment ago; nothing after that, nor a second time.
     #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
     fn take_chosen(&self) -> Vec<PathBuf> {
-        take_fresh(&self.chosen)
+        take_fresh(&self.chosen, CHOSEN_FRESH)
+            .map(|(paths, _)| paths)
+            .unwrap_or_default()
     }
 }
 
@@ -131,7 +151,8 @@ pub async fn read_dropped_files<R: tauri::Runtime>(
 /// The files of the drop the page just took, picked on its own file input (regular files only, as a paste's): the page
 /// gets Files WebKit reads from the disk as they are sent, as + → Document's, of any size, where a read by token
 /// (`read_dropped_files`) brings every byte into the page first. How many are picked: 0, and nothing is clicked, when
-/// the drop brought no file to send.
+/// the drop brought no file to send. `READ_INSTEAD` when one of its files has a path the chooser can't take: the drop
+/// stays, whole, for `read_dropped_files`.
 #[tauri::command]
 pub async fn choose_dropped_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
@@ -142,19 +163,30 @@ pub async fn choose_dropped_files<R: tauri::Runtime>(
     let dropped = window
         .try_state::<DroppedFiles>()
         .ok_or("Dropping files is unavailable")?;
-    let paths = dropped.take();
-    let files = tauri::async_runtime::spawn_blocking(move || pasted_files(paths))
-        .await
-        .map_err(|e| e.to_string())?;
+    let Some((paths, at)) = dropped.take_latest() else {
+        return Ok(0);
+    };
+    let (files, paths) =
+        tauri::async_runtime::spawn_blocking(move || (pasted_files(paths.clone()), paths))
+            .await
+            .map_err(|e| e.to_string())?;
     if files.is_empty() {
         return Ok(0);
+    }
+    if files.iter().any(|(path, ..)| path.to_str().is_none()) {
+        dropped.put(paths, at);
+        return Err(READ_INSTEAD.into());
     }
     let count = files.len();
     *dropped.chosen.lock().unwrap() = Some((
         files.into_iter().map(|(path, ..)| path).collect(),
         Instant::now(),
     ));
-    window.eval(CHOOSE_SCRIPT).map_err(|e| e.to_string())?;
+    if let Err(e) = window.eval(CHOOSE_SCRIPT) {
+        // No click, no chooser: nothing else in the window may take these files.
+        dropped.chosen.lock().unwrap().take();
+        return Err(e.to_string());
+    }
     Ok(count)
 }
 
@@ -461,6 +493,13 @@ mod tests {
         assert_eq!(dropped.take_chosen(), vec![dir.join("archive 300.bin")]);
         assert!(dropped.take_chosen().is_empty(), "picked once");
 
+        // Files the page asked to have picked a while ago go to no chooser: the click comes at once, or never.
+        *dropped.chosen.lock().unwrap() = Some((
+            vec![dir.join("archive 300.bin")],
+            Instant::now().checked_sub(Duration::from_secs(3)).unwrap(),
+        ));
+        assert!(dropped.take_chosen().is_empty(), "too late for a chooser");
+
         // A folder alone: nothing to pick, and nothing clicked.
         dropped.put(vec![dir.join("a folder")], Instant::now());
         assert_eq!(choose(&main), Ok(0));
@@ -484,6 +523,44 @@ mod tests {
         assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
             .contains(&format!("DROP_INPUT_ACCEPT = \"{DROP_CHOOSER}\"")));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A file in a folder whose name is not UTF-8 can't be picked on the page's input (WebKit takes UTF-8 paths): such a
+    /// drop is left to be read by token, as before, and the page is told so, never left waiting for a pick.
+    #[cfg(unix)]
+    #[test]
+    fn a_drop_the_chooser_cant_name_is_read_by_token() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir()
+            .join(format!("ghostly-bytes-{}", std::process::id()))
+            .join(std::ffi::OsStr::from_bytes(b"dir-\xff"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("report.txt"), b"boo").unwrap();
+        std::fs::write(dir.join("../plain.txt"), b"hi").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let dropped = app.state::<DroppedFiles>();
+        dropped.put(
+            vec![dir.join("../plain.txt"), dir.join("report.txt")],
+            Instant::now(),
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
+            Err(READ_INSTEAD.into())
+        );
+        assert!(dropped.take_chosen().is_empty(), "nothing to pick");
+        let items = read(&main).unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.name.as_deref()).collect::<Vec<_>>(),
+            vec![Some("plain.txt"), Some("report.txt")],
+            "the whole drop, by token"
+        );
+        // The page reads the drop when told so.
+        assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
+            .contains(&format!("READ_INSTEAD = \"{READ_INSTEAD}\"")));
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
     /// `run` is what the person's app is built from: the watch goes on its Ghostly window.
