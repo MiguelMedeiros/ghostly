@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -162,6 +162,20 @@ describe("renaming a group in the app", () => {
     expect(input.selectionStart).toBe(63);
     compose(input, ["ね"]);
     expect(input).toHaveValue(`${name}ね`);
+  });
+
+  it("Escape that drops an input method's candidate keeps the rename open", async () => {
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input");
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+    // WebKit: the key that ends the composition comes right after its end, no longer composing, as 229.
+    fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+    expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("group-rename-input")).not.toBeInTheDocument();
   });
 
   it("Rename, Change picture and Remove picture are a thumb's height on a phone, as the rest of the dialog is", () => {
