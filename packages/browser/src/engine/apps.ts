@@ -2293,6 +2293,7 @@ export class Apps {
   }
 
   async storageDelete({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<void> {
+    const uninstalls = this.uninstalls.get(ref);
     const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     await this.serial(`${app.ref}\0${where}`, async () => {
@@ -2301,6 +2302,12 @@ export class Apps {
       if (!old) return;
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
+      // Uninstalled since the row was read, as in `storageSet`: its rows are gone, and the count written here would stay
+      // with the old usage for a reinstall.
+      if (this.uninstalls.get(app.ref) !== uninstalls) {
+        this.usage.delete(`${app.ref}\0${where}`);
+        fail("not-installed", "This app is not installed");
+      }
       writing.delete([app.ref, where, name]);
       await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
