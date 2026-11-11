@@ -50,7 +50,7 @@ export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: 
   );
 }
 
-/** A publisher's fingerprint (80 bits in four groups), as people compare it. */
-export function Fingerprint({ value }: { value: string }) {
-  return <span dir="ltr" className="font-mono text-[11px] text-text-secondary tracking-wide">{value}</span>;
+/** A publisher's fingerprint (80 bits in four groups), as people compare it. In a chat it takes the chat's text size. */
+export function Fingerprint({ value, size = "text-[11px]" }: { value: string; size?: string }) {
+  return <span dir="ltr" className={`font-mono ${size} text-text-secondary tracking-wide`}>{value}</span>;
 }
