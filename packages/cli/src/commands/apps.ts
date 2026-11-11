@@ -102,7 +102,7 @@ export const commands: Record<string, Command> = {
   },
   "app verify": {
     method: "app.verify", usage: "app verify <bundle|url>",
-    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason, revoked when the ghostly-revoke.json beside it revokes this version",
+    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason, revoked when the ghostly-revoke.json beside it (for a URL, or beside one of its sources) revokes this version",
     args: ["bundle"],
     run: async (_, a) => (await import("../apps")).verifyApp(a.bundle!),
   },
