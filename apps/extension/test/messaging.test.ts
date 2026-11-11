@@ -313,7 +313,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }, { name: "permissions-policy", value: expect.stringContaining("geolocation=()") }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -492,6 +492,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
@@ -514,6 +515,7 @@ describe("viewer tabs", () => {
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
