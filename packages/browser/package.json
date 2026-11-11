@@ -13,7 +13,7 @@
     "test:group-load": "vitest run test/communityLoad.test.ts --reporter=verbose"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.79",
+    "@arkade-os/sdk": "0.5.4",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.9.3",
     "@bitcoindevkit/bdk-wallet-web": "0.4.0",
