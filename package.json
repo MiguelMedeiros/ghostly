@@ -64,7 +64,7 @@
     "@scure/base": "2.4.0",
     "@scure/bip39": "^2.4.0",
     "@tauri-apps/api": "^2.12.4",
-    "@tauri-apps/plugin-notification": "^2.7.0",
+    "@tauri-apps/plugin-notification": "^2.8.0",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
     "jsqr": "^1.4.0",
