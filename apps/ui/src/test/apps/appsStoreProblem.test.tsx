@@ -70,6 +70,11 @@ describe("a store's last read that failed", () => {
     expect(await problemLine(store({ equivocation: { sequence: 5, at: SEEN } }))).toContain("signed two different lists");
   });
 
+  it("says it in the red meant for words, readable on a dark theme", async () => {
+    await problemLine(store({ problem: "offline" }));
+    expect(screen.getByTestId("app-store-problem")).toHaveClass("text-danger-ink");
+  });
+
   it("says its cause in the app's language", async () => {
     expect(await problemLine(store({ problem: "offline" }), "pt")).toBe("Você está offline.");
   });

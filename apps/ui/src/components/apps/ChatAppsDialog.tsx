@@ -103,7 +103,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
             {t("apps.composer.browse")}
           </button>
         </div>
-        {error && <p role="alert" className="text-xs text-danger" data-testid="chat-apps-error">{error}</p>}
+        {error && <p role="alert" className="text-xs text-danger-ink" data-testid="chat-apps-error">{error}</p>}
         <div className="flex justify-end">
           <Button onClick={onClose}>{t("common.close")}</Button>
         </div>
