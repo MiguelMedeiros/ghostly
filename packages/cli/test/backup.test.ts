@@ -36,8 +36,11 @@ it("backs a profile up under a passphrase and restores it into a new one, never 
   error(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--passphrase-file", wrong]), "refused", 1);
   error(await ghostly(["--home", dir, "profile", "restore", file, "default"], { env: PASS }), "refused", 1);
   error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: NO_PASS }), "usage", 2);
-  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS }))).toMatchObject({ restored: "copy", protection: "passphrase" });
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS }))).toMatchObject({ restored: "copy", protection: "passphrase", current: false });
   expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ profile: "copy", name: "Backup bot" });
+  // --use says the restored profile is now the current one, as profile create --use does.
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "used", "--use"], { env: PASS }))).toMatchObject({ restored: "used", current: true });
+  expect(ok(await ghostly(["--home", dir, "profile", "list"]))).toMatchObject({ profiles: expect.arrayContaining([{ name: "used", current: true, running: false }]) });
 });
 
 it("a profile's files travel with it, large ones too, and a damaged or cut backup restores nothing", async () => {
