@@ -178,7 +178,6 @@
   "cashu": {
     "add": "添加",
     "addMintPlaceholder": "添加铸币厂：https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "正在询问铸币厂…",
     "backupCopied": "备份已复制。谁拥有这些代币，谁就拥有这些 sats。",
     "contactHint": "要付款给联系人？请在聊天中使用 ⚡。",

@@ -61,7 +61,6 @@
     "tooLong": "Messaggio troppo lungo",
     "tooLongNext": "Accorcialo o invialo come file."
   },
-  "connectionFailed": "Connessione fallita",
   "devices": {
     "digitsEnded": "L'aggiunta di questo dispositivo è terminata",
     "digitsEndedNext": "Ricomincia da Aggiungi un dispositivo.",
@@ -406,7 +405,6 @@
     "refused": "{{host}} ha rifiutato la richiesta",
     "tooSlow": "Il server ha impiegato troppo a rispondere"
   },
-  "messageFailed": "Invio messaggio fallito",
   "pay": {
     "alreadyPaid": "Hai già pagato questa richiesta",
     "bothNeed": "Tu e il tuo contatto avete bisogno di {{rail}}, con la chat attiva",

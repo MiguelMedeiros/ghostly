@@ -61,7 +61,6 @@
     "tooLong": "Message trop long",
     "tooLongNext": "Raccourcissez-le ou envoyez-le en fichier."
   },
-  "connectionFailed": "Échec de connexion",
   "devices": {
     "digitsEnded": "L'ajout de cet appareil est terminé",
     "digitsEndedNext": "Recommencez depuis Ajouter un appareil.",
@@ -406,7 +405,6 @@
     "refused": "{{host}} a refusé la demande",
     "tooSlow": "Le serveur a mis trop de temps à répondre"
   },
-  "messageFailed": "Échec d'envoi du message",
   "pay": {
     "alreadyPaid": "Vous avez déjà payé cette demande",
     "bothNeed": "Vous et votre contact avez besoin de {{rail}}, avec la discussion en direct",

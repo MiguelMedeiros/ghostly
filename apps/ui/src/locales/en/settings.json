@@ -188,7 +188,6 @@
   "sharePresenceHint": "Contacts see a dot while you use Ghostly. A status you set shows either way.",
   "shareProfile": "Share my name and picture with contacts",
   "shareProfileHint": "Your contacts see this profile's name and picture. Off, they see “Contact” and a pattern instead.",
-  "sourceCode": "Source code",
   "stayConnected": "Stay connected in the background",
   "stayConnectedHint": "Chats and groups stay connected while Ghostly is out of sight, with a quiet notification. Uses more battery.",
   "stayConnectedStopped": "Android stopped Ghostly in the background",
@@ -231,12 +230,6 @@
     "large": "Large",
     "larger": "Larger",
     "small": "Small"
-  },
-  "theme": "Theme",
-  "themes": {
-    "dark": "Dark",
-    "light": "Light",
-    "system": "System"
   },
   "timeout": "Lock after",
   "timeoutOptions": {

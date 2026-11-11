@@ -242,7 +242,6 @@
     "newOne": "1 nouveau message, aller en bas"
   },
   "keyChanged": "Cette discussion s'est arrêtée : la clé de votre contact a changé.",
-  "lastSeen": "Vu {{time}}",
   "listTime": {
     "days": "{{count}} j",
     "hours": "{{count}} h",
@@ -485,7 +484,6 @@
     "showTranslation": "Afficher la traduction",
     "translate": "Traduire"
   },
-  "typeMessage": "Tapez un message...",
   "typing": "écrit…",
   "typingRecording": "enregistre un audio…",
   "typingThinking": "réfléchit…",

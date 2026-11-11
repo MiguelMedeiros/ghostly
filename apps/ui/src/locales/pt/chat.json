@@ -241,7 +241,6 @@
     "newOne": "1 mensagem nova, rolar até o fim"
   },
   "keyChanged": "Esta conversa parou: a chave do seu contato mudou.",
-  "lastSeen": "Visto por último {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -484,7 +483,6 @@
     "showTranslation": "Ver tradução",
     "translate": "Traduzir"
   },
-  "typeMessage": "Digite uma mensagem...",
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",

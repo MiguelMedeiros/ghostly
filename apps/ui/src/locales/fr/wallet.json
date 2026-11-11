@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Ajouter",
     "addMintPlaceholder": "Ajouter un mint : https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Demande au mint…",
     "backupCopied": "Sauvegarde copiée. Qui a ces jetons a les sats.",
     "contactHint": "Vous payez un contact ? Utilisez ⚡ dans le chat.",
