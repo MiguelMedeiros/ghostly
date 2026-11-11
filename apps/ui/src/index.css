@@ -1364,6 +1364,23 @@ html .toast-place.toast-place-page[data-at="top"] {
   }
 }
 
+/*
+ * The chat list's rows (ChatRow.tsx `rowClass`) off screen are left out of its style, layout and paint: everything that
+ * restyles the whole page (Light/Dark, a color theme, a Text size step, a language, the window crossing a width
+ * breakpoint) paid for every chat in the list, ~0.75 s of the main thread at 300 chats. Every row stays in the page, so
+ * Tab, find in page, a screen reader, putting rows in order and bringing the open chat's row into view reach each one,
+ * and a scroll costs no script. A row never drawn takes a typical row's height: its two lines at the Text size, and the
+ * key's line of a chat in the comfortable density (the padding and the density's least height, min-h, come on top); one
+ * drawn keeps its last real one (`auto`). Nothing in a row is painted past its edges (its menus are portals).
+ */
+.chat-list-row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(0.125rem + 2.5rem * var(--chat-text-scale));
+}
+.chat-list-row-comfortable[data-chat] {
+  contain-intrinsic-block-size: auto calc(1.125rem + 2.5rem * var(--chat-text-scale));
+}
+
 /* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
    so it also selected a word and put its own Copy, Look Up, Translate menu over the bar. Links keep their own callout. */
 @media (pointer: coarse) {
