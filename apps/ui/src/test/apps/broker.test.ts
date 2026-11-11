@@ -239,6 +239,19 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.set", ["k", "x".repeat(MINI_APP_LIMITS.storageValueBytes)])).toMatchObject({ ok: false, error: "too-large" });
   });
 
+  it("takes a value of 64 KiB under the longest key: the request has room for both", async () => {
+    // The request carries the value with its key and {"id","type","args"} around them, so a 64 KiB request refused a
+    // value a few dozen bytes short of the 64 KiB WISP 1200 promises. The longest key is 256 control characters,
+    // six bytes each in JSON.
+    const { host, run, ask } = setup();
+    run();
+    const key = "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes);
+    const value = "x".repeat(MINI_APP_LIMITS.storageValueBytes - 2);
+    expect(await ask("storage.set", [key, value])).toMatchObject({ ok: true });
+    expect(host.stored.get(`${REF} ${LINK}`)?.get(key)).toBe(value);
+    expect(await ask("storage.set", [key, `${value}x`])).toMatchObject({ ok: false, error: "too-large" });
+  });
+
   it("an engine refusal reaches the app by its code: a full storage is `full`, a missing file `no-file`", async () => {
     // The engine's errors cross its RPC as "<code>: words" (engine/apps.ts). The app saw "failed" for all of them, so it
     // could not tell its 5 MiB were used up (and make room) from a passing failure.
@@ -280,7 +293,7 @@ describe("requests", () => {
     expect(posted.filter((p) => p.message.id === undefined || (p.message.id as number) < 0)).toEqual([]);
   });
 
-  it("refuses a request over 64 KiB before anything sees it", async () => {
+  it("refuses a request over 66 KiB before anything sees it", async () => {
     const { host, run, ask } = setup();
     run();
     const before = host.calls.length;
@@ -290,7 +303,7 @@ describe("requests", () => {
 
   it("refuses a huge or binary request without writing it as JSON first", () => {
     // A structured clone carries what JSON.stringify takes seconds to write (a 16 MiB Uint8Array took 1.6 s on the
-    // page's thread): it is refused from a count that stops at 64 KiB, and binary data from its type alone.
+    // page's thread): it is refused from a count that stops at 66 KiB, and binary data from its type alone.
     const { broker, posted, run } = setup();
     run();
     // Counted by hand: a spy would keep (and print) what it was called with.

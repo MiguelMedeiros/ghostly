@@ -203,7 +203,7 @@ describe("opening an app on Desktop", () => {
     expect(posts("app-9")).toEqual([]);
   });
 
-  it("keeps the web broker's caps: 64 KiB, 50 a second, the API and nothing more", async () => {
+  it("keeps the web broker's caps: 66 KiB, 50 a second, the API and nothing more", async () => {
     const { open, request, answer } = setup();
     await open(REF, LINK);
     request("app-1", { id: 1, type: "writing", args: [] });

@@ -4,7 +4,7 @@
  * (`createBroker`), here in the Ghostly window, one per app window, so the API, its checks and its caps are the same:
  *
  * - The runner in the app window asks `app_broker`. Rust answers `start` itself (the entry it holds for that window),
- *   checks every other request (the caller's label, 64 KiB, 50 a second) and hands it here as `ghostly-app-request`
+ *   checks every other request (the caller's label, 66 KiB, 50 a second) and hands it here as `ghostly-app-request`
  *   with the window's label; the broker knows the app by that label, never by anything the app says.
  * - The broker's answers and events go back through `app_post`: an answer to the request waiting for it (the
  *   result of the app's `app_broker` call), an event into that window alone. A `file` answer names where the bytes lie
