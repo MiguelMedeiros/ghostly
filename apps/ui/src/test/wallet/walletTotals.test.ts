@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { walletCards } from "../../components/walletCardData";
-import { sharedBalanceCards, walletTotals } from "../../components/walletTotals";
+import { sharedBalanceCards, sharedSources, walletTotals } from "../../components/walletTotals";
 import type { Translate } from "../../contexts/I18nContext";
 import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
@@ -105,14 +105,42 @@ describe("one balance per currency", () => {
     expect(totals.bitcoin).toMatchObject({ total: 4_000, uncounted: 1 });
   });
 
-  it("counts a Breez Lightning card on the Spark wallet's own phrase once: the same balance is the same wallet", () => {
-    const breez = (balance: number) => lightningSource({ mode: "testnet", network: "regtest", providerId: "breez", label: "Breez", read: true, balance });
-    const same = totalsOf({ spark: sparkReady({ read: true, balance: 4_000 }), lightning: breez(4_000) }, "testnet");
+  // What the engine says of a Breez Lightning card that opened the Spark wallet's own Breez database: it is that wallet.
+  const breez = (balance: number, same?: "same wallet") =>
+    ({ ...lightningSource({ mode: "testnet", network: "regtest", providerId: "breez", label: "Breez", read: true, balance }), ...(same ? { sameWalletAs: "spark" as const } : {}) });
+
+  it("counts a Breez Lightning card that is the Spark wallet once, as the engine says, even when the two read different amounts", () => {
+    // One wallet read at two moments: Spark already saw a receive the Breez card has not read yet.
+    const moved = totalsOf({ spark: sparkReady({ read: true, balance: 5_000 }), lightning: breez(4_000, "same wallet") }, "testnet");
+    expect(moved.bitcoin, "the wallet holds 5,000, counted once").toMatchObject({ total: 5_000, ready: 5_000, uncounted: 0 });
+    expect(rows(moved.bitcoin)).toEqual(["lightning:testnet: shared 4000", "spark:testnet: counted 5000"]);
+    expect(moved.bitcoin?.rows[0]).toMatchObject({ sharedWith: "Spark" });
+    const same = totalsOf({ spark: sparkReady({ read: true, balance: 4_000 }), lightning: breez(4_000, "same wallet") }, "testnet");
     expect(rows(same.bitcoin)).toEqual(["lightning:testnet: shared 4000", "spark:testnet: counted 4000"]);
     expect(same.bitcoin).toMatchObject({ total: 4_000 });
-    // Another phrase holds another balance: both count.
+    // Spark's balance not read yet: the Breez card is the one reading of that wallet, counted on its own row.
+    const unread = totalsOf({ spark: sparkReady({ balance: 0 }), lightning: breez(4_000, "same wallet") }, "testnet");
+    expect(rows(unread.bitcoin)).toEqual(["lightning:testnet: counted 4000", "spark:testnet: unknown"]);
+  });
+
+  it("counts a Breez Lightning card on another phrase with Spark, even when both hold the same amount: two wallets", () => {
+    const equal = totalsOf({ spark: sparkReady({ read: true, balance: 4_000 }), lightning: breez(4_000) }, "testnet");
+    expect(equal.bitcoin, "they hold 8,000").toMatchObject({ total: 8_000, ready: 8_000, uncounted: 0 });
+    expect(rows(equal.bitcoin)).toEqual(["lightning:testnet: counted 4000", "spark:testnet: counted 4000"]);
     const other = totalsOf({ spark: sparkReady({ read: true, balance: 4_000 }), lightning: breez(900) }, "testnet");
     expect(other.bitcoin).toMatchObject({ total: 4_900 });
+  });
+
+  it("among several Breez cards, only the one the engine names as the Spark wallet uses Spark's balance on the deck", () => {
+    const card = (id: string, name: string, balance: number, same?: "same wallet") => ({ ...breez(balance, same), card: id, name, receive: id === "spark-seed" });
+    const cards = [card("spark-seed", "Breez", 4_000, "same wallet"), card("ln-0ther000", "Breez 2", 5_000)];
+    const empty = { mints: [], balance: 0, history: [], feesPaid: 0 };
+    const state = walletView({ networks: { mainnet: empty, testnet: { ...empty, spark: sparkReady({ read: true, balance: 5_000 }), lightning: cards[0], lightnings: cards } } }) as WalletState;
+    const deck = walletCards(state);
+    const totals = walletTotals(state, "testnet", deck);
+    expect(totals.bitcoin, "Spark's 5,000 once, plus the other phrase's 5,000").toMatchObject({ total: 10_000, uncounted: 0 });
+    expect(totals.bitcoin?.rows.map((r) => `${r.name}: ${r.state}`)).toEqual(["Breez: shared", "Breez 2: counted", "Spark: counted"]);
+    expect([...sharedSources(state, "testnet", deck).values()]).toEqual(["Spark"]);
   });
 
   it("counts a Lightning card through a joined federation once: its balance is the Fedimint card's ecash", () => {

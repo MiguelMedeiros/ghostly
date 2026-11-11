@@ -1276,6 +1276,7 @@ export class GhostlyNode implements EngineImplementation {
     host: () => this.providerHost(network),
     hasMints: () => this.networkMints(network).length > 0,
     fetch: (...request) => (this.options.lnurlFetch ?? globalThis.fetch)(...request),
+    sparkStorage: () => this.sparkWallets[network].adapter?.storage,
     events: {
       changed: () => this.walletChanged(),
       received: (op) => void this.desk.onLightningPaid(op),
