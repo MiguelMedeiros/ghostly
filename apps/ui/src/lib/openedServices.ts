@@ -39,16 +39,18 @@ export function openedServices<T extends Opened>(valid: (entry: Record<string, u
       if (!entries.some((o) => same(o, opened))) save([...entries, opened]);
     },
     /**
-     * Clears the origins of the apps opened from one chat (`tag`) or by one profile (`profile`), one at a time, and
-     * takes each one cleared off the list. One `clear` did not clear (false, or it threw) stays on it, for the
-     * profile's next clear.
+     * Clears the origins of the apps opened from one chat (`tag`) or by one profile (`profile`), one at a time or, with
+     * `atOnce`, all together, and takes each one cleared off the list. One `clear` did not clear (false, or it threw)
+     * stays on it, for the profile's next clear.
      */
-    async forget(which: ForgetServices, clear: (opened: T) => Promise<boolean>): Promise<void> {
+    async forget(which: ForgetServices, clear: (opened: T) => Promise<boolean>, atOnce = false): Promise<void> {
       const matches = (o: T) => ("tag" in which ? o.tag === which.tag : o.profile === which.profile);
-      for (const opened of list().filter(matches)) {
-        if (!(await clear(opened).catch(() => false))) continue;
-        save(list().filter((o) => !same(o, opened)));
-      }
+      const one = async (opened: T) => {
+        if (await clear(opened).catch(() => false)) save(list().filter((o) => !same(o, opened)));
+      };
+      const all = list().filter(matches);
+      if (atOnce) await Promise.all(all.map(one));
+      else for (const opened of all) await one(opened);
     },
   };
 }

@@ -92,6 +92,20 @@ describe("the contacts' apps this device opened", () => {
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
+  it("are cleared all at once: offline, Clear all data waits one bridge's time, not one per app", async () => {
+    vi.useFakeTimers();
+    for (const c of "abcd") noteOpened({ profile: "work000001", tag: `chat-${c}`, label: label(c) });
+    // No bridge loads (the device is offline): each frame waits its whole time.
+    let finished = false;
+    const done = forgetServices(host, { profile: "work000001" }).then(() => { finished = true; });
+    expect(document.querySelectorAll("iframe")).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(CLEAR_ORIGIN_MS);
+    expect(finished).toBe(true);
+    await done;
+    expect(openedServices()).toHaveLength(4);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
   it("of a profile deleted while no bridge answered are cleared at the next start, never a listed profile's", async () => {
     vi.useFakeTimers();
     for (const c of "abc") noteOpened({ profile: "gone000001", tag: `chat-${c}`, label: label(c) });
