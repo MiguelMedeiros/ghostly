@@ -1526,6 +1526,17 @@ html .toast-place.toast-place-page[data-at="top"] {
 .message-button:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-received-bg)); }
 .message-button[data-style="primary"]:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-received-bg)); }
 
+/*
+ * For the one style change that switches the theme (contexts/ThemeContext.tsx): every row, button and list item with
+ * transition-colors faded from the old theme's colors, hundreds of transitions each restyled every frame.
+ */
+:root[data-theme-switch],
+:root[data-theme-switch] *,
+:root[data-theme-switch] *::before,
+:root[data-theme-switch] *::after {
+  transition: none !important;
+}
+
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
 :root[data-reduce-motion="true"] *::before,
