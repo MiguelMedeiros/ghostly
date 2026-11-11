@@ -98,7 +98,7 @@ Bots should run the daemon: a one-shot is offline between commands.
 Every command prints one JSON object on stdout. A failure prints `{"error":{"code","message"}}` and exits with:
 `1` failed (the engine or the network refused), `2` usage, `3` not found, `4` timed out, `5` needs a confirmation
 (`--force`, `--yes`, `--confirm-real`), `130` stopped with Ctrl-C (`interrupted`: a one-shot closes its profile first,
-and a line on stderr says what became of what it waited on). A daemon that does not answer a read or `daemon status` within 15 seconds, or
+and a line on stderr says what became of what it waited on; SIGTERM and SIGHUP stop it the same way, exit `143` and `129`). A daemon that does not answer a read or `daemon status` within 15 seconds, or
 a command that waits (`chat wait`, `file wait`, `--wait`) within its `--timeout` plus 10, is a timeout too (`4`,
 `details.method`); `ghostly daemon restart` is the way out ([docs/CLI.md](../../docs/CLI.md#what-it-does)). On a
 terminal, a command that waits says on stderr what it waits for once it has waited a second; nothing is said there on

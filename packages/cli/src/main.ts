@@ -426,28 +426,33 @@ const INTERRUPT_CLOSE_MS = 10_000;
  * the `interrupted` error, and the exit is 130. Killed by SIGINT, it said nothing, left `daemon.lock` behind, and the
  * person did not learn that the message still goes (and sent it again). Ctrl-C once the work is done (the profile
  * closing) only lets the answer out. A wait that goes on past WAIT_NOTICE_MS says what it waits for, on a terminal only:
- * stderr of a bot's pipe stays clean.
+ * stderr of a bot's pipe stays clean. SIGTERM (`timeout 30 ghostly send …`, a service manager's stop) and SIGHUP (the
+ * terminal or SSH session closing) stop it the same way, named in its words, with the exit a shell read when the
+ * signal ended it (128 + the signal): they ended it on the spot with nothing said and the lock left behind.
  */
+const STOP_SIGNALS = { SIGINT: { said: "Ctrl-C", exit: EXIT.interrupted }, SIGTERM: { said: "SIGTERM", exit: 143 }, SIGHUP: { said: "SIGHUP", exit: 129 } } as const;
+
 function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): Promise<T>; off(): void } {
   let interrupted = false, done = false, left = false;
   const pending = new Set<{ method: string; notice: WaitNotice | null }>();
-  const onSignal = () => {
-    if (interrupted) process.exit(EXIT.interrupted);
+  const onSignal = (signal: NodeJS.Signals) => {
+    const { said, exit: code } = STOP_SIGNALS[signal as keyof typeof STOP_SIGNALS];
+    if (interrupted) process.exit(code);
     interrupted = true;
     if (done) return;
     const [first] = pending, waiting = [...pending].find((call) => call.notice)?.notice;
-    const words = waiting ? `stopped waiting (Ctrl-C): ${waiting.stopped}` : "stopped (Ctrl-C) before the command answered";
+    const words = waiting ? `stopped waiting (${said}): ${waiting.stopped}` : `stopped (${said}) before the command answered`;
     const leave = () => {
       if (left) return;
       left = true;
       process.stderr.write(`ghostly: ${words}\n`);
       print({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1), first ? { method: first.method } : undefined).toJSON() });
-      exit(EXIT.interrupted);
+      exit(code);
     };
     setTimeout(leave, INTERRUPT_CLOSE_MS).unref();
     void s.abort().catch(() => {}).then(leave);
   };
-  process.on("SIGINT", onSignal);
+  for (const signal of Object.keys(STOP_SIGNALS)) process.on(signal, onSignal);
   // Once interrupted, what the work answers late is nobody's: the command leaves with its own answer.
   const held = <T>(promise: Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
     promise.then((value) => { if (!interrupted || done) resolve(value); }, (error: unknown) => { if (!interrupted || done) reject(error); });
@@ -461,7 +466,7 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
   };
   return {
     run: (work) => held(work({ ...s, call }).finally(() => { if (!interrupted) done = true; })),
-    off: () => { process.off("SIGINT", onSignal); },
+    off: () => { for (const signal of Object.keys(STOP_SIGNALS)) process.off(signal, onSignal); },
   };
 }
 

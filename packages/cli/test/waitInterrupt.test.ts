@@ -65,6 +65,24 @@ describe("a wait on a terminal, and Ctrl-C", { timeout: 120_000 }, () => {
     expect(history.messages.map((m) => m.text)).toContain("kept on Ctrl-C");
   });
 
+  // `timeout 30 ghostly send …`, a service manager's stop, a closed terminal or SSH session: it ended on the spot with
+  // nothing on stdout or stderr, its `daemon.lock` left behind, and a bot that saw no answer sent the text again.
+  it.each([["SIGTERM", 143], ["SIGHUP", 129]] as const)("a one-shot send stopped with %s answers as Ctrl-C does, exit %i, its profile released", async (signal, code) => {
+    const send = start(["send", "solo", `kept on ${signal}`, "--wait", "delivered", "--timeout", "60"]);
+    const until = Date.now() + 20_000;
+    while (!lockFiles().includes("daemon.lock") && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(send.child.exitCode).toBeNull();
+    send.child.kill(signal);
+    expect(await send.exited(15_000)).toBe(code);
+    const words = `stopped waiting (${signal}): it is kept here and goes with this profile's next command, or keep it online with \`ghostly daemon --detach\``;
+    expect(send.stderr).toContain(`ghostly: ${words}\n`);
+    expect(send.lines).toEqual([{ error: { code: "interrupted", message: words[0].toUpperCase() + words.slice(1), details: { method: "chat.send" } } }]);
+    expect(lockFiles()).toEqual([]);
+    const history = ok(await ghostly(["--home", dir, "chat", "history", "solo"])) as { messages: { text: string }[] };
+    expect(history.messages.map((m) => m.text)).toContain(`kept on ${signal}`);
+  });
+
   // A one-shot's own default waits are in "knows the waits a one-shot does by default" below: on this chat, which nobody
   // joined, a file send without --wait answers at once.
   it("a one-shot file send that waits says so too; Ctrl-C says the file still goes", async () => {
