@@ -21,6 +21,8 @@ const OPEN_EVENT: &str = "notification-open";
 const VISIBILITY_EVENT: &str = "app-visibility";
 /// The call notification's Hang up (CallService.kt): the page ends the call that is on.
 const HANG_UP_EVENT: &str = "call-hang-up";
+/// A sign-in's answer came after Android ended the process that started it (`OidcState::not_taken`).
+const OIDC_INTERRUPTED_EVENT: &str = "oidc-interrupted";
 /// The composer's Camera was refused (CameraCapture.kt), "refused" or "blocked" (Android no longer asks): the file
 /// input itself only sees a cancel.
 const CAMERA_EVENT: &str = "camera-refused";
@@ -262,10 +264,14 @@ fn received(kind: &str, value: String) {
         "oidc" => {
             let state = app.state::<crate::oidc::OidcState>();
             match crate::oidc::deep_link_answer(&value) {
-                Some(answer) => {
-                    if !state.answer(&answer) {
-                        crate::diagnostics::log("oidc: a sign-in answer nobody waits for, dropped");
-                    }
+                Some(answer) if state.answer(&answer) => {}
+                // Android ended the process that asked while the browser was in front: the page says so.
+                Some(answer) if state.not_taken(&answer) => {
+                    crate::diagnostics::log("oidc: the sign-in this answers was interrupted");
+                    let _ = app.emit_to("main", OIDC_INTERRUPTED_EVENT, ());
+                }
+                Some(_) => {
+                    crate::diagnostics::log("oidc: a sign-in answer nobody waits for, dropped")
                 }
                 None => crate::diagnostics::log("oidc: not a sign-in link, dropped"),
             }
