@@ -871,6 +871,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheard",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
+  fedimintEncrypted: "errors.engine.fedimintEncrypted",
+  encryptWithFedimint: "errors.engine.encryptWithFedimint",
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
@@ -887,6 +889,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
 /** The next line of an engine error that has one: what to do, or what is safe. */
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   cannotSubmitAgain: "errors.engine.cannotSubmitAgainNext",
+  encryptWithFedimint: "errors.engine.encryptWithFedimintNext",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
   fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",

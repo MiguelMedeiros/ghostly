@@ -20,6 +20,15 @@ const chainOf: Record<NetworkRail, (saved: unknown) => string | undefined> = {
   sparkWallet: (saved) => (saved as { network?: unknown })?.network as string | undefined,
 };
 
+/**
+ * The key a stored wallet's seed is bound to (`dataKey.ts`): its network's own key, also once it was archived
+ * (`<rail>-retired-…`). Undefined for a record that does not say its chain.
+ */
+export function walletKeyOf(rail: NetworkRail, saved: unknown): string | undefined {
+  const chain = chainOf[rail](saved);
+  return typeof chain === "string" && chain ? walletKey(rail, walletNetworkOf(chain)) : undefined;
+}
+
 export interface MovedWallet { rail: NetworkRail; network: WalletNetwork; key: string; retired?: string }
 export interface WalletNetworksMigration {
   /** Wallets moved from the bare key to their network's key. */

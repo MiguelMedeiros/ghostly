@@ -14,7 +14,8 @@ import { intentRepository, sealSeed } from "../src/engine/paymentAdapters/persis
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { dropDataKey, openRecordSecret, setDataKey, setSealedOnly } from "../src/engine/dataKey";
-import { isSealedField } from "../src/shared/profileKey";
+import { isSealedField, type ProfileKeyRecord } from "../src/shared/profileKey";
+import { decryptProfile, encryptProfile } from "../src/engine/profileEncryption";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.ready, wallet.mode, wallet.usdt.create, wallet.usdt.backup, wallet.ark.create, wallet.ark.backup, wallet.bark.backup
@@ -535,5 +536,44 @@ describe("the seeds under the profile's data key (WISP 04, Encrypted profile)", 
     expect(reopened.view.locked).toBe(false);
     expect((await reopened.backup()).mnemonic).toBe(mnemonic);
     await reopened.stop();
+  });
+});
+
+describe("the seeds through turning the profile's encryption on and off (WISP 04, Encrypted profile)", () => {
+  const record = async (key: string) => wrap<Record<string, unknown>>((await store(STORES.settings, "readonly")).get(key));
+  const home = () => { let saved: ProfileKeyRecord | null = null; return { read: async () => saved, write: async (r: ProfileKeyRecord) => { saved = r; }, remove: async () => { saved = null; } }; };
+  afterEach(() => { dropDataKey(); });
+
+  it("an Ark wallet that opens by itself and a USDT wallet with a password still open through the wallets' own readers", async () => {
+    const ark = new ArkWallet("mainnet", () => {}); await ark.start(); await ark.ensureReady(true);
+    const arkPhrase = connected(ArkadeAdapter.connect);
+    await ark.stop();
+    const usdt = new UsdtWallet("testnet", () => {}); await usdt.start();
+    await usdt.create({ network: "sepolia", provider: "https://rpc.example", token: "0xtoken", password: PASSWORD });
+    const usdtPhrase = connected(UsdtAdapter.connect);
+    await usdt.stop();
+
+    const keyHome = home();
+    await encryptProfile(keyHome, "throwaway passphrase 1", "");
+    expect(await record("arkWallet-mode-mainnet")).toMatchObject({ automatic: true });
+    expect(await record("arkWallet-mode-mainnet")).not.toHaveProperty("deviceKey");
+    expect(isSealedField((await record("usdtWallet-mode-testnet")).seed)).toBe(true);
+    const sealedArk = new ArkWallet("mainnet", () => {}); await sealedArk.start(); await sealedArk.ensureReady();
+    expect(sealedArk.view).toMatchObject({ locked: false, automatic: true });
+    expect((await sealedArk.backup()).mnemonic).toBe(arkPhrase);
+    await sealedArk.stop();
+    const sealedUsdt = new UsdtWallet("testnet", () => {}); await sealedUsdt.start();
+    await expect(sealedUsdt.unlock()).rejects.toThrow("Enter the USDT wallet password");
+    expect(await sealedUsdt.reveal(PASSWORD)).toBe(usdtPhrase);
+
+    await decryptProfile(keyHome, "throwaway passphrase 1", "");
+    expect(typeof (await record("arkWallet-mode-mainnet")).deviceKey).toBe("string");
+    expect(await record("arkWallet-mode-mainnet")).not.toHaveProperty("automatic");
+    expect((await record("usdtWallet-mode-testnet")).seed).toMatchObject({ version: 1 });
+    const plainArk = new ArkWallet("mainnet", () => {}); await plainArk.start(); await plainArk.ensureReady();
+    expect((await plainArk.backup()).mnemonic).toBe(arkPhrase);
+    await plainArk.stop();
+    const plainUsdt = new UsdtWallet("testnet", () => {}); await plainUsdt.start();
+    expect(await plainUsdt.reveal(PASSWORD)).toBe(usdtPhrase);
   });
 });

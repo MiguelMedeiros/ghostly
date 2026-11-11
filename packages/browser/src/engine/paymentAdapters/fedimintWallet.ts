@@ -7,7 +7,7 @@ import type { WalletMode } from "../../shared/mints";
 import { fedimintDatabase, loadFedimintSdk, type FederationInfo, type FedimintClient, type FedimintOperation, type FedimintSdk, type RedeemState, type SpendState } from "./fedimintSdk";
 import { ModeChanged, ModeGate, WrongNetworkError } from "./modeGate";
 import { intentRepository, sealSeed, unsealSeed } from "./persistence";
-import { openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
+import { hasDataKey, openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
 
 /**
  * The Fedimint wallet of a profile: federations joined with an invite code, per network, each holding ecash
@@ -75,6 +75,13 @@ const seedAt = (mode: WalletMode) => ({ store: STORES.settings, key: key(mode), 
 async function sealMnemonic(mnemonic: string, mode: WalletMode): Promise<Pick<StoredFedimint, "seed" | "deviceKey">> {
   const { field, ...at } = seedAt(mode), sealer = recordSealer(at);
   return { seed: await sealer.seal(mnemonic, field), ...sealer.beside };
+}
+/**
+ * A federation's client file keeps the phrase and the notes in the clear, so none is joined while the profile is
+ * encrypted (its data key is in the slot): WISP 04, What is encrypted. Before anything is written.
+ */
+function refuseEncrypted(): void {
+  if (hasDataKey()) throw engineError("fedimintEncrypted");
 }
 const sats = (msats: number) => Math.floor(msats / 1000);
 export function assertFedimintAmount(amount: number) {
@@ -253,6 +260,7 @@ export class FedimintWallet {
    * its ecash from the federation's backup instead of starting empty.
    */
   join(invite: string, { recover = false }: { recover?: boolean } = {}): Promise<FedimintFederationView> { return this.serial(async () => { refuseAway(`fedimint:${this.network}`, "Fedimint");
+    refuseEncrypted();
     const code = normalizeInvite(invite);
     const sdk = await this.sdk();
     const info = await this.gate.within(sdk.preview(code));
@@ -532,6 +540,7 @@ export class FedimintWallet {
   private async restore(read: () => Promise<{ mnemonic: string; invites: string[] }>): Promise<{ joined: number; failed: string[] }> {
     // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
     refuseAway(`fedimint:${this.network}`, "Fedimint");
+    refuseEncrypted();
     const { mnemonic, invites } = await read();
     const phrase = mnemonic.trim().toLowerCase().split(/\s+/).join(" ");
     if (!validateMnemonic(phrase, wordlist)) throw new Error("Invalid recovery phrase");
