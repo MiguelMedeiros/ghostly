@@ -66,12 +66,15 @@ export class CookieJar {
     const name = at > 0 ? pair!.slice(0, at).trim() : "";
     if (!name) return;
     const value = pair!.slice(at + 1).trim();
-    const gone = attributes.some((a) => {
+    // As RFC 6265 §5.3 reads them: the last of each that parses counts, and a Max-Age wins over an Expires.
+    let maxAge: number | undefined;
+    let expires: number | undefined;
+    for (const a of attributes) {
       const [key, v = ""] = a.split("=").map((s) => s.trim());
-      if (/^max-age$/i.test(key ?? "")) return Number(v) <= 0;
-      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); return Number.isFinite(when) && when <= Date.now(); }
-      return false;
-    });
+      if (/^max-age$/i.test(key ?? "") && /^-?\d+$/.test(v)) maxAge = Number(v);
+      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+    }
+    const gone = maxAge !== undefined ? maxAge <= 0 : expires !== undefined && expires <= Date.now();
     if (gone) { this.cookies.delete(name); return; }
     if (!this.cookies.has(name) && this.cookies.size >= CookieJar.MAX) return;
     this.cookies.set(name, value);
