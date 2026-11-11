@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { FoundUpdate } from "../../lib/updates";
@@ -170,7 +170,7 @@ describe("automatic update checks and the network coming back", () => {
     // The last answer is minutes old, but the word that the build is gone has not been looked at yet.
     net.online();
     await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("A new build of Ghostly 1.1.4 is available")).toBeInTheDocument();
+    expect(await within(await screen.findByTestId("update-banner")).findByText("A new build of Ghostly 1.1.4 is available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
 
