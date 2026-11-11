@@ -91,6 +91,16 @@ describe("the totals over the deck", () => {
     expect(total).toHaveFocus();
   });
 
+  it("counts Cashu sats set aside for a payment in the total, says so on the Cashu row, and leaves them out of what is ready now", async () => {
+    const { user } = await openOn("testnet", { setAside: 4_000 });
+    // 4,000 (Cashu, set aside) + 5,000 (Ark) + 210,000 (on-chain, 40,000 of it unconfirmed).
+    expect(screen.getByTestId("wallet-total-bitcoin-amount")).toHaveTextContent("219,000test sats");
+    await user.click(screen.getByTestId("wallet-total-bitcoin"));
+    expect(screen.getByTestId("wallet-total-ready-amount")).toHaveTextContent("175,000 test sats");
+    expect(row("cashu-testnet")).toHaveTextContent("4,000 test sats not spendable yet");
+    expect(within(row("cashu-testnet")).getByTestId("wallet-total-line-amount")).toHaveTextContent("4,000 test sats");
+  });
+
   it("shows a shared balance's number on one card only: Lightning through the mints says it uses Cashu's", async () => {
     const { user } = await openOn("mainnet");
     expect(screen.getByTestId("wallet-card-cashu-mainnet")).toHaveTextContent("1,000 sats");

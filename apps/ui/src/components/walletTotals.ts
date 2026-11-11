@@ -14,7 +14,8 @@ export type TotalState = "counted" | "shared" | "unknown" | "away" | "none";
 
 /**
  * What a counted row says beside its amount: `unconfirmed` on-chain sats, sats `waiting` in a wallet that is not
- * spendable yet (an Ark deposit on its way in, a Bark round), ecash backed by a `mint` or a `federation`.
+ * spendable yet (an Ark deposit on its way in, a Bark round, Cashu sats set aside for a payment the mint has not
+ * answered), ecash backed by a `mint` or a `federation`.
  */
 export type TotalNote = "unconfirmed" | "waiting" | "mint" | "federation";
 
@@ -153,16 +154,22 @@ const UNKNOWN: Part<never> = { state: "unknown" };
 const NONE: Part<never> = { state: "none" };
 
 /**
+ * Ecash is kept on this device: its balance is always known once there is a mint. Sats set aside for a payment the
+ * mint has not answered are still held here: in the total but not spendable yet, as a Bark send on its way out is.
+ * They leave with the payment, or come back to the balance if it fails.
+ */
+const ecash = (s: WalletState): Part<number> => !s.mints.length ? NONE : s.setAside ? counted(s.balance, s.setAside) : counted(s.balance, 0, "mint");
+
+/**
  * What one Bitcoin card holds, from its network's state (`networkState`, with the card's own Lightning). Known only
  * when its wallet says it read it: every view carries that (`read`), and a balance before it says nothing.
  */
 export function bitcoinPart(rail: Exclude<WalletRail, "usdt">, s: WalletState): Part<number> {
   switch (rail) {
-    // Ecash is kept on this device: its balance is always known once there is a mint.
-    case "cashu": return s.mints.length ? counted(s.balance, 0, "mint") : NONE;
+    case "cashu": return ecash(s);
     case "lightning": {
       const ln = s.lightning;
-      if (!ln || viaMints(s)) return s.mints.length ? counted(s.balance, 0, "mint") : NONE;
+      if (!ln || viaMints(s)) return ecash(s);
       return source(ln);
     }
     case "bitcoin": {
