@@ -158,6 +158,8 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const run = (queue: (() => void)[]) => { for (const task of queue.splice(0)) task(); };
   return {
     copy, dispatch, listeners,
+    /** The page's own `requestAnimationFrame`: one frame's callbacks run in the order they were asked for. */
+    requestFrame: (frame: () => void) => { frames.push(frame); },
     endTask: () => run(tasks),
     nextTask: () => tasks.shift()?.(),
     runUrgent: () => run(urgent),
@@ -227,7 +229,7 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     expect(got).toEqual({ load: false, loadChange: false, timer: false, promise: false });
   });
 
-  it("closes the window at whichever closing task runs first, and only the newest tap's", () => {
+  it("closes the window at whichever closing task runs first, whichever tap queued it", () => {
     const urgent = tapWindow({ postTask: true, frame: true });
     let got: boolean | undefined;
     urgent.dispatch("click", true);
@@ -239,17 +241,42 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     frame.runFrame();
     frame.dispatch("submit", true, () => { got = frame.copy(); });
     expect(got).toBe(false);
-    // Two taps in one go (a key's keydown and keypress): the first one's closing task leaves the second's window
-    // open, until its own runs.
+    // Two taps in one task (a key's keydown and keypress): no guard task runs between them, and the keypress's default
+    // action (Enter's submit) is over before the first one does, so that first one closes the window.
     const page = tapWindow();
     page.dispatch("keydown", true);
     page.dispatch("keypress", true);
     page.nextTask();
     page.dispatch("submit", true, () => { got = page.copy(); });
-    expect(got).toBe(true);
+    expect(got).toBe(false);
     page.nextTask();
     page.dispatch("submit", true, () => { got = page.copy(); });
     expect(got).toBe(false);
+  });
+
+  it("refuses a submit from an animation frame the page asks for in a click's pointerdown, though the click comes later", () => {
+    // A click is five taps; the guard's frame callback at pointerdown runs ahead of the page's, and closes the window
+    // the later taps of the same click opened.
+    const page = tapWindow({ channel: true, postTask: true, frame: true });
+    const got: Record<string, boolean> = {};
+    page.dispatch("pointerdown", true, () => page.requestFrame(() => page.dispatch("submit", true, () => { got.frame = page.copy(); })));
+    page.dispatch("mousedown", true);
+    page.dispatch("pointerup", true);
+    page.dispatch("mouseup", true);
+    page.dispatch("click", true);
+    page.runFrame();
+    expect(got).toEqual({ frame: false });
+  });
+
+  it("lets a submit through from an animation frame the page asked for before the tap, in the frame right after it", () => {
+    // Chromium runs the frame callbacks asked for before an input in the rendering step right after it, ahead of the
+    // guard's own message and task: the window holds that step too (WISP 701), and closes at the guard's frame callback.
+    const page = tapWindow({ channel: true, postTask: true, frame: true });
+    const got: Record<string, boolean> = {};
+    page.requestFrame(() => page.dispatch("submit", true, () => { got.before = page.copy(); }));
+    page.dispatch("click", true, undefined, () => page.requestFrame(() => page.dispatch("submit", true, () => { got.after = page.copy(); })));
+    page.runFrame();
+    expect(got).toEqual({ before: true, after: false });
   });
 
   it("counts no submit or change at all where it can queue no closing task", () => {

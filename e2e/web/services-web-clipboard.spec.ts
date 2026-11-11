@@ -53,6 +53,9 @@ const PAGE = `<!doctype html><title>Pay</title><body style="margin:0">
     for (const ms of [500, 2000, 4500]) setTimeout(() => { log["timer" + ms] = write("bc1q-CONTACT-timer" + ms); out(); }, ms);
     for (const [name, realm] of Object.entries(realms)) setTimeout(() => { log[name] = write("bc1q-CONTACT-" + name, realm); out(); }, 1000);
     setTimeout(() => { submitAs("submitTimer"); flipAs("changeTimer"); }, 1500);
+    // The tightest ones: the next task, and the next frame (asked for in the tap, after the guard's own).
+    setTimeout(() => submitAs("submitTimer0"), 0);
+    requestAnimationFrame(() => flipAs("changeFrame"));
     new Promise((done) => setTimeout(done, 50)).then(() => submitAs("submitPromise"));
     const channel = new MessageChannel();
     channel.port1.onmessage = () => flipAs("changeMessage");
@@ -115,7 +118,7 @@ test("a contact's app writes the clipboard only in the person's tap on its copy 
     await person.page.waitForTimeout(6_000);
     const seen = await log();
     info.annotations.push({ type: "clipboard writes", description: JSON.stringify(seen) });
-    const late = ["submitLoad", "changeLoad", "submitTimer", "changeTimer", "submitPromise", "changeMessage"];
+    const late = ["submitLoad", "changeLoad", "submitTimer0", "changeFrame", "submitTimer", "changeTimer", "submitPromise", "changeMessage"];
     expect(Object.keys(seen)).toEqual(expect.arrayContaining(["timer500", "timer2000", "timer4500", "frame", "parent", ...late]));
     expect(seen).toMatchObject({ load: false, timer500: false, timer2000: false, timer4500: false, frame: false, parent: false });
     expect(seen).toMatchObject(Object.fromEntries(late.map((name) => [name, false])));

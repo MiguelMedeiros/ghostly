@@ -7,14 +7,18 @@
  *   being dispatched (a trusted `pointerdown`, `pointerup`, `mousedown`, `mouseup`, `click`, `auxclick`, `dblclick`,
  *   `contextmenu`, `touchstart`, `touchend`, `keydown`, `keypress` or `keyup`; no script can fire one), or a trusted
  *   `submit` or `change` that began while such an input's window was open. That window opens as the input is
- *   dispatched and closes at the first task the guard queues then (a message on a channel of its own, a
- *   `user-blocking` task where `scheduler.postTask` exists, the next animation frame), so it holds the input's own
- *   dispatch and its default action: the submit of a click on a submit button or of Enter in a field, the change of a
- *   checkbox. A `submit` or `change` fired by script (`requestSubmit()`, `click()`) from a timer, a promise or a
- *   message after the input, or outside any input, does not count. So a copy button, a form, a checkbox, a double
- *   click or the app's own context menu copies on the person's tap, and nothing else does (not on load, not from a
- *   timer or a promise after a tap). `execCommand("paste")` is refused. Every other command passes as it is. The
- *   wrapped `execCommand` is left fixed in place (not writable, not configurable), once per window;
+ *   dispatched and closes at the first callback the guard queued at any input that runs (a message on a channel of
+ *   its own, a `user-blocking` task where `scheduler.postTask` exists, an animation frame), so it holds the input's
+ *   own dispatch and its default action: the submit of a click on a submit button or of Enter in a field, the change
+ *   of a checkbox. It also covers the rendering step right after the input: the animation frame callbacks the page
+ *   asked for before the input run in the frame right after it, ahead of the guard's message and `user-blocking`
+ *   task (and of its own frame callback, which closes the window there), so a `submit` or `change` one of them fires
+ *   counts. A `submit` or `change` fired by script (`requestSubmit()`, `click()`) from a timer, a promise, a message
+ *   or an animation frame asked for at or after the input, or outside any input, does not count. So a copy button, a
+ *   form, a checkbox, a double click or the app's own context menu copies on the person's tap, and nothing else does
+ *   (not on load, not from a timer or a promise after a tap). `execCommand("paste")` is refused. Every other command
+ *   passes as it is. The wrapped `execCommand` is left fixed in place (not writable, not configurable), once per
+ *   window;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
  *   (an empty frame's first load fires as it is put in the page) and as the page changes, each `srcdoc` frame gets
@@ -108,34 +112,32 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         const channel = new w.MessageChannel();
         const post = w.MessagePort.prototype.postMessage;
         const out = channel.port2;
-        let heard = 0;
-        channel.port1.onmessage = () => settle(++heard);
+        channel.port1.onmessage = () => settle();
         shutters[0] = () => apply(post, out, [0]);
       } catch (e) {}
       try {
         const tasks = w.scheduler;
         const postTask = tasks && tasks.postTask;
         const urgent = { __proto__: null, priority: "user-blocking" };
-        if (typeof postTask === "function") shutters[shutters.length] = (n) => { apply(postTask, tasks, [() => settle(n), urgent]); };
+        if (typeof postTask === "function") shutters[shutters.length] = () => { apply(postTask, tasks, [settle, urgent]); };
       } catch (e) {}
       try {
         const frame = w.requestAnimationFrame;
-        if (typeof frame === "function") shutters[shutters.length] = (n) => { apply(frame, w, [() => settle(n)]); };
+        if (typeof frame === "function") shutters[shutters.length] = () => { apply(frame, w, [settle]); };
       } catch (e) {}
       let tap = null;
       let trusted = null;
-      let made = 0;
       let open = 0;
       let follows = null;
-      const settle = (n) => { if (open === n) { open = 0; follows = null; } };
+      const settle = () => { open = 0; follows = null; };
       const seen = (event) => {
         const found = trust(event);
         if (found === null) return;
         tap = event;
         trusted = found;
         if (shutters.length === 0) return;
-        open = ++made;
-        for (let i = 0; i < shutters.length; i++) { try { shutters[i](open); } catch (e) {} }
+        open = 1;
+        for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
       for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
@@ -234,4 +236,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-ojiVqfzOSdkLXa4Mr6pTlB8bLzTbRN9rXHmGn1xyNLs='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-56VCOgGPZ/Nzrd0JvzKoTsGjoDTnwzWAVSy9Hqpw4pw='";
