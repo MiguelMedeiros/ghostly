@@ -954,6 +954,37 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(alice.edgeAllows(groupId, key(carol), { t: "group-sync", g: groupId, e: 4 })).toBe(true);
       });
 
+      it("is still told by the admin that removed it after that admin left the group, and the tombstone goes once it is", async () => {
+        const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        // The admin leaves before Bob is back: the role goes to Carol, who heard the leave. Nobody else keeps an edge to him.
+        await alice.leave(groupId); await world.settle();
+        expect(carol.views()[0]).toMatchObject({ isAdmin: true });
+        expect(alice.views()).toEqual([]);
+        expect(edgesOf(world, "carol")).not.toContain(bobKey);
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Her app restarts meanwhile: the tombstone still waits for him.
+        const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+        await again.load(); await world.settle();
+        world.peers.get("alice")!.groups = again;
+        known.set(again, key(alice));
+        await again.tick(Date.now() + 60_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Bob is back: the commit that removed him comes over that edge.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", canSend: false });
+        expect(await bob.send(groupId, "anyone?")).toMatchObject({ error: "You were removed from this group" });
+        // A moment later the edge goes, and so does the tombstone: nothing is kept of the group.
+        await again.tick(Date.now() + 60_000 + 16_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([]);
+        expect(await world.peers.get("alice")!.store.getGroups()).toEqual([]);
+        expect(again.views()).toEqual([]);
+      });
+
       it("invited again before it is back takes the invitation only once it knows, and ends as a member", async () => {
         const { world, alice, bob, groupId, key, edge } = await trio();
         const oldKey = key(bob);

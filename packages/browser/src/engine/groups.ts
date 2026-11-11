@@ -1451,8 +1451,14 @@ export class Groups {
    * it where the role went.
    */
   private async leaveConfirmed(groupId: string): Promise<void> {
-    if (!this.stored.get(groupId)?.left) return;
+    const group = this.stored.get(groupId), left = group?.left;
+    if (!group || !left) return;
     if (this.holdsRole(groupId, this.sessions.get(groupId))) { if (!this.passedOnUntil.has(groupId)) this.passedOnUntil.set(groupId, this.now() + LEFT_PASSED_ON_MS); return; }
+    // Members I removed while they were away wait for my word still: the tombstone stays for them alone.
+    if (this.farewellKeys(group, this.sessions.get(groupId), this.now()).length) {
+      if (left.heard === undefined) { group.left = { ...left, heard: this.now() }; await this.store.putGroup(group); this.reconcileEdges(groupId); }
+      return;
+    }
     await this.forget(groupId);
   }
   /** Tombstones the role went on from, removed already, and when they go (`leaveConfirmed`). */
@@ -1489,9 +1495,12 @@ export class Groups {
     const { [key]: _gone, ...rest } = group.farewells;
     group.farewells = Object.keys(rest).length ? rest : undefined;
   }
-  /** The removed members this admin still waits for: not told yet, or told a moment ago (the commit is on its way). */
-  private farewellKeys(group: StoredGroup | undefined, session: GroupSession, now: number): string[] {
-    if (!group?.farewells || session.status !== "active") return [];
+  /**
+   * The removed members this admin still waits for: not told yet, or told a moment ago (the commit is on its way). Also
+   * after it left the group: nobody else keeps an edge to them, and the members it removed would never learn it.
+   */
+  private farewellKeys(group: StoredGroup | undefined, session: GroupSession | undefined, now: number): string[] {
+    if (!group?.farewells || !session || (session.status !== "active" && !group.left)) return [];
     return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS && (f.told === undefined || now - f.told < REMOVED_LINGER_MS)
       && (f.opened === undefined || now - f.opened < FAREWELL_OPEN_MS)).map(([key]) => key);
   }
@@ -1817,8 +1826,11 @@ export class Groups {
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS || now >= (this.passedOnUntil.get(group.id) ?? Infinity)) { await this.forget(group.id); continue; }
-          // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
           const session = this.sessions.get(group.id);
+          if (group.farewells && session) this.farewellsTick(group.id, session, now);
+          // Kept for the members I removed while they were away, once the admin heard my leave: they were all told.
+          if (group.left.heard !== undefined && !group.farewells) { await this.forget(group.id); continue; }
+          // The role reached my tombstone (a hand-over that crossed my leave): it goes on, after a restart too.
           if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
           continue;
         }
@@ -2484,6 +2496,12 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
     const left = this.stored.get(groupId)?.left;
     if (left) {
+      const tomb = this.stored.get(groupId)!, session = this.sessions.get(groupId);
+      // A member I removed while it was away, before I left: only its sync is read, as below.
+      if (session && tomb.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) {
+        if (frame && typeof frame === "object") this.farewellSync(groupId, session, tomb, peerKey, frame as Record<string, unknown>);
+        return;
+      }
       // What matters to a group I left: the admin's commit that removes me, and the role on its way to whoever will.
       if (this.removesMe(groupId, peerKey, frame)) await this.leaveConfirmed(groupId);
       else await this.afterLeave(groupId, peerKey, frame);
@@ -2676,6 +2694,7 @@ export class Groups {
     if (left) {
       // The admin was away when I left: now it hears it (and a hub carries it, signed, to an admin I have no edge with).
       const session = this.sessions.get(groupId), group = this.stored.get(groupId)!;
+      if (session && group.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
       if (peerKey === left.admin) { try { if (session) this.sayLeave(groupId, session, group, linkId); else this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
       else if (left.bye && left.hubs?.includes(peerKey)) { try { this.host.sendOnLink(linkId, left.bye); } catch { /* next time it opens */ } }
       return;
@@ -3352,7 +3371,7 @@ export class Groups {
       const left = group?.left;
       const removed = this.removedAt.get(groupId);
       const wanted = session?.status === "active" && group ? this.edgesWanted(groupId, session, group, this.now())
-        : left ? new Set([left.admin, ...left.hubs ?? [], ...this.holdsRole(groupId, session) && !this.hubs.large(session!) ? session!.others : []])
+        : left ? new Set([...left.heard === undefined ? [left.admin, ...left.hubs ?? []] : [], ...this.holdsRole(groupId, session) && !this.hubs.large(session!) ? session!.others : [], ...this.farewellKeys(group, session, this.now())])
         : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       const met = this.justMet.get(groupId);
