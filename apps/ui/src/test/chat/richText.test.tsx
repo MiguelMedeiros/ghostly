@@ -98,6 +98,20 @@ describe("spoilers", () => {
     } finally { outside.remove(); }
   });
 
+  it("cover the new words of a contact's edit again, and stay shown when the edit leaves them as they were", async () => {
+    const draw = (text: string) => <MessageBubble message={message(text)} peerPubKey="peer" />;
+    const { user, rerender } = bubble("the answer is ||forty two||");
+    await user.click(screen.getByTestId("rich-spoiler"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // Only the words around it change: what was uncovered is still the same.
+    rerender(draw("the answer, as said, is ||forty two||"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // New words under it: covered, until tapped again.
+    rerender(draw("the answer, as said, is ||a new secret||"));
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.getByRole("button", { name: "Hidden text. Tap to show it" }).firstElementChild).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("keep a link inside unreachable until shown", async () => {
     const { user } = bubble("||https://x.example/secret||");
     expect(screen.getByTestId("rich-spoiler").querySelector("[inert]")).not.toBeNull();

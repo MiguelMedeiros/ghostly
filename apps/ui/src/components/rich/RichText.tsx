@@ -130,7 +130,8 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
         if (segment.style === "bold") out.push(<strong key={k} className="font-semibold">{inner}</strong>);
         else if (segment.style === "italic") out.push(<em key={k}>{inner}</em>);
         else if (segment.style === "strike") out.push(<s key={k}>{inner}</s>);
-        else out.push(<Spoiler key={k}>{inner}</Spoiler>);
+        // Keyed on its words too: a contact's edit that puts new words under one tapped open covers them again.
+        else out.push(<Spoiler key={`${k}:${shown(segment)}`}>{inner}</Spoiler>);
         break;
       }
       case "atom": {
