@@ -1,5 +1,6 @@
 import { WALLET_NETWORKS, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
+import { composingKey } from "../hooks/useComposition";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, type ChatAccepts } from "../lib/chatPayments";
@@ -247,7 +248,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     return true;
   };
   useEffect(() => {
-    const key = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && escapeToCards.current()) e.preventDefault(); };
+    const key = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !composingKey(e, null) && !e.defaultPrevented && escapeToCards.current()) e.preventDefault(); };
     document.addEventListener("keydown", key, true);
     return () => document.removeEventListener("keydown", key, true);
   }, []);
@@ -422,7 +423,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       data-network={accepting ? undefined : network}
       // Not one from a dialog portalled out of the sheet (SecretGuardDialog): React hands it here too, and it is the dialog's.
-      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented && e.currentTarget.contains(e.target as Node)) { e.preventDefault(); onClose(); } }}
+      // Nor an input method's, dropping a candidate in the memo.
+      onKeyDown={(e) => { if (e.key === "Escape" && !composingKey(e.nativeEvent, null) && !e.defaultPrevented && e.currentTarget.contains(e.target as Node)) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={t("payments.composer.with", { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>
