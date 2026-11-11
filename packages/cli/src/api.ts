@@ -785,7 +785,7 @@ const METHODS: Record<string, Method> = {
     checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
