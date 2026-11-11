@@ -932,7 +932,9 @@ export class Apps {
    * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
    * A store removed since the caller read the stores pins nothing: it is judged at the write, as `removeStore` unpins
    * only the records written before it. A revocation the record gained since `was` (`keepStoreRevocations`) is kept:
-   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already.
+   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already. So is what the person's stores
+   * revoke of the versions written, as held at the write: a version fetched while a store's index revoked it was not on
+   * the record `keepStoreRevocations` read.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -944,6 +946,8 @@ export class Apps {
       if (!sameRecord(now, was)) return;
       const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
+      const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
+      app = withRevocations(app, stopping(this.versionsOf(app), revoked));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -1733,6 +1737,8 @@ export class Apps {
           return this.view((await this.app(version.ref))!, stores);
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
+        // A store's index read while the files were written that revokes or removes it: judged again from the top.
+        if (this.runStatus(version, await this.heldViews(), [...(installed?.revocations ?? []), ...known]).status !== "ok") continue;
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
         // It starts with the revocations read for the preview and the ones kept (of other versions: a later one may name one).
         const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), known);
@@ -1969,6 +1975,8 @@ export class Apps {
         continue;
       }
       if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
+      if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") continue;
       if (app.pending && version.sequence < app.pending.sequence) continue;
       const kind = await this.writeBundle(version.digest, bytes);
       wrote = { bytes: kind, digest: version.digest };
