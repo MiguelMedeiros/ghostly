@@ -647,7 +647,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (tabId === undefined) return;
 
   if (method === "Fetch.requestPaused") {
-    fulfill(tabId, params as PausedRequest).catch(() => {
+    fulfill(tabId, params as unknown as PausedRequest).catch(() => {
       // tab closed or debugger detached mid-request
     });
   } else if (method === "Page.frameNavigated") {
