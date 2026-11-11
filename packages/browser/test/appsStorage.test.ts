@@ -548,4 +548,35 @@ describe("the engine", () => {
     expect(net.requests).toEqual([BUNDLE_URL, new URL("ghostly-revoke.json", BUNDLE_URL).href]);
     await peer.shutdown({ quiet: true });
   });
+
+  it("a chat deleted and joined again (the same invite, the same id) finds its app's storage empty, not full", async () => {
+    const peer = await node({ apps: true });
+    const app = await bundle();
+    net.put(BUNDLE_URL, app.bytes);
+    const preview = await peer.appPreview({ url: BUNDLE_URL });
+    await peer.appInstall({ digest: preview.digest, grant: ["chat"] });
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    let refused: string | undefined;
+    for (let i = 0; i < 100 && !refused; i++) {
+      refused = await peer.appStorageSet({ ref, scope: "l1", key: `k${i}`, value: big }).then(() => undefined, (e: Error) => e.message.split(":")[0]);
+    }
+    expect(refused).toBe("full");
+    // The engine's own removal: the chat goes at once, its rows in the background.
+    const links = (peer as unknown as { links: Map<string, unknown> }).links;
+    const live = links.get("l1");
+    peer.removeLink({ linkId: "l1" });
+    await vi.waitFor(async () => expect(await ownRows()).toEqual([]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The same invite joined again: a chat of this profile with the same id, as it is once paired.
+    links.set("l1", live);
+    expect(await peer.appStorageKeys({ ref, scope: "l1" })).toEqual([]);
+    const value = "y".repeat(63 * 1024);
+    await peer.appStorageSet({ ref, scope: "l1", key: "fresh", value });
+    expect(await peer.appStorageKeys({ ref, scope: "l1" })).toEqual(["fresh"]);
+    // The count kept is this one row's, not the deleted chat's added to it.
+    const counter = (await storageRows() as { scope: string; key: string; value: string }[]).find((r) => r.scope === "l1" && r.key === "");
+    expect(JSON.parse(counter!.value)).toEqual({ rows: 1, keyBytes: "fresh".length, size: "fresh".length + JSON.stringify(value).length });
+    await peer.shutdown({ quiet: true });
+  });
 });

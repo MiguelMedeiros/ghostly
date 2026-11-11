@@ -2246,6 +2246,17 @@ export class Apps {
     return used;
   }
 
+  /**
+   * A chat removed, its rows gone (`db.deleteLink`): what this engine kept of every app's storage there goes too. A chat's
+   * id comes from its invite, so the same invite joined again is the same scope: with the deleted chat's count still
+   * held, its app found no keys yet every write refused as full until a restart.
+   */
+  forgetScope(scope: string): void {
+    const of = (id: string) => id.slice(id.indexOf("\0") + 1) === scope;
+    for (const id of [...this.usage.keys()]) if (of(id)) this.usage.delete(id);
+    for (const id of [...this.keyReads.keys()]) if (of(id)) this.keyReads.delete(id);
+  }
+
   async storageGet({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: JsonValue } | null> {
     const app = await this.runningOrFail(ref, digest);
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, this.scopeOf(scope), this.keyOf(key)]));
