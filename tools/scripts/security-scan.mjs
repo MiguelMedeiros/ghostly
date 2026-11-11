@@ -4,10 +4,19 @@
  *
  *   node tools/scripts/security-scan.mjs [--json]
  *
+ *   node tools/scripts/security-scan.mjs --warn-unused   (the morning run)
+ *
  * Reads every lockfile in LOCKFILES, asks OSV (https://osv.dev: GitHub
  * advisories, RustSec, npm) about each exact version, and exits 1 if anything
  * is affected that is not accepted in .github/security-allowlist.json. Needs
  * no dependencies and no npm audit endpoint.
+ *
+ * It also exits 1 on an allowlist entry past its `until`, and on one that no
+ * advisory of this run matched (the package left every lockfile or moved past
+ * the fix): left in place, it would accept a later downgrade without a word.
+ * With --warn-unused, an unused entry is a warning only, so an advisory OSV
+ * withdraws overnight does not turn the morning run red; a pull request that
+ * makes an entry unused still fails until it removes it.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -51,7 +60,7 @@ export function npmPackages(lockfile) {
   return [...out.values()];
 }
 
-function cargoPackages(lockfile) {
+export function cargoPackages(lockfile) {
   const text = readFileSync(join(root, lockfile), "utf8");
   const out = [];
   for (const block of text.split("[[package]]").slice(1)) {
@@ -61,6 +70,20 @@ function cargoPackages(lockfile) {
     out.push({ ecosystem: "crates.io", name, version, dev: false, lockfile });
   }
   return out;
+}
+
+/**
+ * Which advisories the allowlist accepts, and which of its entries no longer apply: `unused` matched none of this
+ * run's findings, `expired` is past its `until` (and accepts nothing any more).
+ */
+export function allowlistReport(allowlist, findings, today) {
+  const live = (a) => !a.until || a.until >= today;
+  const names = (a, f) => a.id === f.id && a.package === f.name;
+  return {
+    accepted: (finding) => allowlist.some((a) => live(a) && names(a, finding)),
+    unused: allowlist.filter((a) => live(a) && !findings.some((f) => names(a, f))),
+    expired: allowlist.filter((a) => !live(a)),
+  };
 }
 
 async function osv(url, body) {
@@ -74,6 +97,7 @@ async function osv(url, body) {
 
 async function main() {
   const asJson = process.argv.includes("--json");
+  const warnUnused = process.argv.includes("--warn-unused");
   const packages = LOCKFILES.flatMap(({ ecosystem, file }) => (ecosystem === "npm" ? npmPackages(file) : cargoPackages(file)));
 
   const hits = [];
@@ -87,10 +111,6 @@ async function main() {
     });
   }
 
-  const allowlist = JSON.parse(readFileSync(join(root, ".github/security-allowlist.json"), "utf8")).accepted;
-  const today = new Date().toISOString().slice(0, 10);
-  const accepted = (hit) => allowlist.some((a) => a.id === hit.id && a.package === hit.name && (!a.until || a.until >= today));
-
   const findings = [];
   for (const hit of hits) {
     const detail = await osv(`https://api.osv.dev/v1/vulns/${hit.id}`);
@@ -102,20 +122,29 @@ async function main() {
       .filter(Boolean);
     const severity =
       detail.database_specific?.severity ?? (detail.id.startsWith("RUSTSEC") ? (detail.affected?.[0]?.database_specific?.informational ?? "RUSTSEC") : "UNKNOWN");
-    findings.push({ ...hit, severity, summary: detail.summary ?? "", fixed, accepted: accepted(hit) });
+    findings.push({ ...hit, severity, summary: detail.summary ?? "", fixed });
   }
 
+  const allowlist = JSON.parse(readFileSync(join(root, ".github/security-allowlist.json"), "utf8")).accepted;
+  const { accepted, unused, expired } = allowlistReport(allowlist, findings, new Date().toISOString().slice(0, 10));
+  for (const f of findings) f.accepted = accepted(f);
+
   const open = findings.filter((f) => !f.accepted);
+  const failing = open.length + expired.length + (warnUnused ? 0 : unused.length);
   if (asJson) {
-    console.log(JSON.stringify({ scanned: packages.length, lockfiles: LOCKFILES.map((l) => l.file), findings }, null, 2));
+    console.log(JSON.stringify({ scanned: packages.length, lockfiles: LOCKFILES.map((l) => l.file), findings, unusedEntries: unused, expiredEntries: expired }, null, 2));
   } else {
-    console.log(`Scanned ${packages.length} packages in ${LOCKFILES.length} lockfiles: ${findings.length} advisories, ${open.length} not accepted.`);
+    console.log(`Scanned ${packages.length} packages in ${LOCKFILES.length} lockfiles: ${findings.length} advisories, ${open.length} not accepted; allowlist: ${unused.length} unused, ${expired.length} expired.`);
     for (const f of findings) {
       const mark = f.accepted ? "accepted" : "OPEN";
       console.log(`  [${mark}] ${f.name} ${f.version} (${f.lockfile}${f.dev ? ", dev" : ""}) ${f.id} ${f.severity}: ${f.summary}${f.fixed.length ? ` → fixed in ${f.fixed.join(", ")}` : ""}`);
     }
+    // Annotations, so the entries to remove show on the run's page, not only in its log.
+    const level = warnUnused ? "warning" : "error";
+    for (const a of unused) console.log(`::${level} file=.github/security-allowlist.json::Unused allowlist entry: ${a.package} ${a.id} matched no advisory in any lockfile; remove it.`);
+    for (const a of expired) console.log(`::error file=.github/security-allowlist.json::Expired allowlist entry: ${a.package} ${a.id} (until ${a.until}); re-check it, then remove it or move its date.`);
   }
-  process.exit(open.length ? 1 : 0);
+  process.exit(failing ? 1 : 0);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
