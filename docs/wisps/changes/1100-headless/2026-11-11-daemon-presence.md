@@ -1,0 +1,1 @@
+`settings set daemonPresence true` (off by default) makes a running daemon say this profile is active to its paired contacts (WISP 401 § Presence and status), so their apps show its dot while it runs; turned off, it is taken back at once. A one-shot command never says it, and `settings get` shows it as `daemonPresence: false` until it is turned on.

@@ -187,7 +187,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Apps | Mini-apps ([1200](1200-marketplace.md)): install from a store, run in a sandbox | Not applicable: no page runs here. A profile can be the other side of an app instead, speaking its messages as a bot ([Apps as a bot](#apps-as-a-bot)); built after release 1.2, in no release yet |
 | Calls | Voice: place, answer, decline, hang up, auto-answer; the audio to and from a program | Phase 5 ([#350](https://github.com/MiguelMedeiros/ghostly/pull/350)), see [Calls](#calls) |
 | Calls | Video, screen sharing | Not applicable: a video call is answered as a voice call, and the answer says no picture is taken (`vr: 0`) |
-| Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
+| Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name, a daemon's presence (`settings set daemonPresence true`: contacts see it online while it runs, WISP 401 § Presence and status) | Phase 1 through `settings set` and `profile set` |
 | Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Available beside the relays (`bittorrent-dht`): the same signed payload goes to relays and DHT; checked on a loopback testnet with relays answering 500 (a group joined by its link, its edge up and a message delivered in 16 s); `GHOSTLY_DHT_BOOTSTRAP` for private testnets |
 
 ## Calls
