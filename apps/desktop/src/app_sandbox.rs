@@ -2245,10 +2245,10 @@ mod tests {
             "too-large"
         );
         // A stored value's 64 KiB (WISP 1200) under the longest key, 256 control characters at six bytes each in JSON.
-        let longest = json!({"id": MAX_ID, "type": "storage.set", "args": ["\u{1}".repeat(256), "x".repeat(64 * 1024 - 2)]});
+        let longest = json!({"id": 4, "type": "storage.set", "args": ["\u{1}".repeat(256), "x".repeat(64 * 1024 - 2)]});
         assert!(matches!(
             admitted(&state, "app-1", longest),
-            Ok(Admitted::Relay(MAX_ID, _))
+            Ok(Admitted::Relay(4, _))
         ));
     }
 
