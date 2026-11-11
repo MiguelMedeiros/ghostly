@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The merge train: the only way pull requests land on `dev` (and on each `epic/*` branch). A reviewer adds the label
-// `queue` to an approved, green pull request; the train lines them up and lands them in batches, or alone when only one
+// `queue` to a ready and green pull request; the train lines them up and lands them in batches, or alone when only one
 // is in line.
 //
 // - The line, per base: `queue:priority` first (alone it is in the line too), then by the time each got `queue` (the
@@ -72,7 +72,8 @@
 //   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
 //   fast-forward pushes commits as they are: a batch that fell back to the rebase merge and everything that lands on
 //   an epic stay unsigned.
-// - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd").
+// - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd"). Its hidden marks count
+//   only while the train's login wrote that comment last: one another login edited counts as queued again.
 //
 // The train keeps no state of its own: a batch's members (each with its head and the batch's commit of it) and the half
 // that waits after it live in a hidden mark in the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
@@ -663,6 +664,17 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
     else if (!p.sticky && said.truncated) p.unread = "comments";
+  }
+  // An account that may edit any comment can rewrite the train's own: its marks count only while the train wrote it
+  // last. GitHub names a comment's last editor over GraphQL only, so one read asks it for every position comment.
+  const writers = await gh.lastEditors(queued.map((p) => p.sticky?.node_id).filter(Boolean));
+  for (const p of queued) {
+    const events = p.events;
+    // Edited by another login: it speaks for nobody, and the pull request counts as queued again (as below).
+    if (p.sticky && writers.get(p.sticky.node_id) !== login) {
+      say(`#${p.number}: its position comment was last edited by ${writers.get(p.sticky.node_id) ?? "someone else"}, so its marks do not count.`);
+      [p.stale, p.sticky] = [p.sticky, undefined];
+    }
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
     const relabeled = vouchedAt(events, p.labels, null);
@@ -1363,7 +1375,7 @@ export const appTrainIn = (jobs) =>
 export class BudgetLow extends Error {}
 
 /**
- * GitHub over REST (the shared GraphQL quota stays free). A request that fails to connect (a reset, DNS after a Mac
+ * GitHub over REST, so the GraphQL quota (a Mac's is shared) stays nearly free: only `lastEditors` asks it. A request that fails to connect (a reset, DNS after a Mac
  * wakes), a 5xx, a 429 or a rate-limited 403 (primary, or secondary with `Retry-After`) is retried with backoff;
  * below `budget` calls left the run stops. An attempt with no answer within `timeout` counts as one that failed to
  * connect; once `signal` aborts (the round's deadline), every request fails at once. A POST retried after a 5xx that
@@ -1375,7 +1387,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   let warnedActivity = false;
   let cancelDenied = null;
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
-  const api = async (method, path, body) => {
+  const api = async (method, path, body, root = `/repos/${repo}`) => {
     const named = (e) => (e?.name === "TimeoutError" ? new Error(`${method} ${path}: no answer within ${timeout / 1000} s`) : e);
     for (let attempt = 0; ; attempt++) {
       signal?.throwIfAborted();
@@ -1383,7 +1395,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       const cut = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
       let r;
       try {
-        r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+        r = await fetchImpl(`https://api.github.com${root}${path}`, {
           method,
           headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
           body: body ? JSON.stringify(body) : undefined,
@@ -1589,6 +1601,28 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       return moved && Date.parse(moved) > Date.parse(first) ? moved : first;
     },
     comments: (n) => all(`/issues/${n}/comments`),
+    /**
+     * Who last wrote each comment (by `node_id`): its last editor, else its author, by the login REST gives (a bot's
+     * with "[bot]"). A comment GitHub no longer has, or whose account is gone, is left out. One GraphQL request per 100
+     * comments (REST does not say who edited one), none when there is none.
+     */
+    lastEditors: async (ids) => {
+      const out = new Map();
+      const name = (a) => (a?.login ? `${a.login}${a.__typename === "Bot" ? "[bot]" : ""}` : null);
+      for (let i = 0; i < ids.length; i += 100) {
+        const query = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id author { __typename login } editor { __typename login } lastEditedAt } } }";
+        const r = await api("POST", "/graphql", { query, variables: { ids: ids.slice(i, i + 100) } }, "");
+        // A comment deleted since it was listed is a NOT_FOUND error beside a null node.
+        const error = r.data?.errors?.find((e) => e.type !== "NOT_FOUND");
+        if (!r.ok || error) throw new Error(`POST /graphql (comment editors): HTTP ${r.status} ${error?.message ?? r.data?.message ?? ""}`);
+        for (const c of r.data?.data?.nodes ?? []) {
+          // Edited by an account that is gone: nobody known wrote it last.
+          const who = c?.id && (c.editor ? name(c.editor) : c.lastEditedAt ? null : name(c.author));
+          if (who) out.set(c.id, who);
+        }
+      }
+      return out;
+    },
     branchSha: async (base) => (await must("GET", `/git/ref/heads/${base}`)).object.sha,
     comment: (n, body) => must("POST", `/issues/${n}/comments`, { body }),
     editComment: (id, body) => must("PATCH", `/issues/comments/${id}`, { body }),
