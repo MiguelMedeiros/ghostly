@@ -729,8 +729,8 @@ export class CommunitySession {
   /** My frames said again in this run (`e:h16:n`) → the id of the message they first were. In memory only. */
   private resealedFrom = new Map<string, string>();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
-  private pendingMeta: { from: string; frame: unknown } | undefined;
+  /** Metadata frames naming a commit or a secret I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain or my secrets move. */
+  private pendingMeta: { admin?: WaitingMeta; other?: WaitingMeta } = {};
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
@@ -2840,13 +2840,13 @@ export class CommunitySession {
     if (!groupMetaNewer(s, this.state.meta)) return false;
     const at = this.mainIndex.get(s.h);
     if (at === undefined) {
-      if (s.e >= this.epoch - COMMUNITY_LIMITS.window) { this.pendingMeta = { from, frame: raw }; this.ask(from); }
+      if (s.e >= this.epoch - COMMUNITY_LIMITS.window) this.waitMeta(from, raw, s);
       return false;
     }
     if (at !== s.e || rosterAdmin(this.rosterAt(s.h) ?? []) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return false;
     // The epoch it is sealed under: a commit I know and hold the secret of, or one that may still come.
     const secret = this.state.secrets[frame.k], sealedUnder = this.known.get(frame.k);
-    if (!secret || !sealedUnder) { this.pendingMeta = { from, frame: raw }; this.ask(from); return false; }
+    if (!secret || !sealedUnder) { this.waitMeta(from, raw, s); return false; }
     const opened = openGroupMeta(frame, epochKeys(fromBase64Url(secret), this.id, sealedUnder.e).message);
     if (!opened) return false;
     const before = this.state.meta;
@@ -2859,6 +2859,18 @@ export class CommunitySession {
     if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s, at), change, opened.meta.ts);
     this.hooks.changed();
     return true;
+  }
+
+  /**
+   * A statement that waits for the chain: only one its signer signed, so an altered copy cannot push out the one
+   * waiting. The admin I know has a place of their own, which another member's statement cannot take, and in each
+   * place only a later statement takes the one waiting.
+   */
+  private waitMeta(from: string, raw: unknown, s: GroupMetaStatement): void {
+    if (!verifyGroupMetaSignature(s)) return;
+    const place = s.by === this.admin ? "admin" : "other", waiting = this.pendingMeta[place];
+    if (!waiting || groupMetaNewer(s, waiting.s)) this.pendingMeta[place] = { from, frame: raw, s };
+    this.ask(from);
   }
 
   /**
@@ -2884,9 +2896,9 @@ export class CommunitySession {
    * went with a branch that lost a fork, the name and picture signed again as mine under the main branch.
    */
   private async metaFollowsChain(): Promise<void> {
-    const pending = this.pendingMeta;
-    this.pendingMeta = undefined;
-    if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
+    const { admin, other } = this.pendingMeta;
+    this.pendingMeta = {};
+    for (const pending of [admin, other]) if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again. One under a commit off
     // the main branch reaches no one (each waits for a chain that never comes): its admin signs it again too. Dated
     // when it was set: a member holding nothing tells it from a new admin's change by that (`metaAuthor`).
@@ -2904,6 +2916,8 @@ export class CommunitySession {
 }
 
 interface Branch { tip: string; fork: number; path: string[] }
+/** A metadata frame waiting for the chain, with its statement, whose signature holds. */
+interface WaitingMeta { from: string; frame: unknown; s: GroupMetaStatement }
 
 export function signCommunity(commit: Omit<CommunityCommit, "sig">, seed: Uint8Array): CommunityCommit {
   return { ...commit, sig: toBase64Url(sign(utf8Encode(tuple(commit)), seed)) };

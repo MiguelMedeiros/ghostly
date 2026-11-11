@@ -159,6 +159,8 @@
     "askAgain": "请联系人重新发送。",
     "askGroupAgain": "请稍后再向群组请求。",
     "askedTooOften": "联系人请求此文件的次数过多",
+    "audioMetadata": "无法发送这段音频：Ghostly 无法删除其中保存的信息，例如录制地点",
+    "audioMetadataNext": "请在音频编辑器中另存一份副本，或从录制它的应用重新导出，然后发送。",
     "cancelledHere": "你取消了它。",
     "cancelledThere": "你的联系人取消了它。",
     "cannotDecodeRecording": "此设备无法解码该录音",

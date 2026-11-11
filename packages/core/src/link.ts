@@ -9,6 +9,7 @@ import {
   type ResolvedLink,
   type ResolvedMessage,
 } from "./records";
+import { PKARR_FUTURE_SKEW_MS } from "./pkarr";
 import type { ServiceAd } from "./services";
 import type { SignalSight } from "./signal";
 import { RelaysFailedError } from "./relay";
@@ -970,7 +971,9 @@ export class LinkSession {
           if (fresh.length > 0) this.events.onMessages?.(fresh, batch);
         }
 
-        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = batch.packetTimestamp;
+        // No further ahead than readers take a date (`newerPacket`): anyone holding the invite can date a packet under the
+        // peer's key, and a later offer dated before this one does not read as seen arriving (`offerIsFresh`).
+        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = Math.min(batch.packetTimestamp, Date.now() + PKARR_FUTURE_SKEW_MS);
         // How long ago the peer published is measured on this clock, from when its packet was first read here.
         const seenAt = batch.packetTimestamp === wasSeen ? presenceSeenAt(this.presence) : Math.max(readBefore, Math.min(batch.packetTimestamp, Date.now()));
         const online = batch.services !== null && Date.now() - seenAt < PRESENCE_WINDOW;

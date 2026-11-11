@@ -1513,14 +1513,17 @@ export class GhostlyNode implements EngineImplementation {
       this.accepting = true;
       try {
         const { linkId } = await this.joinLink({ inviteCode: request.invite });
-        this.renameLink({ linkId, label: request.name });
+        // The requester chose the name: it is the contact's own, as the one its app says once the chat starts, never a
+        // label (a name given on this side, which the CLI's name lookups trust). Cleaned as a label is.
+        const peerNick = sanitizeDisplayText(request.name.trim().replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ");
         // The invite is a bearer code: whoever made it may not be who asked. The text is the request's, not confirmed,
         // until the requester's app proves in the chat that it holds the asker key (`contactAskerHeard`).
         const message = `peer_contact_${request.key.slice(0, 32)}`;
         const contactAsker = { link: request.link, key: request.key, message };
         const live = this.links.get(linkId);
-        if (live) live.stored = { ...live.stored, contactAsker };
-        await db.patchLink(linkId, { contactAsker });
+        if (live) live.stored = { ...live.stored, peerNick, contactAsker };
+        await db.patchLink(linkId, { peerNick, contactAsker });
+        this.emitState();
         // Dated by the request, never later than it came: the requester chose that date.
         await this.storeMessage({ linkId, id: message, text: request.text, sender: "peer", timestamp: Math.min(request.issued, request.receivedAt), via: "pkarr", unconfirmed: true });
         // A proof heard while the chat was being joined.

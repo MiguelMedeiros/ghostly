@@ -6,8 +6,8 @@ import { deviceStateOf, forgetDevice, readDeviceRecord } from "@ghostly/browser/
 import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
-import { activeProfileId, chosenProfileId, forgetProfileHere, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
-import { LEGACY_JOIN_PREFIX, ownsKey, retryUnsaved, unreadUnder } from "./storage";
+import { activeProfileId, chosenProfileId, forgetProfileHere, homeDatabaseOf, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
+import { LEGACY_JOIN_PREFIX, ownsOriginalKey, retryUnsaved, unreadUnder } from "./storage";
 import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
 import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
@@ -305,11 +305,22 @@ export async function removeProfileHere(): Promise<void> {
   if (!record || !(record.state === "removed" || (record.state === "moving" && record.reenroll))) throw new Error("Only a device removed from this profile's devices removes it here");
   // The shares this page holds go with it: the reload after this would carry them to the next page.
   resetIncomingShare();
-  // The first profile's keys are the ones without another profile's id or space after `ghostly_` (`ownsKey`); the
-  // registry stays, which the app needs to start at all.
-  await dropProfile(id, (key) => key !== registryKey() && (ns ? key.startsWith(`ghostly_${ns}_`) : ownsKey(key) || key.startsWith(LEGACY_JOIN_PREFIX)));
+  // The first profile running on a namespace a handoff installed: what a take left in its own namespace goes as well
+  // (an earlier build's take dropped its database and kept its keys), since the profile starts there again, empty.
+  const original = homeDatabaseOf(id) === "ghostly" ? "" : homeDatabaseOf(id).slice("ghostly_".length);
+  await dropProfile(id, (key) => keyOfSpace(ns, key) || (!id && keyOfSpace(original, key)));
   forgetProfileHere(id);
   await releaseUnusedLocalAccessOf();
+}
+
+/**
+ * Whether a local key is a namespace's own: `ghostly_<ns>_`, or for the first profile's original one (`ns` empty) the
+ * keys without another profile's id or space after `ghostly_` (`ownsOriginalKey`) and the legacy join marks. Never the
+ * registry, which the app needs to start at all.
+ */
+export function keyOfSpace(ns: string, key: string): boolean {
+  if (key === registryKey()) return false;
+  return ns ? key.startsWith(`ghostly_${ns}_`) : ownsOriginalKey(key) || key.startsWith(LEGACY_JOIN_PREFIX);
 }
 
 /**
