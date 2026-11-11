@@ -22,6 +22,7 @@
     "today": "Today",
     "week": "This week"
   },
+  "linkLike": "This reads as a link, which a status can't hold. Change the text to save it.",
   "menuLabel": "Your status: {{status}}. Change status",
   "past": "Choose a time later than now.",
   "placeholder": "What's your status?",
