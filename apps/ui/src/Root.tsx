@@ -66,7 +66,8 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
  * id, carries the chat's keys. They leave the address at once, so they stay
  * out of the history: the address must not wait for the password. The chat
  * itself is made once the lock is passed and a limited start's question answered, as a group's link is joined, and
- * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
+ * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`). A link it refuses is said then too,
+ * not under the lock screen, and the notice stays until closed (`ClosableTopNotice`), as a group link's refusal does.
  */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
@@ -140,18 +141,11 @@ function ChatLinkIntake() {
     open(held);
   }, [held, waits, open]);
 
-  useEffect(() => {
-    if (!invalid) return;
-    const timer = setTimeout(() => setInvalid(null), 6000);
-    return () => clearTimeout(timer);
-  }, [invalid]);
-
-  return invalid ? (
-    <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
-      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {t(invalid)}
-    </div>
-  ) : null;
+  // Kept until closed, and said only once the lock is passed and the question answered: under the lock screen nobody
+  // can read it, and a refusal that went before the unlock left the link looking as if it did nothing.
+  return invalid && !waits
+    ? <ClosableTopNotice problem={{ tone: "error", title: t(invalid) }} testId="invite-link-invalid" onClose={() => setInvalid(null)} />
+    : null;
 }
 
 /** "You're already in this chat", or "This is your own invite" from a link: said over the chat it opened, for a moment. */
