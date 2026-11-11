@@ -508,6 +508,23 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("an edit past 16 KiB is a bad request as a send is, refused before the secret guard reads it", async () => {
+    const { ctx, node } = fake([msg("me_1", 5, { sender: "me" })]);
+    const editMessage = vi.fn(async () => ({ error: null, messageId: "me_1" }));
+    Object.assign(node, { editMessage });
+    // A seed past the limit: the size is said, not the guard's "looks like a secret" (a --force would not send it either).
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow ";
+    const long = seed + "é".repeat(8193);
+    await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_1", text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/) });
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: "k:0:1", text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/) });
+    // 9 MiB of letters (`edit --stdin`, or the socket): the guard's rune pattern overflowed the stack on it, and the
+    // daemon answered `engine` "Maximum call stack size exceeded"; 15 MiB of prose held every other call ~1.7 s.
+    const huge = "a".repeat(9 * 1024 * 1024);
+    await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_1", text: huge })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: "k:0:1", text: huge })).rejects.toMatchObject({ code: "bad_request" });
+    expect(editMessage).not.toHaveBeenCalled();
+  });
+
   it("a --timeout out of range is refused before anything is sent, edited or forwarded: a retry never sends it twice", async () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [] })) });

@@ -426,6 +426,8 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "group edit", "<message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
+    // Before the guard: it read megabytes whole (`edit --stdin`), holding the daemon, for the engine to refuse them after.
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
@@ -804,6 +806,7 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "edit <chat> <message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
