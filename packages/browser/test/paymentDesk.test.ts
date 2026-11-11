@@ -157,6 +157,22 @@ describe("paying a contact's request, never twice", () => {
     await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "noSharedMint" });
   });
 
+  // A mint that took the split and never answered holds the sats until it does: the fallback finding nothing else to pay
+  // the invoice with said "Not enough sats in your wallet", to a payer with the sats, who was never told they come back.
+  it("ecash whose mint has not answered, with no Lightning to fall back on, says the mint has not answered", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    const unsettled = new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 });
+    wallet.createToken.mockRejectedValue(unsettled);
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughSats"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow(unsettled.message);
+    expect(state("r1")).toMatchObject({ state: "pending" });
+    // Another mint with the sats still pays it over Lightning.
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    expect(lightning.pay).toHaveBeenCalledOnce();
+    expect(state("r1")?.state).toBe("settled");
+  });
+
   it("pays an invoice only for the amount asked, and for at most 3% in fees (10 sats at least)", async () => {
     const { desk, lightning, allowed, state } = setup([record({ id: "r1", amount: 1_000, invoice: INVOICE })]);
     await desk.start();
