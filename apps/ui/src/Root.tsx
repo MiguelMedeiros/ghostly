@@ -57,7 +57,7 @@ const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
 function namedDeviceLink(pathname: string, hash: string): string | null {
-  const named = `#${pathname.replace(/^\//, "")}${hash}`;
+  const named = `#${pathname.replace(/^\//, "")}${hash.replace(/\/+$/, "")}`;
   const link = readDeviceLink(named);
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
