@@ -98,6 +98,34 @@ describe("withoutAudioMetadata", () => {
     expect(Buffer.from(out).toString("latin1")).not.toMatch(/LIST|id3 /);
   });
 
+  it("a WAV or an Ogg with tags a tagger appended after it, or a WAV whose odd chunk has no pad byte, goes without them", async () => {
+    const size = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+    /** A chunk as written, with no pad byte after an odd one. */
+    const raw = (id: string, body: Buffer) => Buffer.concat([Buffer.from(id, "latin1"), size(body.length), body]);
+    const riff = (...chunks: Buffer[]) => { const body = Buffer.concat([Buffer.from("WAVE"), ...chunks]); return Buffer.concat([Buffer.from("RIFF"), size(body.length), body]); };
+    const fmt = raw("fmt ", Buffer.alloc(16, 1)), info = raw("LIST", Buffer.concat([Buffer.from("INFO"), raw("INAM", Buffer.from(`${PLACE}\0`, "latin1"))]));
+    const odd = WAV_DATA.subarray(0, 999);
+    const files = [
+      Buffer.concat([taggedWav(), id3v1()]),
+      Buffer.concat([taggedWav(), apev2(), id3v1()]),
+      Buffer.concat([taggedOpus(), id3v1()]),
+      Buffer.concat([taggedVorbis(), apev2()]),
+      // A 999-byte data chunk then the list, no pad byte between them; and one with an ID3v1 right after it.
+      riff(fmt, raw("data", odd), info),
+      Buffer.concat([riff(fmt, info, raw("data", odd)), id3v1()]),
+    ];
+    for (const file of files) {
+      expect(hasPlace(file)).toBe(true);
+      const out = await stripped(file, "");
+      expect(hasPlace(out), file.subarray(0, 4).toString("latin1")).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(contains(out, file.subarray(0, 4).toString() === "OggS" ? OPUS_PACKETS[1]! : odd)).toBe(true);
+    }
+    // A tag after them that cannot be read is still refused.
+    await expect(withoutAudioMetadata(new Blob([Buffer.concat([taggedWav(), apev2().subarray(-32)])]), "audio/wav")).rejects.toThrow(NO_AUDIO_METADATA);
+    await expect(withoutAudioMetadata(new Blob([Buffer.concat([taggedOpus(), apev2().subarray(-32)])]), "audio/ogg")).rejects.toThrow(NO_AUDIO_METADATA);
+  });
+
   it("a WebM or Matroska file goes without its title, date, track names and tags, its clusters untouched", async () => {
     const webm = taggedWebm();
     expect(hasPlace(webm)).toBe(true);
