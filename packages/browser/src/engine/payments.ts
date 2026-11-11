@@ -833,9 +833,11 @@ export class PaymentDesk {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/spent/i.test(message)) throw error;
-      // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled.
+      // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled, or one they
+      // refused while the automatic take back could not reach the mint (`failed` with its token) and redeemed anyway.
       const current = this.current(payment);
       if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
+      else if (current.state === "failed" && current.token) await this.save({ ...current, state: "settled", token: undefined, error: undefined });
       return undefined;
     }
   }
