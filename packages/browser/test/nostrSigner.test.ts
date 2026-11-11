@@ -19,6 +19,34 @@ describe('external Nostr signers', () => {
       expect(fixture.methods).toEqual(['connect','get_public_key','sign_event']);
     } finally { await fixture.close(); }
   });
+  it('waits for a bunker the person approves after 30 s, and says its own words when two minutes pass', async () => {
+    let approve!: () => void;
+    let gate = new Promise<void>(resolve => { approve = resolve; });
+    const fixture = await startTestBunker(0, { hold: () => gate });
+    const sign = () => withNostrSigner({ bunker:fixture.bunker,signal:new AbortController().signal,onAuth:vi.fn() }, async signer => {
+      const externalKey=await signer.getPublicKey();
+      const c: ProofChallenge={adapter:'nostr',externalKey,subject:createIdentity().pubKeyZ32,audience:createIdentity().pubKeyZ32,
+        context:'a'.repeat(64),session:'b'.repeat(64),nonce:'Z'.repeat(43),issuedAt:1800000000,expiresAt:1800086400};
+      return signer.signEvent(nostrProofTemplate(c));
+    });
+    const asked = async (count: number) => { while (fixture.methods.filter((m: string) => m === 'sign_event').length < count) await new Promise(r => setImmediate(r)); };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // Approved on the phone a minute later: still signed.
+      const late = sign();
+      await asked(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      approve();
+      await expect(late).resolves.toMatchObject({ pubkey: fixture.userPub });
+      // Never approved: Ghostly's own two minutes and its own words.
+      gate = new Promise<void>(() => {});
+      const never = sign();
+      const failed = expect(never).rejects.toThrow('Signer timed out. Your Ghostly identity is unchanged.');
+      await asked(2);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await failed;
+    } finally { vi.useRealTimers(); await fixture.close(); }
+  });
   it('rejects secrets, insecure remote relays and unrelated URL schemes', () => {
     for(const input of ['nsec1secret','https://example.com',`bunker://${'a'.repeat(64)}?relay=ws://example.com`, `bunker://${'a'.repeat(64)}?relay=wss://user:pass@example.com`])
       expect(()=>parseProofBunker(input)).toThrow();
