@@ -352,11 +352,20 @@ describe("the clipboard guard's Trusted Types default policy", () => {
     expect(page.script("1 + 1")).toBe("1 + 1");
     // The app's policy would pass it: the guard's refusal comes first.
     expect(page.navigate("javascript:alert(1)")).toBeNull();
-    // A rule the app did not give refuses the string, as its own default policy would.
-    expect(page.types.defaultPolicy!.rules.createScriptURL!("/a.js", "createScriptURL", "HTMLScriptElement src")).toBeNull();
     // Once, as in a browser; other names go to the browser's own.
     expect(() => page.types.createPolicy("default", {})).toThrow(/already exists/);
     expect(page.types.createPolicy("mine", {}).name).toBe("mine");
     expect(() => guarded().types.createPolicy("default", { createHTML: "no" as never })).toThrow(TypeError);
+  });
+
+  it("passes a string on as it is where the app's own policy has no rule for it, but a javascript: URL", () => {
+    // The app sends no Trusted Types policy of its own: only Ghostly's asks its default policy at all, so a script
+    // URL it never gave a rule for must load as it does outside the view.
+    const page = guarded();
+    page.types.createPolicy("default", { createHTML: (input) => input.replace("<b>", "") });
+    expect(page.html("<b>hi")).toBe("hi");
+    expect(page.types.defaultPolicy!.rules.createScriptURL!("/lib.js", "createScriptURL", "HTMLScriptElement src")).toBe("/lib.js");
+    expect(page.script("1 + 1")).toBe("1 + 1");
+    expect(page.navigate("javascript:alert(1)")).toBeNull();
   });
 });
