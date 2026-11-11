@@ -6,7 +6,7 @@
 | Status | Draft |
 | Kind | Adapter |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md) (the Breez source shares the wallet), authenticated live data transport |
-| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click, and a Mainnet wallet once the person gives their Breez API key. |
+| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.28.2 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click, and a Mainnet wallet once the person gives their Breez API key. |
 | Summary | Pay a contact who also has Spark straight from wallet to wallet: instant, off-chain, no Lightning hop. |
 | Availability | Available |
 | Notes | Experimental: Mainnet with your own Breez API key; Testnet runs on Breez's hosted regtest with no key. The same wallet can be your Lightning source. |

@@ -17,7 +17,7 @@
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.8.9",
     "@bitcoindevkit/bdk-wallet-web": "0.4.0",
-    "@breeztech/breez-sdk-spark": "0.26.1",
+    "@breeztech/breez-sdk-spark": "0.28.2",
     "@cashu/cashu-ts": "^4.13.0",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
