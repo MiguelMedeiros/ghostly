@@ -25,7 +25,9 @@
  *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
- *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them).
+ *   guard's policy back with them, a kind of string they have no rule for passes on as it is, and the copy of itself it puts
+ *   in a `srcdoc` frame skips them. The guard cannot tell an app's own `require-trusted-types-for` from its own, so it
+ *   keeps none: an app that enforces Trusted Types itself has every string its rules leave out passed on).
  * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
@@ -172,8 +174,8 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -259,4 +261,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-VQmaFzhHMo1TP1ODnuXq72M52+6qthD/ZZHQsQiYAdY='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-wAupW9j/ambjbPkatvRing6WpCDUpH+BNy4NZlvFzQc='";
