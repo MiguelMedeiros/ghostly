@@ -530,7 +530,34 @@ test.describe("Open again after an app stopped responding", () => {
     expect(await app.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
   });
 
-  test("alone: offline the layer stays and says why under Open again", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+  test("on a phone after Back: the chat keeps the message field, and the way back says it stopped", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    // Hangs once Ana is back in the chat.
+    const [ana] = await setUp(peer, { entry: HANGS.replace("1500", "4000") });
+    await ana.page.setViewportSize({ width: 375, height: 812 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    await expect.poll(() => appHeading(ana)).toBe("Chess");
+    await app.getByTestId("mini-app-back").click();
+    await expect(app).toBeHidden();
+    const input = ana.page.getByPlaceholder("Message…");
+    await input.click();
+
+    const resume = ana.page.getByTestId("mini-app-resume");
+    await expect(resume.getByTestId("mini-app-resume-stopped")).toContainText("Stopped", { timeout: 60_000 });
+    await expect(app).toBeHidden();
+    await expect(input).toBeFocused();
+    await ana.page.keyboard.type("Still here");
+    await expect(input).toHaveValue("Still here");
+
+    // Back to it: why it stopped, and Open again.
+    await resume.click();
+    await expect(app).toBeVisible();
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+    await expect(app.getByTestId("mini-app-open-again")).toBeVisible();
+  });
+
+  test("alone: offline the layer stays and says why under Open again",{ tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
     test.setTimeout(180_000);
     const store = await testStore({ view: "full", title: "Chess", entry: HANGS });
     const ana = await peer("ana");
