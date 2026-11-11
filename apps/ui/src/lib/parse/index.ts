@@ -4,7 +4,7 @@
  */
 export { parseMessage } from "./blocks";
 export { tokenizeInline } from "./inline";
-export { plainText, SPOILER_PLAIN } from "./plain";
+export { plainText, unspoiledText, SPOILER_PLAIN } from "./plain";
 export { DETECTORS } from "./detectors";
 export { linkEnd, link, shownUrl } from "./links";
 export { mdLink, labelMisleads, type MdLinkData } from "./mdlink";
