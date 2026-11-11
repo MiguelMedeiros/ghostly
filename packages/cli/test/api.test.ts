@@ -137,6 +137,43 @@ describe("chats", () => {
     expect(calls.renameGroup).toHaveBeenCalledTimes(1);
   });
 
+  // A name of 10 MiB was cleaned whole before it was counted: `group.create` answered in 4 s, `profile.set` in 3.6 s, and
+  // the daemon answered no other client meanwhile. Far past its bound as given (64 units a character), it is refused
+  // unread; up to that, what cleaning drops still does not count.
+  it("a name far past its bound as given is refused before it is cleaned, counted as given", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createGroup: vi.fn(async () => ({ groupId: "g2" })), renameGroup: vi.fn(async () => undefined) });
+    const huge = "hello there ".repeat(Math.ceil(10 * 1024 * 1024 / 12));
+    const given = huge.length;
+    for (const [method, params, subject, max] of [
+      ["group.create", { name: huge, profile: "mesh" }, "A group's name", 64],
+      ["group.rename", { group: "Crew", name: huge }, "A group's name", 64],
+      ["profile.set", { name: huge }, "name", 64],
+      ["settings.set", { nick: huge }, "nick", 64],
+      ["chat.rename", { chat: "chat-one", name: huge }, "A chat's name", 48],
+    ] as const) {
+      await expect(callApi(ctx, method, params), method).rejects.toMatchObject({ code: "bad_request", message: `${subject} is up to ${max} characters as stored (this one is ${given} as given)`, details: { given, max } });
+    }
+    expect(calls.createGroup).not.toHaveBeenCalled();
+    expect(calls.renameGroup).not.toHaveBeenCalled();
+    expect(calls.renameLink).not.toHaveBeenCalled();
+    expect(calls.updateSettings).not.toHaveBeenCalled();
+    // At the bound as given: cleaned, and only what shows counts.
+    await callApi(ctx, "group.create", { name: `${" ".repeat(4095)}x`, profile: "mesh" });
+    expect(calls.createGroup).toHaveBeenLastCalledWith({ name: "x", profile: "mesh" });
+    await expect(callApi(ctx, "group.create", { name: `${" ".repeat(4096)}x`, profile: "mesh" })).rejects.toMatchObject({ message: "A group's name is up to 64 characters as stored (this one is 4097 as given)" });
+  });
+
+  // A file's name of 10 MiB was searched whole by the secret guard (2 s, the daemon answering no one else), and past
+  // ~8 MiB of word characters the search threw "Maximum call stack size exceeded": `engine`. It reads what
+  // `sanitizeFileName` keeps of it, its start and its end, so a secret at the end is still found.
+  it("file.send's guard reads a file's name as far as the name is kept, a secret at its end included", async () => {
+    const { ctx } = fake();
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    await expect(callApi(ctx, "file.send", { chat: "nope", path: "/nope", name: "a".repeat(9 * 1024 * 1024) })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "file.send", { chat: "nope", path: "/nope", name: `${" ".repeat(10 * 1024 * 1024)}${seed}` })).rejects.toMatchObject({ code: "confirm" });
+  });
+
   // A name is counted in code points, as the engine keeps it, so a joined emoji counts as several (a family of four is
   // 7, a flag or a skin tone 2). The refusal said "up to 48 characters on one line" to 7 emoji on one line, with no
   // count: it now says the count as stored and what counts as several, and gives both numbers as details.
