@@ -37,9 +37,16 @@ async function until<T>(read: () => T | undefined, ms: number, what: string): Pr
 }
 
 describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () => {
-  for (const withDaemon of [true, false]) {
-    it(`ends the hook and keeps the cursor before its event, ${withDaemon ? "following a daemon" : "running the profile itself"}`, async () => {
-      const dir = home(withDaemon ? "exec-stop-daemon" : "exec-stop-own");
+  // SIGHUP: the terminal or SSH session the listen ran in closed. Unhandled, it ended Node with no 'exit' event, so
+  // the hook (in a process group of its own) ran on, and the next listen ran its event again beside it.
+  const cases = [
+    { withDaemon: true, stopSignal: "SIGTERM" },
+    { withDaemon: true, stopSignal: "SIGHUP" },
+    { withDaemon: false, stopSignal: "SIGTERM" },
+  ] as const;
+  for (const { withDaemon, stopSignal } of cases) {
+    it(`ends the hook and keeps the cursor before its event on ${stopSignal}, ${withDaemon ? "following a daemon" : "running the profile itself"}`, async () => {
+      const dir = home(`exec-stop-${withDaemon ? "daemon" : "own"}-${stopSignal.toLowerCase()}`);
       ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
       const log = join(dir, "hook.log"), cursor = join(dir, "cursor"), hook = join(dir, "hook.sh");
       // Only chat.created is slow; daemon.started passes at once (it tells the test the listen is up).
@@ -54,7 +61,7 @@ describe("listen --exec stopped while its hook runs", { timeout: 120_000 }, () =
         ok(await ghostly(["--home", dir, "invite", "create", "--label", "slow"], { env }));
         const [pid, seq] = await until(() => starts()[0], 30_000, "the hook's start");
         expect(alive(pid)).toBe(true);
-        listen.child.kill("SIGTERM");
+        listen.child.kill(stopSignal);
         await listen.exited(30_000);
         // No orphan: the hook is gone with the listen, and it never finished.
         expect(alive(pid), `the hook ${pid} still runs after the listen stopped\n${listen.stderr}`).toBe(false);
