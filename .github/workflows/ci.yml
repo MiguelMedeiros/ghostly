@@ -252,8 +252,8 @@ jobs:
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
-  # package. The CLI's two-peer story (about 3 minutes of designed waits, one test after another) has a shard to
-  # itself and sets the pace.
+  # package. The CLI's two-peer story (about 2 minutes of designed waits, one test after another) runs first on its
+  # shard with nothing beside it; that shard runs other tests after it.
   packages-tests:
     name: Frontend tests (packages ${{ matrix.shard }}/4)
     needs: changes
