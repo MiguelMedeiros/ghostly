@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Page } from "../components/layout";
-import { ChatTargetRow } from "../components/chat/ChatTargets";
+import { ChatTargetRow, ChatTargetSearch } from "../components/chat/ChatTargets";
 import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { chatTargetKeys, findChatTargets } from "../lib/chatTargets";
 import { Notice } from "../components/ui/Notice";
-import { MAX_SHARE_FILES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
+import { SEARCH_STATUS_SETTLE_MS, SearchStatus } from "../components/ui/SearchStatus";
+import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare, type IncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -15,6 +17,8 @@ const WAIT_MS = 5000;
  * text in the draft and the files on the attachment sheet, to look over and send there; nothing is sent from
  * here. Groups take files as chats do (WISP 503).
  * A chat is never picked for the person, not even when there is only one: any website can post a share.
+ * Found by name as in Forward: with a hundred contacts, the one not chatted with lately is typed, not scrolled to. The
+ * search does not take the focus by itself: the picker may open on its own, and a phone's keyboard would hide the list.
  */
 export function SharePicker() {
   const { t } = useI18n();
@@ -33,21 +37,59 @@ export function SharePicker() {
   const leftOutNames = leftOut.filter(Boolean);
   const noRoom = share?.noRoom ?? [];
   const pastLimit = share?.pastLimit ?? [];
+  const dropped = share?.dropped ?? 0;
   const targets = useChatTargets();
+  const search = useRef<HTMLInputElement>(null), list = useRef<HTMLUListElement>(null);
+  const [query, setQuery] = useState("");
+  const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
   const preview = share ? sharePreview(share) : "";
+  const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
+
+  // Each share shown (the first, and the next in place of the one just picked or put aside): said, and not acted on before it is.
+  const [said, setSaid] = useState("");
+  const shownAt = useRef(0);
+  const settling = () => Date.now() - shownAt.current < SEARCH_STATUS_SETTLE_MS;
+  const say = (shown: IncomingShare) => isEmptyShare(shown) ? "" : [t("pwa.shareFrom"), shown.files.length ? filesName(shown) : "", sharePreview(shown)].filter(Boolean).join(" ");
+  // The first share shown is said and waits as long: the picker may have opened by itself (a share forwarded to this
+  // tab moves it here from any screen), under a press meant for the screen it replaced.
+  if (share && !shownAt.current) {
+    shownAt.current = Date.now();
+    setSaid(say(share));
+  }
+  /**
+   * Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now. The
+   * focus leaves the button just pressed for the page's heading and the page is scrolled to the new share, which is
+   * said once it has settled; until then a press (a key held down, a double tap) does nothing, so a share is never
+   * sent or put aside before anyone saw it.
+   */
+  const showNext = (next: IncomingShare) => {
+    shownAt.current = Date.now();
+    // The next share may be for another chat: the whole list again.
+    setQuery("");
+    setSaid(say(next));
+    document.querySelector<HTMLElement>('[data-testid="share-picker"] h1')?.focus();
+    document.querySelector<HTMLElement>('[data-testid="share-picker"] [data-page-body]')?.scrollTo?.({ top: 0 });
+  };
 
   const pick = (chat: string, path: string) => {
+    if (settling()) return;
     sendShareTo(chat);
-    nav.conversation(path);
+    // This one waits for its chat's composer. The last one picked opens its chat.
+    const next = incomingShare();
+    if (next) showNext(next);
+    else nav.conversation(path);
   };
   const cancel = () => {
+    if (settling()) return;
     dropIncomingShare();
-    // Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now.
-    if (!incomingShare()) nav.home();
+    const next = incomingShare();
+    if (next) showNext(next);
+    else nav.home();
   };
 
   return (
     <Page title={t("pwa.shareTitle")} testId="share-picker">
+      <SearchStatus testId="share-next" text={said} />
       {!share ? (
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
@@ -72,6 +114,12 @@ export function SharePicker() {
             <Notice tone="error" className="text-sm" testId="share-past-limit"
               title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: pastLimit.join(", ") })} next={t("pwa.sharePastLimitNext")} />
           )}
+          {/* Shares that came while this one waited, past the most that can wait, were not kept: never dropped without a word. */}
+          {dropped > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-dropped"
+              title={dropped === 1 ? t("pwa.shareDroppedOne", { waiting: String(MAX_WAITING_SHARES) }) : t("pwa.shareDropped", { count: String(dropped), waiting: String(MAX_WAITING_SHARES) })}
+              next={t("pwa.shareDroppedNext")} />
+          )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (
             <>
@@ -82,7 +130,7 @@ export function SharePicker() {
                     A long one-word file name wraps anywhere, so its extension stays inside the card. */}
                 {hasFiles && (
                   <p dir="auto" className="m-0 text-sm text-text-primary font-medium [overflow-wrap:anywhere]" data-testid="share-files">
-                    {share.files.length === 1 ? share.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(share.files.length) })}
+                    {filesName(share)}
                   </p>
                 )}
                 {preview && <p dir="auto" className="m-0 text-sm text-text-secondary line-clamp-3 break-words whitespace-pre-line" data-testid="share-text">{preview}</p>}
@@ -92,8 +140,15 @@ export function SharePicker() {
               {targets.length === 0 ? (
                 <p className="text-sm text-text-muted">{t("pwa.shareNoChats")}</p>
               ) : (
-                <ul className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("pwa.shareTitle")}>
-                  {targets.map((target) => (
+                <>
+                  <ChatTargetSearch inputRef={search} list={list} testId="share-search" value={query} onChange={setQuery} />
+                  <SearchStatus testId="share-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t("chat.forward.noMatch")} />
+                </>
+              )}
+              {targets.length > 0 && shown.length === 0 && <p className="text-sm text-text-muted" data-testid="share-no-match">{t("chat.forward.noMatch")}</p>}
+              {shown.length > 0 && (
+                <ul ref={list} onKeyDown={chatTargetKeys(search)} className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("pwa.shareTitle")}>
+                  {shown.map((target) => (
                     <li key={target.chat}>
                       <ChatTargetRow target={target} testId={target.kind === "group" ? "share-group" : "share-chat"} onClick={() => pick(target.chat, target.path)} />
                     </li>

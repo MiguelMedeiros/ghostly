@@ -54,7 +54,7 @@ export function ReactionChips({ chips, onReact, align }: { chips: ReactionChip[]
               className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-full border text-[13px] leading-none shadow-sm transition-colors cursor-pointer disabled:cursor-default ${
                 chip.mine ? "border-accent bg-accent/20 text-text-primary" : "border-border bg-surface-alt text-text-secondary hover:bg-surface-hover"}`}>
               <span aria-hidden="true">{chip.emoji}</span>
-              {chip.count > 1 && <span data-testid="reaction-count" aria-hidden="true" className="text-[11px] tabular-nums">{chip.count}</span>}
+              {chip.count > 1 && <span data-testid="reaction-count" aria-hidden="true" className="chat-text-tag tabular-nums">{chip.count}</span>}
             </button>
             {who === chip.emoji && (
               <span role="tooltip" data-testid="reaction-who" className={`absolute bottom-full mb-1 z-20 w-max max-w-[14rem] rounded-md border border-border bg-surface-alt px-2 py-1 text-xs text-text-primary shadow-lg whitespace-normal ${align === "end" ? "end-0" : "start-0"}`}>

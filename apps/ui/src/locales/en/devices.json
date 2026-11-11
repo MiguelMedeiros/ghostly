@@ -98,7 +98,8 @@
       "older": "Update Ghostly on this device first.",
       "password": "Wrong password.",
       "payment": "A payment is still going through. Try again in a moment.",
-      "refused": "{{device}} does not let this device take the profile.",
+      "refused": "{{device}} did not let this device take the profile.",
+      "refusedNext": "If wrong passwords were typed here, unlock {{device}} and let this device try again.",
       "room": "Not enough space on this device.",
       "settle": "Can't check which device is active. Check your connection, then try again.",
       "stalled": "The move stopped",
@@ -347,6 +348,15 @@
     "reenroll": {
       "hint": "Add this device again from the device you use now.",
       "title": "Your devices changed while this one was off"
+    },
+    "removeHere": {
+      "button": "Remove this profile here",
+      "confirm": "Type {{name}} to confirm",
+      "first": "An empty profile takes its place here.",
+      "go": "Remove",
+      "hint": "Its chats, keys and wallets go from this device. Your other devices keep the profile.",
+      "removing": "Removing…",
+      "title": "Remove {{name}} from this device?"
     },
     "title": {
       "moving": "Almost there",

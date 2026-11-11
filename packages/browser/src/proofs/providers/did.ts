@@ -3,7 +3,7 @@ import {
   didWebFileUrl, normalizeDid, parseDid, parseDidSignaturePaste, signingKeys, staticDidDocument, strictBase64Url, toBase64Url,
   type DidCurve, type DidKey, type IdentityStatement,
 } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider, PublishSigner, SignerInstructions, SubjectPreview } from "../contract";
+import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type ProviderSay, type PublishSigner, type SignerInstructions, type SubjectPreview } from "../contract";
 import { fetchDidWebFile, lastDidResolution, resolveDid, type DidResolution } from "../did";
 import { ownDid } from "../ownDid";
 import { boundedIdentityFetch } from "../verify";
@@ -100,22 +100,22 @@ function opensslCommand(statement: string, curve: DidCurve): string {
 const signer: ExternalToolSigner<DidEvidence> = {
   id: "sign", kind: "external-tool", label: "Sign with a key of the DID",
   description: "Sign the statement with a key your DID document lists for authentication or assertionMethod, and paste a JWS or the raw signature. The private key never enters Ghostly.",
-  instructions(statement): SignerInstructions {
+  instructions(statement, say = englishSay): SignerInstructions {
     const did = statement.binding.subject;
     if (statement.text.includes("'")) throw new DidError("Statement is not signable as plain text");
     const keys = knownKeys(did);
     const key = keys.length === 1 ? keys[0] : undefined;
     const curve = key?.curve ?? keys[0]?.curve ?? "Ed25519";
-    const which = keys.length ? keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", ") : "a key listed under authentication or assertionMethod";
+    const which = keys.length ? keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", ") : say("steps.anyKey", "a key listed under authentication or assertionMethod");
     return {
       steps: [
-        { text: `Sign this statement with the private key of ${which}. It is one line, with no newline at the end:`, copy: statement.text },
-        ...(curve === "secp256k1" ? [] : [{ text: `With jose (Node.js 20 or later), a JWS: save this as sign.mjs and run it with your ${curve} private key as a JWK file.`, copy: joseScript(statement.text, key?.id) }]),
-        { text: `With @noble/curves (Node.js), a raw signature: save this as sign.mjs and run it with your ${curve} private key in hex.`, copy: nobleScript(statement.text, curve) },
-        { text: `Or with OpenSSL 3 and your ${curve} key in PEM:`, copy: opensslCommand(statement.text, curve) },
-        { text: `Paste what it prints: a compact JWS (${didJwsAlg(curve)}, attached or detached), or the signature in hex or base64. If your DID lists several keys, you may write the key id first: #key-1 <signature>.` },
+        { text: say("steps.sign", "Sign this statement with the private key of {{key}}. It is one line, with no newline at the end:", { key: which }), copy: statement.text },
+        ...(curve === "secp256k1" ? [] : [{ text: say("steps.jose", "With jose (Node.js 20 or later), a JWS: save this as sign.mjs and run it with your {{curve}} private key as a JWK file.", { curve }), copy: joseScript(statement.text, key?.id) }]),
+        { text: say("steps.noble", "With @noble/curves (Node.js), a raw signature: save this as sign.mjs and run it with your {{curve}} private key in hex.", { curve }), copy: nobleScript(statement.text, curve) },
+        { text: say("steps.openssl", "Or with OpenSSL 3 and your {{curve}} key in PEM:", { curve }), copy: opensslCommand(statement.text, curve) },
+        { text: say("steps.paste", "Paste what it prints: a compact JWS ({{alg}}, attached or detached), or the signature in hex or base64. If your DID lists several keys, you may write the key id first: #key-1 <signature>.", { alg: didJwsAlg(curve) }) },
       ],
-      paste: { label: "JWS or signature", placeholder: "eyJhbGciOi… or the signature in hex", multiline: true },
+      paste: { label: say("paste.label", "JWS or signature"), placeholder: say("paste.placeholder", "eyJhbGciOi… or the signature in hex"), multiline: true },
     };
   },
   async parse(pasted, statement) {
@@ -138,13 +138,13 @@ const webOnly = (statement: IdentityStatement) => {
 const fileSigner: PublishSigner<DidEvidence> = {
   id: "file", kind: "publish", label: "Publish a file beside did.json",
   description: "did:web only: upload a small file next to your did.json. Contacts' apps download both from your server.",
-  instructions(statement) {
+  instructions(statement, say = englishSay) {
     const did = webOnly(statement);
     return { steps: [
-      { text: "Create this file on your web server, beside your did.json:", copy: didWebFileUrl(did, statement.id) },
-      { text: "With exactly this content:", copy: didWebFile(did, statement.text) },
-      { text: "Serve it over HTTPS at exactly that address, without any redirect, and with this header so browsers may read it (your did.json needs it too):", copy: "Access-Control-Allow-Origin: *" },
-      { text: "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check." },
+      { text: say("file.create", "Create this file on your web server, beside your did.json:"), copy: didWebFileUrl(did, statement.id) },
+      { text: say("file.content", "With exactly this content:"), copy: didWebFile(did, statement.text) },
+      { text: say("file.serve", "Serve it over HTTPS at exactly that address, without any redirect, and with this header so browsers may read it (your did.json needs it too):"), copy: "Access-Control-Allow-Origin: *" },
+      { text: say("file.check", "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check.") },
     ] };
   },
   evidence: () => ({ method: "file" }),
@@ -153,27 +153,41 @@ const fileSigner: PublishSigner<DidEvidence> = {
 const serviceSigner: PublishSigner<DidEvidence> = {
   id: "service", kind: "publish", label: "Add a service to did.json",
   description: "did:web only: add one entry to the service list of your did.json. Contacts' apps read it there.",
-  instructions(statement) {
+  instructions(statement, say = englishSay) {
     const did = webOnly(statement);
     const seen = lastDidResolution(did);
     return { steps: [
-      { text: `Add this entry to the "service" list of your did.json${seen?.documentUrl ? ` (${seen.documentUrl})` : ""}:`, copy: JSON.stringify(didGhostlyServiceEntry(did, statement.binding.key, statement.id), null, 2) },
-      { text: "Then press Check. Removing the entry withdraws this proof from every contact at their next check." },
+      { text: seen?.documentUrl
+        ? say("service.addAt", "Add this entry to the \"service\" list of your did.json ({{url}}):", { url: seen.documentUrl })
+        : say("service.add", "Add this entry to the \"service\" list of your did.json:"), copy: JSON.stringify(didGhostlyServiceEntry(did, statement.binding.key, statement.id), null, 2) },
+      { text: say("service.check", "Then press Check. Removing the entry withdraws this proof from every contact at their next check.") },
     ] };
   },
   evidence: () => ({ method: "service" }),
 };
 
-function previewOf(r: DidResolution): SubjectPreview {
+function previewOf(r: DidResolution, say: ProviderSay): SubjectPreview {
   const keys = signingKeys(r.document);
   const unusable = r.document.keys.length - keys.length + r.document.skipped;
   if (!keys.length && r.method !== "web") throw new DidError("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign");
-  const facts: { label: string; value: string }[] = [{ label: "Method", value: `did:${r.method}${r.method === "key" || r.method === "jwk" ? ", the key is the identifier" : ""}` }];
-  if (r.host) facts.push({ label: "Domain", value: r.host });
-  if (r.documentUrl) facts.push({ label: "Document", value: r.documentUrl });
-  if (r.relay) facts.push({ label: "Relay", value: r.relay.replace(/^https:\/\//, "") });
-  facts.push({ label: keys.length === 1 ? "Key" : "Keys", value: keys.length ? keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", ") : "none that can sign: publish instead" });
-  if (unusable > 0) facts.push({ label: "Not usable", value: `${unusable} ${unusable === 1 ? "key" : "keys"}: another curve, or not for authentication or assertionMethod` });
+  const method = `did:${r.method}`;
+  const facts: { label: string; value: string }[] = [{
+    label: say("preview.method", "Method"),
+    value: r.method === "key" || r.method === "jwk" ? say("preview.keyIsIdentifier", "{{method}}, the key is the identifier", { method }) : method,
+  }];
+  if (r.host) facts.push({ label: say("preview.domain", "Domain"), value: r.host });
+  if (r.documentUrl) facts.push({ label: say("preview.document", "Document"), value: r.documentUrl });
+  if (r.relay) facts.push({ label: say("preview.relay", "Relay"), value: r.relay.replace(/^https:\/\//, "") });
+  facts.push({
+    label: keys.length === 1 ? say("preview.key", "Key") : say("preview.keys", "Keys"),
+    value: keys.length ? keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", ") : say("preview.noKeys", "none that can sign: publish instead"),
+  });
+  if (unusable > 0) facts.push({
+    label: say("preview.notUsable", "Not usable"),
+    value: unusable === 1
+      ? say("preview.unusableOne", "1 key: another curve, or not for authentication or assertionMethod")
+      : say("preview.unusable", "{{count}} keys: another curve, or not for authentication or assertionMethod", { count: unusable }),
+  });
   return { facts, signers: r.method === "web" ? [...(keys.length ? ["sign"] : []), "file", "service"] : ["sign"] };
 }
 
@@ -196,7 +210,7 @@ export const did: IdentityProofProvider<DidEvidence> = {
       return canonical;
     },
     short: shortDid,
-    preview: async (subject, { signal }) => previewOf(await resolveDid(subject, { fetch: uiFetch, signal })),
+    preview: async (subject, { signal, say = englishSay }) => previewOf(await resolveDid(subject, { fetch: uiFetch, signal }), say),
   },
   // A proven DID is already a URI: the profile's own did:dht may list it under alsoKnownAs.
   publicUri: subject => subject,
@@ -204,7 +218,7 @@ export const did: IdentityProofProvider<DidEvidence> = {
   // A did:web or did:dht document can drop a key, or the file be deleted: contacts can check again.
   recheck: { afterSeconds: 86_400 },
   privacy: "did:key and did:jwk: nothing, checked on this device. did:web: the contact's app asks its DNS-over-HTTPS resolver for your domain and downloads your did.json, " +
-    "so your web server sees the contact's IP address. did:dht: a Pkarr relay learns which DID was looked up.",
+    "so your web server sees the contact's IP address. did:dht: one of the contact's Pkarr relays (their Network settings) learns which DID was looked up.",
   signers: [signer, fileSigner, serviceSigner],
   parseEvidence(raw) {
     const e = raw as Record<string, unknown>;

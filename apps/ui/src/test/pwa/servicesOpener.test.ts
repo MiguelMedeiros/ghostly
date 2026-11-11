@@ -2,8 +2,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { onAppInput } from "../../lib/apps/open";
+import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -108,11 +109,56 @@ describe("one request from the app, over the contact's link", () => {
       async (request) => { sent.push(request); return answer(200, [["content-type", "text/plain"], ["set-cookie", "theme=dark; Path=/"], ["x-bad", "a\r\nb"]], ["he", "llo"]); }, jar, words);
     expect(sent[0]).toMatchObject({ method: "POST", path: "/api", headers: [["content-type", "text/plain"], ["cookie", "sid=abc"]] });
     expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
-    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"]] });
+    // A page the clipboard guard cannot go into (no destination said, so taken for one) runs no script.
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
     expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
+  });
+
+  it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
+    // covers: settings.network.relay-only
+    const { port, replies } = recorder();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
+    // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's
+    // and the clipboard guard's.
+    const off = recorder();
+    await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
+    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]] });
+  });
+
+  it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
+    // covers: settings.network.relay-only
+    const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
+    const served = async (destination: string | undefined, relayOnly: boolean, type = "text/html") => {
+      const { port, replies } = recorder();
+      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null, ...(destination === undefined ? {} : { destination }) },
+        async () => answer(200, [["content-type", type], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], [page.slice(0, 7), page.slice(7)]), new CookieJar(), words, undefined, relayOnly);
+      const head = replies[0] as Extract<ServiceReply, { type: "head" }>;
+      const text = replies.filter((r) => r.type === "chunk").map((r) => new TextDecoder().decode((r as { bytes: Uint8Array }).bytes)).join("");
+      return { headers: head.headers, text };
+    };
+    const guarded = await served("iframe", true);
+    expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    // The contact's policy lets it run; its length is not the page's any more.
+    expect(guarded.headers).toEqual([
+      ["content-type", "text/html"],
+      ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}`],
+      ["content-security-policy", VIEWER_GUARD_CSP],
+      ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY],
+    ]);
+    // A page the guard cannot go into runs no script.
+    expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"]);
+    // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
+    expect((await served("", true)).text).toBe(page);
+    expect((await served("script", true, "text/javascript")).text).toBe(page);
+    const off = await served("iframe", false);
+    expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    expect(off.headers).toEqual([["content-type", "text/html"], ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}`], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
   });
 
   it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -175,6 +221,46 @@ describe("one request from the app, over the contact's link", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it("holds a bounded number of the app's requests and their bodies in this page, however many it sends: past it, refused at once", async () => {
+    vi.useFakeTimers();
+    try {
+      // The real link client, on a link where the contact never answers: what goes out is counted.
+      let sentOnLink = 0;
+      const channel = {
+        bufferedAmount: LIMITS.sendHighWaterMark + 1, drained: () => new Promise<void>(() => {}), close() {}, onMessage: null, onClose: null,
+        send(data: string | Uint8Array) { if (typeof data === "string" && decodeControl(data)?.t === "req") sentOnLink++; },
+      };
+      const client = new HttpClient(channel);
+      const send = (request: ClientRequest) => client.request("demo", request);
+      const jar = new CookieJar();
+      // One 8 MiB buffer for every POST, as the app can: what counts is what the page holds for each.
+      const body = new ArrayBuffer(MAX_REQUEST_BYTES);
+      const requests = Array.from({ length: 40 }, () => {
+        const r = recorder();
+        let ended = false;
+        void serve(r.port, { type: "request", method: "POST", path: "/up", headers: [], body }, send, jar, words).finally(() => { ended = true; });
+        return { ...r, ended: () => ended };
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const held = requests.filter((r) => !r.ended());
+      const refused = requests.filter((r) => r.ended());
+      expect(held.length * MAX_REQUEST_BYTES, "the bodies this page still holds").toBeLessThanOrEqual(32 * 1024 * 1024);
+      expect(refused.length).toBe(40 - held.length);
+      for (const r of refused) expect(r.replies).toEqual([{ type: "error", status: 503, text: "Failed" }]);
+      // Once those end (here: unanswered in time), the app has its room again.
+      await vi.advanceTimersByTimeAsync(ANSWER_BY_MS);
+      expect(requests.every((r) => r.ended())).toBe(true);
+      const again = recorder();
+      void serve(again.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, send, jar, words);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(again.replies).toEqual([]);
+      expect(sentOnLink).toBe(held.length + 1);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops what is not a request, sending nothing", async () => {
     const { port, replies, closed } = recorder();
     let called = false;
@@ -220,6 +306,41 @@ describe("a contact's app shown over the app", () => {
     // Closed, it hears nothing more.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(listeners.size).toBe(0);
+  });
+
+  it("counts the person's taps and keys in the app for the lock screen, as the browser's activation says, and only while it is open", async () => {
+    // Real input in a frame activates every frame above it, this page too; no script, the contact's included, can.
+    const activation = { isActive: false };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    let heard = 0;
+    const stop = onAppInput(() => { heard += 1; });
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      vi.advanceTimersByTime(10_000);
+      expect(heard, "no input, nothing").toBe(0);
+      // The contact's page saying so itself counts for nothing.
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "activity" }, origin: new URL(frame.src).origin, source: frame.contentWindow }));
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(0);
+      activation.isActive = true;
+      vi.advanceTimersByTime(1_000);
+      expect(heard).toBeGreaterThan(0);
+      activation.isActive = false;
+      const before = heard;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+      // Closed: the page's own listeners hear its input again, and nothing is counted twice.
+      closeServiceView();
+      activation.isActive = true;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      stop();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
   });
 
   it("opens on the notice when the contact is already offline", async () => {
@@ -281,6 +402,25 @@ describe("a contact's app shown over the app", () => {
     expect(signals.map((s) => s.aborted), "the frame loaded again: the old page's requests end").toEqual([true, true, true, false, false]);
     document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
+  });
+
+  it("answers every request of an app with the viewer policy, and the one that keeps it to its own origin while Hide my IP from contacts is on", async () => {
+    for (const relayOnly of [true, false]) {
+      await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]), words, relayOnly });
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin: new URL(frame.src).origin, source: inFrame as unknown as Window }));
+      const channel = (inFrame.postMessage.mock.calls[0]![2] as MessagePort[])[0]!;
+      const reply = new MessageChannel();
+      const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
+      channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
+      const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
+      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
+      // The bridge, on the app's origin, runs the WebRTC guard too while it is on.
+      expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly });
+      document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    }
   });
 
   it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {

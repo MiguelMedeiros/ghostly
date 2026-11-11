@@ -192,14 +192,17 @@ test("a message to a closed web app wakes it with a push its contact's app sends
   await worker.deliver(pushed);
   await expect.poll(() => worker.shown()).toEqual([{ body: "New message", tag: expect.stringContaining(row!.path), path: row!.path }]);
 
-  // A push naming a token Bo no longer uses (the one from before the mute) shows nothing.
-  await worker.deliver(JSON.stringify({ wake: 1, k: row!.token }));
-  await worker.page.waitForTimeout(1500);
-  expect(await worker.shown()).toHaveLength(1);
+  // A push naming a token Bo no longer uses (the one from before the mute) shows no chat: the app's name alone, one
+  // per profile however many come, since a push that shows nothing counts against the subscription.
+  for (const k of [row!.token, row!.token]) await worker.deliver(JSON.stringify({ wake: 1, k }));
+  await expect.poll(async () => (await worker.shown()).sort((a, b) => a.tag.localeCompare(b.tag))).toEqual([
+    { body: "", tag: "quiet:", path: "/" },
+    { body: "New message", tag: expect.stringContaining(row!.path), path: row!.path },
+  ]);
 
   // The tap: the app's window comes to that chat (a new window opens only from a real tap, which a test cannot make).
   await reopen(bo);
-  const [notice] = await worker.shown();
+  const notice = (await worker.shown()).find((shown) => shown.path === row!.path);
   await worker.page.evaluate(async (tag) => {
     const registration = await navigator.serviceWorker.getRegistration("/push/default/");
     registration!.active!.postMessage({ type: "open-notification", tag });
@@ -207,7 +210,9 @@ test("a message to a closed web app wakes it with a push its contact's app sends
   await expect(bo.page).toHaveURL(new RegExp(`#${row!.path}$`));
   await expect(chat(bo).getByText("wake up")).toBeVisible({ timeout: 150_000 });
   await expect(chat(bo).getByText("hello?")).toBeVisible({ timeout: 150_000 });
-  expect(await worker.shown()).toEqual([]);
+  // The tap closed the chat's notice. (Whether the quiet one is still listed depends on how long the app took to
+  // fetch: the headless browser's own list drops notices about 30 s after the push worker's last event.)
+  expect((await worker.shown()).filter((shown) => shown.path !== "/")).toEqual([]);
 });
 
 test("turning it off tells the contact, and stops the wake-ups", { tag: ["@feature:push.wake.exchange"] }, async ({ peer }) => {
@@ -274,6 +279,48 @@ test("a call to a closed web app wakes it with \"Incoming call\", and rings once
   await reopen(bo, new URL(chatUrl).hash);
   await expect(bo.page.getByTitle("Accept audio call")).toBeVisible({ timeout: 120_000 });
   await expect(ana.page.getByTestId("wake-call")).toHaveCount(0);
+});
+
+/**
+ * Online notices (WISP 401 § Wake-up push, revision 2026-10-27): Bo's switch is on by default, so his target asks Ana's
+ * app for them (`o`). Ana's app starts again while Bo's is closed: 30 seconds later it posts one online wake-up, which
+ * Bo's worker shows as "<Ana's name> is online", under a tag of its own.
+ */
+test("a contact's app starting again tells a closed web app it is online", { tag: ["@feature:push.wake.online"] }, async ({ peer }) => {
+  test.skip(deployed, "the push service stand-in routes the sender's own post");
+  test.setTimeout(6 * 60_000);
+  const keys = subscriptionKeys();
+  const [ana, bo] = await Promise.all([peer("ana"), peer("bo", { serviceWorkers: "allow" })]);
+  await bo.context.grantPermissions(["notifications"], { origin: new URL(bo.page.url()).origin });
+  await standInPushManager(bo.context, { p256dh: keys.p256dh, auth: keys.authB64 });
+  const posts = await pushService(ana.context);
+  await bo.page.reload();
+  await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+  await link(ana, bo);
+  await connect(ana, bo);
+  for (const p of [ana, bo]) await connected(p);
+  await bo.page.goto("/#/settings");
+  await bo.page.getByTestId("settings-wake").click();
+  await expect(bo.page.getByTestId("settings-wake-online")).toBeChecked();
+  await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(true);
+  const [row] = await wakeTable(bo.page);
+  await bo.page.close();
+  await away(ana);
+  expect(posts).toHaveLength(0);
+
+  // Ana's app starts again: once its chats had their 30 s to go live, one online wake-up, and only one.
+  await ana.page.reload();
+  await expect.poll(() => posts.length, { timeout: 90_000 }).toBe(1);
+  const pushed = readPush(posts[0]!, keys);
+  expect(JSON.parse(pushed)).toEqual({ wake: 1, k: row!.token, o: 1 });
+  expect(posts[0]!.headers().ttl).toBe("300");
+  await ana.page.reload();
+  await ana.page.waitForTimeout(40_000);
+  expect(posts).toHaveLength(1);
+
+  const worker = await workerConsole(bo.context);
+  await worker.deliver(pushed);
+  await expect.poll(() => worker.shown()).toEqual([{ body: expect.stringMatching(/^.+ is online$/), tag: expect.stringContaining("wake-online"), path: row!.path }]);
 });
 
 /**

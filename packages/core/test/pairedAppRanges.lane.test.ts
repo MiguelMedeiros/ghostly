@@ -183,15 +183,46 @@ describe("the read lane of one chat", () => {
     expect(sent).toEqual([]);
     expect([1_000, 1_001, 1_002].map(get).every(Boolean)).toBe(true);
     expect(get(1_003)).toBeNull();
-    // An unserve, a close and the session's end count the same way, and the last two free every place.
-    server.closeApp(CINEMA);
+    // An unserve counts the same way; only this side's own close of the app, whose page is gone, frees every place.
+    server.closeApp(CINEMA, "offline", true);
     const again = server.serve(CINEMA, "film-id");
     const task = server.receiveGet(appRangeGetFrame(CINEMA, again, 7, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)!;
     server.unserve(again);
     expect(task.live).toBe(false);
-    server.reset();
+    server.release(task);
     const third = server.serve(CINEMA, "film-id");
     expect([0, 1, 2, 3].every(r => server.receiveGet(appRangeGetFrame(CINEMA, third, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>))).toBe(true);
+  });
+
+  it("the contact's close of its app and a session's end keep the places of what this side is still reading", () => {
+    const sent: AppRangeFrame[] = [];
+    // A second between cycles: the bytes a second are not what stops them.
+    const clock = { t: 1_000 };
+    const server = new AppRanges(frame => sent.push(frame), undefined, () => clock.t);
+    const get = (s: string, r: number) => server.receiveGet(appRangeGetFrame(CINEMA, s, r, 0, APP_RANGE_LIMITS.requestBytes) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    // The contact asks 5, then closes its app (or the session drops) and opens it again, 10 times; nothing is answered yet.
+    const handed: AppRangeTask[] = [];
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const serve = server.serve(CINEMA, "film-id");
+      for (let r = 0; r < 5; r++) { const task = get(serve, r); if (task) handed.push(task); }
+      if (cycle % 2) server.reset(); else server.closeApp(CINEMA);
+      clock.t += 1_000;
+    }
+    expect(handed).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    expect(handed.every(task => !task.live && server.holds(task))).toBe(true);
+    expect(sent.filter(frame => frame.t === "ar-err" && frame.e === "busy")).toHaveLength(10 * 5 - APP_RANGE_LIMITS.inFlight);
+    // Once the page answers one, its place frees, and nothing goes for it.
+    sent.length = 0;
+    server.finish(handed[0], 10);
+    expect(sent).toEqual([]);
+    const serve = server.serve(CINEMA, "film-id");
+    expect(get(serve, 0)).not.toBeNull();
+    expect(get(serve, 1)).toBeNull();
+    // This side's own close of the app (its page is gone: nothing reads for the contact any more) frees them all.
+    server.closeApp(CINEMA, "offline", true);
+    expect(handed.some(task => server.holds(task))).toBe(false);
+    const after = server.serve(CINEMA, "film-id");
+    expect([0, 1, 2, 3].every(r => get(after, r))).toBe(true);
   });
 
   it("a server takes asks for 32 MiB a second, its apps together: a get and cancel loop answered at once meets busy", () => {

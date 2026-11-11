@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, noteOpened, openedServices } from "../../../../web/src/svc/forget";
+import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, forgetServicesOfGone, noteOpened, openedServices } from "../../../../web/src/svc/forget";
 import { clearSite, dropSharedCookies } from "../../../../web/src/svc/clearSite";
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PAGE, BRIDGE_READY, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PAGE, BRIDGE_READY, CLEAR_COOKIES, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 
@@ -92,6 +92,27 @@ describe("the contacts' apps this device opened", () => {
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
+  it("of a profile deleted while no bridge answered are cleared at the next start, never a listed profile's", async () => {
+    vi.useFakeTimers();
+    for (const c of "abc") noteOpened({ profile: "gone000001", tag: `chat-${c}`, label: label(c) });
+    noteOpened({ profile: "work000001", tag: "chat-w", label: label("w") });
+    noteOpened({ profile: "", tag: "chat-y", label: label("y") });
+    // Delete profile on a device that is offline: no bridge loads, and the profile leaves the list all the same.
+    const done = forgetServices(host, { profile: "gone000001" });
+    await vi.advanceTimersByTimeAsync(3 * CLEAR_ORIGIN_MS);
+    await done;
+    expect(openedServices().filter((o) => o.profile === "gone000001")).toHaveLength(3);
+    vi.useRealTimers();
+    // The next start, online: the profiles on the list are "" and work000001.
+    const bridge = bridges();
+    try {
+      await forgetServicesOfGone(host, ["", "work000001"]);
+    } finally { bridge.stop(); }
+    expect(bridge.asked).toEqual([...("abc")].map((c) => serviceOrigin(host, label(c))));
+    expect(openedServices()).toEqual([{ profile: "work000001", tag: "chat-w", label: label("w") }, { profile: "", tag: "chat-y", label: label("y") }]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
   it("hears no other frame or origin: a page of the contact's saying it cleared does not take it off the list", async () => {
     vi.useFakeTimers();
     noteOpened({ profile: "", tag: "chat-a", label: label("y") });
@@ -117,7 +138,34 @@ function recordCookieWrites(seen: string) {
   return { list, stop: () => { delete (document as unknown as { cookie?: string }).cookie; } };
 }
 
+/**
+ * A cookie jar as `document.cookie` shows it: each name it holds, at any path. It takes a cookie for the whole services
+ * host only if `shared` (not when that host is a public suffix).
+ */
+function cookieJar({ shared, live = [] }: { shared: boolean; live?: string[] }) {
+  const names = new Set(live);
+  Object.defineProperty(document, "cookie", {
+    configurable: true,
+    get: () => [...names].map((name) => `${name}=1`).join("; "),
+    set: (value: string) => {
+      if (value.includes("; Domain=") && !shared) return;
+      const name = value.split("=")[0]!.trim();
+      if (value.includes("Expires=Thu, 01 Jan 1970")) names.delete(name);
+      else names.add(name);
+    },
+  });
+  return { live: names, stop: () => { delete (document as unknown as { cookie?: string }).cookie; } };
+}
+
+/** The server's answer to the bridge's clear of the cookies, and the paths it was asked for. */
+function stubClearCookies(status: number): string[] {
+  const fetched: string[] = [];
+  vi.stubGlobal("fetch", async (path: string) => { fetched.push(path); return new Response(null, { status }); });
+  return fetched;
+}
+
 describe("the bridge's clear of its origin", () => {
+  beforeEach(() => { stubClearCookies(204); });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -168,14 +216,53 @@ describe("the bridge's clear of its origin", () => {
     }
   });
 
-  it("drops only the services host's cookies before it frames an app, never this origin's own", () => {
+  it("drops only the services host's cookies before it frames an app, never this origin's own", async () => {
     const writes = recordCookieWrites("mine=1; link=profile-a");
     try {
-      dropSharedCookies(host.suffix);
+      await dropSharedCookies(host.suffix);
     } finally { writes.stop(); }
     expect(writes.list.length).toBeGreaterThan(0);
     expect(writes.list.every((w) => w.includes(`; Domain=${host.suffix}`)), "a host-only cookie is another one: it stays").toBe(true);
-    expect(new Set(writes.list.map((w) => w.split("=")[0]))).toEqual(new Set(["mine", "link"]));
+    const expired = writes.list.filter((w) => w.includes("Expires=Thu, 01 Jan 1970"));
+    expect(new Set(expired.map((w) => w.split("=")[0]))).toEqual(new Set(["mine", "link"]));
+  });
+
+  it("has the server drop the services host's cookies at every path before it frames an app: one at Path=/t is never seen here", async () => {
+    const jar = cookieJar({ shared: true });
+    const fetched = stubClearCookies(204);
+    try {
+      await dropSharedCookies(host.suffix);
+    } finally { jar.stop(); }
+    expect(fetched).toEqual([CLEAR_COOKIES]);
+    expect(jar.live.size, "its own probe is not left behind").toBe(0);
+  });
+
+  it("leaves this origin's own cookies when the browser takes none for the services host (a public suffix)", async () => {
+    const jar = cookieJar({ shared: false, live: ["mine"] });
+    const fetched = stubClearCookies(204);
+    try {
+      await dropSharedCookies(host.suffix);
+    } finally { jar.stop(); }
+    expect(fetched).toEqual([]);
+    expect([...jar.live]).toEqual(["mine"]);
+  });
+
+  it("fails when the server did not clear them, so the app is not framed with another's cookie", async () => {
+    const jar = cookieJar({ shared: true });
+    stubClearCookies(404);
+    try {
+      await expect(dropSharedCookies(host.suffix)).rejects.toThrow();
+    } finally { jar.stop(); }
+  });
+
+  it("has the server drop every cookie of the origin when it clears it, at every path, whatever the browser takes", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const jar = cookieJar({ shared: false });
+    const fetched = stubClearCookies(204);
+    try {
+      await clearSite(host.suffix);
+    } finally { jar.stop(); }
+    expect(fetched).toEqual([CLEAR_COOKIES]);
   });
 
   it("empties the origin-private file system", async () => {
@@ -186,5 +273,16 @@ describe("the bridge's clear of its origin", () => {
     });
     await clearSite(host.suffix);
     expect([...files]).toEqual([]);
+  });
+
+  it("deletes the storage buckets too: what an app put in its own bucket's IndexedDB, caches and files goes with it", async () => {
+    const buckets = new Set(["kept", "other"]);
+    vi.stubGlobal("navigator", {
+      storage: { getDirectory: async () => ({ async *keys() {}, removeEntry: async () => {} }) },
+      storageBuckets: { keys: async () => [...buckets], delete: async (name: string) => { buckets.delete(name); } },
+      serviceWorker: { getRegistrations: async () => [] },
+    });
+    await clearSite(host.suffix);
+    expect([...buckets]).toEqual([]);
   });
 });

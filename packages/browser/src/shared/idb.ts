@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 15;
+export const DB_VERSION = 16;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -130,6 +130,8 @@ function storedVersion(name: string): Promise<number | undefined> {
 }
 /** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
 export const CARD_INDEX = "byCardKind";
+/** The messages store's index of the messages that carry a file, by chat (`linkId`, `file.id`): what `db.getFileMessages` reads. */
+export const FILE_INDEX = "byLinkFile";
 /** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
 export const WALLET_TX_INDEX = "byMintTime";
 
@@ -203,12 +205,15 @@ export interface StoredFile {
    * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
    * `digest` is the author's, which the bytes are checked against.
    */
-  /** A group's file (WISP 503): its message, author and the message's time (`ts`, absent on records from before). */
-  group?: { message: string; author: string; ts?: number; auto?: boolean; asked?: boolean; paused?: boolean };
+  /**
+   * A group's file (WISP 503): its message, author and, when its announcement reached this device said again under a
+   * later epoch than the message's own, that epoch (`arrived`). A `ts` on records from before is not read.
+   */
+  group?: { message: string; author: string; arrived?: number; auto?: boolean; asked?: boolean; paused?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
-type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group">>;
+type FileStateFields = Partial<Pick<StoredFile, "bytes" | "digest" | "transfer" | "wire3" | "group" | "leftOut">>;
 type FileState = { id: string } & FileStateFields;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -285,6 +290,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v15: the wallet history by mint and time, so a refresh reads each network's newest movements without the rest.
       const walletTx = request.transaction!.objectStore(STORES.walletTx);
       if (!walletTx.indexNames.contains(WALLET_TX_INDEX)) walletTx.createIndex(WALLET_TX_INDEX, ["mint", "timestamp"]);
+      // v16: the messages that carry a file, by chat or group, so a chat's files are read without its texts (`file list`).
+      // A message without a file has no such key and is not in it.
+      if (!messages.indexNames.contains(FILE_INDEX)) messages.createIndex(FILE_INDEX, ["linkId", "file.id"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -316,14 +324,21 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
 
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
- * with their keys and revocations and when the contacts' were last looked up for one, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
- * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`) and the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
+ * with their keys and revocations and when the contacts' were last looked up for one (and which, of a lookup under way), its own Nostr data, the public profiles it read, the built-in mini-apps it removed
+ * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`) and the mini-app revocations it verified (`APP_REVOCATIONS_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
  * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
  * (`engine/saved.ts`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+
+/** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
+export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
+export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKey(""), `${groupLiveKey("")}￿`);
+/** A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`): the profile's too. */
+export const groupLightKey = (groupId: string): string => `groupLight:${groupId}`;
+export const GROUP_LIGHT_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLightKey(""), `${groupLightKey("")}￿`);
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -347,6 +362,8 @@ export async function clearProfileStores(): Promise<void> {
   if (names.includes(STORES.settings)) {
     const settings = tx.objectStore(STORES.settings);
     for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
+    settings.delete(GROUP_LIVE_RANGE());
+    settings.delete(GROUP_LIGHT_RANGE());
     const read = settings.get("settings");
     read.onsuccess = () => {
       const record = read.result as Record<string, unknown> | undefined;

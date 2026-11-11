@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
+import { QrCode } from "@/components/site/QrCode";
+import { ANDROID_PAGE_URL } from "@/lib/release";
 import { Act } from "@/components/story/Act";
 import { Statement } from "@/components/story/Statement";
 import { StoryRail } from "@/components/story/StoryRail";
@@ -42,7 +44,7 @@ export function HomePage({ version }: { version: string }) {
           { id: "dht", chapter: "dht" },
         ]}
       >
-        <Hero t={t.hero} />
+        <Hero t={t.hero} version={version} />
         <InviteScene eyebrow={t.invite.eyebrow} label={t.invite.label} steps={t.invite.steps} card={t.invite.card} />
         <DhtScene eyebrow={t.dht.eyebrow} label={t.dht.label} steps={t.dht.steps} tags={t.dht.tags} />
       </Act>
@@ -80,7 +82,8 @@ export function HomePage({ version }: { version: string }) {
           </Link>
         </div>
       </div>
-      <Finale t={t.finale} version={version} />
+      {/* The QR code is drawn here, on the server, so its encoder never reaches the reader. */}
+      <Finale t={t.finale} version={version} qr={<QrCode text={ANDROID_PAGE_URL} label={t.finale.android.qr} className="fin-qr-code" />} />
       {/* After the story, so Skip to content and Tab reach the hero before its marks; it is fixed, so this does not move it. */}
       <StoryRail
         label={t.rail}

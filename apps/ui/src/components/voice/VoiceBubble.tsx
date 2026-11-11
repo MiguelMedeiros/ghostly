@@ -493,7 +493,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
               disabled={!ready}
               aria-disabled={state === "loading" || undefined}
               onClick={() => (state === "loading" ? undefined : state === "playing" ? pause() : void play())}
-              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/15"
+              className="tap-target w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/15"
             >
               {state === "playing" ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
@@ -526,7 +526,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
             onKeyDown={onWaveKey}
           />
           {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place. */}
-          <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-text-primary/65" data-testid="voice-meta">
+          <div className="flex items-center gap-1 mt-1 min-h-[18px] chat-text-media-meta text-text-primary/65" data-testid="voice-meta">
             {active ? (
               <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />
             ) : (
@@ -555,12 +555,12 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
         <div className="mt-1.5 px-1">
           <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
             className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer">
-            {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+            {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
           </button>
         </div>
       )}
       {problem && (
-        <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
+        <p className="chat-text-media-line text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
           {saveUrl && <a href={saveUrl} download={downloadName(file, timestamp)} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
@@ -594,8 +594,9 @@ export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: stri
       data-rate={rate}
       aria-label={t("chat.voice.speed", { speed: label })}
       onClick={() => nextVoiceRate()}
-      // The pill is as tall as the line it sits on; its touch area reaches a little past it.
-      className="relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-1"
+      // The pill is as tall as the line it sits on; its touch area reaches a little past it. On a phone that area is
+      // 44 px tall and at least 44 px wide, grown toward the time only: on the play button's side it would cut into its.
+      className="relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-start-1 before:-end-1 before:-inset-y-1 max-md:before:start-0 max-md:before:-end-3 max-md:before:-inset-y-[13px]"
     >
       {label}
     </button>

@@ -87,6 +87,45 @@ describe("search inside a chat", () => {
     expect(field()).toBeInTheDocument();
   });
 
+  it("gives its buttons a thumb's 44 px on a phone", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+  });
+
+  it("on a phone held upright puts the count on a line of its own under the field, and keeps it beside the field when wider", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    await type("nowhere to be found");
+    const bar = screen.getByTestId("chat-search"), status = screen.getByTestId("chat-search-count");
+    const line = field().parentElement!;
+    // "Nenhum resultado" beside the field and the four 44 px buttons left the field 12 px wide at 320 px. The bar is
+    // measured by its own width (a container), so the count moves only where it is narrow; the measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts).
+    expect(bar).toHaveClass("@container");
+    // Only under md, where the buttons are 44 px: two panes (a phone on its side, 874 px, a chat pane about 450 px)
+    // keep one line with their 32 px buttons. Wrapped there, the taller bar hid the message found in the 162 px the
+    // keyboard leaves (e2e/web/phone-landscape.spec.ts).
+    expect(line).toHaveClass("max-md:@max-[28rem]:flex-wrap");
+    expect(status).toHaveClass("max-md:@max-[28rem]:order-last", "max-md:@max-[28rem]:basis-full", "max-md:@max-[28rem]:ps-5.5", "max-md:@max-[20rem]:ps-1.5");
+    expect(line.querySelector("svg")).toHaveClass("max-md:@max-[20rem]:hidden");
+    for (const element of [line, status, line.querySelector("svg")!]) {
+      for (const name of element.classList) if (name.startsWith("@max-")) expect.fail(`${name} applies in two panes too`);
+    }
+    // Wider, nothing changes: the count stays between the field and the buttons, on the same line.
+    expect(line).not.toHaveClass("flex-wrap");
+    expect(status).not.toHaveClass("order-last");
+    expect(status).not.toHaveClass("basis-full");
+    expect(status.previousElementSibling).toBe(field());
+    // The same live region either way, with the same words: moving it would have read the count twice or not at all.
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(count()).toBe("No results");
+  });
+
   it("gives the focus back as it closes: to ⋮ when opened from its menu, to the composer after Ctrl+F there", async () => {
     const { user } = openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);

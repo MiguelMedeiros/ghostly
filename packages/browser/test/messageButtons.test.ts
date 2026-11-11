@@ -10,6 +10,7 @@ import type { HoldStore } from "../src/backup/storage";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
 import { withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
+import { quoteFor, replyIndex, type NameOf } from "../../../apps/ui/src/lib/replies";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.buttons.wire
 
@@ -285,6 +286,38 @@ describe("a question changed after it was answered", () => {
     // A task's card keeps no trail, as before.
     const task = { ...question, card: readStatusCard({ kind: "task", id: "t", title: "T", status: "running" })! };
     expect(withEdit(task, { seq: 1, at: 2, text: "other", card: task.card }).edit?.history).toEqual([]);
+  });
+});
+
+describe("a reply naming a button that came before its original", () => {
+  const names: NameOf = from => from === "me" ? "You" : from === "peer" ? "Bob" : undefined;
+
+  it("in a chat: kept unchecked as the wire said, and once the original is here its quote is the original's words", async () => {
+    const t = await setup();
+    const to = WIRE("d");
+    expect(await t.contact.sendMessage("Confirmed, as I said above", Date.now(), WIRE("R"), undefined, { i: to, s: "I owe you 5,000 EUR and will pay Friday", f: "sender", b: "ok" })).toBeNull();
+    const reply = await t.peerRow("Confirmed, as I said above");
+    expect(reply.replyTo).toEqual({ id: to, snippet: "I owe you 5,000 EUR and will pay Friday", from: "peer", button: "ok" });
+    expect(reply.press).toBeUndefined();
+    expect(quoteFor(reply.replyTo!, replyIndex([reply]), names)).toMatchObject({ state: "unverified" });
+    expect(await t.contact.sendMessage("See you at the meeting", Date.now(), to)).toBeNull();
+    const original = await t.peerRow("See you at the meeting");
+    const rows = await db.getMessages(t.id);
+    expect(rows.find(m => m.id === reply.id)!.replyTo).not.toHaveProperty("messageId");
+    expect(quoteFor(rows.find(m => m.id === reply.id)!.replyTo!, replyIndex(rows), names))
+      .toEqual({ state: "found", name: "Bob", snippet: "See you at the meeting", mine: false, targetId: original.id });
+  });
+
+  it("in a group: a member naming my next message by its id quotes my own words once I send it", async () => {
+    const t = await setup();
+    const me = "a".repeat(52), them = "b".repeat(52), linkId = `group:${crypto.randomUUID()}`, next = `${me}:1:6`;
+    const resolve = (message: StoredMessage) => (t.node as unknown as { resolveReply(m: StoredMessage): Promise<StoredMessage> }).resolveReply(message);
+    const reply = await resolve({ linkId, id: `${them}:1:3`, text: "ok", sender: "peer", member: them, timestamp: 1,
+      replyTo: { id: next, snippet: "I agree, send the 2 BTC to X's address", from: "me", member: me, button: "ok" } });
+    expect(reply.replyTo).toEqual({ id: next, snippet: "I agree, send the 2 BTC to X's address", from: "me", member: me, button: "ok" });
+    expect(quoteFor(reply.replyTo!, replyIndex([reply], true), names)).toMatchObject({ state: "unverified", mine: true });
+    const mine: StoredMessage = { linkId, id: next, text: "lunch at 1?", sender: "me", member: me, timestamp: 2 };
+    expect(quoteFor(reply.replyTo!, replyIndex([reply, mine], true), names)).toEqual({ state: "found", name: "You", snippet: "lunch at 1?", mine: true, targetId: next });
   });
 });
 

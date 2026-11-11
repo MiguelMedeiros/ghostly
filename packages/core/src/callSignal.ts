@@ -273,7 +273,9 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
       if (currentMedia === "a" && opus === null && /^opus/i.test(rtpmap[2])) opus = pt;
       if (currentMedia === "v" && vp8 === null && /^VP8/i.test(rtpmap[2])) vp8 = pt;
     }
-    if (line.startsWith("a=candidate:")) {
+    // Component 1 alone: the rebuilt SDP says `a=rtcp-mux`, so a component 2 line (webrtc-rs, the Linux Desktop,
+    // lists one of every candidate) is no path, and it would take another candidate's slot.
+    if (line.startsWith("a=candidate:") && line.split(" ")[1] === "1") {
       candidates.push(line.substring("a=candidate:".length));
     }
     if (line.startsWith("a=ssrc:")) {
@@ -322,6 +324,18 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
 
 /** Offers, answers and hang-ups older (or further in the future) than this are ignored. */
 export const CALL_SIGNAL_MAX_AGE_MS = 120_000;
+
+/**
+ * A call that comes this soon after the contact's last missed one does not ring, when that one barely rang
+ * (`BURST_RING_MS`): a bot looping call and hang-up does that (1,375 calls a minute), no person does. It is kept as a
+ * missed call, and the wait starts over with it, so a burst rings once and a call placed after a pause rings again.
+ * A person's call that rang a while, then was cancelled or rang out, holds nothing back: calling again at once (voice to
+ * video, a slip of the finger) rings. The apps (`useWebRTC`) and the headless CLI's call manager both keep it.
+ */
+export const QUICK_REDIAL_MS = 2000;
+
+/** A missed call that rang shorter than this was not a person's (`QUICK_REDIAL_MS`). */
+export const BURST_RING_MS = 1000;
 /**
  * A signal dated further ahead of this clock than this is not taken, however it was heard. A receiver acts on a signal
  * only when its `ts` is later than the last one it acted on: taken, a signal dated a day ahead would be that last one,
@@ -334,10 +348,33 @@ const ICE_UFRAG = /^[A-Za-z0-9+/]{4,256}$/;
 const ICE_PWD = /^[A-Za-z0-9+/]{22,256}$/;
 const ICE_FOUNDATION = /^[A-Za-z0-9+/]{1,32}$/;
 const CANDIDATE_ADDRESS = /^[A-Za-z0-9.:-]{1,64}$/;
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const MDNS_NAME = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.local$/;
 const CANDIDATE_TYPES = new Set(["host", "srflx", "prflx", "relay"]);
 const EXTENSION_TOKEN = /^[A-Za-z0-9+/._-]{1,64}$/;
 const DIGITS = /^\d{1,10}$/;
 const MAX_CANDIDATES = 8;
+
+function isIpv6(text: string): boolean {
+  const halves = text.split("::");
+  if (halves.length > 2) return false;
+  const groups = halves.flatMap((half) => (half ? half.split(":") : []));
+  // An IPv4 tail (`::ffff:192.0.2.1`) counts as two groups.
+  const v4 = groups.length > 0 && IPV4.test(groups[groups.length - 1]);
+  if (v4) groups.pop();
+  if (!groups.every((group) => /^[0-9a-fA-F]{1,4}$/.test(group))) return false;
+  const count = groups.length + (v4 ? 2 : 0);
+  return halves.length === 2 ? count < 8 : count === 8;
+}
+
+/**
+ * Whether a contact's candidate address may go into this device's remote description: an IPv4 or IPv6 literal, or the
+ * `<uuid>.local` name a browser gives its host candidate. Any other name would have this side's ICE agent look it up in
+ * DNS, a request the contact chose, whatever the relay policy says.
+ */
+export function isCandidateAddress(address: string): boolean {
+  return IPV4.test(address) || MDNS_NAME.test(address) || (address.includes(":") && isIpv6(address));
+}
 
 function uint(value: string, max: number): number | null {
   if (!DIGITS.test(value)) return null;
@@ -349,7 +386,8 @@ function uint(value: string, max: number): number | null {
  * Parses the part of an `a=candidate:` line that the signal carries
  * (`foundation component transport priority address port typ type [raddr a rport p] [ext value]...`)
  * and serializes it again from the validated parts. Returns `undefined` for a
- * well-formed candidate that is not UDP (skipped) and `null` for anything malformed.
+ * well-formed candidate that is not UDP or not on an address (`isCandidateAddress`), skipped, and `null` for anything
+ * malformed.
  */
 function normalizeCandidate(candidate: unknown): string | null | undefined {
   if (typeof candidate !== "string" || candidate.length > 512) return null;
@@ -382,6 +420,7 @@ function normalizeCandidate(candidate: unknown): string | null | undefined {
   }
 
   if (transport.toLowerCase() !== "udp") return undefined;
+  if (!isCandidateAddress(address) || (raddr !== null && !isCandidateAddress(raddr))) return undefined;
   let line = `${foundation} ${component} udp ${priority} ${address} ${port} typ ${type}`;
   if (raddr !== null && rport !== null) line += ` raddr ${raddr} rport ${rport}`;
   return line;

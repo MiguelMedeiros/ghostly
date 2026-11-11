@@ -109,7 +109,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   };
 
   return createPortal(<dialog ref={dialog} data-testid="forward-dialog" aria-labelledby={`${id}-title`}
-    onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }}
+    // Not a cancel from the seed question over it (SecretGuardDialog): React hands it here too, and it is the question's.
+    onCancel={(e) => { e.preventDefault(); if (!busy && e.target === e.currentTarget) onClose(); }}
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[min(640px,calc(100dvh_-_2rem))] flex-col rounded-2xl border border-border bg-sidebar-bg p-0 text-text-primary shadow-2xl backdrop:bg-black/60 open:flex">
     <div className="px-4 pt-4 pb-2 space-y-2">
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
@@ -133,10 +134,13 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         </ul>
       )}
     </div>
+    {/* The alert around the list, not on it: on the <ul> it took the place of the list, and its lines were read as no list. */}
     {problems.length > 0 && (
-      <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">
-        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
-      </ul>
+      <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
+        <ul className="m-0 list-none space-y-1 p-0">
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
+        </ul>
+      </div>
     )}
     {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 line-clamp-2 break-words text-xs text-text-muted" data-testid="forward-sent"
       title={namesTitle(sentTo, t)}>{sentBefore}<NameList names={sentTo} />{sentAfter}</p>}

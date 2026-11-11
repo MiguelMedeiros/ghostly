@@ -1,17 +1,18 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
-import { forgetServicesOf } from "@ghostly/browser/host";
+import { forgetServicesOf, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { runsEngine } from "@ghostly/browser/devices/state";
 import { deviceStateOf, forgetDevice, readDeviceRecord } from "@ghostly/browser/devices/store";
 import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
-import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
-import { retryUnsaved, unreadUnder } from "./storage";
+import { activeProfileId, chosenProfileId, forgetProfileHere, homeDatabaseOf, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
+import { LEGACY_JOIN_PREFIX, ownsOriginalKey, retryUnsaved, unreadUnder } from "./storage";
 import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
-import { verifyPassword } from "./settings";
+import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
+import { resetIncomingShare } from "./incomingShare";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -70,6 +71,33 @@ function drop(name: string): Promise<void> {
     r.onsuccess = () => resolve();
     r.onerror = () => reject(r.error);
     r.onblocked = () => reject(new Error("This profile is open in another window. Close it, then try again."));
+  });
+}
+
+/**
+ * `drop`, only if no other connection holds the database. A blocked delete is not withdrawn by giving up on it: it stays
+ * queued and deletes the database once the holder closes. So the delete is asked from inside a version change, which
+ * runs only when every other connection has closed; one that was blocked is refused when it finally runs.
+ */
+async function dropUnheld(name: string): Promise<void> {
+  const current = await request(indexedDB.open(name));
+  const version = current.version;
+  current.close();
+  return new Promise((resolve, reject) => {
+    let blocked = false, deleted: Promise<void> | null = null;
+    const r = indexedDB.open(name, version + 1);
+    r.onblocked = () => { blocked = true; reject(new Error("This profile is open in another window. Close it, then try again.")); };
+    r.onupgradeneeded = () => {
+      // Queued behind this version change, the delete runs as soon as it is refused, before any other connection opens.
+      if (!blocked) deleted = drop(name);
+      r.transaction!.abort();
+    };
+    r.onerror = (event) => {
+      event.preventDefault();
+      if (deleted) deleted.then(resolve, reject);
+      else if (!blocked) reject(r.error);
+    };
+    r.onsuccess = () => { r.result.close(); reject(new Error("Could not delete this profile's data")); };
   });
 }
 
@@ -217,12 +245,18 @@ async function storedAvatar(dbName: string): Promise<string | undefined> {
 
 /**
  * Another profile's data is only read or removed from here with its lock password, when it has a lock:
- * being able to open one profile must not open the others.
+ * being able to open one profile must not open the others. Wrong passwords are paced as on that profile's lock screen.
  */
 export async function assertUnlocked(id: string, password?: string): Promise<void> {
   if (id === activeProfileId()) return;
   const hash = profileLock(id);
-  if (hash && !(password && (await verifyPassword(password, hash)))) throw new Error("Wrong lock password for that profile");
+  if (!hash) return;
+  const waiting = lockRetryAt(id);
+  if (waiting) throw new Error(waitMessage(waiting));
+  if (!password) throw new Error("Wrong lock password for that profile");
+  const tried = await tryLockPassword(id, password, hash);
+  if (tried.waited) throw new Error(waitMessage(tried.retryAt!));
+  if (!tried.ok) throw new Error("Wrong lock password for that profile");
 }
 
 /** Another window runs that profile: it is online itself. */
@@ -239,26 +273,73 @@ async function lockHeld(ns: string): Promise<boolean> {
 
 /**
  * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
- * (Ark, Bark and Breez databases, Fedimint client files), the forks a handoff left of it on this device, then its place
- * on the list (WISP 04). Never the active one,
- * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
+ * (Ark, Bark and Breez databases, Fedimint client files), the forks a handoff left of it on this device and what a move
+ * of it to this device staged and never installed, then its place on the list (WISP 04). Never the active one, never the
+ * first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
   if (id === activeProfileId()) throw new Error("Switch to another profile first");
-  const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
+  const ns = namespaceOf(id);
   // Another tab runs it (and has likely made it the registry's choice): that is what to say, since switching here
   // would not close it.
   if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
   // Nor the one the registry has chosen, which the next page starts as.
   if (id === chosenProfileId()) throw new Error("Switch to another profile first");
   await assertUnlocked(id, password);
+  await dropProfile(id, (key) => key.startsWith(`ghostly_${ns}_`));
+  unregisterProfile(id);
+  // The local hosts it shared apps at (the extension's host permissions), unless a profile still on the list shares one there.
+  await releaseUnusedLocalAccessOf();
+}
+
+/**
+ * "Remove this profile here" (WISP 06 § User experience), on a device out of the profile's device set for good: removed,
+ * or `moving` with nothing it can accept. The profile this page runs as, on its standby screen, holds a frozen copy that
+ * is not encrypted; it goes from this device as `deleteProfile` takes a profile, forks included. Another profile goes off
+ * the list; the first one stays on it, empty. Its other devices keep the profile. The caller then reloads.
+ */
+export async function removeProfileHere(): Promise<void> {
+  const id = activeProfileId(), ns = namespaceOf(id), dbName = databaseOf(id);
+  const record = await readDeviceRecord(dbName);
+  if (!record || !(record.state === "removed" || (record.state === "moving" && record.reenroll))) throw new Error("Only a device removed from this profile's devices removes it here");
+  // The shares this page holds go with it: the reload after this would carry them to the next page.
+  resetIncomingShare();
+  // The first profile running on a namespace a handoff installed: what a take left in its own namespace goes as well
+  // (an earlier build's take dropped its database and kept its keys), since the profile starts there again, empty.
+  const original = homeDatabaseOf(id) === "ghostly" ? "" : homeDatabaseOf(id).slice("ghostly_".length);
+  await dropProfile(id, (key) => keyOfSpace(ns, key) || (!id && keyOfSpace(original, key)));
+  forgetProfileHere(id);
+  await releaseUnusedLocalAccessOf();
+}
+
+/**
+ * Whether a local key is a namespace's own: `ghostly_<ns>_`, or for the first profile's original one (`ns` empty) the
+ * keys without another profile's id or space after `ghostly_` (`ownsOriginalKey`) and the legacy join marks. Never the
+ * registry, which the app needs to start at all.
+ */
+export function keyOfSpace(ns: string, key: string): boolean {
+  if (key === registryKey()) return false;
+  return ns ? key.startsWith(`ghostly_${ns}_`) : ownsOriginalKey(key) || key.startsWith(LEGACY_JOIN_PREFIX);
+}
+
+/**
+ * What `deleteProfile` and `removeProfileHere` delete of a profile: its peer database, its wallets' own storage, its
+ * linked files and files, the local keys `owned` names, its push subscription, the forks its device record lists and
+ * the record itself, and what another profile's peek saw of it. Not its place on the list.
+ */
+async function dropProfile(id: string, owned: (key: string) => boolean): Promise<void> {
+  const dbName = databaseOf(id);
   const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
   const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
   const own = await walletStorage(dbName);
-  // The forks its device record lists (WISP 06 § Installing the staged state): read before the record goes.
-  const forks = (await readDeviceRecord(dbName).catch(() => null))?.forks ?? [];
-  if (await databaseExists(dbName)) await drop(dbName);
+  // The forks its device record lists (WISP 06 § Installing the staged state), and the staging namespace a move of it
+  // to this device wrote and never installed (a pull that stopped keeps its files, their notes and, past pass 2, the
+  // staged database for a later try): read before the record goes, the only thing that names them.
+  const record = await readDeviceRecord(dbName).catch(() => null);
+  const forks = record?.forks ?? [];
+  const staged = record?.handoff?.role === "taking" ? record.handoff.staging : undefined;
+  if (await databaseExists(dbName)) await dropUnheld(dbName);
   // The folders and files its apps were given (linked files: handles, never copies).
   if (await databaseExists(linkedFilesDatabase(dbName))) await drop(linkedFilesDatabase(dbName)).catch(() => {});
   await dropFileSpace(dbName).catch(() => {});
@@ -266,8 +347,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
   // Its Breez databases, as the device's register lists them: each is one profile's only.
   await dropBreezDatabasesOf(dbName).catch(() => {});
-  const prefix = `ghostly_${ns}_`;
-  for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
+  for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k && owned(k))) localStorage.removeItem(key);
   // The room its keys made may fit what the open profile's page held (the storage-full notice).
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
@@ -282,9 +362,9 @@ export async function deleteProfile(id: string, password?: string): Promise<void
     await handoffProfileHost()?.staging.drop(fork).catch(() => {});
     if (await databaseExists(linkedFilesDatabase(fork))) await drop(linkedFilesDatabase(fork)).catch(() => {});
   }
+  if (staged && staged !== dbName && !listed.has(staged)) await handoffProfileHost()?.staging.drop(staged).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
-  unregisterProfile(id);
 }

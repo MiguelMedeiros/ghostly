@@ -18,6 +18,7 @@
   "reloadUnreachable": "Ghostly のサーバーに接続できません。接続を確認してから、再読み込みしてください。",
   "shared": "別のタブの Ghostly に送りました。",
   "sharedHint": "そちらでチャットを選んでください。このタブは閉じてかまいません。",
+  "sharing": "別のタブの Ghostly に送っています…",
   "title": "このブラウザでは Ghostly を実行できません",
   "tryOther": "プライベートモードを終了してサイトデータを許可するか、ブラウザを更新するか、別のブラウザで Ghostly を開いてください。",
   "trySecure": "https:// のアドレスで Ghostly を開いてください。"

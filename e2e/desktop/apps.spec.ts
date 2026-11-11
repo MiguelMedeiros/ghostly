@@ -9,9 +9,85 @@ import { STORE_URL, testStore } from "../support/appStore";
  * the store's files come from a local server the build's test fetcher reads (apps/ui/src/desktop/appsTestFetch.ts).
  */
 
-/** What the app does once written: every broker call it may make, a request over 64 KiB, and two ways out. */
+/**
+ * What the app does once written: every broker call it may make, a request over 64 KiB, and two ways out. And every
+ * way it has to `execCommand` a clipboard command on a selected textarea, on load, in a tap on #pad and from a timer
+ * after it, the engine's answer (true: it wrote) in #clip; then an editing command, which still edits. And, on load and
+ * in the tap, whether it finds each call of the async Clipboard API ("none": it does not) and how a write ends, from
+ * its own window and from a frame it makes (#clip's `api` and `framed`).
+ */
 const PROBE = `<!doctype html><meta charset=utf-8><title>Chess</title><body style="font:16px system-ui"><h1>Chess</h1><pre id=out></pre>
+<textarea id=t></textarea><div id=pad style="width:200px;height:200px">tap</div><pre id=clip></pre>
 <script>
+(() => {
+  const t = document.getElementById("t"), proto = Document.prototype, exec = proto.execCommand, clip = {};
+  const show = () => { document.getElementById("clip").textContent = JSON.stringify(clip); };
+  const tries = (tag) => {
+    const out = {};
+    const ways = {
+      copy: () => document.execCommand("copy"),
+      COPY: () => document.execCommand("COPY"),
+      cut: () => document.execCommand("cut"),
+      paste: () => document.execCommand("paste"),
+      taken: () => exec.call(document, "copy"),
+      proto: () => proto.execCommand.call(document, "copy", false),
+      other: () => document.implementation.createHTMLDocument("").execCommand("copy"),
+    };
+    for (const way in ways) {
+      t.value = "bc1q-APP-" + tag + "-" + way;
+      t.select();
+      try { out[way] = ways[way](); } catch (e) { out[way] = e.name; }
+    }
+    clip[tag] = out;
+    show();
+  };
+  clip.api = {};
+  const asks = (tag) => {
+    const c = navigator.clipboard, out = { item: typeof ClipboardItem === "function" ? "there" : "none" };
+    const text = "bc1q-APP-" + tag + "-api";
+    const writes = {
+      writeText: () => c.writeText(text),
+      write: () => c.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }) })]),
+    };
+    for (const way of ["writeText", "write", "readText", "read"]) {
+      if (!c || typeof c[way] !== "function") { out[way] = "none"; continue; }
+      if (!writes[way]) { out[way] = "there"; continue; }
+      out[way] = "pending";
+      try {
+        writes[way]().then(() => { out[way] = "wrote"; show(); }, (e) => { out[way] = e.name; show(); });
+      } catch (e) { out[way] = e.name; }
+    }
+    clip.api[tag] = out;
+    show();
+  };
+  // Through a frame the app makes, whose realm the runner never ran in.
+  const framed = () => {
+    try {
+      const frame = document.createElement("iframe");
+      document.body.appendChild(frame);
+      const w = frame.contentWindow, c = w && w.navigator.clipboard;
+      if (!c || typeof c.writeText !== "function") { clip.framed = "none"; show(); return; }
+      clip.framed = "pending";
+      c.writeText("bc1q-APP-framed").then(() => { clip.framed = "wrote"; show(); }, (e) => { clip.framed = e.name; show(); });
+    } catch (e) { clip.framed = e.name; }
+    show();
+  };
+  tries("load");
+  asks("load");
+  let taps = 0;
+  document.getElementById("pad").addEventListener("pointerdown", () => {
+    if (taps++) return;
+    asks("tap");
+    framed();
+    tries("tap");
+    t.value = "";
+    t.focus();
+    const typed = document.execCommand("insertText", false, "typed");
+    clip.edit = typed + " " + t.value;
+    show();
+    setTimeout(() => tries("timer"), 1000);
+  });
+})();
 (async () => {
   const out = {};
   try {
@@ -114,6 +190,22 @@ test("installs Chess from a store and opens it in an app window of its own, whic
       const done = arguments[arguments.length - 1];
       window.__TAURI_INTERNALS__.invoke("get_profile").then(() => done("answered"), (e) => done(String(e)));`);
     expect(other).toMatch(/not allowed/i);
+
+    // The app writes nothing to the clipboard: not on load, not in a tap (WebKit lets a tap's copy through whatever
+    // the window's clipboard setting says), not from a timer after one. An editing command still edits.
+    await app.click("#pad");
+    const clip = async () => JSON.parse((await app.text("#clip")) ?? "{}") as Record<string, Record<string, unknown> | string>;
+    await expect.poll(async () => (await clip()).timer, { timeout: 10_000 }).toBeDefined();
+    const seen = await clip();
+    for (const tag of ["load", "tap", "timer"]) {
+      for (const [way, wrote] of Object.entries(seen[tag] as Record<string, unknown>)) expect(`${tag} ${way}: ${String(wrote)}`).toBe(`${tag} ${way}: false`);
+    }
+    expect(seen.edit).toBe("true typed");
+    // Nor does it find the async Clipboard API, which WebKit lets write on a tap.
+    const none = { item: "none", writeText: "none", write: "none", readText: "none", read: "none" };
+    expect(seen.api).toEqual({ load: none, tap: none });
+    expect(seen.framed).toBeDefined();
+    expect(seen.framed).not.toBe("wrote");
 
     // The app closes itself: its window goes, and the Ghostly window is all there is again.
     await app.execute("ghostly.close()");

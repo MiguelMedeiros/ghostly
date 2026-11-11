@@ -17,6 +17,8 @@ export interface Problem {
   next?: string;
   /** The error as it was thrown, for the ⓘ: only when the title does not already say all of it. */
   detail?: string;
+  /** Why, in the app's language, behind the same ⓘ: what the short title leaves out (errorText's `info`). */
+  info?: string;
   tone: ProblemTone;
 }
 
@@ -57,8 +59,14 @@ const DIAL_TIMEOUTS = [/^Timed out connecting to the peer$/];
 /** A session the peer broke the protocol on (packages/core pairedSession.ts): it says nothing a person can act on. */
 const PROTOCOL = [/^Session frame too large$/, /^Negotiation message too large$/, /^Invalid connection binding\b/];
 
-/** What `fallback` titles an error nothing here knows: a connection's own words, or the app's generic ones. */
-export type ProblemFallback = "connect" | "generic";
+/**
+ * What `fallback` titles an error nothing here knows: a connection's own words, or the app's generic ones. "proof": why
+ * a contact's proof failed this app's check, a provider's own English (packages/browser/src/proofs): one the rules do not
+ * know reads as "could not verify", never as it came, its English in the detail only.
+ */
+export type ProblemFallback = "connect" | "generic" | "proof";
+
+const FALLBACK_TITLE = { connect: "errors.problem.connectFailed", generic: "errors.generic", proof: "errors.proof.checkFailed" } as const;
 
 /** `cause` as a notice says it (see above). */
 export function problemText(cause: unknown, t: Translate = english, fallback: ProblemFallback = "generic"): Problem {
@@ -76,11 +84,12 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
   // Known also without the final period a message around it took ("…: <reason>. Nothing was saved").
   const parts = knownErrorParts(raw, t) ?? (raw && !raw.endsWith(".") ? knownErrorParts(`${raw}.`, t) : null);
   if (parts) return { tone: "error", ...parts };
+  if (fallback === "proof") return { tone: "error", title: t(FALLBACK_TITLE.proof), ...(raw && { detail: raw }) };
   if (raw && readable(raw) && !PROTOCOL.some((p) => p.test(raw))) return { tone: "error", title: raw };
   // "Not a relay address: ftp://x": the words before the first colon say it, the rest goes behind the ⓘ.
   const head = raw.split(/:\s/)[0]!;
   if (head !== raw && head.length >= 8 && readable(head) && !PROTOCOL.some((p) => p.test(head))) return { tone: "error", title: head, detail: raw };
-  return { tone: "error", title: t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic"), ...(raw && { detail: raw }) };
+  return { tone: "error", title: t(FALLBACK_TITLE[fallback]), ...(raw && { detail: raw }) };
 }
 
 /** A problem as one line, where only a line fits (a status under a name, a hint): its title and next line together. */
@@ -88,7 +97,8 @@ export function problemLine(cause: unknown, t: Translate = english, fallback: Pr
   const { title, next: said, detail } = problemText(cause, t, fallback);
   // A line has no ⓘ: an error nothing here knows keeps its words after the generic title, never a bare "Something went
   // wrong" in their place (an identity check's "No Ghostly TXT record at _ghostly.…" was lost that way, 2026-10-07).
-  const generic = !said && detail !== undefined && title === t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic");
+  // A proof's reason is the exception: its English is never shown (see ProblemFallback).
+  const generic = fallback !== "proof" && !said && detail !== undefined && title === t(FALLBACK_TITLE[fallback]);
   const next = generic ? detail : said;
   return next ? sentences(title, next, t) : title;
 }

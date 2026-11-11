@@ -195,6 +195,25 @@ describe("HTTPS only", () => {
     expect(read("apps/web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
     expect(read("apps/website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
   });
+
+  // A browser ignores that header over plain http://, where the app can't run either (no secure context). Cloudflare
+  // reaches nginx through the tunnel whatever the visitor used, and says which in CF-Visitor. (The website's redirect
+  // is checked against `next start`: apps/website/e2e/https-redirect.spec.ts.)
+  it("the web app's server sends a visit over http:// to the same address over https://, in one hop", () => {
+    const nginx = read("apps/web/nginx.conf");
+    const server = /server \{([\s\S]*?)\n {2}location /.exec(nginx)![1]!;
+    const redirect = /\n {2}if \(\$(\w+)\) \{\s*return 301 https:\/\/\$host\$request_uri;\s*\}/.exec(server);
+    expect(redirect, "a redirect at the top of the app's server").not.toBeNull();
+    const map = new RegExp(`map \\$http_cf_visitor \\$${redirect![1]} \\{([^}]*)\\}`).exec(nginx);
+    expect(map, `the map of CF-Visitor that sets $${redirect![1]}`).not.toBeNull();
+    expect(map![1]).toMatch(/^\s*default 0;$/m);
+    const entries = [...map![1]!.matchAll(/^\s*(?:"~([^"]+)"|'~([^']+)')\s+1;$/gm)].map((m) => new RegExp(m[1] ?? m[2]!));
+    /** Whether nginx redirects a request with this CF-Visitor, as its map reads it. */
+    const plain = (visitor: string) => entries.some((re) => re.test(visitor));
+    expect(plain('{"scheme":"http"}')).toBe(true);
+    expect(plain('{"scheme":"https"}')).toBe(false);
+    expect(plain("")).toBe(false); // straight to the server (http://localhost, a proxy that is not Cloudflare): the page
+  });
 });
 
 describe("nothing written into a page on its way", () => {

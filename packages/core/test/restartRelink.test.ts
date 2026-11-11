@@ -1,8 +1,9 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ChatFiles, type FileTransferRecord } from "../src/chatFiles";
 import { CROSSED_WAIT_MS, GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
-import { RELAY_POLL_INTERVALS } from "../src/link";
+import { DAEMON_WATCH_PEER_IDLE_MS, RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, invitationWhere, killRtc, rtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
@@ -22,11 +23,13 @@ import { setLinkTraceSink } from "../src/linkTrace";
 
 /**
  * `iroh`, `webrtc`: the one transport both apps run. `webrtc+hyperdht`: the CLI's, WebRTC first and HyperDHT (direct)
- * after it. `webrtc+iroh`: WebRTC first and an Iroh reached through its relay (no direct address), ranked last.
+ * after it. `webrtc+iroh`: WebRTC first and an Iroh reached through its relay (no direct address), ranked last, as
+ * Automatic ranked them before WISP 100 revision 2026-11-08 and as a chat whose person chose WebRTC still does.
+ * `auto+iroh`: the same transports on Automatic, which puts Iroh first, through its relay too.
  */
-type Kind = "iroh" | "webrtc" | "webrtc+hyperdht" | "webrtc+iroh";
+type Kind = "iroh" | "webrtc" | "webrtc+hyperdht" | "webrtc+iroh" | "auto+iroh";
 interface App {
-  name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number }[]; stopped?: Promise<void>;
+  name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number; read?: string }[]; stopped?: Promise<void>;
   /** While set, the relays' request budget holds back every publish of this app (it throws `DiscoveryBudgetError`). */
   heldUntil?: number;
   /** While set, the relays' budget holds back every read of this app: it is answered with the last packet it read. */
@@ -53,7 +56,7 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
       if (app.offline) throw new Error("offline");
       // Held back: as the relay transport does, what it read last is the answer (`RelayTransport.resolve`).
       if (app.readsHeldUntil && Date.now() < app.readsHeldUntil) return lastRead.get(key) ?? null;
-      requests.push({ at: Date.now() });
+      requests.push({ at: Date.now(), read: key });
       const packet = await inner.resolve(key, options);
       lastRead.set(key, packet);
       return packet;
@@ -68,7 +71,9 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
  */
 function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number, chosen = false,
   /** `upgrade/1`: this app's, and the contact's as its capability record says. */
-  upgrade: { mine?: boolean; contact?: boolean } = {}): App {
+  upgrade: { mine?: boolean; contact?: boolean } = {},
+  /** More of the link's options (a CLI daemon's `watchPeerIdleMs`). */
+  more: Partial<ConstructorParameters<typeof GhostLink>[0]> = {}): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
   const peerNative = native === "hyperdht/1" ? { publicKey: world.native.key("hyperdht/1", contact.name) } : { id: world.native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] };
@@ -80,9 +85,10 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     dht: { state: dhtState, save: async state => { app.dhtState = state; } },
     native: native
       ? { peerDescriptors: { [native]: peerNative }, peerTransports: [...(rtcToo ? ["webrtc/1" as const] : []), native], peerFallback: true,
-        ...(chosen ? { preferred: native, automatic: false } : { automatic: true }) }
+        ...(chosen ? { preferred: native, automatic: false } : kind === "webrtc+iroh" ? { preferred: "webrtc/1" as const, automatic: false } : { automatic: true }) }
       : { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
-    // What the app was live on when it quit: WebRTC wherever the app has it (it ranks first).
+    // What the app was live on when it quit: WebRTC wherever the app has it (it ranked first; on `auto+iroh`, a chat
+    // live on WebRTC from before Automatic put Iroh first).
     ...(wasLive ? { resume: chosen && native ? native : rtcToo ? "webrtc/1" as const : "iroh/1" as const } : {}),
     transport: counted(world.pkarr, app),
     pollIntervals: RELAY_POLL_INTERVALS,
@@ -90,6 +96,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     ...(upgrade.mine ? { upgradeSupport: true, peerUpgrades: () => !!upgrade.contact } : {}),
     createPeerConnection: () => fakePeerConnection(name),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
+    ...more,
   });
   apps.push(app);
   app.link.start();
@@ -220,6 +227,23 @@ describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app 
       expect(result.dialFailures).toBe(0);
     }, 240_000);
   });
+});
+
+/**
+ * Automatic puts Iroh first, through its relay too (WISP 100, revision 2026-11-08). A chat on it that was live on
+ * WebRTC when the app quit (from before the rule) resumes on Iroh. (These apps do not list `upgrade/1`, so nothing then
+ * moves the session to WebRTC; the wake tests below have it.)
+ */
+describe("a chat on Automatic, both apps with WebRTC and an Iroh through its relay, after one app restarts", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key, $how: live again on Iroh within the target", async ({ restarted, how }) => {
+    const result = await restart("auto+iroh", restarted, how);
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(how === "crash" ? 15_000 : 5_000);
+    expect(result.transport).toBe("iroh/1");
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+  }, 240_000);
 });
 
 /**
@@ -475,13 +499,13 @@ describe("a restart whose WebRTC answer the relays' budget holds back", () => {
     expect((low.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport).toBe("hyperdht/1");
   }, 240_000);
 
-  it("a relayed transport ranked after WebRTC waits for a contact reading in the background first", async () => {
-    const result = await restart("webrtc+iroh", "lower", "crash", BUDGET_HELD_MS);
-    // Before: 90.7 s, 19.5 requests a minute. After: 40.6 s, 15.5: an offer out reads the relays fast until it ends,
-    // now at 40 s rather than 90 s.
-    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(45_000);
+  it("on Automatic, Iroh through its relay goes first: the answer held back holds nothing back", async () => {
+    const result = await restart("auto+iroh", "lower", "crash", BUDGET_HELD_MS);
+    // WebRTC first with a relayed Iroh ranked after it (the rule before WISP 100 revision 2026-11-08): 90.7 s before
+    // revision 0.7, 40.6 s after it (the relayed Iroh raced 40 s after the offer), 15.5 requests a minute.
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
     expect(result.transport).toBe("iroh/1");
-    expect(result.requestsPerMin).toBeLessThanOrEqual(16);
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
     expect(result.dialFailures).toBe(0);
   }, 240_000);
 });
@@ -665,18 +689,20 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs, kind = "webrtc+iroh" }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
     /** The app's Iroh is off its relay at the wake, and back on it this long after (`NativeWorld.offRelay`). */
     relayBackMs?: number;
     /** A dial that reaches nobody fails this long after it began (Iroh's: 20 s). */
-    dialFailMs?: number }) {
+    dialFailMs?: number;
+    /** `auto+iroh`: both on Automatic, which dials Iroh first. */
+    kind?: "webrtc+iroh" | "auto+iroh" }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     if (dialFailMs) world.native.dialFailMs = dialFailMs;
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
     const up = { mine: true, contact: true };
-    const phone = startApp(world, "phone", phoneSide, { side: cliSide, name: "cli" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
-    const cli = startApp(world, "cli", cliSide, { side: phoneSide, name: "phone" }, "webrtc+iroh", emptyDhtDeliveryState(), false, undefined, false, up);
+    const phone = startApp(world, "phone", phoneSide, { side: cliSide, name: "cli" }, kind, emptyDhtDeliveryState(), false, undefined, false, up);
+    const cli = startApp(world, "cli", cliSide, { side: phoneSide, name: "phone" }, kind, emptyDhtDeliveryState(), false, undefined, false, up);
     expect(await until(() => phone.link.isDataLinkOpen && cli.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
     await run(20_000);
     expect(transportOf(phone)).toBe("webrtc/1");
@@ -757,6 +783,24 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(knocks.filter(step => step === "knock-again")).toHaveLength(1);
   }, 240_000);
 
+  /**
+   * On Automatic (WISP 100, revision 2026-11-08) a return dials Iroh through its relay first, whatever transport the
+   * chat was live on: no WebRTC offer to wait on. Once live, the session moves to WebRTC on itself (`upgrade/1`), which
+   * carries files many times faster than the relay. Away 30 s, 2 and 10 minutes.
+   */
+  it.each([
+    { higher: false, awayMs: 30_000 }, { higher: true, awayMs: 30_000 },
+    { higher: false, awayMs: 2 * 60_000 }, { higher: true, awayMs: 2 * 60_000 },
+    { higher: false, awayMs: 10 * 60_000 }, { higher: true, awayMs: 10 * 60_000 },
+  ])("on Automatic, live again on Iroh within seconds of coming back, then on WebRTC (higher key: $higher, away $awayMs ms)", async ({ higher, awayMs }) => {
+    const { liveMs, firstOn, directMs, requestsToLive } = await sleepAndWake({ higher, awayMs, frozen: true, kind: "auto+iroh" });
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ kind: "auto+iroh", higher, awayMs, liveMs, firstOn, directMs, requestsToLive }) + "\n");
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
+    expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+
   it.each([
     { duringAttemptMs: 20_000, crossed: false },
     { duringAttemptMs: 30_000, crossed: false },
@@ -783,5 +827,233 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(liveMs, "from the return to live on both sides").toBeLessThan(crossed ? 2_000 + CROSSED_WAIT_MS : 2_000);
     expect(firstOn).toBe("iroh/1");
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
+  }, 240_000);
+});
+
+/**
+ * A phone back after minutes asleep to a CLI bot, WebRTC the only transport between them (no Iroh), the phone's key the
+ * lower (it dials): its offer waits for the bot's read. The bot read a contact that left at the active pace for 2 minutes,
+ * then every 30 s: live again 2.3, 4.5 and 18.3 s after a return from 30 s, 2 and 5 minutes away (the web lab,
+ * 2026-11-01). A daemon reads it every 10 s up to 5 minutes (`DAEMON_WATCH_PEER_IDLE_MS`).
+ */
+describe("a phone back after minutes asleep to a CLI daemon, over WebRTC alone", () => {
+  const daemon = { watchPeerIdleMs: DAEMON_WATCH_PEER_IDLE_MS };
+  async function asleep(awayMs: number, cli: Partial<ConstructorParameters<typeof GhostLink>[0]>) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    // The inviter has the lower key: the phone.
+    const { inviter: phoneSide, joiner: botSide } = invitationWhere("inviter");
+    const phone = startApp(world, "phone", phoneSide, { side: botSide, name: "cli" }, "webrtc", emptyDhtDeliveryState());
+    const bot = startApp(world, "cli", botSide, { side: phoneSide, name: "phone" }, "webrtc", emptyDhtDeliveryState(), false, undefined, false, {}, cli);
+    expect(await until(() => phone.link.isDataLinkOpen && bot.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    // Asleep: no network, and its WebRTC connection dies unheard (the bot's fails 20 s on).
+    phone.offline = true;
+    killRtc("phone", undefined, 20_000);
+    const asleepAt = Date.now();
+    await run(awayMs);
+    phone.offline = false;
+    /** The bot's reads of the phone's key from `fromMs` to `toMs` into the absence. */
+    const reads = (fromMs: number, toMs: number) => bot.requests.filter(r => r.read === phone.link.myPubKeyZ32 && r.at >= asleepAt + fromMs && r.at < asleepAt + toMs).length;
+    phone.link.wake();
+    const liveMs = await until(() => phone.link.isDataLinkOpen && bot.link.isDataLinkOpen, 120_000);
+    return { liveMs, reads };
+  }
+
+  // Each just after one of the bot's reads at the background pace (170, 230 s…): the slowest returns before.
+  it.each([2 * 60_000 + 51_000, 3 * 60_000 + 51_000, 4 * 60_000 + 30_000])("live within seconds of a return between 2 and 5 minutes (away %i ms)", async awayMs => {
+    const { liveMs } = await asleep(awayMs, daemon);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ daemon: true, awayMs, liveMs }) + "\n");
+    // The bot's next read (10 s at most) and the answer's way back.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(RELAY_POLL_INTERVALS.idle + 3_000);
+  }, 240_000);
+
+  it("reads a contact away the whole 5 minutes every 10 s from 2 to 5 minutes, 12 reads more, and nothing past them", async () => {
+    const before = await asleep(7 * 60_000, {}), after = await asleep(7 * 60_000, daemon);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ before: before.reads(0, 420_000), after: after.reads(0, 420_000) }) + "\n");
+    // The first 2 minutes as before (fast, then the active pace).
+    expect(after.reads(0, 120_000)).toBe(before.reads(0, 120_000));
+    // From 2.5 to 5 minutes, past the slowing down from the active pace: one read every 10 s, not every 30 s.
+    expect(before.reads(150_000, 300_000)).toBeLessThanOrEqual(150_000 / RELAY_POLL_INTERVALS.background + 1);
+    expect(after.reads(150_000, 300_000)).toBeGreaterThanOrEqual(150_000 / RELAY_POLL_INTERVALS.idle - 1);
+    expect(after.reads(150_000, 300_000)).toBeLessThanOrEqual(150_000 / RELAY_POLL_INTERVALS.idle + 1);
+    // Past 5 minutes, the background pace again.
+    expect(after.reads(330_000, 420_000)).toBeLessThanOrEqual(90_000 / RELAY_POLL_INTERVALS.background + 1);
+    // The whole absence: 12 more (from 2 to 5 minutes, every 10 s and not every 30 s), give or take the edges.
+    expect(after.reads(0, 420_000) - before.reads(0, 420_000)).toBeLessThanOrEqual(14);
+  }, 240_000);
+});
+
+/**
+ * Automatic, both apps with `upgrade/1`: after a restart the chat is live over Iroh through its relay and moves to WebRTC
+ * about a second later, when queued texts flush and people type. Each side swaps when its own new session is ready, so
+ * for a moment the contact still sends on the session this side just replaced. That session stopped at the swap and
+ * dropped what came on it: a text or two each way and a receipt or two, sent within 100 ms of the move, were lost.
+ */
+describe("texts sent each way while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key back ($how): every text arrives, and its receipt within 2 s", async ({ restarted, how }) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const got = { goes: new Set<string>(), stays: new Set<string>() }, receipts = { goes: new Set<string>(), stays: new Set<string>() };
+    const moves: string[] = [];
+    const events = (who: "goes" | "stays") => ({ events: {
+      onMessage: async (message: { id?: string }) => { if (message.id) got[who].add(message.id); },
+      onMessageReceipt: async (id: string) => { receipts[who].add(id); },
+      onTransportSwitched: (from?: string, to?: string) => { moves.push(`${who} ${from}->${to}`); },
+    } });
+    let goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("goes"));
+    const stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("stays"));
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, goes, how);
+    await run(RESTART_AFTER_MS);
+    moves.length = 0;
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", goes.dhtState, true, undefined, false, up, events("goes"));
+    const before = channelOf(stays);
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== before, 60_000)).toBeLessThan(Infinity);
+    // From the moment it is live (on Iroh), one text each way every 50 ms for 8 s: the move falls in the middle.
+    const sent = { goes: [] as string[], stays: [] as string[] };
+    for (let n = 0; n < 160; n++) {
+      for (const [who, app] of [["goes", goes], ["stays", stays]] as const) {
+        const id = `${who}${String(n).padStart(4, "0")}`.padEnd(22, "x");
+        expect(await app.link.sendMessage(`text ${n}`, Date.now(), id)).toBeNull();
+        sent[who].push(id);
+      }
+      await vi.advanceTimersByTimeAsync(50); await yieldToLoop();
+    }
+    await run(2_000);
+    expect(moves.sort(), "the session moved on both sides while the texts went").toEqual(["goes iroh/1->webrtc/1", "stays iroh/1->webrtc/1"]);
+    // Before: 1 or 2 texts each way never arrived, and 1 or 2 that did never had their receipt.
+    expect({ goes: sent.goes.filter(id => !got.stays.has(id)), stays: sent.stays.filter(id => !got.goes.has(id)) }, "texts lost").toEqual({ goes: [], stays: [] });
+    expect({ goes: sent.goes.filter(id => !receipts.goes.has(id)), stays: sent.stays.filter(id => !receipts.stays.has(id)) }, "receipts missing").toEqual({ goes: [], stays: [] });
+  }, 240_000);
+});
+
+/**
+ * The same move, and what else a person does to a message: a reaction, a pin, an edit (a deletion for everyone is one).
+ * Sent by the side that has not swapped yet, the moment its contact did, each went on the session the contact had just
+ * replaced. That session read only texts and receipts while it retired: the rest was dropped, and the app said it again
+ * only after its 30 s resend (reactions, pins), with the sender's mark unconfirmed until then.
+ */
+describe("a reaction, a pin and an edit sent while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key back ($how): each arrives, and its receipt within 2 s", async ({ restarted, how }) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const got: string[] = [], receipts: string[] = [], moves: string[] = [];
+    const id = "m".padEnd(22, "x");
+    const apps = {} as Record<"goes" | "stays", App>;
+    let armed = false;
+    // The first side to swap after the restart: its contact, still on the old session, reacts, pins and edits at once.
+    const other = (who: "goes" | "stays") => apps[who === "goes" ? "stays" : "goes"];
+    const events = (who: "goes" | "stays") => ({ reactionsSupport: true, pinSupport: true, editSupport: true, events: {
+      onReaction: async (r: { n: number }) => { got.push(`reaction ${r.n}`); return true; },
+      onReactionReceipt: async (n: number) => { receipts.push(`reaction ${n}`); },
+      onPin: async (p: { n: number }) => { got.push(`pin ${p.n}`); return true; },
+      onPinReceipt: async (n: number) => { receipts.push(`pin ${n}`); },
+      onMessageEdit: async (e: { e: number }) => { got.push(`edit ${e.e}`); return true; },
+      onEditReceipt: async (_id: string, e: number) => { receipts.push(`edit ${e}`); },
+      onTransportSwitched: (from?: string, to?: string) => {
+        moves.push(`${who} ${from}->${to}`);
+        if (!armed || moves.length !== 1) return;
+        const link = other(who).link;
+        expect((link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport, "the contact has not swapped yet").toBe("iroh/1");
+        expect(link.sendReaction({ id, e: "❤️", n: 7 })).toBeNull();
+        expect(link.sendPin({ id, n: 8 })).toBeNull();
+        void link.sendEdit({ id, e: 9, ts: Date.now(), m: "edited" });
+      },
+    } });
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("goes"));
+    apps.stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("stays"));
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, apps.goes, how);
+    await run(RESTART_AFTER_MS);
+    // The first session moved from Iroh to WebRTC too: what counts starts with the restart.
+    moves.length = 0; got.length = 0; receipts.length = 0; armed = true;
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", apps.goes.dhtState, true, undefined, false, up, events("goes"));
+    expect(await until(() => moves.length === 2, 60_000)).toBeLessThan(Infinity);
+    await run(2_000);
+    expect(moves.map(m => m.split(" ")[1]), "the session moved on both sides").toEqual(["iroh/1->webrtc/1", "iroh/1->webrtc/1"]);
+    // Before: none of the three arrived, and none was confirmed.
+    expect(got.sort(), "arrived").toEqual(["edit 9", "pin 8", "reaction 7"]);
+    expect(receipts.sort(), "confirmed").toEqual(["edit 9", "pin 8", "reaction 7"]);
+  }, 240_000);
+});
+
+/**
+ * The same move, and a file under way each way: both senders cancel theirs the moment the first side swaps. Each
+ * cancel (`pf-abort`) was lost, and nothing said it again: the sender no longer offers a file it cancelled, and the
+ * receiver asks about an active one only after its 30 s idle nudge. Until then it showed the file moving, its progress
+ * frozen and its bytes kept.
+ * - Said by the side that had not swapped yet, it went on the session its contact had just replaced, which read only
+ *   texts, reactions, pins, edits and their receipts while it retired.
+ * - Said by the side that had just swapped, it went nowhere: that side's files are off from the swap until the contact
+ *   says what it supports on the new session, and a cancel then only ended the file here.
+ */
+describe("a file's cancel said while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each(["lower", "higher"] as const)("the app with the %s key back: each receiver has the file cancelled within 2 s", async restarted => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const file = new Uint8Array(32 * 1024 * 1024);
+    const ids = { goes: "g".padEnd(22, "x"), stays: "s".padEnd(22, "x") };
+    const apps = {} as Record<"goes" | "stays", App>, files = {} as Record<"goes" | "stays", ChatFiles>;
+    const records = { goes: new Map<string, FileTransferRecord>(), stays: new Map<string, FileTransferRecord>() };
+    const other = (who: "goes" | "stays") => who === "goes" ? "stays" : "goes";
+    const moves: string[] = [];
+    let armed = false, atMove: (string | undefined)[] = [];
+    // A chat's files on a link, as the app wires them (filesBinary.test.ts's `desk`); the bytes taken are only counted.
+    const chatFiles = (who: "goes" | "stays") => new ChatFiles({
+      send: frame => apps[who].link.sendFilesFrame(frame),
+      decide: async () => "accept",
+      openTarget: async () => ({ offset: 0, append: async () => {}, flush: async () => {}, verify: async () => true, discard: async () => {} }),
+      openSource: async () => ({ read: async (offset, length) => file.subarray(offset, offset + length), digest: async () => "x" }),
+      changed: record => { records[who].set(record.id, record); },
+      room: async () => 1024 ** 3,
+    });
+    const options = (who: "goes" | "stays") => ({ largeFilesSupport: true, events: {
+      onFilesFrame: (frame: Record<string, unknown>) => files[who].handle(frame),
+      onFilesSession: (open: boolean) => { if (open) files[who].attach(); else files[who].detach(); },
+      onTransportSwitched: (from?: string, to?: string) => {
+        moves.push(`${who} ${from}->${to}`);
+        if (!armed || moves.length !== 1) return;
+        // The side that swapped cancels the file it sends, and so does its contact, still on the old session.
+        atMove = [records[other(who)].get(ids[who])?.state, records[who].get(ids[other(who)])?.state];
+        files[who].cancel("out", ids[who]);
+        files[other(who)].cancel("out", ids[other(who)]);
+      },
+    } });
+    const start = (who: "goes" | "stays", wasLive: boolean) => {
+      files[who] = chatFiles(who);
+      const [side, contact] = who === "goes" ? [goesSide, { side: staysSide, name: "stays" }] : [staysSide, { side: goesSide, name: "goes" }];
+      apps[who] = startApp(world, who, side, contact, "auto+iroh", apps[who]?.dhtState ?? emptyDhtDeliveryState(), wasLive, undefined, false, up, options(who));
+    };
+    start("goes", false); start("stays", false);
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, apps.goes, "graceful");
+    await run(RESTART_AFTER_MS);
+    moves.length = 0; armed = true;
+    const before = channelOf(apps.stays);
+    start("goes", true);
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen && channelOf(apps.stays) !== before, 60_000)).toBeLessThan(Infinity);
+    for (const who of ["goes", "stays"] as const) files[who].offer({ id: ids[who], name: `${who}.bin`, mime: "application/octet-stream", size: file.length, timestamp: 1 });
+    expect(await until(() => moves.length === 2, 60_000)).toBeLessThan(Infinity);
+    expect(moves.map(m => m.split(" ")[1]), "the session moved on both sides").toEqual(["iroh/1->webrtc/1", "iroh/1->webrtc/1"]);
+    expect(atMove, "both files were under way at the move").toEqual(["active", "active"]);
+    await run(2_000);
+    expect([records.goes.get(ids.goes)?.state, records.stays.get(ids.stays)?.state], "the senders'").toEqual(["cancelled", "cancelled"]);
+    // Before: both still active, until each receiver's idle nudge 30 s later got its sender's answer.
+    expect({ goes: records.stays.get(ids.goes)?.state, stays: records.goes.get(ids.stays)?.state }, "the receivers'").toEqual({ goes: "cancelled", stays: "cancelled" });
   }, 240_000);
 });

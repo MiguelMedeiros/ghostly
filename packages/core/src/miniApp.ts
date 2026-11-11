@@ -87,8 +87,8 @@ export interface MiniAppApi {
     forget(id: string): Promise<void>;
     /**
      * Lets the same app on the contact's side read one kept file (the `chat` permission too, in a chat open on both
-     * sides): answers a serve id for the app to tell its contact in its own `chat.send`. It lasts until `unserve`, this
-     * side or the contact closes the app, or the session ends.
+     * sides): answers a serve id for the app to tell its contact in its own `chat.send`. It lasts until `unserve`, or
+     * until this side or the contact closes the app; a reconnect the app is kept open across keeps it.
      */
     serve(id: string): Promise<string>;
     /** Ends one serve. A serve id that is no longer served is no error. */
@@ -199,8 +199,11 @@ export type MiniAppEvent = { event: "chat.message"; data: MiniAppJson } | { even
 
 /** Limits the broker enforces (and an app can plan for). */
 export const MINI_APP_LIMITS = {
-  /** One request, serialized. */
-  requestBytes: 64 * 1024,
+  /**
+   * One request, serialized: a stored value's 64 KiB with room for its key (256 bytes, at most six times that as JSON)
+   * and `{"id", "type", "args"}` around them.
+   */
+  requestBytes: 66 * 1024,
   /** Requests per second, per app. */
   requestsPerSecond: 50,
   /**

@@ -26,12 +26,14 @@
     "title": "Esperando por você"
   },
   "notCopied": "Não copiado",
+  "quotedName": "“{{name}}”",
   "save": "Salvar",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "Sucesso",
   "unnamedContact": "Contato · {{key}}",

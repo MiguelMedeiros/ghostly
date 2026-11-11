@@ -63,7 +63,7 @@ A host (`packages/browser/src/host.ts`) is the small part that differs: how a pa
 
 Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallets, Identities, Services and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
 
-It installs to the home screen and runs in a window of its own: see [Install it](#install-it). On an Android phone this is Ghostly today: a native Android app is planned and not released ([ANDROID.md](ANDROID.md)). The same profile can move between a phone and a computer: [Several devices](DEVICES.md).
+It installs to the home screen and runs in a window of its own: see [Install it](#install-it). On an Android phone it is one way to have Ghostly; each release since 1.6.0 also attaches the native Android app's APK ([ANDROID.md](ANDROID.md)). The same profile can move between a phone and a computer: [Several devices](DEVICES.md).
 
 Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the call's Share screen button does not show there. Elsewhere it is in every connected call, voice or video (there is no button for it in the chat header).
 

@@ -32,6 +32,7 @@ import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopHoldFetch } from "./holdFetch";
 import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
@@ -141,8 +142,9 @@ export function createTauriTransport(): PkarrTransport {
         for (const listener of listeners) listener("recovered");
       }).catch(() => {});
     },
-    configure({ relays, readRelays }) {
-      void invoke("set_pkarr_relays", { relays, readRelays }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
+    // `dhtDirect: false` (Hide my IP from contacts): Rust closes its DHT nodes, and reads and writes go to the relays.
+    configure({ relays, readRelays, dhtDirect }) {
+      void invoke("set_pkarr_relays", { relays, readRelays, ...(dhtDirect !== undefined ? { dhtDirect } : {}) }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
     },
     discovery: () => status ?? { path: null, relays: [] },
     subscribe(listener) {
@@ -278,11 +280,21 @@ export function forgetServiceWindows(which: { tag: string } | { profile: string 
 /** `t()` in the profile's language, as it is now. */
 const profileT = (): Translate => translatorFor(loadSettings().language);
 
+/** The name each contact's app had when its window opened, by `<peer> <service>`. */
+const openedNames = new Map<string, string>();
+
+/**
+ * The name a contact gave the app a window shows: as the chat lists it now, else as it was when the window opened.
+ * Their machine says they took it back (`services.window.unshared`) just when the chat no longer lists it.
+ */
+function serviceWindowName(peer: string, service: string): string | undefined {
+  return engine.linkByPeer(peer)?.peerServices?.find((s) => s.id === service)?.name ?? openedNames.get(`${peer} ${service}`);
+}
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const name = engine.linkByPeer(payload.peer)?.peerServices?.find((s) => s.id === payload.service)?.name;
-    const response = await answerServiceWindow(server, payload, profileT(), name);
+    const response = await answerServiceWindow(server, payload, profileT(), serviceWindowName(payload.peer, payload.service));
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -405,6 +417,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
     // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
     lnurlFetch: desktopLnurlFetch(invoke),
+    // Held items are read from the contact's storage on public addresses only, which Rust checks and a WebView cannot.
+    holdFetch: desktopHoldFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };
@@ -447,20 +461,26 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
     readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
+    // The WebView's copy cannot mark one sensitive, and every system keeps copies somewhere: Android's preview and
+    // keyboards, Windows' clipboard history and cloud clipboard, clipboard managers on macOS and Linux. A secret (an
+    // invite, a device's link, ecash) is copied natively, marked so (Kotlin on Android, arboard on Desktop).
+    copySecret: (text: string) => invoke<void>("copy_secret", { text }),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
-    async openService(peerPubKeyZ32, serviceId, tag) {
+    async openService(peerPubKeyZ32, serviceId, tag, relayOnly) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
+      if (service?.name) openedNames.set(`${peerPubKeyZ32} ${serviceId}`, service.name);
       // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
       // Android opens none (`viewer` is Desktop's).
       if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
       const t = profileT();
       // Its window is titled "<title> — Ghostly": the title says whose app it is, never the contact's name for it alone.
       const { label } = serviceFraming(service?.name ?? serviceId, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t);
-      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable") });
+      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window. With
+      // Hide my IP from contacts on, its pages load nothing but their own origin (`SERVICE_CSP_RELAY_ONLY`).
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable"), relayOnly });
     },
     forgetServices: forgetServiceWindows,
   });

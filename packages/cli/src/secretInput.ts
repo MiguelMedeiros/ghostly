@@ -95,7 +95,7 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
  */
 export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
   // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-` says how.
-  const usage = "Missing <json-value>: ghostly settings set <key> <json-value>";
+  const usage = "Missing <json-value>: ghostly settings set <key> <json-value> [--force]";
   if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
   if (value === undefined && tty) throw new CliError("usage", usage);
   const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");

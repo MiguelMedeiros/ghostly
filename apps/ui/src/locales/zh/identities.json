@@ -14,7 +14,7 @@
     "mutual": "关注了 {{name}}，{{name}} 也关注了该账号",
     "notShown": "未显示。",
     "notShownWhy": "未显示：{{reason}}。",
-    "off": "公开资料已关闭（设置 → 安全）。",
+    "off": "公开资料已关闭（{{settings}} → {{section}}）。",
     "open": "打开",
     "openIn": "在 {{network}} 中打开",
     "openPostIn": "在 {{network}} 中打开此帖子",
@@ -44,6 +44,7 @@
     "dayOne": "1 天",
     "days": "{{count}} 天",
     "experimental": "实验性：尚未在所有工具上测试。",
+    "interrupted": "登录已中断",
     "keepOpen": "保持打开",
     "keyAbout": "只有此密钥的持有者才能生成此证明。",
     "kinds": "身份类型",
@@ -57,6 +58,7 @@
     "redirectHint": "{{provider}} 会要求你登录，随后用签名令牌向 Ghostly 担保该账号；你的密码永远不会到达 Ghostly。",
     "signWith": "签名方式",
     "signWithNamed": "使用 {{signer}} 签名",
+    "tryAgain": "重试",
     "validFor": "有效期",
     "verifyAndSave": "验证并保存"
   },
@@ -107,6 +109,7 @@
     "lead": "仅在此聊天中共享。并不能证明对方是谁。",
     "lookingUp": "正在查找…",
     "lookupNote": "只有在你要求时才会查找公开资料；被询问的服务器会知道你查找了哪个身份。",
+    "lookupOpenpgp": "通过 keys.openpgp.org 查验邮箱",
     "name": "名称",
     "nameFrom": "名称：{{source}}",
     "proves": "证明内容",
@@ -118,6 +121,12 @@
     "sharedBy": "{{name}} 共享的",
     "showProfile": "显示公开资料",
     "since": "起始",
+    "sourceKeyserver": "邮箱已由其所有者向 keys.openpgp.org 确认：这是密钥服务器的检查，不是 Ghostly 的",
+    "sourceNostrSignature": "Nostr 签名（NIP-01、BIP-340）",
+    "sourceSigned": "由 {{provider}} 签名",
+    "sourceSignedEmailUnverified": "由 {{provider}} 签名；邮箱未经 {{provider}} 验证",
+    "sourceSignedEmailVerified": "由 {{provider}} 签名；邮箱已由 {{provider}} 验证",
+    "sourceUserId": "密钥上的用户 ID，由持有者自己填写：不能证明该名称或邮箱属于对方",
     "status": "状态",
     "tapHint": "点按卡片查看检查方式。",
     "theirProfile": "对方的公开资料",
@@ -354,6 +363,454 @@
     "pictureMiss": "未显示资料照片：{{reason}}。",
     "sourceAsked": "{{time}}询问了 {{from}}。该请求让这台服务器得知了此设备的 IP 地址。",
     "sourceFound": "{{time}}从 {{from}} 加载。这是账号的自述，不属于证明。该请求让这台服务器得知了此设备的 IP 地址。"
+  },
+  "providers": {
+    "atproto": {
+      "description": "证明你控制某个 Bluesky（AT Protocol）账号：在你的服务器上批准，Ghostly 会在你账号的仓库中发布一条记录。它和仓库的其他内容一样是公开的：任何人都能看到此账号创建了 Ghostly 证明，但看不到你与谁共享。联系人无需登录即可检查。",
+      "limits": "用你账号的密钥签名，该密钥通常由你的服务器持有。它证明的是对账号的控制，而不是你是谁；只有当 handle 仍指回该账号时才会显示。",
+      "privacy": "联系人的应用会向 PLC 目录（或你的 did:web 主机）请求你账号的文档，向你的服务器请求该记录，并通过其 DNS-over-HTTPS 解析器或你 handle 的网站查询你的 handle，因此它们会得知此账号被检查过。",
+      "progress": {
+        "approve": "请在打开的窗口中在 {{server}} 上批准…",
+        "deleting": "正在删除 {{server}} 上的记录…",
+        "lookingUp": "正在查找 {{account}}…",
+        "publishing": "正在 {{server}} 上发布证明…"
+      },
+      "signers": {
+        "atproto-oauth": {
+          "action": "在你的服务器上继续",
+          "description": "打开你服务器的登录页面。Ghostly 只请求创建和删除它自己的证明记录：从不发帖、读取你的消息或编辑你的资料。",
+          "fields": {
+            "handle": {
+              "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
+              "label": "Handle"
+            }
+          },
+          "label": "你的服务器（Bluesky 或其他 PDS）"
+        },
+        "atproto-oauth-full": {
+          "action": "在你的服务器上继续（完全访问）",
+          "description": "请求访问你的整个账号，适用于无法限制 Ghostly 权限的服务器。当你的服务器拒绝范围更小的登录或拒绝写入记录时，Ghostly 会建议使用它。Ghostly 仍然只写入这一条记录，并会立即交还访问权限。",
+          "fields": {
+            "handle": {
+              "help": "你的 Bluesky handle、你自己的域名（如果在用），或你的 DID。",
+              "label": "Handle"
+            }
+          },
+          "label": "你的服务器，完全访问（较旧的服务器）"
+        }
+      },
+      "subject": {
+        "label": "账号（DID）"
+      },
+      "summary": "在你的 Bluesky 服务器上发布一条记录",
+      "unpublish": {
+        "description": "同时删除你服务器上的记录：你的服务器会请你批准。"
+      }
+    },
+    "bitcoin": {
+      "description": "证明你能用某个比特币地址背后的密钥签名：由你的钱包对声明签名，然后粘贴签名。",
+      "label": "比特币地址",
+      "limits": "它不能证明余额、过去的付款，也不能证明你会付款。",
+      "paste": {
+        "label": "签名",
+        "placeholder": "smp… (BIP-322) 或钱包显示的 base64 签名"
+      },
+      "privacy": "无：签名在此设备上检查，不查询区块链。你共享给的联系人会得知该地址。",
+      "scripts": {
+        "p2pkh": "传统 (1…)",
+        "p2sh": "嵌套 SegWit (3…)",
+        "p2tr": "Taproot (bc1p…)",
+        "p2wpkh": "原生 SegWit (bc1q…)",
+        "p2wsh": "脚本 / 多签 (P2WSH)",
+        "witness-unknown": "未来的 SegWit 版本"
+      },
+      "signers": {
+        "bitcoin-core": {
+          "description": "旧式消息签名：仅适用于旧式 1… 地址。"
+        },
+        "coldcard": {
+          "description": "BIP-322 消息签名。"
+        },
+        "electrum": {
+          "description": "旧式消息签名：仅适用于旧式 1… 地址。"
+        },
+        "other": {
+          "description": "BIP-322 消息签名。",
+          "label": "其他钱包"
+        },
+        "sparrow": {
+          "description": "BIP-322 消息签名。"
+        },
+        "trezor": {
+          "description": "旧式消息签名：仅适用于旧式 1… 地址。"
+        }
+      },
+      "steps": {
+        "address": "使用这个地址：",
+        "cannotSign": "{{wallet}} 无法以 Ghostly 接受的格式为 {{type}} 地址签名。请使用支持 BIP-322 签名的钱包。",
+        "cannotSignTry": "{{wallet}} 无法以 Ghostly 接受的格式为 {{type}} 地址签名。请试试 {{others}}，或其他支持 BIP-322 签名的钱包。",
+        "command": "命令行：",
+        "commandTestnet": "命令行 (加上 -signet、-testnet4 或 -regtest)：",
+        "either": "{{a}} 或 {{b}}",
+        "limits": "这表明你能为该地址签名。它不表明余额、过去的付款，也不表明你会付款。",
+        "statement": "原样签署这条声明，作为一行，不要添加换行：",
+        "testnet": "测试网络：{{how}}"
+      },
+      "subject": {
+        "help": "证明内容：生成此签名的人在签名时能用此地址背后的密钥签名。不能证明该地址现在或曾经有任何余额。不能证明对方发送或收到过任何付款。不能证明对方会付款给你，或会从此地址花费。",
+        "label": "比特币地址",
+        "placeholder": "bc1q…（测试网络上为 tb1…）"
+      },
+      "summary": "在你自己的钱包中签名消息",
+      "wallets": {
+        "bitcoin-core": {
+          "step1": "Bitcoin Core 只以传统格式为传统地址签名消息 (主网为 1…，测试网络为 m… 或 n…)。在 Receive 标签页选择 Base58 (Legacy) 类型创建一个，或使用 `getnewaddress \"\" legacy`。",
+          "step2": "图形界面：File → Sign message…；粘贴地址，粘贴声明，点 Sign Message，复制签名。",
+          "step3": "命令行：bitcoin-cli signmessage \"<地址>\" '<声明>' (单引号能保留声明中的双引号)。",
+          "testnet": "用 -signet、-testnet4 或 -regtest 运行它；bitcoin-cli 也加上同样的选项。"
+        },
+        "coldcard": {
+          "note": "较旧的固件只以传统格式签名 (Ghostly 对传统 1… 地址接受这种格式)，并限制消息长度和字符。",
+          "step1": "按照适用于你固件的 COLDCARD BIP-322 指南操作：它会根据型号，通过 MicroSD、NFC 或二维码，用它的某个地址签署声明。",
+          "step2": "把与 Ghostly 显示完全一致的声明和你要证明的地址交给它。",
+          "step3": "把它生成的签名粘贴到 Ghostly。"
+        },
+        "electrum": {
+          "step1": "Electrum 以传统格式签名，Ghostly 只对传统 1… 地址 (测试网络上为 m…/n…) 接受这种格式；它默认的 bc1… 钱包需要换用其他钱包。",
+          "step2": "Addresses 标签页 (View → Show Addresses)，右键点击地址 → Sign/verify message。",
+          "step3": "把声明粘贴到 Message，点击 Sign，复制 Signature 并粘贴到 Ghostly。",
+          "testnet": "用 --testnet 或 --signet 启动 Electrum。"
+        },
+        "other": {
+          "step1": "在钱包中查找“签名消息”(Sign message)。要求选择格式时选 BIP-322。",
+          "step2": "用你要证明的地址，签署与 Ghostly 显示完全一致的声明。",
+          "step3": "嵌套 SegWit 地址 (3…，测试网络上为 2…) 需要完整的 BIP-322 签名 (以 ful… 开头)。",
+          "step4": "把签名粘贴到 Ghostly；如果不匹配，它会立即告诉你。"
+        },
+        "sparrow": {
+          "note": "Sparrow 只为软件钱包提供 BIP322 (Simple)；连接的硬件钱包以 Standard (Electrum) 格式签名，Ghostly 只对传统 1… 地址接受这种格式。",
+          "step1": "打开持有该地址的钱包，然后选择 Tools → Sign/Verify Message。",
+          "step2": "Address：粘贴你要证明的地址。",
+          "step3": "Message：原样粘贴 Ghostly 显示的声明。",
+          "step4": "Format：bc1q… 或 bc1p… 地址 (测试网络上为 tb1…) 选 BIP322 (Simple)。传统 1… 地址选 Standard (Electrum)。",
+          "step5": "点 Sign Message，然后复制完整的 Signature (以 smp… 开头) 并粘贴到 Ghostly。",
+          "testnet": "Tools → Restart In → Testnet 或 Signet，并使用该网络上的钱包。"
+        },
+        "trezor": {
+          "step1": "Trezor 以传统格式签名消息；Ghostly 对 Legacy 账户 (1…) 的地址接受这种格式。",
+          "step2": "打开 Legacy 账户，在其菜单中选择 Sign & verify。",
+          "step3": "把声明粘贴到 Message，选择地址，点 Sign，在设备上确认，然后把签名复制到 Ghostly。"
+        }
+      }
+    },
+    "did": {
+      "description": "证明你控制某个去中心化标识符（W3C DID）：用其 DID 文档列出的密钥对声明签名；如果是 did:web，也可以把证明发布在你的 did.json 旁边。",
+      "file": {
+        "check": "然后点“检查”。证明在使用期间，文件一直是公开的；删除它会在每位联系人下次检查时撤回这项证明。",
+        "content": "内容必须完全如下：",
+        "create": "在你的网站服务器上、did.json 旁边创建这个文件：",
+        "serve": "通过 HTTPS 在正是这个地址上提供它，不能有任何重定向，并带上这个头，让浏览器可以读取 (你的 did.json 也需要)："
+      },
+      "limits": "不能证明是谁控制该 DID，只能证明添加证明的人持有它的某个密钥（或它的网站）。",
+      "paste": {
+        "label": "JWS 或签名",
+        "placeholder": "eyJhbGciOi… 或十六进制签名"
+      },
+      "preview": {
+        "document": "文档",
+        "domain": "域名",
+        "key": "密钥",
+        "keyIsIdentifier": "{{method}}，密钥就是标识符",
+        "keys": "密钥",
+        "method": "方法",
+        "noKeys": "没有可签名的密钥：请改为发布",
+        "notUsable": "不可用",
+        "relay": "中继",
+        "unusable": "{{count}} 个密钥：其他曲线，或不用于 authentication 或 assertionMethod",
+        "unusableOne": "1 个密钥：其他曲线，或不用于 authentication 或 assertionMethod"
+      },
+      "privacy": "did:key 和 did:jwk：无，在此设备上检查。did:web：联系人的应用向其 DNS-over-HTTPS 解析器查询你的域名并下载你的 did.json，因此你的网页服务器会看到联系人的 IP 地址。did:dht：联系人的某个 Pkarr 中继（在其网络设置中）会得知查询了哪个 DID。",
+      "service": {
+        "add": "把这一项添加到你的 did.json 的 \"service\" 列表中：",
+        "addAt": "把这一项添加到你的 did.json ({{url}}) 的 \"service\" 列表中：",
+        "check": "然后点“检查”。删除这一项会在每位联系人下次检查时撤回这项证明。"
+      },
+      "signers": {
+        "file": {
+          "description": "仅限 did:web：在你的 did.json 旁上传一个小文件。联系人的应用从你的服务器下载两者。",
+          "label": "在 did.json 旁发布文件"
+        },
+        "service": {
+          "description": "仅限 did:web：在你的 did.json 的 service 列表中添加一项。联系人的应用从那里读取。",
+          "label": "在 did.json 中添加 service"
+        },
+        "sign": {
+          "description": "用你的 DID 文档在 authentication 或 assertionMethod 中列出的密钥对声明签名，然后粘贴 JWS 或原始签名。私钥永远不会进入 Ghostly。",
+          "label": "用 DID 的密钥签名"
+        }
+      },
+      "steps": {
+        "anyKey": "列在 authentication 或 assertionMethod 下的密钥",
+        "jose": "使用 jose (Node.js 20 或更高版本) 生成 JWS：把这段保存为 sign.mjs，并以 JWK 文件形式的 {{curve}} 私钥运行它。",
+        "noble": "使用 @noble/curves (Node.js) 生成原始签名：把这段保存为 sign.mjs，并以十六进制的 {{curve}} 私钥运行它。",
+        "openssl": "或者使用 OpenSSL 3 和 PEM 格式的 {{curve}} 密钥：",
+        "paste": "粘贴它输出的内容：紧凑 JWS ({{alg}}，附加或分离)，或十六进制或 base64 的签名。如果你的 DID 列有多个密钥，可以先写密钥 id：#key-1 <签名>。",
+        "sign": "用 {{key}} 的私钥签署这条声明。它只有一行，末尾没有换行："
+      },
+      "subject": {
+        "help": "did:key、did:jwk、did:dht 或 did:web。联系人能看到完整的 DID 以及签名所用的密钥。",
+        "placeholder": "did:key:z6Mk… 或 did:web:example.com"
+      },
+      "summary": "did:key、did:jwk、did:dht 或 did:web"
+    },
+    "domain": {
+      "description": "证明你控制某个域名：发布一条 DNS TXT 记录或在其网站上放一个文件，只需一次。你共享时联系人的应用会查询它，之后也可以再次检查。",
+      "dns": {
+        "name": "在你的域名注册商或 DNS 服务商处打开 {{domain}} 的 DNS 设置，添加一条使用此名称的 TXT 记录。有些服务商会自动补上域名：这时只需填写 {{domain}} 之前的部分。",
+        "public": "证明在使用期间，记录一直是公开的。删除它会在每位联系人下次检查时撤回这项证明。",
+        "ttl": "把 TTL 设为 300 秒或更短，这样删除记录能很快生效。然后点“检查”：DNS 更改可能需要几分钟才会出现。",
+        "value": "值 (一个字符串，与显示的完全一致)："
+      },
+      "https": {
+        "check": "然后点“检查”。证明在使用期间，文件一直是公开的；删除它会在每位联系人下次检查时撤回这项证明。",
+        "content": "内容必须完全如下：",
+        "file": "在 {{domain}} 的网站服务器上创建这个文件：",
+        "serve": "通过 HTTPS 在正是这个地址上提供它，不能有任何重定向 (包括到 www)，并带上这个头，让浏览器可以读取："
+      },
+      "label": "域名",
+      "limits": "不能证明是谁运营该域名，只能证明添加证明的人可以在其下发布内容。",
+      "nip05": {
+        "approve": "请在你的签名工具中批准 Ghostly 身份声明。"
+      },
+      "privacy": "DNS：联系人的应用向其设置中选定的 DNS-over-HTTPS 解析器（默认 Quad9；无法连接时依次改用 Quad9、Cloudflare 和 Google 中的下一个）查询该记录，因此该解析器会得知此域名被检查过。网站或 NIP-05：解析器会得知该域名，域名的网页服务器会看到联系人的 IP 地址。",
+      "signers": {
+        "dns": {
+          "description": "在你的 DNS 服务商处添加一条 TXT 记录。联系人的应用通过 DNS-over-HTTPS 解析器查询它。",
+          "label": "DNS TXT 记录"
+        },
+        "https": {
+          "description": "向你的网站上传一个小文件。联系人的应用从你的服务器下载它。",
+          "label": "网站上的文件"
+        },
+        "nip05-nip07": {
+          "description": "已在使用 NIP-05？用你域名的 nostr.json 为域名本身指定的 Nostr 密钥签名即可，无需新记录。",
+          "fields": {
+            "domain": {
+              "help": "其 /.well-known/nostr.json 必须为 \"_\"（域名本身）指定此 Nostr 密钥。",
+              "label": "域名"
+            }
+          },
+          "label": "NIP-05 配合浏览器扩展"
+        },
+        "nip05-nip46": {
+          "description": "已在使用 NIP-05？用你域名的 nostr.json 为域名本身指定的 Nostr 密钥签名即可，无需新记录。",
+          "fields": {
+            "bunker": {
+              "label": "签名工具连接链接"
+            },
+            "domain": {
+              "help": "其 /.well-known/nostr.json 必须为 \"_\"（域名本身）指定此 Nostr 密钥。",
+              "label": "域名"
+            }
+          },
+          "label": "NIP-05 配合远程签名工具"
+        }
+      },
+      "subject": {
+        "help": "你控制的域名或子域名。alice.example.com 的证明发布在 alice.example.com 下。",
+        "label": "域名"
+      },
+      "summary": "DNS 记录或网站上的文件"
+    },
+    "nostr": {
+      "approve": "请在你的签名工具中批准 Ghostly 身份声明。",
+      "description": "证明你持有某个 Nostr 密钥：由你的签名工具对声明签名，密钥始终不离开它。",
+      "privacy": "无：签名在此设备上检查。证明永远不会发布到中继。",
+      "signers": {
+        "nip07": {
+          "description": "在此浏览器的 Nostr 扩展中批准。",
+          "label": "浏览器扩展（NIP-07）"
+        },
+        "nip46": {
+          "description": "粘贴签名应用中的 bunker:// 链接，然后在那里批准。",
+          "fields": {
+            "bunker": {
+              "label": "签名工具连接链接"
+            }
+          },
+          "label": "远程签名工具（NIP-46）"
+        }
+      },
+      "subject": {
+        "label": "公钥"
+      },
+      "summary": "用你的 Nostr 签名工具签名一次"
+    },
+    "oidc": {
+      "description": "使用 Google、Microsoft、Apple、GitLab 或 Twitch 登录：提供方用签名令牌向 Ghostly 担保该账号属于你。",
+      "label": "提供方的账号",
+      "limits": "由提供方证明，而不是由你持有的密钥证明：你的联系人信任的是那家公司。",
+      "privacy": "联系人的应用会下载提供方的公钥（例如从 www.googleapis.com），因此提供方会看到某个应用检查了一次登录，但不知道是谁的。联系人能看到账号标识符以及你选择共享的内容。",
+      "signIn": "请在打开的窗口中用 {{provider}} 登录。",
+      "signers": {
+        "oidc-account": {
+          "description": "令牌只包含提供方给你账号的标识符，别无其他。",
+          "label": "登录：只共享账号"
+        },
+        "oidc-email": {
+          "description": "加上你的邮箱地址（如果提供方提供）。",
+          "label": "登录：共享账号和邮箱"
+        },
+        "oidc-profile": {
+          "description": "加上你的邮箱地址以及名称或用户名（如果提供方提供）。",
+          "label": "登录：共享账号、邮箱和名称"
+        }
+      },
+      "subject": {
+        "help": "联系人能看到你在该提供方的账号标识符，以及你选择添加的内容。GitLab 还会加上你直接所属的群组；Apple 从不向 Ghostly 提供你的邮箱。",
+        "label": "提供方"
+      },
+      "summary": "使用 Google、Microsoft、Apple… 登录"
+    },
+    "openpgp": {
+      "description": "证明你持有某个 OpenPGP 密钥：用 gpg 对声明签名（也可以用 YubiKey），然后粘贴结果。",
+      "label": "OpenPGP 密钥",
+      "limits": "持有密钥并不能证明其用户 ID 中的名称或邮箱。",
+      "lookupLabel": "通过 keys.openpgp.org 查验邮箱",
+      "paste": {
+        "signed": "已签名的声明",
+        "signedAndKey": "已签名的声明和公钥"
+      },
+      "privacy": "无：签名在此设备上检查。只有当你为密钥选择 keys.openpgp.org，或请它确认邮箱时，才会联系 keys.openpgp.org。",
+      "signers": {
+        "gpg": {
+          "description": "用 gpg 签名并粘贴它输出的内容，包括公钥。不进行任何查询。"
+        },
+        "gpg-keys-openpgp-org": {
+          "description": "用 gpg 签名并粘贴签名；随后 Ghostly 从 keys.openpgp.org 获取你的公钥，keys.openpgp.org 会得知查询了哪个密钥。",
+          "label": "gpg，密钥来自 keys.openpgp.org"
+        }
+      },
+      "steps": {
+        "card": "使用 YubiKey 或其他 OpenPGP 卡时，gpg 会要求输入卡的 PIN，如果卡需要，还会要求触摸。没有命令行时，把下面的声明保存为文本文件并签署该文件。",
+        "save": "把声明保存到文件 (只有一行，末尾没有换行)：",
+        "sign": "签名，然后复制它输出的全部内容：",
+        "signExport": "签名并导出你的公钥，然后复制它输出的全部内容："
+      },
+      "subject": {
+        "help": "主密钥的完整指纹。持有密钥并不能证明其用户 ID 中的名称或邮箱。",
+        "label": "密钥指纹",
+        "placeholder": "40 个十六进制字符，来自 gpg --fingerprint"
+      },
+      "summary": "用 gpg 签名并粘贴结果"
+    },
+    "pubky": {
+      "approval": {
+        "googleNote": "Passport 用 Google 创建的身份需要 Google 加 Passport 才能恢复：两者缺一不可。",
+        "passport": "在浏览器中批准 (Pubky Passport)",
+        "passportAbout": "打开 Pubky Passport。还没有 Passport 身份？它会提供“使用 Google 继续”并为你创建一个。",
+        "qrNote": "这个二维码就是你的请求：请自己扫描，不要分享。",
+        "ring": "或用 Pubky Ring 扫描"
+      },
+      "description": "证明你持有某个 Pubky 密钥：在 Pubky Ring 或 Pubky Passport 中批准一次请求，Ghostly 会在你的 homeserver 上写入一个小的证明文件。联系人的应用通过你密钥自己的记录读取它。",
+      "limits": "文件位于你的 homeserver 上：运营它的人也能在那里写入。它不能证明是谁持有该密钥。",
+      "privacy": "联系人的应用从 Pubky 的 Pkarr 中继（pkarr.pubky.org、pkarr.pubky.app）读取你密钥的记录，通过其 DNS-over-HTTPS 解析器查找你 homeserver 的地址（无法连接时改用下一个；它只连接公网地址的 443 端口），再从你的 homeserver 读取证明文件，homeserver 会看到联系人的 IP 地址。",
+      "progress": {
+        "approved": "已批准。正在检查 Pubky 授予的权限…",
+        "deleting": "正在从你的 homeserver 删除证明文件…",
+        "popupBlocked": "你的浏览器拦截了 Passport 窗口：请允许 Ghostly 弹出窗口后再点一次按钮，或用 Pubky Ring 扫描二维码。",
+        "writing": "正在把证明写入你的 homeserver…"
+      },
+      "signers": {
+        "pubky-auth": {
+          "action": "继续",
+          "description": "一次请求：在浏览器中的 Pubky Passport 里批准，或用 Pubky Ring 扫描。Ghostly 只请求在你 homeserver 的一个新文件夹中写入一个小文件。",
+          "label": "Pubky Ring 或 Pubky Passport"
+        }
+      },
+      "subject": {
+        "help": "在你批准时由 Pubky Ring 或 Passport 提供。",
+        "label": "Pubky 密钥"
+      },
+      "summary": "在 Pubky Ring 或 Passport 中批准",
+      "unpublish": {
+        "description": "同时删除你 homeserver 上的证明文件：由于 Ghostly 没有保留访问权限，需要在 Pubky Ring 或 Passport 中再批准一次。"
+      }
+    },
+    "ssh": {
+      "description": "证明你持有某个 SSH 密钥（包括 FIDO 安全密钥）：用 ssh-keygen 对声明签名一次，然后粘贴签名。",
+      "label": "SSH 密钥",
+      "paste": {
+        "label": "SSH 签名"
+      },
+      "privacy": "无：签名在此设备上检查。密钥指纹会把你共享它的所有聊天关联起来。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "用 OpenSSH 的 ssh-keygen（8.1 或更高版本）签名：密钥文件、ssh-agent 或 FIDO 安全密钥均可。"
+        }
+      },
+      "steps": {
+        "orSave": "或者把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。",
+        "paste": "粘贴它输出的完整签名，从 -----BEGIN SSH SIGNATURE----- 到 -----END SSH SIGNATURE-----。你的私钥不会离开你的电脑。",
+        "run": "在终端中运行这条命令 (macOS、Linux，或 Windows 上的 Git Bash/WSL)。如果你的密钥不是 ~/.ssh/id_ed25519，请修改 -f 后面的路径；当私钥在 ssh-agent 或安全密钥中时，用 .pub 路径也可以。",
+        "save": "把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。"
+      },
+      "subject": {
+        "help": "你的公钥，即 .pub 文件中的那一行。联系人能看到它的指纹。",
+        "label": "公钥",
+        "placeholder": "ssh-ed25519 AAAA…（或 SHA256:…）"
+      },
+      "summary": "用 ssh-keygen 签名一次"
+    },
+    "ssh-github": {
+      "description": "证明你持有你的 GitHub 账号公开的某个 SSH 密钥：用 ssh-keygen 对声明签名一次。无需登录 GitHub。",
+      "label": "GitHub（SSH 密钥）",
+      "limits": "不能证明 GitHub 登录：只能证明该账号列出的某个密钥属于你，且仅在它仍被列出期间有效。",
+      "paste": {
+        "label": "SSH 签名"
+      },
+      "privacy": "在你共享时以及每次重新检查时，联系人的应用会向 api.github.com 请求此账号的公开 SSH 密钥：GitHub 会得知该账号被查询，以及来自哪个 IP 地址。你添加时，此应用也一样。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "用你的 GitHub 账号列出的 SSH 密钥签名（Settings → SSH keys）。"
+        }
+      },
+      "steps": {
+        "orSave": "或者把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。",
+        "paste": "粘贴它输出的完整签名，从 -----BEGIN SSH SIGNATURE----- 到 -----END SSH SIGNATURE-----。你的私钥不会离开你的电脑。",
+        "run": "在终端中运行这条命令 (macOS、Linux，或 Windows 上的 Git Bash/WSL)。如果你的密钥不是 ~/.ssh/id_ed25519，请修改 -f 后面的路径；当私钥在 ssh-agent 或安全密钥中时，用 .pub 路径也可以。",
+        "save": "把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。"
+      },
+      "subject": {
+        "label": "GitHub 用户名"
+      },
+      "summary": "你的 GitHub 账号列出的密钥"
+    },
+    "ssh-gitlab": {
+      "description": "证明你持有你的 GitLab 账号公开的某个 SSH 密钥：用 ssh-keygen 对声明签名一次。无需登录 GitLab。",
+      "label": "GitLab（SSH 密钥）",
+      "limits": "不能证明 GitLab 登录：只能证明该账号列出的某个密钥属于你，且仅在它仍被列出期间有效。",
+      "paste": {
+        "label": "SSH 签名"
+      },
+      "privacy": "在你共享时以及每次重新检查时，联系人的应用会向 gitlab.com 请求此账号的公开 SSH 密钥：GitLab 会得知该账号被查询，以及来自哪个 IP 地址。你添加时，此应用也一样。",
+      "signers": {
+        "ssh-keygen": {
+          "description": "用你的 GitLab 账号列出的 SSH 密钥签名（Settings → SSH keys）。"
+        }
+      },
+      "steps": {
+        "orSave": "或者把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。",
+        "paste": "粘贴它输出的完整签名，从 -----BEGIN SSH SIGNATURE----- 到 -----END SSH SIGNATURE-----。你的私钥不会离开你的电脑。",
+        "run": "在终端中运行这条命令 (macOS、Linux，或 Windows 上的 Git Bash/WSL)。如果你的密钥不是 ~/.ssh/id_ed25519，请修改 -f 后面的路径；当私钥在 ssh-agent 或安全密钥中时，用 .pub 路径也可以。",
+        "save": "把这条声明保存到文件，运行 ssh-keygen -Y sign -n {{namespace}} -f <你的密钥> <文件>，然后粘贴它写出的 <文件>.sig。"
+      },
+      "subject": {
+        "label": "GitLab 用户名",
+        "placeholder": "用户名"
+      },
+      "summary": "你的 GitLab 账号列出的密钥"
+    }
   },
   "received": {
     "checked": "{{category}} · {{time}} 检查",

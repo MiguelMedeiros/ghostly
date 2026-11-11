@@ -14,6 +14,8 @@ let apps: readonly InstalledAppView[] | null = null;
 /** The built-in apps this profile is offered (`appBuiltIns`): read with the installed ones, each time. */
 let offers: readonly BuiltInAppOffer[] = [];
 let loading: Promise<void> | null = null;
+/** Why the last read failed (storage: a private window, a full disk), or null: the list is then no proof of none. */
+let failed: unknown = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -27,6 +29,23 @@ engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) void
 /** How many reads were asked: of two on their way at once, the one asked last is what shows. */
 let asked = 0;
 
+/**
+ * `next` with each app that reads as before kept as the object held, and the list held when every app is: each Apps
+ * page visit (in every tab) reads the list again, and what did not change draws nothing again, no app card included.
+ */
+function kept<T extends { ref: string }>(held: readonly T[] | null, next: readonly T[]): readonly T[] {
+  if (!held) return next;
+  const before = new Map(held.map((a) => [a.ref, a]));
+  let same = held.length === next.length;
+  const out = next.map((a, i) => {
+    const old = before.get(a.ref);
+    const view = old && JSON.stringify(old) === JSON.stringify(a) ? old : a;
+    if (view !== held[i]) same = false;
+    return view;
+  });
+  return same ? held : out;
+}
+
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
   // An engine from before built-in apps (the extension's, another tab's) has no `appBuiltIns`: none offered.
@@ -36,8 +55,8 @@ export function refreshInstalledApps(): Promise<void> {
   const read: Promise<void> = engine.call("appList").then(async (list) => {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
-    offers = offered; apps = list; tell(); stopTakenDown(list);
-  }, () => { if (mine !== asked) return loading ?? undefined; apps ??= []; tell(); }).finally(() => { if (loading === read) loading = null; });
+    offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list);
+  }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
 }
@@ -47,7 +66,14 @@ export function forgetInstalledApps(): void {
   apps = null;
   offers = [];
   loading = null;
+  failed = null;
   asked++;
+}
+
+/** Why the last read of the installed apps failed, or null when it did not: the Apps page says it, not "No apps yet." */
+export function useInstalledAppsFailure(enabled: boolean): unknown {
+  const snapshot = () => (enabled ? failed : null);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
@@ -57,8 +83,13 @@ export function forgetInstalledApps(): void {
 export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] | null {
   const snapshot = () => (enabled ? apps : null);
   const list = useSyncExternalStore(subscribe, snapshot, snapshot);
-  useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
+  useFirstRead(enabled);
   return list;
+}
+
+/** Reads the list when the first screen that shows it does. */
+function useFirstRead(enabled: boolean): void {
+  useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
 }
 
 /**
@@ -75,10 +106,21 @@ const NONE: readonly BuiltInAppOffer[] = [];
 /**
  * The app installed here under `ref`, if any: the one an app card with that ref opens (WISP 405 § An app). The card and
  * its row both name it from here, so what is read out is what is shown. No `ref` (not an app card): nothing is asked.
+ * Another app's change draws no card of this one again.
  */
 export function useInstalledApp(ref: string | undefined): InstalledAppView | undefined {
-  const installed = useInstalledApps(ref !== undefined);
-  return ref === undefined ? undefined : installed?.find((a) => a.ref === ref);
+  const snapshot = () => (ref === undefined ? undefined : apps?.find((a) => a.ref === ref));
+  const app = useSyncExternalStore(subscribe, snapshot, snapshot);
+  useFirstRead(ref !== undefined);
+  return app;
+}
+
+/**
+ * A version found revoked or removed (WISP 1200 § Takedowns): every screen that shows the installed app (the Apps page,
+ * the composer's Apps, an app card in a chat) says "Stopped" and offers no plain Open.
+ */
+export function appStopped(app: InstalledAppView): boolean {
+  return app.run.status === "revoked" || app.run.status === "removed";
 }
 
 /** The installed apps as last read (null until a screen read them): for a line, not a hook. */

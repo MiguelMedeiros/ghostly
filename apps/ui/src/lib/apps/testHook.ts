@@ -6,6 +6,7 @@
 import type { AppFrameEvent } from "@ghostly/core";
 import { startApp, type AppLaunch, type AppStopReason, type RunningApp } from "./broker";
 import { memoryHost, memoryAppId } from "./memoryHost";
+import { onAppInput } from "./open";
 import { runnerAvailable } from "./runnerCheck";
 
 export interface AppsTestHook {
@@ -14,6 +15,8 @@ export interface AppsTestHook {
   /** Where an app is, and why it stopped. */
   status(handle: number): { phase: RunningApp["phase"]; stopped: AppStopReason | null };
   stop(handle: number): void;
+  /** How many times the person's tap or key in an app they are in reached the page (the runner's `activity`). */
+  inputs(): number;
   /** Every host call, with the app reference the broker named. */
   calls(): { op: string; ref: string; scope?: string; linkId?: string; key?: string }[];
   /** What an app keeps in a scope. */
@@ -31,6 +34,8 @@ export interface AppsTestHook {
 export function installAppsTestHook(): void {
   const host = memoryHost();
   const apps: { app: RunningApp; stopped: AppStopReason | null }[] = [];
+  let inputs = 0;
+  onAppInput(() => { inputs += 1; });
   const hook: AppsTestHook = {
     open({ files, chat, unguarded, ...launch }) {
       host.files.set(launch.ref, new Map(Object.entries(files ?? {}).map(([path, text]) => [path, new TextEncoder().encode(text)])));
@@ -54,6 +59,7 @@ export function installAppsTestHook(): void {
     },
     status: (handle) => ({ phase: apps[handle]!.app.phase, stopped: apps[handle]!.stopped }),
     stop: (handle) => apps[handle]?.app.stop(),
+    inputs: () => inputs,
     calls: () => host.calls.map((call) => ({ ...call })),
     stored: (ref, scope) => Object.fromEntries(host.stored.get(`${ref} ${scope}`) ?? []),
     sent: () => host.sent.map((s) => ({ ...s })),

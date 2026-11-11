@@ -22,6 +22,41 @@ function dohSentence(file) {
   return text.slice(at, text.indexOf(". ", at) + 1);
 }
 
+/** The hosts of a default relay list (`name = [ "https://…", … ]`) in a source file. */
+function defaultHosts(file, name) {
+  const list = read(file).match(new RegExp(`${name}[^=]*=\\s*\\[([\\s\\S]*?)\\]`));
+  assert.ok(list, `${name} is in ${file}`);
+  return [...list[1].matchAll(/"(https:\/\/[^"]+)"/g)].map((m) => new URL(m[1]).hostname);
+}
+
+test("the privacy page and the agents FAQ name the default relays the project runs, and the FAQ how to replace them", () => {
+  const pkarr = defaultHosts("packages/core/src/relay.ts", "DEFAULT_RELAYS");
+  const iroh = defaultHosts("packages/browser/src/platform/irohWeb.ts", "DEFAULT_IROH_RELAYS");
+  const own = [...pkarr, ...iroh].filter((host) => host.endsWith(".miguelmedeiros.dev"));
+  assert.deepEqual(own, ["pkarr.miguelmedeiros.dev", "iroh.miguelmedeiros.dev"]);
+  const faq = read("apps/website/content/agents-faq.ts");
+  for (const file of ["apps/website/app/privacy/page.tsx", "apps/website/content/agents-faq.ts"]) {
+    for (const host of own) assert.ok(read(file).includes(host), `${file} names ${host}`);
+  }
+  for (const name of ["GHOSTLY_PKARR_RELAYS", "GHOSTLY_IROH_RELAYS"]) assert.ok(faq.includes(name), `the agents FAQ names ${name}`);
+  assert.doesNotMatch(faq, /no Ghostly server in the path|Nothing goes to a Ghostly server/);
+  // The CLI's Iroh is the wasm build, relay only (packages/cli/src/runtime/engine.ts): never a direct path.
+  const direct = faq.match(/directly over (?:\w+(?:, | or ))*\w+/g) ?? [];
+  assert.ok(direct.length, "the agents FAQ says how the two ends connect directly");
+  for (const ways of direct) assert.doesNotMatch(ways, /Iroh/, `the CLI's Iroh is never direct: "${ways}"`);
+});
+
+test("the terms name the default relays the project runs among what it runs", () => {
+  const own = [...defaultHosts("packages/core/src/relay.ts", "DEFAULT_RELAYS"), ...defaultHosts("packages/browser/src/platform/irohWeb.ts", "DEFAULT_IROH_RELAYS")]
+    .filter((host) => host.endsWith(".miguelmedeiros.dev"));
+  const text = read("apps/website/app/terms/page.tsx").replace(/\s+/g, " ");
+  const start = text.indexOf('title="What we run, and what we do not"');
+  assert.ok(start >= 0, "the terms have a section on what the project runs");
+  const section = text.slice(start, text.indexOf("</Section>", start));
+  for (const host of own) assert.ok(section.includes(host), `the terms' "What we run" names ${host}`);
+  assert.doesNotMatch(section, /nothing else that Ghostly depends on|do not run any relay/);
+});
+
 test("the privacy page and /developers name every resolver a domain lookup may ask, in its order", () => {
   const names = dohResolvers();
   assert.deepEqual(names, ["Quad9", "Cloudflare", "Google"]);

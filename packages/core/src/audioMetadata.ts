@@ -1,0 +1,511 @@
+/**
+ * What an audio file leaves with. A recording made in another app, or a song a tagger went through, says more than its
+ * sound: a title or a file name that is where it was recorded (a phone's recorder names it after the place), a comment,
+ * a location tag, a picture, the date. The sender removes them before the file is stored and its digest computed, as
+ * pictures' and videos' are (pictureMetadata.ts, videoMetadata.ts), without decoding or re-encoding a sample, and the
+ * file keeps its size, so no offset in it moves and it plays as it did:
+ *
+ * - MP4 audio (M4A, a voice note recorded in MP4): videoMetadata.ts's box walk, its `udta` and `meta` emptied.
+ * - MP3 and AAC: an ID3v2 tag at the start becomes an empty one (its frames zeros: padding), one at the end (with its
+ *   footer), an APEv2 tag's items, a Lyrics3v2 tag and an ID3v1 tag's fields become zeros.
+ * - FLAC: every metadata block but its stream info and seek table (a Vorbis comment, a picture, a cue sheet, an
+ *   application's) becomes padding, zeroed.
+ * - Ogg Opus, Vorbis and Speex: the comment header keeps its vendor (the encoder's name) and has no comment, the bytes
+ *   after it zeros; each page it changed has its checksum made again.
+ * - WAV: every chunk but its format, data and the ones of the sound itself (`fact`, `cue `, `smpl`, `inst`) becomes
+ *   `JUNK`, zeroed (an INFO list, an `id3 ` chunk, a broadcast `bext` with its date and originator, XMP).
+ * - WebM and Matroska, audio or video: `Tags`, `Attachments`, `Chapters`, the title, the date, the file names and each
+ *   track's name become `Void` elements (and the SeekHead's entries for them); the muxer's and the writing app's names
+ *   are zeroed. Clusters, cues and track settings are kept as they are.
+ *
+ * Fail-closed: a file that is one of these by its bytes and whose tags cannot be removed (truncated, malformed) is
+ * refused with `NO_AUDIO_METADATA`, never sent as it was. Any other file goes as it is (other audio formats too).
+ */
+import { NO_VIDEO_METADATA, readingAhead, videoMetadataPatches, type VideoPatch, type VideoSource } from "./videoMetadata";
+
+export const AUDIO_METADATA_LIMITS = {
+  /** The largest header, element or tag read whole (an Ogg comment header with a picture in it): past this the file is refused. */
+  maxReadBytes: 64 * 1024 * 1024,
+  /** The most pages, chunks, blocks or elements walked. */
+  maxParts: 1_000_000,
+  /** Bytes read first to tell an audio file from another file. */
+  headBytes: 64,
+} as const;
+
+/** Why an audio file is refused: its tags could not be removed, so it does not go at all. */
+export const NO_AUDIO_METADATA = "This audio cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded";
+
+/** Zeros put in a Blob a slice at a time: a Blob's Blob parts are not copied, so a zeroed range of any size holds no more. */
+const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
+
+const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
+const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const syncsafe = (b: Uint8Array, at: number) => (b[at]! << 21) | (b[at + 1]! << 14) | (b[at + 2]! << 7) | b[at + 3]!;
+const latin = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+
+/** Refuses the file where its bytes are not what this expects. */
+function check(ok: boolean): asserts ok {
+  if (!ok) throw new Error(NO_AUDIO_METADATA);
+}
+
+/** The file read as patches are made: `length` of its bytes from `offset`, all of them or refused. */
+type Read = (offset: number, length: number) => Promise<Uint8Array>;
+
+function exactly(source: VideoSource): Read {
+  return async (offset, length) => {
+    check(offset >= 0 && length >= 0 && length <= AUDIO_METADATA_LIMITS.maxReadBytes && offset + length <= source.size);
+    const bytes = await source.read(offset, length);
+    check(bytes.length === length);
+    return bytes;
+  };
+}
+
+/** Counts the parts walked, so a file of millions of tiny ones is refused rather than walked forever. */
+function counter(): () => void {
+  let parts = 0;
+  return () => check(++parts <= AUDIO_METADATA_LIMITS.maxParts);
+}
+
+// ID3, APE, Lyrics3: MP3's and AAC's tags.
+
+/** An ID3v2 header at `at` of `b`: its version 2 to 4 and its size four 7-bit bytes, or none. */
+const isId3 = (b: Uint8Array, at = 0) => b.length >= at + 10 && text(b, at, 3) === "ID3" && b[at + 3]! >= 2 && b[at + 3]! <= 4 && b[at + 4] !== 0xff
+  && [6, 7, 8, 9].every((i) => b[at + i]! < 0x80);
+
+/**
+ * The ID3v2 tag whose header is `head`, at `at`: made an empty one where it is, its frames (and an extended header)
+ * zeros, which is its padding, its flags but the footer's cleared. Returns where it ends.
+ */
+async function emptyId3(read: Read, size: number, at: number, head: Uint8Array, patches: VideoPatch[]): Promise<number> {
+  const body = syncsafe(head, 6), footer = head[3] === 4 && head[5]! & 0x10 ? 10 : 0, end = at + 10 + body + footer;
+  check(end <= size);
+  const flags = Uint8Array.of(footer ? 0x10 : 0);
+  patches.push({ start: at + 5, end: at + 6, bytes: flags });
+  if (body) patches.push({ start: at + 10, end: at + 10 + body });
+  if (footer) {
+    check(text(await read(at + 10 + body, 3), 0, 3) === "3DI");
+    patches.push({ start: at + 10 + body + 5, end: at + 10 + body + 6, bytes: flags });
+  }
+  return end;
+}
+
+/**
+ * The tags at the end of an MP3 or AAC file (after `start`): an ID3v1 (and its extended part), then any of an APEv2
+ * tag, a Lyrics3v2 tag and an ID3v2 tag with a footer, in any order. Each found is emptied where it is.
+ */
+async function trailingTags(read: Read, size: number, start: number, patches: VideoPatch[]): Promise<void> {
+  let end = size;
+  if (end - 128 >= start && text(await read(end - 128, 3), 0, 3) === "TAG") {
+    // Its fields zeros, its genre none.
+    patches.push({ start: end - 125, end: end - 1 }, { start: end - 1, end, bytes: Uint8Array.of(0xff) });
+    end -= 128;
+    if (end - 227 >= start && text(await read(end - 227, 4), 0, 4) === "TAG+") {
+      patches.push({ start: end - 223, end });
+      end -= 227;
+    }
+  }
+  const count = counter();
+  for (;;) {
+    count();
+    if (end - 32 >= start) {
+      const footer = await read(end - 32, 32);
+      if (text(footer, 0, 8) === "APETAGEX") {
+        // Its size counts its items and footer; a header before them says so in its flags.
+        const length = u32le(footer, 12), header = footer[23]! & 0x80 ? 32 : 0, tagStart = end - length - header;
+        check(length >= 32 && tagStart >= start);
+        if (header) {
+          check(text(await read(tagStart, 8), 0, 8) === "APETAGEX");
+          patches.push({ start: tagStart + 16, end: tagStart + 20 });
+        }
+        if (length > 32) patches.push({ start: tagStart + header, end: end - 32 });
+        patches.push({ start: end - 16, end: end - 12 });
+        end = tagStart;
+        continue;
+      }
+    }
+    if (end - 15 >= start) {
+      const footer = await read(end - 15, 15);
+      if (text(footer, 6, 9) === "LYRICS200") {
+        const length = /^\d{6}$/.test(text(footer, 0, 6)) ? Number(text(footer, 0, 6)) : -1, tagStart = end - 15 - length;
+        check(length >= 11 && tagStart >= start && text(await read(tagStart, 11), 0, 11) === "LYRICSBEGIN");
+        if (length > 11) patches.push({ start: tagStart + 11, end: end - 15 });
+        end = tagStart;
+        continue;
+      }
+    }
+    if (end - 10 >= start) {
+      const footer = await read(end - 10, 10);
+      if (text(footer, 0, 3) === "3DI") {
+        check([6, 7, 8, 9].every((i) => footer[i]! < 0x80));
+        const tagStart = end - 20 - syncsafe(footer, 6);
+        check(tagStart >= start);
+        const head = await read(tagStart, 10);
+        check(isId3(head));
+        check(await emptyId3(read, size, tagStart, head, patches) === end);
+        end = tagStart;
+        continue;
+      }
+    }
+    return;
+  }
+}
+
+/** An MPEG audio frame's or an ADTS header's first bytes: 11 bits set, a version and a layer that are some. */
+const isFrame = (b: Uint8Array, at: number) => b.length >= at + 2 && b[at] === 0xff && (b[at + 1]! & 0xe0) === 0xe0 && (b[at + 1]! & 0x18) !== 0x08;
+
+// FLAC.
+
+const FLAC_KEEPS = new Set([0 /* STREAMINFO */, 3 /* SEEKTABLE */]);
+
+/** A FLAC's metadata blocks from `at` (its `fLaC`): all but its stream info and seek table become padding, zeroed. */
+async function flac(read: Read, size: number, at: number, patches: VideoPatch[]): Promise<number> {
+  const count = counter();
+  for (at += 4; ;) {
+    count();
+    const head = await read(at, 4);
+    const last = head[0]! & 0x80, type = head[0]! & 0x7f, end = at + 4 + ((head[1]! << 16) | (head[2]! << 8) | head[3]!);
+    check(type !== 127 && end <= size);
+    if (!FLAC_KEEPS.has(type)) {
+      if (type !== 1) patches.push({ start: at, end: at + 1, bytes: Uint8Array.of(last | 1) });
+      if (end > at + 4) patches.push({ start: at + 4, end });
+    }
+    at = end;
+    if (last) return at;
+  }
+}
+
+// Ogg.
+
+const OGG_CRC = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let crc = i << 24;
+    for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
+    table[i] = crc >>> 0;
+  }
+  return table;
+})();
+
+/** Ogg's page checksum, over the page with its checksum's four bytes zeroed. */
+function oggCrc(page: Uint8Array): number {
+  let crc = 0;
+  for (let i = 0; i < page.length; i++) crc = ((crc << 8) ^ OGG_CRC[((crc >>> 24) ^ (i >= 22 && i < 26 ? 0 : page[i]!)) & 0xff]!) >>> 0;
+  return crc;
+}
+
+/**
+ * How a codec's comment header (its second packet) is laid out: its magic's length, and whether a framing bit
+ * follows its comments (Vorbis). Known by the first bytes of its first packet.
+ */
+const OGG_CODECS: { head: string; comments: string; framing: boolean }[] = [
+  { head: "OpusHead", comments: "OpusTags", framing: false },
+  { head: "\x01vorbis", comments: "\x03vorbis", framing: true },
+  { head: "Speex   ", comments: "", framing: false },
+];
+
+/**
+ * A comment header with no comment: its magic and vendor kept, its count 0 (and Vorbis's framing bit set), the rest
+ * zeros: padding after the comments, which Opus says may be there and Vorbis's and Speex's readers do not read.
+ */
+function noComments(packet: Uint8Array, codec: (typeof OGG_CODECS)[number]): Uint8Array {
+  const magic = codec.comments.length;
+  check(text(packet, 0, magic) === codec.comments && packet.length >= magic + 4);
+  const count = magic + 4 + u32le(packet, magic);
+  check(count + 4 + (codec.framing ? 1 : 0) <= packet.length);
+  const out = new Uint8Array(packet.length);
+  out.set(packet.subarray(0, count));
+  if (codec.framing) out[count + 4] = 1;
+  return out;
+}
+
+/**
+ * An Ogg file's pages walked: each logical stream's comment header (a chained file has one per link) made one with no
+ * comment where it is, across the pages it spans, and those pages' checksums made again.
+ */
+async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  /** A logical stream: its packets so far, the parts of the one being read (with the page each is on), its codec (null: one not known). */
+  interface Stream { packet: number; ranges: [number, number, number][]; codec?: (typeof OGG_CODECS)[number] | null }
+  const streams = new Map<number, Stream>();
+  /** The bytes put in the pages changed, by where each page starts: by where they go in the file. */
+  const pages = new Map<number, [number, Uint8Array][]>();
+  const packetOf = async (ranges: [number, number, number][]) => {
+    const length = ranges.reduce((sum, [start, end]) => sum + end - start, 0);
+    check(length <= AUDIO_METADATA_LIMITS.maxReadBytes);
+    const packet = new Uint8Array(length);
+    let at = 0;
+    for (const [start, end] of ranges) { packet.set(await read(start, end - start), at); at += end - start; }
+    return packet;
+  };
+  const count = counter();
+  for (let at = 0; at < size;) {
+    count();
+    const head = await read(at, 27);
+    check(text(head, 0, 4) === "OggS" && head[4] === 0);
+    const lacing = await read(at + 27, head[26]!);
+    const end = at + 27 + lacing.length + lacing.reduce((sum, l) => sum + l, 0);
+    check(end <= size);
+    const serial = u32le(head, 14);
+    if (head[5]! & 2) streams.set(serial, { packet: 0, ranges: [] });
+    const stream = streams.get(serial);
+    check(!!stream);
+    let offset = at + 27 + lacing.length;
+    for (const length of lacing) {
+      if (stream.packet <= 1 && stream.codec !== null) stream.ranges.push([offset, offset + length, at]);
+      offset += length;
+      if (length === 255) continue;
+      // A packet ends.
+      if (stream.packet === 0) {
+        const first = await packetOf(stream.ranges);
+        stream.codec = OGG_CODECS.find((codec) => text(first, 0, codec.head.length) === codec.head) ?? null;
+      } else if (stream.packet === 1 && stream.codec) {
+        const emptied = noComments(await packetOf(stream.ranges), stream.codec);
+        let from = 0;
+        for (const [start, until, page] of stream.ranges) {
+          if (!pages.has(page)) pages.set(page, []);
+          pages.get(page)!.push([start, emptied.subarray(from, from + until - start)]);
+          from += until - start;
+        }
+      }
+      stream.packet++;
+      stream.ranges = [];
+    }
+    at = end;
+  }
+  // A stream cut before its comment header ended would go with it.
+  for (const stream of streams.values()) check(stream.codec === null || stream.packet > 1);
+  for (const [start, changes] of pages) {
+    const head = await read(start, 27), lacing = await read(start + 27, head[26]!);
+    const end = start + 27 + lacing.length + lacing.reduce((sum, l) => sum + l, 0);
+    const page = (await read(start, end - start)).slice();
+    for (const [where, bytes] of changes) page.set(bytes, where - start);
+    const crc = oggCrc(page);
+    page.set([crc & 0xff, (crc >>> 8) & 0xff, (crc >>> 16) & 0xff, crc >>> 24], 22);
+    patches.push({ start, end, bytes: page });
+  }
+}
+
+// WAV.
+
+/** The chunks a WAV's sound is made of, kept; any other becomes `JUNK`. */
+const WAV_KEEPS = new Set(["fmt ", "data", "fact", "cue ", "smpl", "inst"]);
+const WAV_SPACE = new Set(["JUNK", "junk", "PAD ", "FLLR"]);
+
+async function wav(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  for (let at = 12; at + 8 <= size;) {
+    count();
+    const head = await read(at, 8);
+    const id = text(head, 0, 4), length = u32le(head, 4);
+    let end = at + 8 + length + (length & 1);
+    // Sound that runs to the end: a recorder's that never wrote its size (0, or all ones), or one cut short.
+    if (id === "data") end = length ? Math.min(end, size) : size;
+    else check(at + 8 + length <= size);
+    if (!WAV_KEEPS.has(id)) {
+      if (!WAV_SPACE.has(id)) patches.push({ start: at, end: at + 4, bytes: latin("JUNK") });
+      if (length) patches.push({ start: at + 8, end: at + 8 + length });
+    }
+    at = Math.min(end, size);
+  }
+}
+
+// WebM and Matroska.
+
+const EBML_HEADER = 0x1a45dfa3, SEGMENT = 0x18538067, CLUSTER = 0x1f43b675, VOID = 0xec, CRC32 = 0xbf;
+const SEEK_HEAD = 0x114d9b74, INFO = 0x1549a966, TRACKS = 0x1654ae6b, CUES = 0x1c53bb6b;
+/** What a segment's sound and pictures are made of, kept; any other top-level element (Tags, Attachments, Chapters) becomes Void. */
+const SEGMENT_KEEPS = new Set([SEEK_HEAD, INFO, TRACKS, CLUSTER, CUES]);
+/** What a cluster holds: one of unknown size ends where an element that is none of these starts. */
+const CLUSTER_CHILDREN = new Set([0xe7, 0x5854, 0xa7, 0xab, 0xa3, 0xa0, 0xaf, VOID, CRC32]);
+/** What Info keeps: the timing, the segment's IDs; the muxer's and writing app's names, zeroed. Any other (a title, a date, file names) becomes Void. */
+const INFO_KEEPS = new Set([0x2ad7b1, 0x4489, 0x73a4, 0x4444, 0x3cb923, 0x3eb923, 0x6924]);
+const INFO_ZEROED = new Set([0x4d80, 0x5741]);
+const TRACK_ENTRY = 0xae, TRACK_NAME = 0x536e, SEEK = 0x4dbb, SEEK_ID = 0x53ab;
+
+interface Element { id: number; start: number; body: number; end: number; unknown: boolean }
+
+/** The element whose header is at `at` of `b` (`base` its offset in the file); one of unknown size ends at `limit`. */
+function element(b: Uint8Array, at: number, limit: number, base = 0): Element {
+  check(at < b.length);
+  const idLength = Math.clz32(b[at]!) - 23;
+  check(idLength >= 1 && idLength <= 4 && at + idLength < b.length);
+  let id = 0;
+  for (let i = 0; i < idLength; i++) id = id * 256 + b[at + i]!;
+  const sizeAt = at + idLength, sizeLength = Math.clz32(b[sizeAt]!) - 23;
+  check(sizeLength >= 1 && sizeLength <= 8 && sizeAt + sizeLength <= b.length);
+  let size = b[sizeAt]! & (0xff >> sizeLength), ones = size === 0xff >> sizeLength;
+  for (let i = 1; i < sizeLength; i++) {
+    size = size * 256 + b[sizeAt + i]!;
+    ones &&= b[sizeAt + i] === 0xff;
+  }
+  const body = base + sizeAt + sizeLength;
+  return { id, start: base + at, body, end: ones ? limit : body + size, unknown: ones };
+}
+
+/** An element's header read from the file at `at`. */
+async function elementAt(source: VideoSource, at: number, limit: number): Promise<Element> {
+  return element(await source.read(at, 12), 0, limit, at);
+}
+
+/** A Void element `length` bytes long: its ID, its size in as many bytes as it takes to fill it, the rest zeros. */
+function voidHeader(length: number): Uint8Array {
+  for (let sizeLength = 1; sizeLength <= 8; sizeLength++) {
+    const body = length - 1 - sizeLength;
+    if (body < 0 || body >= 2 ** (7 * sizeLength) - 1) continue;
+    const header = new Uint8Array(1 + sizeLength);
+    header[0] = VOID;
+    for (let i = sizeLength, rest = body; i >= 1; i--, rest = Math.floor(rest / 256)) header[i] = rest % 256;
+    header[1]! |= 0x80 >> (sizeLength - 1);
+    return header;
+  }
+  check(false);
+}
+
+/** `el` of `b` (read whole, `el`'s offsets in it) made Void where it is. */
+function voidIn(b: Uint8Array, el: Element): void {
+  const header = voidHeader(el.end - el.start);
+  b.fill(0, el.start, el.end);
+  b.set(header, el.start);
+}
+
+/** The children of `parent` (in `b`, read whole) as elements, each within it. */
+function childrenOf(b: Uint8Array, parent: Element): Element[] {
+  const found: Element[] = [];
+  for (let at = parent.body; at < parent.end;) {
+    const child = element(b.subarray(0, parent.end), at, parent.end);
+    check(!child.unknown && child.end <= parent.end);
+    found.push(child);
+    at = child.end;
+  }
+  return found;
+}
+
+/**
+ * A top-level element of a segment read whole and changed in it: Info without its title, date and file names (its
+ * muxer's and writing app's names zeroed), Tracks without their names, a SeekHead without the entries for what
+ * became Void. A CRC-32 in them, wrong once they changed, becomes Void too.
+ */
+function stripTopLevel(b: Uint8Array): void {
+  const top = element(b, 0, b.length);
+  check(!top.unknown && top.end === b.length);
+  for (const child of childrenOf(b, top)) {
+    if (child.id === CRC32) voidIn(b, child);
+    else if (top.id === INFO) {
+      if (INFO_ZEROED.has(child.id)) b.fill(0, child.body, child.end);
+      else if (!INFO_KEEPS.has(child.id) && child.id !== VOID) voidIn(b, child);
+    } else if (top.id === TRACKS && child.id === TRACK_ENTRY) {
+      for (const part of childrenOf(b, child)) if (part.id === TRACK_NAME || part.id === CRC32) voidIn(b, part);
+    } else if (top.id === SEEK_HEAD && child.id === SEEK) {
+      const target = childrenOf(b, child).find((part) => part.id === SEEK_ID);
+      let id = 0;
+      if (target) for (let i = target.body; i < target.end; i++) id = id * 256 + b[i]!;
+      if (!SEGMENT_KEEPS.has(id)) voidIn(b, child);
+    }
+    if (child.id === VOID) b.fill(0, child.body, child.end);
+  }
+}
+
+/** Where a cluster of unknown size ends: at the first element that is not a cluster's, or the segment's end. */
+async function clusterEnd(source: VideoSource, at: number, limit: number, count: () => void): Promise<number> {
+  for (;;) {
+    count();
+    if (at >= limit) return limit;
+    const child = await elementAt(source, at, limit);
+    if (!CLUSTER_CHILDREN.has(child.id)) return at;
+    check(!child.unknown);
+    // A recording cut short ends in the middle of a block: the rest is sound.
+    if (child.end >= limit) return limit;
+    at = child.end;
+  }
+}
+
+async function matroska(source: VideoSource, read: Read, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  const toVoid = (el: Element) => {
+    const header = voidHeader(el.end - el.start);
+    patches.push({ start: el.start, end: el.start + header.length, bytes: header });
+    if (el.end > el.start + header.length) patches.push({ start: el.start + header.length, end: el.end });
+  };
+  for (let at = 0; at < source.size;) {
+    count();
+    const top = await elementAt(source, at, source.size);
+    check(top.end <= source.size);
+    if (top.id === EBML_HEADER) check(!top.unknown);
+    else if (top.id === VOID) { if (top.end > top.body) patches.push({ start: top.body, end: top.end }); }
+    else if (top.id !== SEGMENT) { check(!top.unknown); toVoid(top); }
+    else for (let in_ = top.body; in_ < top.end;) {
+      count();
+      const el = await elementAt(source, in_, top.end);
+      if (el.id === CLUSTER) {
+        in_ = el.unknown ? await clusterEnd(source, el.body, top.end, count) : Math.min(el.end, top.end);
+        continue;
+      }
+      check(!el.unknown && el.end <= top.end);
+      if (el.id === INFO || el.id === TRACKS || el.id === SEEK_HEAD) {
+        const bytes = (await read(el.start, el.end - el.start)).slice();
+        stripTopLevel(bytes);
+        patches.push({ start: el.start, end: el.end, bytes });
+      } else if (el.id === VOID) {
+        if (el.end > el.body) patches.push({ start: el.body, end: el.end });
+      } else if (!SEGMENT_KEEPS.has(el.id)) toVoid(el);
+      in_ = el.end;
+    }
+    at = top.end;
+  }
+}
+
+/**
+ * What `withoutAudioMetadata` changes in an audio file read from `source` (one not held in a Blob: a file kept in
+ * storage): the parts replaced, in order and apart, the rest of its bytes going as they are; undefined when it goes as
+ * it is. Throws `NO_AUDIO_METADATA` for one whose tags cannot be removed; an error reading `source` as it is.
+ */
+export async function audioMetadataPatches(file: VideoSource, mime: string): Promise<VideoPatch[] | undefined> {
+  const source = readingAhead(file), read = exactly(source), size = source.size;
+  const head = await source.read(0, Math.min(AUDIO_METADATA_LIMITS.headBytes, size));
+  const patches: VideoPatch[] = [];
+  if (head.length >= 8 && text(head, 4, 4) === "ftyp") {
+    try {
+      return await videoMetadataPatches(file, mime, true);
+    } catch (error) {
+      if (error instanceof Error && error.message === NO_VIDEO_METADATA) throw Object.assign(new Error(NO_AUDIO_METADATA), { cause: error });
+      throw error;
+    }
+  } else if (text(head, 0, 4) === "OggS") await ogg(read, size, patches);
+  else if (head.length >= 12 && text(head, 0, 4) === "RIFF" && text(head, 8, 4) === "WAVE") await wav(read, size, patches);
+  else if (text(head, 0, 4) === "\x1a\x45\xdf\xa3") await matroska(source, read, patches);
+  else if (text(head, 0, 4) === "fLaC") await trailingTags(read, size, await flac(read, size, 0, patches), patches);
+  else if (isId3(head) || isFrame(head, 0)) {
+    // ID3v2 tags before the sound (one after another, as some taggers leave them), then a FLAC's blocks or MPEG frames.
+    let at = 0;
+    const count = counter();
+    for (let next = head; isId3(next); next = at + 10 <= size ? await read(at, 10) : new Uint8Array(0)) {
+      count();
+      at = await emptyId3(read, size, at, next, patches);
+    }
+    if (at + 4 <= size && text(await read(at, 4), 0, 4) === "fLaC") at = await flac(read, size, at, patches);
+    await trailingTags(read, size, at, patches);
+  } else return undefined;
+  if (!patches.length) return undefined;
+  patches.sort((a, b) => a.start - b.start);
+  for (let i = 1; i < patches.length; i++) check(patches[i]!.start >= patches[i - 1]!.end);
+  return patches;
+}
+
+/**
+ * `source` as it is sent: an audio file without its tags, made of `source`'s own bytes but for the parts emptied;
+ * undefined when it goes as it is (not one of these, or one with nothing to remove). Throws `NO_AUDIO_METADATA` for
+ * one whose tags cannot be removed; an error reading `source` as it is.
+ */
+export async function withoutAudioMetadata(source: Blob, mime: string): Promise<Blob | undefined> {
+  const patches = await audioMetadataPatches({ size: source.size, read: async (offset, length) => new Uint8Array(await source.slice(offset, offset + length).arrayBuffer()) }, mime);
+  if (!patches) return undefined;
+  const parts: BlobPart[] = [];
+  let at = 0;
+  for (const patch of patches) {
+    if (patch.start > at) parts.push(source.slice(at, patch.start));
+    if (patch.bytes) parts.push(patch.bytes as BlobPart);
+    else for (let left = patch.end - patch.start; left > 0; left -= ZEROS.size) parts.push(ZEROS.slice(0, Math.min(left, ZEROS.size)));
+    at = patch.end;
+  }
+  if (at < source.size) parts.push(source.slice(at));
+  return new Blob(parts, { type: mime });
+}

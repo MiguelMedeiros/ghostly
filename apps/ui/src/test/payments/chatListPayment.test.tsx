@@ -52,10 +52,16 @@ describe("a payment as the chat list's last line", () => {
     expect(line).not.toHaveTextContent("test");
   });
 
-  it("keeps the stored line while the wallet does not know the payment", () => {
+  // Before the wallet is there, or once the payment's record is gone: the stored English line, said as the bubble says it.
+  it.each([
+    ["⚡ 21 test sats", "peer", "en", "⚡ Sent you 21 test sats"],
+    ["⚡ Requested 1,234 test sats", "me", "pt", "⚡ Você pediu 1.234 sats de teste"],
+    ["Requested 2100 test sats on Ark", "peer", "pt", "⚡ Pediu a você 2.100 sats de teste"],
+    ["[a payment]", "peer", "pt", "[a payment]"],
+  ] as const)("says the stored line “%s” in the app's language while the wallet does not know the payment", (stored, sender, language, said) => {
     fakeEngine.setState({ payments: {} });
-    saveSession(session("⚡ 21 test sats", "peer"));
-    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
-    expect(within(screen.getByTestId("chat-row")).getByTestId("chat-row-preview")).toHaveTextContent("⚡ 21 test sats");
+    saveSession(session(stored, sender));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language });
+    expect(within(screen.getByTestId("chat-row")).getByTestId("chat-row-preview")).toHaveTextContent(said);
   });
 });

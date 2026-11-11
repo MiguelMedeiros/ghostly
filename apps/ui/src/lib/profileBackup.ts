@@ -16,9 +16,10 @@ import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
-import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
+import { builtInNameBefore, currentProfile, hasBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 import { NAME_STEP_SUFFIX } from "./nameStep";
 import { SENT_ORIGINALS_SUFFIX } from "./sentOriginals";
+import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
 interface ProfileHead {
@@ -257,6 +258,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     const suffix = key.slice(prefix.length);
     // A handoff leaves the lock's count of wrong attempts behind, and what a staging namespace notes for itself.
     if (handoff && (suffix === "lock_attempts" || suffix.startsWith("handoff_"))) continue;
+    // The microphone, camera and speaker chosen here are this device's (their ids are this browser's): a move leaves them.
+    if (handoff && suffix === MEDIA_DEVICES_SUFFIX) continue;
     // A new profile's question for a name (NameStep) stays with it: a restored or added copy is not a new profile.
     if (suffix === NAME_STEP_SUFFIX) continue;
     // The originals of what I sent translated never leave this device, not even to my other devices (lib/sentOriginals.ts).
@@ -315,10 +318,11 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     progress.stage = "writing";
     tell();
 
-    const name = storedProfileName(active ? currentProfile().id : id!) ?? "Profile";
+    const profileId = active ? currentProfile().id : id!;
+    const name = storedProfileName(profileId) ?? "Profile";
     const put = async (record: BackupRecord) => writer.json(await encode(record));
     const mark: LightMark | undefined = light ? { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut, bytes: leftOutBytes } : undefined;
-    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
+    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: hasBuiltInName(profileId) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
     // Right after the head: a restore reads it before it writes anything (`openProfileBackup`).
     if (devices) await put({ t: "devices", ...devices });
     if (peer) {
@@ -375,13 +379,17 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
 
 /**
  * What a bundle carries of a profile's device set (WISP 06 § A backup restored where a device set exists): the secret,
- * the set and the turn, and the takeover count, never the device signing key, the stored packet or the state of this
- * device. Null for a profile with no device set, and where the device state cannot be read.
+ * the set and the turn, the takeover count and the slot active as this device knows it (its own, when it is the active
+ * one), never the device signing key, the stored packet or the state of this device. Null for a profile with no device
+ * set, and where the device state cannot be read.
  */
 async function bundleDevicesOf(database: string): Promise<BundleDevices | null> {
   const record = await readDeviceRecord(database).catch(() => null);
   if (!record?.d) return null;
-  return { d: record.d, set: record.deviceSet.map((slot) => slot && { key: slot.key, name: slot.name }), turn: record.turn, takeovers: record.takeovers };
+  const set = record.deviceSet.map((slot) => slot && { key: slot.key, name: slot.name });
+  const known = record.state === "active" ? record.ownSlot : record.activeSlot;
+  const active = known !== undefined && set[known] ? known : undefined;
+  return { d: record.d, set, turn: record.turn, takeovers: record.takeovers, ...(active !== undefined ? { active } : {}) };
 }
 
 /** `writeProfileBackup` into memory: for a profile small enough to hold whole (tests, a bundle sent to S3). */

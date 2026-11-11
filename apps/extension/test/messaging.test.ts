@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -31,7 +31,7 @@ describe("the service worker keeps one peer", () => {
     ]);
     // Iroh runs in the page here too (WISP 102, relay only), loaded on first use.
     // A new profile's Mainnet wallets are made by the peer, never under test (see defaultWalletsAllowed).
-    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function) });
+    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, apps: false, defaultWallets: expect.any(Function), localFetch: expect.any(Function) });
 
     // Later asks find the document and only check that the peer answers.
     expect(await send({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });
@@ -59,9 +59,12 @@ describe("the service worker keeps one peer", () => {
   it("opens the tab on a first install even when the peer does not start, so the page can say why", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       fire(world.chrome.runtime.onInstalled, { reason: "install" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      // Its wait, then a new document's in its place.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
     } finally {
       vi.useRealTimers();
@@ -71,11 +74,15 @@ describe("the service worker keeps one peer", () => {
   it("says so when the peer never answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
-      // The document is created but its script never listens.
+      // The document the worker made as it loaded went away; the next one is created but its script never listens.
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const reply = send({ target: "background", type: "ensure-engine" });
-      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
       expect(await reply).toEqual({ ok: false, error: expect.stringContaining("did not start") });
+      // The silent document went, and the one made in its place was waited on too.
+      expect(world.callsTo("offscreen.closeDocument")).toHaveLength(1);
+      expect(world.callsTo("offscreen.createDocument")).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
@@ -83,6 +90,8 @@ describe("the service worker keeps one peer", () => {
 
   it("waits for the peer to be ready before saying the engine is there", async () => {
     let ready!: () => void;
+    // The peer the worker started as it loaded went away; the next one is slow to be ready.
+    world.endOffscreen();
     engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
     let answered = false;
     const reply = send({ target: "background", type: "ensure-engine" }).then((r) => ((answered = true), r));
@@ -103,9 +112,9 @@ describe("messages nobody should act on", () => {
     ["a string", "ensure-engine"],
     ["a number", 42],
   ])("%s gets no answer and does nothing", async (_, message) => {
+    const before = world.calls.length;
     await expect(send(message)).rejects.toThrow("message port closed");
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
-    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.calls.slice(before).map((c) => c.api)).toEqual(["runtime.sendMessage"]);
   });
 
   it("nothing outside the extension is heard: no external listeners at all", async () => {
@@ -166,7 +175,10 @@ describe("the page and the peer talk over the 'ui' port", () => {
       () => (disconnected = true),
     );
     const server = engine();
-    expect(world.callsTo("runtime.sendMessage")[0]).toEqual([{ target: "background", type: "ensure-engine" }]);
+    // The worker's own pings came first, as it loaded.
+    const ensured = world.calls.findIndex((c) => c.api === "runtime.sendMessage" && (c.args[0] as { type?: string }).type === "ensure-engine");
+    expect(ensured).toBeGreaterThanOrEqual(0);
+    expect(ensured).toBeLessThan(world.calls.findIndex((c) => c.api === "runtime.connect"));
     expect(server.attached).toHaveLength(1);
 
     connection.send({ id: 1, method: "getState", params: [] } as never);
@@ -221,11 +233,12 @@ describe("the page and the peer talk over the 'ui' port", () => {
   it("fails the page's connect when the peer cannot start", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
+      world.endOffscreen();
       world.onCreateDocument = async () => {};
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
       const connecting = extensionHost.connect(() => {}, () => {});
       const failed = expect(connecting).rejects.toThrow("did not start");
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(11_000);
       await failed;
       expect(world.callsTo("runtime.connect")).toEqual([]);
     } finally {
@@ -274,7 +287,7 @@ describe("viewer tabs", () => {
     ["a chat tag with a dot", PEER, SERVICE, `${TAG}.evil`],
     ["a chat tag outside z-base-32", PEER, SERVICE, "l".repeat(16)],
   ])("refuses %s before opening a tab", async (_, peer, service, tag) => {
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: peer, serviceId: service, tag, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Invalid service" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
@@ -282,7 +295,7 @@ describe("viewer tabs", () => {
 
   it("closes the tab and forgets it when DevTools cannot attach", async () => {
     world.failDebuggerAttach = "Another debugger is already attached to the tab.";
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" });
     expect(reply).toEqual({ ok: false, error: "Another debugger is already attached to the tab." });
     const [[tabId]] = world.callsTo("tabs.remove") as [[number]];
     expect(world.tabs.has(tabId)).toBe(false);
@@ -300,7 +313,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -309,6 +322,115 @@ describe("viewer tabs", () => {
     expect(request.init).toMatchObject({ method: "POST", path: "/api/items?limit=5", headers: [["Content-Type", "application/json"]] });
     expect(new TextDecoder().decode(request.init.body!)).toBe('{"name":"ç"}');
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
+  });
+
+  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+    const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
+    const policies = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+  });
+
+  it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
+    // A popup is no viewer: no DevTools on it, no binding, so no close (lock, profile switch, Hide my IP) reaches it.
+    const sandboxes = (params: Record<string, unknown>) =>
+      (params.responseHeaders as { name: string; value: string }[])
+        .filter(({ name }) => name.toLowerCase() === "content-security-policy")
+        .flatMap(({ value }) => value.split(/[,;]/).map((directive) => directive.trim().split(/\s+/)))
+        .filter(([name]) => name === "sandbox")
+        .map(([, ...flags]) => flags);
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["content-security-policy", "sandbox allow-scripts allow-popups"]]);
+    const served = sandboxes((await pauseRequest(world, tabId, { url })).params);
+    const offline = await httpError("offline", "offline");
+    engineControl().respond = async () => {
+      throw offline;
+    };
+    const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
+
+    // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
+    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+  });
+
+  it("opens no tab while Hide my IP from contacts is on, and says why", async () => {
+    // covers: settings.network.relay-only
+    // The app could send the tab, or a frame of its own, to a server of the contact's: Chrome connects there before
+    // any policy or DevTools refuses the page, and that server learns this device's address.
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, relayOnly: true });
+    expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.callsTo("debugger.attach")).toEqual([]);
+    expect(world.session.size).toBe(0);
+    // A page that says anything but true counts as off.
+    const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
+    expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
+  describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
+    const open = { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "" };
+    const close = { target: "background", type: "close-services" };
+
+    /** No tab is left for the app, none was ever sent to its address, and nothing would serve it. */
+    async function expectNoViewer() {
+      await settle();
+      expect([...world.tabs.values()]).toEqual([]);
+      expect(world.callsTo("tabs.update")).toEqual([]);
+      expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
+    }
+
+    it("opens nothing when both come in the same tick", async () => {
+      const opened = send(open);
+      const closed = send(close);
+      expect(await closed).toEqual({ ok: true });
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("opens nothing when the close comes while the open waits on a peer that is starting", async () => {
+      let ready!: () => void;
+      endBootPeer(world);
+      engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+      const opened = send(open);
+      await settle();
+      expect(await send(close)).toEqual({ ok: true });
+      ready();
+      expect(await opened).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("closes the tab it was making when the close comes right after the tab is created", async () => {
+      const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+      let closed: Promise<unknown> | undefined;
+      world.chrome.tabs.create = (async (props: { url: string }) => {
+        const tab = await create(props);
+        closed = send(close);
+        return tab;
+      }) as typeof world.chrome.tabs.create;
+      expect(await send(open)).toEqual({ ok: true });
+      expect(await closed).toEqual({ ok: true });
+      await expectNoViewer();
+    });
+
+    it("a close before the open does not keep a later open from opening", async () => {
+      expect(await send(close)).toEqual({ ok: true });
+      const tabId = await openViewer(world);
+      expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+    });
   });
 
   it("joins a body DevTools hands over in several pieces", async () => {
@@ -369,6 +491,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "sid=1; Path=/" },
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -390,6 +513,7 @@ describe("viewer tabs", () => {
     expect(answer.params.responseHeaders).toEqual([
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
+      { name: "content-security-policy", value: expect.any(String) },
     ]);
   });
 
@@ -443,6 +567,41 @@ describe("viewer tabs", () => {
     expect(bodyText(gone.params)).toContain("This service is not reachable. Services exist while their ghost is online.");
   });
 
+  it("says in the profile's language and from this side why the contact's machine answered in place of their app", async () => {
+    world.storage.set("ghostly_app_settings", JSON.stringify({ language: "ar" }));
+    // The contact chose the app's name: it goes into the page escaped.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "<b>Atlas</b>" }] }];
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const { default: ar } = await import("../../ui/src/locales/ar/services.json");
+    // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
+    await import("../../ui/src/locales/ar/index.ts");
+    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+
+    // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
+    engineControl().respond = async () =>
+      okResponse("The local service is not reachable.\n", 502, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unreachable"]]);
+    const down = await pauseRequest(world, tabId, { url });
+    expect(down.params).toMatchObject({ responseCode: 502 });
+    expect(down.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "unreachable" });
+    const downHtml = bodyText(down.params);
+    expect(downHtml).toContain(named(ar.window.notAnswering));
+    expect(downHtml).not.toContain("The local service");
+    expect(downHtml).toContain('<html lang="ar" dir="rtl">');
+  });
+
+  it("names an app the contact took back as it was named when the tab opened, not by its id", async () => {
+    const page = { lang: "en", dir: "ltr", unreachable: "a", failed: "b", app: "Atlas" };
+    const tabId = await openViewer(world, PEER, SERVICE, TAG, page);
+    // Taken back: the peer's state lists it no more, and their machine says so for it.
+    engineControl().links = [{ peerPubKeyZ32: PEER, peerServices: [] }];
+    engineControl().respond = async () =>
+      okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
+    const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
+    expect(gone.params).toMatchObject({ responseCode: 404 });
+    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+  });
+
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
     const tabId = await openViewer(world);
     const navigate = (frame: { url: string; parentId?: string }) =>
@@ -481,7 +640,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
 
   it("attaches only to the tab it just created, whatever tab a page names", async () => {
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
-    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, tabId: bank.id });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG, profile: "", tabId: bank.id });
     expect(reply).toEqual({ ok: true });
     const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
     expect(viewer.id).not.toBe(bank.id);
@@ -524,6 +683,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     ["a web page claiming the extension's id", { id: "nbedaagicniejlmfcncndfjcejaidbcf", url: "https://evil.example/" }],
     ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
   ])("does not hear %s", async (_, sender) => {
+    // The peer the worker started as it loaded went away: a stranger's ensure-engine does not bring it back.
+    world.endOffscreen();
     for (const message of [
       { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tag: TAG },
       { target: "background", type: "open-payment-link", uri: "lightning:lnbc1" },
@@ -533,7 +694,8 @@ describe("the debugger stays on the tabs the worker opened", () => {
     }
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    expect(world.offscreenDocument).toBe(false);
   });
 });
 
@@ -597,6 +759,21 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.create")).toHaveLength(1);
     expect(world.callsTo("tabs.update")).toEqual([[tab.id, { active: true }]]);
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
+  });
+
+  it("opens the app even when the peer does not start, so the page can say why", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      // The document the worker made as it loaded went away, and the next one's script never listens.
+      world.endOffscreen();
+      world.onCreateDocument = async () => {};
+      fire(world.chrome.action.onClicked);
+      // The silent document is waited on, replaced once, and the new one waited on too, before the start gives up.
+      await vi.advanceTimersByTimeAsync(2 * 100 * 50 + 1000);
+      expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, MintOperationError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
+import { Amount, HttpResponseError, MintOperationError, NetworkError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
 import { LIMITS } from "@ghostly/core";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
@@ -176,10 +176,11 @@ describe("Lightning out: melts", () => {
     const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
     return wallet.payQuote(quote, at);
   };
-  /** Asks about the pending payments once no request of theirs can reach the mint any more. */
+  /** Asks about the pending payments once no request of theirs can reach the mint any more: that long really passed. */
   const pollWhenOverdue = async (wallet: CashuWallet) => {
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
-    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); }
+    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
   };
 
   it("reserves the proofs of a pending payment, then drops them once the mint pays it", async () => {
@@ -249,6 +250,66 @@ describe("Lightning out: melts", () => {
     expect(rows("melts")).toHaveLength(1);
   });
 
+  it("keeps a payment whose answer was lost pending when the device clock steps forward, and books it paid when the mint pays it", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new TypeError("Failed to fetch"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet, events } = setup();
+    expect(await pay(wallet)).toBe(false);
+
+    // An hour on the device clock, a few ms in fact: the request may still reach the mint.
+    const start = performance.now();
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(start);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 60 * 60_000 });
+    try {
+      await wallet["pollMelts"]();
+      expect(balance()).toBe(8);
+      expect(rows("melts")).toHaveLength(1);
+      expect(events.onMeltResolved).not.toHaveBeenCalled();
+
+      // It lands, and the mint pays the invoice with those proofs: the next round books it.
+      mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PAID", []));
+      vi.setSystemTime(Date.now() + 30_000);
+      monotonic.mockReturnValue(start + 30_000);
+      await wallet["pollMelts"]();
+    } finally { vi.useRealTimers(); monotonic.mockRestore(); }
+    expect(rows<StoredProof>("proofs").map((p) => p.secret)).toEqual(["c"]);
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", amount: 90 }]);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), true);
+  });
+
+  it("settles a payment whose answer was lost once its window really passed, whatever the device clock says", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new TypeError("Failed to fetch"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet, events } = setup();
+    expect(await pay(wallet)).toBe(false);
+
+    // The clock set back an hour, and the window passed in fact: no request of it can land any more.
+    const monotonic = vi.spyOn(performance, "now").mockReturnValue(performance.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() - 60 * 60_000 });
+    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+  });
+
+  it("gives a payment found after a restart with a time ahead of the clock its window again, not the time to that clock", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    // Written down by a run whose clock was a day ahead.
+    seed("proofs", [stored(8, "c"), { ...stored(64, "a"), reserved: true }, { ...stored(32, "b"), reserved: true }, { ...stored(4, "d"), reserved: true }]);
+    seed("melts", [{ quote: "m1", mint: MINT, request: INVOICE, amount: 90, secrets: ["a", "b", "d"], outlay: 100, outputs: [], createdAt: Date.now() + 86_400_000 } satisfies PendingMelt]);
+    const { wallet } = setup();
+    await wallet["pollMelts"]();
+    expect(rows("melts")).toHaveLength(1);
+
+    // The window passes, a day before that run's time: no request of it can land any more.
+    await pollWhenOverdue(wallet);
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
+  });
+
   it("gives the sats back and says so when the mint refuses the payment", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     mint.completeMelt.mockRejectedValue(new MintOperationError(20005, "Invoice already paid"));
@@ -278,6 +339,20 @@ describe("Lightning out: melts", () => {
     expect(balance()).toBe(108);
     expect(rows("melts")).toHaveLength(0);
     expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee")).toEqual([]);
+  });
+
+  it("a refused payment's review pays when Pay is pressed again, as its refusal says it can", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValueOnce(new MintOperationError(20000, "Lightning payment failed: no route"))
+      .mockResolvedValueOnce({ quote: meltQuote("PAID"), change: [], outputData: [] });
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet } = setup();
+    const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
+
+    await expect(wallet.payQuote(quote, at)).rejects.toMatchObject({ engineCode: "lightningRefused" });
+    // The same review, Pay again: the quote is still the invoice and amount shown, and the mint's quote is unpaid.
+    expect(await wallet.payQuote(quote, at)).toBe(true);
+    expect(mint.completeMelt).toHaveBeenCalledTimes(2);
   });
 
   it("books the fee the split before a refused payment cost, and says it", async () => {
@@ -317,6 +392,22 @@ describe("Lightning out: melts", () => {
     const { wallet } = setup();
     await pay(wallet);
     await expect(wallet.payQuote("m1", MINT)).rejects.toThrow(/already being paid/);
+  });
+
+  it("a mint that fails the quote (a 500, a closed socket) is named, with nothing paid and the next step; its own words kept last", async () => {
+    const socket = "fetch failed (other side closed, UND_ERR_SOCKET) at https://mint.example";
+    for (const [failure, said] of [[new HttpResponseError("internal error", 500), "internal error"], [new NetworkError(socket), socket]] as const) {
+      mint.createMeltQuoteBolt11.mockRejectedValueOnce(failure);
+      const { wallet } = setup();
+      await expect(wallet.quoteInvoice(INVOICE)).rejects.toMatchObject({
+        engineCode: "mintFailedQuote",
+        message: `mint.example could not take this payment right now, and no sats left your wallet: try again later. The mint said: ${said}`,
+      });
+    }
+    // A refusal is the mint's word on this invoice: said as it said it.
+    mint.createMeltQuoteBolt11.mockRejectedValueOnce(new MintOperationError(20000, "Amount too large"));
+    await expect(setup().wallet.quoteInvoice(INVOICE)).rejects.toThrow(/^Amount too large$/);
+    expect(balance()).toBe(108);
   });
 
   describe("pays only the invoice and amount shown", () => {
@@ -507,7 +598,10 @@ describe("ecash a profile restore brought back", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(rows<StoredProof>("proofs").map((p) => [p.secret, !!p.unchecked])).toEqual([["a", true], ["b", false]]);
 
+      // Still no answer for one of them: asked twice as late.
       mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mint.checkProofsStates).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(balance()).toBe(32);
       expect(mint.checkProofsStates).toHaveBeenCalledTimes(3);

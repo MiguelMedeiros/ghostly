@@ -6,11 +6,8 @@ import { connect, expect, link, test } from "../support/fixtures";
  * the header's buttons cut to "Contac…": neither the word nor the key it names them by was left. The key's start is on
  * the line right under the name, so the header says the word alone, and it fits whole.
  */
-/** What the name's line shows against what it holds: cut short with an ellipsis when `shown` < `whole`. */
-const room = (name: Locator) => name.evaluate((el) => {
-  const line = el.parentElement!;
-  return { text: el.textContent, shown: Math.round(line.clientWidth), whole: Math.round(line.scrollWidth) };
-});
+/** What the name shows against what it holds: cut short with an ellipsis when `shown` < `whole`. */
+const room = (name: Locator) => name.evaluate((el) => ({ text: el.textContent, shown: Math.round(el.clientWidth), whole: Math.round(el.scrollWidth) }));
 
 test("on a 320px phone an unnamed contact's name in the chat header is not cut short", { tag: ["@feature:app.mobile-layout", "@feature:chats.list.unnamed-contact"] }, async ({ peer }) => {
   const alice = await peer("alice");

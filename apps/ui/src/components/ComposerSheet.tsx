@@ -1,4 +1,6 @@
-import type { HTMLAttributes, ReactNode, Ref } from "react";
+import { useRef, type HTMLAttributes, type ReactNode, type RefObject } from "react";
+import { useTabTrap } from "../hooks/useDismiss";
+import { useIsMobile } from "../hooks/useIsMobile";
 import "./composer-sheet.css";
 
 /**
@@ -8,11 +10,16 @@ import "./composer-sheet.css";
  * never runs past the chat's column, however narrow the chat list leaves it. Both pickers
  * share this shell, its head, the hint under the deck and the primary action, so they look and fit alike.
  */
-export function ComposerSheet({ ref, className = "", children, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+export function ComposerSheet({ ref, className = "", children, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: RefObject<HTMLDivElement | null> }) {
+  const own = useRef<HTMLDivElement>(null);
+  const box = ref ?? own;
+  // A phone's sheet covers the chat with its backdrop, as a dialog does: Tab and Shift+Tab go round its own controls.
+  // They went on to the chat under it (its Back, its messages, the composer's buttons), the sheet still open.
+  useTabTrap(box, useIsMobile());
   return (<>
     <div className="sheet-backdrop" />
-    <div ref={ref} {...props}
-      className={`composer-sheet sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
+    <div ref={box} {...props}
+      className={`composer-sheet sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
       {children}
     </div>
   </>);

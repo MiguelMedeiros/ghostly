@@ -1,6 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64, sign, verify } from "../src/identity";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDENTITY_MEMO_IDLE_MS, IDENTITY_MEMO_MAX, IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64, sign, verify } from "../src/identity";
 import { toBase64Url } from "../src/bytes";
 
 // noble's ed25519 is frozen: a spy cannot go on it, so the module hands out a counting getPublicKey.
@@ -20,6 +20,7 @@ const keyOf = (seed: Uint8Array) => { const at = derive.calls; const key = ed255
 const seedOf = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (n * 31 + i * 7) & 0xff);
 
 beforeEach(() => { derive.calls = 0; });
+afterEach(() => { vi.useRealTimers(); });
 
 describe("identityFromSeed", () => {
   it("derives a seed's public key once, however many times and from however many copies of the seed it is asked", () => {
@@ -54,16 +55,55 @@ describe("identityFromSeed", () => {
     expect(after.publicKey).toEqual(keyOf(new Uint8Array(32)));
   });
 
-  it("keeps a bounded number of keys: past them, the oldest is derived again", () => {
+  it("derives each key of a 600-chat start once: the load pass, then each link's own keys again and again", () => {
+    // 3,954 distinct seeds over 600 chats, as a 600-chat, 50-group CLI profile holds: each chat's own seed and its
+    // participation seed are asked by the load pass, then again by its link, delivery and capability record, along
+    // with the few more seeds of its own the link derives.
+    const chats = Array.from({ length: 600 }, (_, chat) =>
+      Array.from({ length: chat < 354 ? 7 : 6 }, () => crypto.getRandomValues(new Uint8Array(32))));
+    const distinct = chats.reduce((sum, seeds) => sum + seeds.length, 0);
+    expect(distinct).toBe(3_954);
+    for (const [own, participation] of chats) { identityFromSeed(own!); identityFromSeed(participation!); }
+    for (const [own, participation, ...more] of chats) {
+      for (const seed of more) { identityFromSeed(own!); identityFromSeed(seed); identityFromSeed(participation!); }
+    }
+    for (const [own, participation] of chats) { identityFromSeed(own!); identityFromSeed(participation!); }
+    expect(derive.calls).toBe(distinct);
+  });
+
+  it("past its first keys, lets go of the ones not asked for a while: the oldest of them is derived again", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // Later than every key the tests above kept, so they are all idle by now.
+    vi.setSystemTime(Date.now() + 2 * IDENTITY_MEMO_IDLE_MS);
     // Seeds no other test uses: 32 random bytes each.
     const fresh = Array.from({ length: IDENTITY_MEMO_SIZE + 1 }, () => crypto.getRandomValues(new Uint8Array(32)));
     for (const seed of fresh) identityFromSeed(seed);
-    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 1);
-    identityFromSeed(fresh[IDENTITY_MEMO_SIZE]!);
-    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 1);
     identityFromSeed(fresh[0]!);
-    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 2);
+    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 1);
+    vi.advanceTimersByTime(IDENTITY_MEMO_IDLE_MS - 1);
+    identityFromSeed(fresh[IDENTITY_MEMO_SIZE]!);
+    vi.advanceTimersByTime(1);
+    // A new key makes room: the ones not asked for since they were first derived go.
+    identityFromSeed(crypto.getRandomValues(new Uint8Array(32)));
+    identityFromSeed(fresh[1]!);
+    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 3);
+    identityFromSeed(fresh[0]!);
+    identityFromSeed(fresh[IDENTITY_MEMO_SIZE]!);
+    expect(derive.calls).toBe(IDENTITY_MEMO_SIZE + 3);
   });
+
+  // 16,385 keys derived: about 4 s on a desktop, past the default 5 s on a busy CI runner.
+  it("keeps a bounded number of keys, used or not: past them, the oldest is derived again", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 4 * IDENTITY_MEMO_IDLE_MS);
+    const fresh = Array.from({ length: IDENTITY_MEMO_MAX + 1 }, () => crypto.getRandomValues(new Uint8Array(32)));
+    for (const seed of fresh) identityFromSeed(seed);
+    expect(derive.calls).toBe(IDENTITY_MEMO_MAX + 1);
+    identityFromSeed(fresh[1]!);
+    expect(derive.calls).toBe(IDENTITY_MEMO_MAX + 1);
+    identityFromSeed(fresh[0]!);
+    expect(derive.calls).toBe(IDENTITY_MEMO_MAX + 2);
+  }, 60_000);
 
   it("refuses a seed that is not 32 bytes", () => {
     expect(() => identityFromSeed(new Uint8Array(31))).toThrow("Seed must be exactly 32 bytes");

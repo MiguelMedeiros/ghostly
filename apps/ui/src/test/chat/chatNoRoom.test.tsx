@@ -172,4 +172,29 @@ describe("on a full localStorage", () => {
     await escape();
     expect(screen.queryByTestId("chat-not-stored")).toBeNull();
   }, 60_000);
+
+  it("an Escape that closes a dialog opened over the notice closes only the dialog", async () => {
+    render(<><Root /><dialog data-testid="question"><button type="button">Delete</button></dialog></>);
+    const newChat = await screen.findByTestId("sidebar-new-chat");
+    fill();
+    act(() => { newChat.focus(); newChat.click(); });
+    await screen.findByTestId("chat-not-stored", undefined, { timeout: 5_000 });
+    const dialog = screen.getByTestId<HTMLDialogElement>("question");
+    act(() => { dialog.showModal(); screen.getByRole("button", { name: "Delete" }).focus(); });
+    /** A browser closes a modal <dialog> on Escape's default action, without cancelling the keydown. */
+    const escape = async () => {
+      act(() => {
+        const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+        document.activeElement!.dispatchEvent(e);
+        if (!e.defaultPrevented && dialog.open) dialog.close();
+      });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    };
+
+    await escape();
+    expect(dialog.open).toBe(false);
+    expect(screen.getByTestId("chat-not-stored")).toBeInTheDocument();
+    await escape();
+    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+  }, 60_000);
 });
