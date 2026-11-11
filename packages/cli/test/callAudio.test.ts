@@ -59,6 +59,29 @@ describe("the playback queue (program to call)", () => {
     expect(q.next().silent).toBe(true);
   });
 
+  // A program streams in chunks of any size (a TTS body piped through): a flush that dropped half a sample read every
+  // sample after it a byte off, loud noise until the call ended.
+  it("a flush with half a sample queued drops its other half too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, () => 0);
+    const stream = Buffer.alloc(2 * 400);
+    for (let i = 0; i < 400; i++) stream.writeInt16LE(1000 + i, i * 2);
+    q.push(stream.subarray(0, 3));
+    q.flush();
+    q.push(stream.subarray(3));
+    expect(q.next().frame.readInt16LE(0)).toBe(1002);
+  });
+
+  it("a full queue that drops an odd number of bytes drops the next byte too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, Date.now, 100);
+    q.push(Buffer.alloc(1600));
+    expect(q.push(Buffer.alloc(3))).toBe(3);
+    q.flush();
+    const rest = Buffer.alloc(2 * 160 + 1);
+    for (let i = 0; i < 160; i++) rest.writeInt16LE(-500, 1 + i * 2);
+    q.push(rest);
+    expect(q.next().frame.readInt16LE(0)).toBe(-500);
+  });
+
   it("drops what goes past its cap", () => {
     const q = new PlaybackQueue(8000, Date.now, 100);
     expect(q.push(Buffer.alloc(3000))).toBe(3000 - 1600);
