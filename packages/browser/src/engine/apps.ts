@@ -90,6 +90,8 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
  * and checked again if it still runs.
  */
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
+/** URLs the update check remembers it read whole and refused (`Apps.refusedReads`). */
+const REFUSED_READS_KEPT = 256;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 /** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
@@ -688,6 +690,12 @@ export class Apps {
    * index listing the same is not peeked again at every check.
    */
   private readonly listingMisses = new Map<string, string>();
+  /**
+   * URLs whose whole read the update check refused (a file hash that does not hold, a bad signature, too large), with
+   * the digest their peek showed then: the same peek there is not read whole again at every check, for an hour (a fixed
+   * upload of the same version keeps its manifest). At most `REFUSED_READS_KEPT`, the oldest going first.
+   */
+  private readonly refusedReads = new Map<string, { digest: string; at: number }>();
   /**
    * The index a store's own URL served at its last read when it was not taken (behind the copy the person took, at a
    * commit): by store key, with that URL. The same bytes there again are not checked whole at every refresh.
@@ -1933,8 +1941,19 @@ export class Apps {
       // Unless the app is marked for that very one already (a mark is only taken from a bundle read whole and checked,
       // and the peek's digest is the SHA-256 of the manifest it read): nothing new is learned, and the mark keeps its `at`.
       if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
+      // A URL whose whole read was refused for this very peek is not downloaded again (up to 16 MiB at every Apps page
+      // visit); a read that brought no bundle (the host down) is tried again at the next check.
+      const refused = this.refusedReads.get(url);
+      if (holds && refused?.digest === holds.digest && this.now() - refused.at < APP_CHECK_TIMINGS.freshMs) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
-      try { fetched = await this.fetchBundle(url); } catch { continue; }
+      try { fetched = await this.fetchBundle(url); } catch (error) {
+        if (holds && (!(error instanceof AppFetchError) || error.code === "too-large")) {
+          this.refusedReads.delete(url);
+          this.refusedReads.set(url, { digest: holds.digest, at: this.now() });
+          for (const old of this.refusedReads.keys()) { if (this.refusedReads.size <= REFUSED_READS_KEPT) break; this.refusedReads.delete(old); }
+        }
+        continue;
+      }
       const { bundle, bytes } = fetched;
       const version = versionOf(bundle.manifest, bundle.digest);
       if (version.ref !== app.ref || known.has(version.digest)) continue;
