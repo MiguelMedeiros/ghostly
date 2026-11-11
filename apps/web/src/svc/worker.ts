@@ -63,6 +63,16 @@ export function said(status: number, text: string, lang?: string, dir?: string):
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
 }
 
+/**
+ * The app's error answer at a status a Response may carry, as the head's (`answerStatus`): one outside 200-599 is a
+ * 502, and one that takes no body (a 304, say) goes without the words.
+ */
+function failed(status: number, text: string, lang?: string, dir?: string): Response {
+  const kept = answerStatus(status);
+  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: { "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  return said(kept, text, lang, dir);
+}
+
 /** The bridge page open on this origin, among its pages: the one way to the app, and so to the contact. */
 function bridge(all: WindowClient[]): WindowClient | undefined {
   // Framed, as the app frames it: a bridge page opened on its own (by another site, say) has no way to the app.
@@ -129,11 +139,15 @@ async function forward(event: FetchEvent): Promise<Response> {
     const timer = setTimeout(() => { if (!answered) { answered = true; port.close(); resolve(plain(504, "The app did not answer in time.")); } }, HEAD_TIMEOUT_MS);
     // The app's page gave up on it before any answer (its own abort): the page lets go of it too, body and all.
     request.signal.addEventListener("abort", () => { if (!answered) port.postMessage({ type: "cancel" }); }, { once: true });
+    /** The page's answer, once: a Response refused by the browser (a status it takes no body with) ends it as a 502. */
+    const settle = (make: () => Response): boolean => {
+      answered = true;
+      clearTimeout(timer);
+      try { resolve(make()); return true; } catch { resolve(plain(502, "The request failed.")); return false; }
+    };
     port.onmessage = (event: MessageEvent<ServiceReply>) => {
       const reply = event.data;
       if (reply?.type === "head" && !answered) {
-        answered = true;
-        clearTimeout(timer);
         const status = answerStatus(reply.status);
         // Framed by the bridge, under the app, and by nothing else: no other site, nor another contact's app. The
         // app's own X-Frame-Options would refuse the bridge, so this policy takes its place.
@@ -146,15 +160,16 @@ async function forward(event: FetchEvent): Promise<Response> {
           try { out.append(name, kept); } catch { /* not a header a Response takes */ }
         }
         out.append("content-security-policy", frameAncestors());
-        resolve(new Response(NULL_BODY.has(status) || request.method === "HEAD" ? null : stream, { status, headers: out }));
-        if (NULL_BODY.has(status) || request.method === "HEAD") port.close();
+        const empty = NULL_BODY.has(status) || request.method === "HEAD";
+        if (!settle(() => new Response(empty ? null : stream, { status, headers: out }))) { port.postMessage({ type: "cancel" }); port.close(); }
+        else if (empty) port.close();
       } else if (reply?.type === "chunk" && answered) {
         try { controller.enqueue(reply.bytes); } catch { /* the page stopped reading */ }
       } else if (reply?.type === "end") {
         try { controller.close(); } catch { /* already closed */ }
         port.close();
       } else if (reply?.type === "error") {
-        if (!answered) { answered = true; clearTimeout(timer); resolve(said(reply.status, reply.text, reply.lang, reply.dir)); }
+        if (!answered) settle(() => failed(reply.status, reply.text, reply.lang, reply.dir));
         else { try { controller.error(new Error(reply.text)); } catch { /* already closed */ } }
         port.close();
       }
