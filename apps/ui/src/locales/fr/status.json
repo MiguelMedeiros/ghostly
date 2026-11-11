@@ -22,6 +22,7 @@
     "today": "Aujourd'hui",
     "week": "Cette semaine"
   },
+  "linkLike": "Ceci ressemble à un lien, qu'un statut ne peut pas contenir. Modifiez le texte pour l'enregistrer.",
   "menuLabel": "Votre statut : {{status}}. Changer de statut",
   "past": "Choisissez une heure après maintenant.",
   "placeholder": "Quel est votre statut ?",

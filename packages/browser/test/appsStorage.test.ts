@@ -379,6 +379,30 @@ describe("uninstall", () => {
     }
   });
 
+  it("an app uninstalled while it deletes a key keeps no count of its rows: a reinstall starts empty", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+    // The person's Uninstall commits while the delete reads the row it removes.
+    let uninstalled: Promise<void> | undefined;
+    const get = IDBObjectStore.prototype.get;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, query: IDBValidKey | IDBKeyRange) {
+      const request = get.call(this, query);
+      if (!uninstalled && Array.isArray(query) && query[2] === "k0") uninstalled = store.uninstall({ ref });
+      return request;
+    });
+    const deleted = await store.storageDelete({ ref, scope: "chat-1", key: "k0" }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+    spy.mockRestore();
+    await uninstalled;
+    expect(deleted).toBe("not-installed");
+    expect(await storageRows()).toEqual([]);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: app.digest, grant: ["chat"] });
+    // The count starts again with the new install: as many full values fit as before.
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+  });
+
   it("a chat deleted while its app is writing keeps none of that app's rows: a write still waiting is refused", async () => {
     for (const burst of [5, 20, 50]) {
       await emptyProfile();

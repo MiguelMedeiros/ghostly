@@ -87,15 +87,16 @@ export function useStayConnected(): void {
 
   useEffect(() => {
     if (!android) return;
-    let live = true;
+    // `killed` is said once a run, by the first call that holds: kept even when links changed before it answered,
+    // unless the switch was turned off meanwhile.
     const tell = () => {
       void invoke<{ held: boolean; killed: boolean }>("connection_service", { on, links })
-        .then((answer) => { if (live && answer?.killed) setStopped(true); })
+        .then((answer) => { if (answer?.killed && readSetting()) setStopped(true); })
         .catch(() => {});
     };
     tell();
     const timer = on ? setInterval(tell, TELL_AGAIN_MS) : undefined;
-    return () => { live = false; clearInterval(timer); };
+    return () => clearInterval(timer);
   }, [android, on, links]);
 
   // Turned off: no notice about it any more.

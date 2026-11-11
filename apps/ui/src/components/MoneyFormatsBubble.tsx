@@ -81,7 +81,7 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId} data-network={network ?? "unknown"}>
       <div className="flex flex-wrap items-center justify-between gap-1.5">
-        <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{label}</p>
+        <p className="chat-text-pay-label uppercase tracking-wider text-text-primary/65 m-0">{label}</p>
         <MoneyNetworkTag network={network} chain={chain} />
       </div>
       {/* The number and its unit have no space between them: inline they were one run, and on a 320px phone a long
@@ -90,10 +90,10 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
       <p className="m-0 mt-1 leading-tight flex flex-wrap items-baseline [&>bdi]:min-w-0 [&>bdi]:break-all">{amount}</p>
       {/* A label or description is text someone else wrote, in any script: laid out by its own direction, as the invoice's card does. */}
       {lines.filter(Boolean).map((line) => (
-        <p key={line} dir="auto" className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
+        <p key={line} dir="auto" className="chat-text-pay-detail leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
-      <p className="font-mono text-[11.5px] leading-snug m-0 mt-1.5 break-all text-text-primary/80" data-testid="money-detail">{detail}</p>
-      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      <p className="font-mono chat-text-pay-mono leading-snug m-0 mt-1.5 break-all text-text-primary/80" data-testid="money-detail">{detail}</p>
+      {!fits && <p className="chat-text-pay-detail leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
       {fits && showQr && (
         <button onClick={() => setShowQr(false)} className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none" title={t("payments.invoice.hideQr")}>
           <MoneyQr value={qr} />
@@ -144,7 +144,7 @@ function NoWallet({ rail, network, other }: { rail: Rail; network: WalletNetwork
   const { t } = useI18n();
   const nav = useAppNavigation();
   return (
-    <div className="basis-full text-[12px] leading-snug mt-0.5" data-testid="money-no-wallet">
+    <div className="basis-full chat-text-pay-line leading-snug mt-0.5" data-testid="money-no-wallet">
       <p className="m-0">{t(`payments.formats.noWallet.${network}`, { wallet: WALLET_NAME[rail] })}</p>
       {other && <p className="m-0 mt-0.5 text-text-primary/70">{t("payments.formats.otherNeverPays", { network: NETWORK_NAME[network === "mainnet" ? "testnet" : "mainnet"], wallet: WALLET_NAME[rail] })}</p>}
       <button className={`${quiet} mt-1.5`} data-testid="money-create-wallet" onClick={() => nav.place("/wallet", { newWallet: { type: rail, network } })}>
@@ -226,7 +226,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
         </button>
         <button className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</button>
       </div>
-      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" />}
+      {error && <Notice problem={error} testId="money-pay-error" className="chat-text-card-line m-0" />}
     </div>
   );
 }
@@ -246,9 +246,9 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
   let status: React.ReactNode = null;
   if (payable && !hasWallet(view, "bitcoin")) status = <NoWallet rail="bitcoin" network={request.network} other={hasWallet(other, "bitcoin")} />;
   else if (payable && bitcoin?.network && !chainAccepts(bitcoin.network, request.address)) {
-    status = <p className="basis-full text-[12px] m-0" data-testid="money-wrong-chain">{t("payments.formats.wrongChain", { network: NETWORK_NAME[request.network], chain: bitcoin.network, target: chainName ?? request.chain })}</p>;
+    status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wrong-chain">{t("payments.formats.wrongChain", { network: NETWORK_NAME[request.network], chain: bitcoin.network, target: chainName ?? request.chain })}</p>;
   } else if (payable && bitcoin?.status !== "ready") {
-    status = <p className="basis-full text-[12px] m-0" data-testid="money-wallet-offline">{t("payments.formats.offline", { network: NETWORK_NAME[request.network] })}</p>;
+    status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wallet-offline">{t("payments.formats.offline", { network: NETWORK_NAME[request.network] })}</p>;
   } else if (payable && bitcoin?.network) {
     const chain = bitcoin.network;
     status = (
@@ -277,7 +277,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
       </Shell>
       {lightning && (
         <div className="mt-2" data-testid="onchain-lightning">
-          <p className="text-[11px] text-text-primary/65 m-0 mb-1">{t("payments.formats.orLightning")}</p>
+          <p className="chat-text-pay-label text-text-primary/65 m-0 mb-1">{t("payments.formats.orLightning")}</p>
           {lightning}
         </div>
       )}
@@ -320,7 +320,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
   let status: React.ReactNode = null;
   if (wallet && !mine && !off) {
     if (!hasWallet(view, rail)) status = <NoWallet rail={rail} network={request.network} other={hasWallet(other, rail)} />;
-    else if (ark?.locked) status = <p className="basis-full text-[12px] m-0" data-testid="money-wallet-locked">{t("payments.formats.unlock", { network: NETWORK_NAME[request.network], wallet: WALLET_NAME[rail] })}</p>;
+    else if (ark?.locked) status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wallet-locked">{t("payments.formats.unlock", { network: NETWORK_NAME[request.network], wallet: WALLET_NAME[rail] })}</p>;
     else if (ark?.network && ark.provider) {
       const { network, provider } = ark;
       status = (
@@ -364,12 +364,12 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
     : <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   let status: React.ReactNode = null;
   if (!network) {
-    status = <p className="basis-full text-[12px] m-0" data-testid="money-network-unknown">{request.chainId !== undefined ? t("payments.formats.usdtOtherChain", { chain: chain ?? "" }) : t("payments.formats.usdtNoChain")}</p>;
+    status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-network-unknown">{request.chainId !== undefined ? t("payments.formats.usdtOtherChain", { chain: chain ?? "" }) : t("payments.formats.usdtNoChain")}</p>;
   } else if (wallet && !mine && !off) {
     if (!hasWallet(view, "usdt")) status = <NoWallet rail="usdt" network={network} other={hasWallet(other, "usdt")} />;
-    else if (usdt?.locked) status = <p className="basis-full text-[12px] m-0" data-testid="money-wallet-locked">{t("payments.formats.unlock", { network: NETWORK_NAME[network], wallet: "USDT" })}</p>;
-    else if (usdt?.chainId !== request.chainId) status = <p className="basis-full text-[12px] m-0" data-testid="money-wrong-chain">{t("payments.formats.usdtWrongChain", { network: NETWORK_NAME[network], chain: USDT_CHAINS[usdt?.chainId ?? 0]?.name ?? t("payments.formats.anotherChain"), target: chain ?? "" })}</p>;
-    else if (request.token && usdt?.token && request.token !== usdt.token.toLowerCase()) status = <p className="basis-full text-[12px] m-0" data-testid="money-wrong-token">{t("payments.formats.wrongToken")}</p>;
+    else if (usdt?.locked) status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wallet-locked">{t("payments.formats.unlock", { network: NETWORK_NAME[network], wallet: "USDT" })}</p>;
+    else if (usdt?.chainId !== request.chainId) status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wrong-chain">{t("payments.formats.usdtWrongChain", { network: NETWORK_NAME[network], chain: USDT_CHAINS[usdt?.chainId ?? 0]?.name ?? t("payments.formats.anotherChain"), target: chain ?? "" })}</p>;
+    else if (request.token && usdt?.token && request.token !== usdt.token.toLowerCase()) status = <p className="basis-full chat-text-pay-line m-0" data-testid="money-wrong-token">{t("payments.formats.wrongToken")}</p>;
     else if (usdt?.network && usdt.provider && usdt.token) {
       const { network: evm, provider, token } = usdt;
       status = (
@@ -421,7 +421,7 @@ function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }
       {!mine && <OpenInWallet className={`${button} no-underline`} uri={request.uri} title={t("payments.formats.moneroPayTitle")} testId="monero-pay">{t("payments.invoice.pay")}</OpenInWallet>}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
       {!mine && <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />}
-      {!mine && info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
+      {!mine && info && <p id={infoId} className="basis-full order-last chat-text-pay-line leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
       {failed && <MoneyCopyRefused value={request.address} />}
     </Shell>
   );

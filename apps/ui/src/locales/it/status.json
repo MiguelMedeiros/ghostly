@@ -22,6 +22,7 @@
     "today": "Oggi",
     "week": "Questa settimana"
   },
+  "linkLike": "Sembra un link, e uno stato non può contenerne. Cambia il testo per salvarlo.",
   "menuLabel": "Il tuo stato: {{status}}. Cambia stato",
   "past": "Scegli un orario dopo adesso.",
   "placeholder": "Qual è il tuo stato?",

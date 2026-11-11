@@ -99,6 +99,29 @@ describe("the status picker in the account menu", () => {
     expect(engine.callsTo("setOwnStatus")[0]?.status.text).toBe(`${"x".repeat(58)}😀😀`);
   });
 
+  it("refuses a text that reads as a link, which the engine would drop, and saves it once changed", async () => {
+    answerStatus();
+    const { user, engine } = renderBar();
+    const dialog = await openPicker(user);
+    await user.click(within(dialog).getByRole("radio", { name: "Busy" }));
+    const field = within(dialog).getByRole("textbox", { name: "Status text" });
+    // Plain words to a person; "data:" is one of the link schemes a status text may not hold (core's plainStatusLine).
+    await user.type(field, "Crunching data: back at 5");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")).toHaveLength(0);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("This reads as a link, which a status can't hold. Change the text to save it.");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription(/reads as a link/);
+
+    await user.clear(field);
+    await user.type(field, "Crunching numbers, back at 5");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(field).not.toHaveAttribute("aria-invalid");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")[0]?.status.text).toBe("Crunching numbers, back at 5");
+  });
+
   it("sends a chosen time as until, and refuses one already past", async () => {
     answerStatus();
     const { user, engine } = renderBar();
