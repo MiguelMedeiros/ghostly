@@ -233,11 +233,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
         )}
         <div className="min-w-0 flex-1">
           {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
-          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          <p dir="auto" className="chat-text-media-name leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
           {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
-          <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
+          <p className={`flex items-center gap-1 chat-text-media-meta m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
             <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
@@ -270,11 +270,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
-          <p className="text-[12px] m-0 mb-1 [overflow-wrap:anywhere]">
+          <p className="chat-text-media-line m-0 mb-1 [overflow-wrap:anywhere]">
             {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
           </p>
           {typeof transfer.room === "number" && (
-            <p className={`text-[11px] m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
+            <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
               {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
