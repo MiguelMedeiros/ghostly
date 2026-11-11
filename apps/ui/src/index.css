@@ -1775,6 +1775,20 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 }
 [dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
 
+/* A panel from the end edge on a wide screen (a message's details, a wallet total's breakdown) is a portal on the body
+   too: an iPhone on its side or an installed iPad keeps its close button and its last row clear of the notch, the
+   status bar and the home indicator. The end inset is added to its width, so the content keeps its 400px. */
+.end-panel {
+  width: min(calc(400px + env(safe-area-inset-right)), 100vw);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline-end: env(safe-area-inset-right);
+}
+[dir="rtl"] .end-panel {
+  width: min(calc(400px + env(safe-area-inset-left)), 100vw);
+  padding-inline-end: env(safe-area-inset-left);
+}
+
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
   padding-top: max(0.5rem, env(safe-area-inset-top));
