@@ -1,5 +1,5 @@
 import { getBrowserHost, type EngineConnection } from "../host";
-import type { AppFrameEvent } from "@ghostly/core";
+import { STATUS_IDLE_AFTER_MS, type AppFrameEvent } from "@ghostly/core";
 import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
@@ -54,6 +54,14 @@ class EngineClient {
   private lastGroup: string | null = null;
   /** That group, held or asked for when the peer went away: the next connection asks its whole history again. */
   private readonly reread = new Set<string>();
+  /**
+   * What this page last told the peer about itself that the peer keeps only in memory (`sessionWord`): the chat on
+   * screen, whether the person is here, a call on. A peer that starts again (the extension's offscreen document,
+   * replaced) knows none of it, and the page says it only when it changes: each connection is told it again.
+   */
+  private readonly said = new Map<string, { method: EngineMethod; params: unknown; at: number }>();
+  /** Per `said` key, the calls waiting for a connection to send it: the newest word goes with them, not before. */
+  private readonly due = new Map<string, number>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -135,8 +143,12 @@ class EngineClient {
     return undefined;
   }
 
-  /** Forgets every history held here, as a page that just loaded holds none: each test of the UI is a page of its own. */
+  /**
+   * Forgets every history held here, and what the page told the peer about itself, as a page that just loaded holds
+   * none: each test of the UI is a page of its own.
+   */
   forgetHistories(): void {
+    this.said.clear();
     this.messages.clear();
     this.partial.clear();
     this.asked.clear();
@@ -224,7 +236,22 @@ class EngineClient {
   }
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {
-    await this.connect();
+    const word = sessionWord(method, params[0]);
+    if (word) {
+      // The newest word is the one a later connection is told, even when this call never reaches a peer.
+      if (word.kept) this.said.set(word.key, { method, params: params[0], at: Date.now() });
+      else this.said.delete(word.key);
+      this.due.set(word.key, (this.due.get(word.key) ?? 0) + 1);
+    }
+    try {
+      await this.connect();
+    } finally {
+      if (word) {
+        const left = (this.due.get(word.key) ?? 1) - 1;
+        if (left) this.due.set(word.key, left);
+        else this.due.delete(word.key);
+      }
+    }
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
@@ -264,6 +291,7 @@ class EngineClient {
       .then((connection) => {
         this.connection = connection;
         this.setReconnecting(false);
+        this.sayAgain(connection);
         const reread = [...this.reread];
         this.reread.clear();
         for (const id of reread) this.history(id);
@@ -287,6 +315,21 @@ class EngineClient {
   private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
     const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
     return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
+  }
+
+  /**
+   * Tells a new connection what the page said of itself to the one before (`said`): a peer that started again heard
+   * none of it. A word a call is about to send itself is left to that call, so nothing goes twice on a first connection
+   * and an older word never follows a newer one. Nobody waits for the answers.
+   */
+  private sayAgain(connection: EngineConnection): void {
+    for (const [key, { method, params, at }] of this.said) {
+      if (this.due.has(key)) continue;
+      // The peer before went idle by itself 10 minutes after the last "active" (`STATUS_IDLE_AFTER_MS`): so does this one.
+      const said = method === "setPresence" && (params as { presence?: unknown }).presence === "active" && Date.now() - at >= STATUS_IDLE_AFTER_MS
+        ? { presence: "idle" } : params;
+      connection.send({ kind: "request", id: this.nextId++, method, params: said } as Parameters<EngineConnection["send"]>[0]);
+    }
   }
 
   /** Connects again after `delay`, and again after twice as long while the tries fail. */
@@ -400,6 +443,30 @@ class EngineClient {
       const changes: ListChanges = { from, messages: [...rows.values()], deleted: [...deleted] };
       for (const listener of this.messageListeners) listener(linkId, messages, changes);
     }
+  }
+}
+
+/**
+ * What a page says of itself that the peer keeps only in memory, and only hears when it changes: the chat or group on
+ * screen (`setActiveLink`), whether the person is here (`setPresence`), whether a call is on in the page (`setCallOn`;
+ * the engine server counts it per page), and a chat polled fast while a call connects over the DHT (`setFastPoll`).
+ * `key` names the word (the newest per key counts); `kept` is false for what a new peer already starts with (nothing
+ * on screen, no presence said, no call, no fast poll), which needs no saying again. Anything else (a send, a setting
+ * the peer stores) is no such word: undefined.
+ */
+function sessionWord(method: string, params: unknown): { key: string; kept: boolean } | undefined {
+  const p = (params ?? {}) as Record<string, unknown>;
+  switch (method) {
+    case "setActiveLink":
+      return { key: method, kept: typeof p.linkId === "string" };
+    case "setPresence":
+      return { key: method, kept: p.presence === "active" || p.presence === "idle" };
+    case "setCallOn":
+      return { key: method, kept: p.on === true };
+    case "setFastPoll":
+      return typeof p.linkId === "string" ? { key: `${method} ${p.linkId}`, kept: p.fast === true } : undefined;
+    default:
+      return undefined;
   }
 }
 
