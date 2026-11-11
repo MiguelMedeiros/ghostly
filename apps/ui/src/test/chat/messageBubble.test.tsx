@@ -5,6 +5,7 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { forgetPictureLinks } from "../../lib/pictureLink";
+import { previewText } from "../../lib/chatList";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
@@ -433,6 +434,31 @@ describe("MessageBubble: money in a message", () => {
     expect(within(card).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(within(card).getByTestId("qr-too-long")).toHaveTextContent("Too long for a QR code");
     expect(card.querySelector("svg")).toBeNull();
+  });
+
+  it.each([
+    ["a Lightning invoice", `guess: ||${INVOICE}||`, "guess: ▒▒▒"],
+    ["an ecash token", `prize ||${TOKEN}||`, "prize ▒▒▒"],
+    ["a bitcoin: link", "||bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.1||", "▒▒▒"],
+    ["a Bitcoin address", "a ||bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq|| b", "a ▒▒▒ b"],
+  ])("keeps %s inside a spoiler covered: no card says its amount, memo, mint or address", async (_, text, line) => {
+    // The card stood in for the whole text, spoiler and all, with "||||" left above it; the chat list named it too.
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 100, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const { engine } = bubble({ text });
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.getByTestId("message-text")).not.toHaveTextContent("||");
+    for (const card of ["invoice-bubble", "cashu-token-bubble", "onchain-bubble", "money-amount"]) expect(screen.queryByTestId(card)).toBeNull();
+    expect(engine.callsTo("walletInspectCashu")).toEqual([]);
+    expect(previewText(text)).toBe(line);
+  });
+
+  it.each([
+    ["before", `||the answer|| ${INVOICE}`],
+    ["after", `${INVOICE} ||the answer||`],
+  ])("still shows the card of money with a spoiler %s it", (_, text) => {
+    bubble({ text });
+    expect(within(screen.getByTestId("invoice-bubble")).getByTestId("money-amount")).toHaveTextContent("2,100");
+    expect(previewText(text)).toMatch(/^⚡ Lightning invoice/);
   });
 
   it("shows an ecash token of another unit as one this wallet cannot take", async () => {
