@@ -12,7 +12,9 @@ import { choose } from "../support/select";
  * the chat's data link to the bot's machine.
  *
  * Needs a build made with a services host: the suite's own sets one (`VITE_SERVICES_HOST`, e2e/playwright.config.ts),
- * `http://*.localhost:<port>`, which Chromium resolves to this machine.
+ * `http://*.localhost:<port>`, which Chromium and Firefox resolve to this machine. In Firefox
+ * (e2e/playwright.firefox.config.ts) the POST's body takes another way through the services worker: Firefox's
+ * `Request` has no body stream.
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
