@@ -195,7 +195,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
  */
 function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
   return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
-    className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
+    className="current-mark pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
 /** `chat-list-row`: drawn only near the list's view (index.css), every row still in the page. */
