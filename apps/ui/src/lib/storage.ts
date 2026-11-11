@@ -74,12 +74,14 @@ export function keyOwner(): (key: string) => boolean {
   const spaces = otherSpaces();
   return (key) => key.startsWith("ghostly_") && ownsUnprefixed(key, spaces);
 }
-const ownsUnprefixed = (key: string, spaces = otherSpaces()) => {
-  const rest = key.slice("ghostly_".length);
-  return !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
-};
 /** The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. */
 const DEVICE_KEYS = new Set(["ghostly_keep_awake", "ghostly_stay_connected"]);
+// Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, and
+// its backups and moves carried them (bug hunt, 2026-11-11).
+const ownsUnprefixed = (key: string, spaces = otherSpaces()) => {
+  const rest = key.slice("ghostly_".length);
+  return !DEVICE_KEYS.has(key) && !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
+};
 /**
  * Which keys are the first profile's own in its original namespace (`ghostly_` with no other profile's id or space
  * after it), whichever profile or space this page runs as: one a handoff installed elsewhere leaves them behind.
@@ -88,7 +90,7 @@ const DEVICE_KEYS = new Set(["ghostly_keep_awake", "ghostly_stay_connected"]);
  */
 export function originalKeyOwner(): (key: string) => boolean {
   const spaces = otherSpaces();
-  return (key) => key.startsWith("ghostly_") && !DEVICE_KEYS.has(key) && ownsUnprefixed(key, spaces);
+  return (key) => key.startsWith("ghostly_") && ownsUnprefixed(key, spaces);
 }
 /**
  * Other storage spaces in this storage area (Desktop's GHOSTLY_PROFILE, and their profiles): each keeps
