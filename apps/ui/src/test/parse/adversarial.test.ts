@@ -158,6 +158,16 @@ describe("direction controls in links", () => {
     expect(shownUrl("https://a@b@evil.example/x")).toBe("https://evil.example/x");
     expect(shownUrl("https://x.example/@alice")).toBe("https://x.example/@alice");
   });
+
+  it("shows the host a link opens when the typed one has escapes or other forms the parser rewrites", () => {
+    expect(shownUrl("https://paypal.com%2Eevil.example/login")).toBe("https://paypal.com.evil.example/login");
+    expect(shownUrl("https://paypal.com%C2%ADevil.example/x")).toBe("https://paypal.comevil.example/x");
+    expect(shownUrl("https://paypal%E3%80%82com/x")).toBe("https://paypal.com/x");
+    expect(shownUrl("https://paypal.com%E2%80%8Bevil.example/")).not.toContain("%");
+    expect(shownUrl("https://127.1/")).toBe("https://127.0.0.1/");
+    // Only the host decides: case, a port and escapes in the path still show as typed.
+    expect(shownUrl("HTTPS://X.Example:8443/a%20b?q=%2E")).toBe("HTTPS://X.Example:8443/a%20b?q=%2E");
+  });
 });
 
 describe("long mentions", () => {

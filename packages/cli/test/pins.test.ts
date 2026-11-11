@@ -122,6 +122,13 @@ describe("pin in a group waits for an edge, as group react does", () => {
     expect(await callApi(inGroup("one-shot", () => 0).ctx, "chat.pin", { chat: "Crew", message: "k:0:1", wait: "none" })).toEqual({ group: "g1", messageId: "k:0:1", removed: false, sent: false, edges: 0 });
   });
 
+  it("the message pinned already (someone else's pin: the engine sends nothing, so no number) answers at once that nothing went", async () => {
+    const { ctx, node, groupTaken } = inGroup("one-shot", () => 1);
+    node.pinMessage.mockResolvedValue({ error: null });
+    expect(await callApi(ctx, "chat.pin", { chat: "Crew", message: "k:0:1", timeout: 1 })).toEqual({ group: "g1", messageId: "k:0:1", removed: false, sent: false, edges: 0 });
+    expect(groupTaken).not.toHaveBeenCalled();
+  });
+
   it("a daemon answers at once (it goes on saying it), unless asked to wait", async () => {
     const { ctx, groupTaken } = inGroup("daemon", () => 0);
     expect(await callApi(ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).toEqual({ group: "g1", messageId: "k:0:1", removed: false, sent: false, edges: 0 });

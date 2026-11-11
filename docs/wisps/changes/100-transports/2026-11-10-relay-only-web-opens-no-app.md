@@ -1,0 +1,1 @@
+Relay only: the web app now opens no contact's shared app while it is on, as the extension and `service open` do, and says why. No page policy is enough there: a Chromium browser connects to a server a frame in the app points at before the policy refuses the frame. The Desktop keeps opening one with its guard. No wire change.

@@ -6,6 +6,8 @@ import { LightningService, readLightningJournal, type LightningEvents, type Ligh
 import { sourceKey } from "./sources";
 import { awayFrom } from "../away";
 import { breezDatabaseInUse } from "./breezDatabases";
+import { BreezLightning } from "./breez";
+import { nwc, nwcWalletName } from "./nwcProvider";
 import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
 
@@ -34,6 +36,11 @@ export interface LightningCardView extends LightningView {
   name: string;
   /** The network's default for receiving: chat requests and Receive use it unless another card is picked. */
   receive: boolean;
+  /**
+   * `spark`: this card is the network's Spark wallet itself (a Breez card that opened the Spark wallet's own Breez
+   * database: same phrase, same profile), so its balance is that wallet's, whatever each of the two last read.
+   */
+  sameWalletAs?: "spark";
 }
 
 /** The card of Lightning through the Cashu mints: at most one per network, shown while the network has mints. */
@@ -78,6 +85,30 @@ export async function loadLightningCards(network: WalletMode, label: (providerId
 const cashuCard = (now: number): StoredLightningCard => ({ id: CASHU_CARD, name: SHORT[CASHU_MINT_SOURCE], providerId: CASHU_MINT_SOURCE, key: CASHU_CARD, createdAt: now });
 const shortName = (providerId: string, label: (providerId: string) => string) => SHORT[providerId] ?? label(providerId);
 
+/** At most this many characters of the wallet's own name go into a new card's name. */
+const ALIAS_IN_NAME = 20;
+
+/**
+ * A new card's name: the wallet's own name, then its source's short name ("Alby Hub (NWC)"), or the short name alone.
+ * An NWC wallet's name leaves out "via <relay host>" (the card's subtitle shows it). A longer name is cut where a word
+ * ends, with "…", never in the middle of a word.
+ */
+export function defaultCardName(providerId: string, alias: string | undefined, short: string): string {
+  const own = (alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "").replace(/\s+/g, " ").trim();
+  return own ? `${cutAtWord(own, ALIAS_IN_NAME)} (${short})` : short;
+}
+
+/** `text` in at most `max` UTF-16 units (the unit `rename` counts), cut after a whole word with "…" when longer. */
+function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let head = text.slice(0, max - 1);
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  // A head that ends right before a space is whole words already; otherwise drop the word it cut, unless it is the only one.
+  const space = text[head.length] === " " ? head.length : head.lastIndexOf(" ");
+  const kept = (space > 0 ? head.slice(0, space) : head).replace(/[\s,;:·–—-]+$/u, "");
+  return `${kept || head}…`;
+}
+
 export interface LightningCardsHost {
   descriptors: () => readonly LightningProviderDescriptor[];
   host: () => Omit<ProviderHost, "mode" | "signal">;
@@ -85,6 +116,8 @@ export interface LightningCardsHost {
   /** Whether the network has Cashu mints: the Cashu card shows only then. */
   hasMints: () => boolean;
   fetch?: typeof fetch;
+  /** The Breez database the network's Spark wallet has open, when it is open (`SparkAdapter.storage`). */
+  sparkStorage?: () => string | undefined;
 }
 
 /**
@@ -154,12 +187,21 @@ export class LightningCards {
 
   views(): LightningCardView[] {
     const receive = this.receivingId;
-    return this.shown().filter((card) => this.services.has(card.id)).map((card) => ({ ...this.services.get(card.id)!.view, card: card.id, name: card.name, receive: card.id === receive }));
+    return this.shown().filter((card) => this.services.has(card.id)).map((card) => this.cardView(card, card.id === receive));
   }
   /** The default for receiving's view: what a caller from before cards reads as the network's Lightning. None before start. */
   get view(): LightningCardView | undefined {
     const card = this.stored.cards.find((c) => c.id === this.receivingId) ?? this.stored.cards[0];
-    return card && this.services.has(card.id) ? { ...this.services.get(card.id)!.view, card: card.id, name: card.name, receive: true } : undefined;
+    return card && this.services.has(card.id) ? this.cardView(card, true) : undefined;
+  }
+  private cardView(card: StoredLightningCard, receive: boolean): LightningCardView {
+    const service = this.services.get(card.id)!;
+    return { ...service.view, card: card.id, name: card.name, receive, ...(this.isSpark(service) ? { sameWalletAs: "spark" as const } : {}) };
+  }
+  /** The card opened the Breez database the network's Spark wallet has open: one wallet behind both cards. */
+  private isSpark(service: LightningService): boolean {
+    const spark = this.options.sparkStorage?.(), active = service.sources.active;
+    return !!spark && active instanceof BreezLightning && active.storage === spark;
   }
 
   /** The card holding this quote (each card quotes through its own source). */
@@ -194,7 +236,7 @@ export class LightningCards {
       try { await service.sources.set(providerId, values); }
       catch (error) { await service.stop(); throw error; }
       finally { this.adding = undefined; }
-      card.name = this.freeName(service.view.alias ? `${service.view.alias.slice(0, 20)} (${shortName(providerId, this.label)})` : shortName(providerId, this.label));
+      card.name = this.freeName(defaultCardName(providerId, service.view.alias, shortName(providerId, this.label)));
       const receive = this.receivingId === CASHU_CARD ? id : this.stored.receive;
       // The mints' card of a network with no mints is not shown and holds nothing: a card of the person's own takes its
       // place, as the one source did before cards (a Cashu wallet made later does not bring it back).

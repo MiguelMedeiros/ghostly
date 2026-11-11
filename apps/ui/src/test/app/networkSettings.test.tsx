@@ -106,6 +106,17 @@ describe("Settings, Network: the transport line", () => {
       });
     }
   }
+
+  // Hide my IP from contacts closes the Desktop's DHT node: every read and write goes through the relays.
+  it("on the Desktop with Hide my IP on, says it reaches the DHT through the relays, not directly", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: transports.direct, settings: { relays: RELAYS, relayOnly: true } }));
+    const line = screen.getByTestId("network-protocol");
+    expect(line.textContent).toBe("Reaches the Mainline DHT (BEP44) through Pkarr relays (HTTP)");
+    expect(line).toHaveAttribute("data-kind", "relays");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-protocol").textContent).toBe("Reaches the Mainline DHT (BEP44) directly (UDP) and Pkarr relays (HTTP)");
+  });
 });
 
 describe("Settings, Network: Iroh relays", () => {
@@ -287,6 +298,26 @@ describe("Settings, Network: Hide my IP from contacts", () => {
     expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
   });
 
+  // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
+  for (const language of LANGUAGES) {
+    it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      const { engine } = renderApp(<NetworkSettings />, { language });
+      act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+      const field = screen.getByTestId("network-turn-field");
+      expect(field).not.toHaveTextContent(lookup(language, "network.turnHint")!);
+      expect(field).toHaveTextContent(lookup(language, "network.turnHintRelayOnly")!);
+      act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(lookup(language, "network.turnHint")!);
+    });
+  }
+
+  it("while it is on, the TURN server's hint says so in English", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Required while Hide my IP is on: calls and chats go through it.");
+    expect(screen.getByTestId("network-turn-field")).not.toHaveTextContent("Optional");
+  });
+
   it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "" } }));
@@ -373,7 +404,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings")).toEqual([]);
     // Not "Use a wss:// relay address" in an Arabic page.
-    expect(hyperdht).toHaveAccessibleDescription("استخدم wss:// في عنوان المرحّل");
+    expect(hyperdht).toHaveAccessibleDescription("استخدم \u2066wss://\u2069 في عنوان المرحّل");
     expect(push).toHaveAccessibleDescription("أزِل اسم المستخدم وكلمة المرور من العنوان");
     expect(marked()).toEqual(["network-hyperdht-relay", "network-push-relay"]);
     // The error sits right under the field that points at it.
@@ -412,7 +443,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     const url = screen.getByLabelText(arNetwork.turnUrl);
     await user.type(url, "https://turn.example.org");
     await user.click(screen.getByTestId("network-save"));
-    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل turn:host:port): https://turn.example.org");
+    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): https://turn.example.org");
     expect(marked()).toEqual(["network-turn-url"]);
     expect(url).toHaveFocus();
     await user.clear(url);

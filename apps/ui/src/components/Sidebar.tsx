@@ -4,7 +4,7 @@ import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
-import { ChatRow, GroupRow } from "./ChatRow";
+import { ChatRow, GroupRow, type ListedGroup } from "./ChatRow";
 import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
 import { OTHER_CHATS_ID, createFolder, folderChatsId, inOrder, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, setSectionOrder, useChatFolders } from "../lib/chatFolders";
 import { FolderNameDialog } from "./chat/ChatFolderDialogs";
@@ -25,6 +25,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
@@ -59,13 +60,17 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { WINDOW_FROM, useListWindow } from "../hooks/useListWindow";
 import { useComposition } from "../hooks/useComposition";
 import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
-const NO_GROUPS: NonNullable<typeof engine.state>["groups"] = [];
+const NO_GROUPS: ListedGroup[] = [];
+/** A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing. */
+const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup =>
+  ({ ...group, members: members.map(({ key, role, me, nick }) => ({ key, role, me, nick })) });
 /** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
-const listOfState = (state: typeof engine.state) => ({ groups: state?.groups ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
+const listOfState = (state: typeof engine.state) => ({ groups: state?.groups?.map(listedGroup) ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
 /** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
 const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
@@ -159,8 +164,8 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  // Its groups only, compared by content: the engine sends its whole state anew on every change (up to 20 a second while
-  // a file moves), and the whole of it drew the list and every row in it on each.
+  // Its groups only, as it reads them, compared by content: the engine sends its whole state anew on every change (up to
+  // 20 a second while a file moves), and the whole of it drew the list and every row in it on each.
   const engineState = useEngineValue(listOfState);
   // A bot's usage card (WISP 405 § Usage) per contact: the meter on its row.
   const usageByPeer = useUsageByPeer();
@@ -247,11 +252,13 @@ export function Sidebar() {
     };
   }, [refreshSessions]);
 
-  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  // The open chat is read while the page shows; in a hidden window what comes stays unread (usePageShown), and under
+  // the lock screen too (the app stays mounted there).
   const pageShown = usePageShown();
+  const locked = useIsLocked();
   useEffect(() => {
-    if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
-  }, [activeSessionId, pageShown, sessions]);
+    if (activeSessionId && pageShown && !locked) markSessionAsRead(activeSessionId);
+  }, [activeSessionId, pageShown, locked, sessions]);
 
   // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with Scan focused.
   // Any site can send the browser to either address, so neither does anything without a press: a chat made at `#/new`
@@ -339,6 +346,14 @@ export function Sidebar() {
   const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search,
     onMove: (id, index) => announceMove(byFolders ? moveInPart(id, index) : movePinnedBeside(id, index), byFolders),
     folders: { rows: movable, of: partOf, onDrop: setChatFolder } });
+  // A long list draws the rows near its view only (hooks/useListWindow.ts); the others are a space of their height. The
+  // open chat's row, an invitation answered from its row and a row in the hand are always drawn.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const rowWindow = useListWindow(rowsRef, { on: !collapsed && listReady && foundCount >= WINDOW_FROM, fallback: density === "compact" ? 66 : 80 });
+  // (Compared one by one: a Set of them built here kept the React Compiler from memoizing the component.)
+  const invitations = shownGroups.filter(invitationRow).map(g => groupChat(g.id));
+  /** The row at place `at` of its part (keyed as `useListWindow` keys rows: a chat's id, `group:<id>`) is drawn. */
+  const drawn = (key: string, at: number) => key === activeSessionId || key === reorder.dragging || key === `group:${activeGroupId}` || invitations.includes(key) || rowWindow.drawn(key, at);
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
@@ -429,8 +444,11 @@ export function Sidebar() {
   };
 
   // The list or the rail, whichever is drawn: the open chat's row is brought into sight in it (a reload, a link).
-  const rowsRef = useRef<HTMLDivElement>(null);
   useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
+  /** A row of the list while it is far from the view: the room it takes. */
+  const rowSpace = (key: string) => (
+    <div key={key} data-row-space={key} aria-hidden="true" style={{ height: rowWindow.space(key) }} {...(reorder.rowProps(key)["data-reorder-id"] ? { "data-reorder-id": key } : {})} />
+  );
 
   return (
     <div
@@ -471,14 +489,16 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
+            {/* On a phone 32px wide, and a thumb's 44px where a tap lands: that reaches past its end, over the gap and
+                Join's start, so New keeps all of its own and the words still fit beside the logo on a 375px phone. */}
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
-              className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
+              className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             {newMenu()}
           </div>
-          <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><ActionIcon d={JOIN_PATH} /><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
+          <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><ActionIcon d={JOIN_PATH} /><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>
         {/* A wide window folds the list to a rail of pictures, for more room for the open chat. */}
         {!isMobile && <RailToggle ref={toggleRef} collapsed={false} onToggle={toggleCollapsed} />}
@@ -541,7 +561,7 @@ export function Sidebar() {
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
                 {itsGroups.filter(invitationRow).map(groupRow)}
-                {(folderRows.get(folder.id) ?? []).map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
+                {(folderRows.get(folder.id) ?? []).map((row, at) => (!drawn(row.key, at) ? rowSpace(row.key) : row.group ? groupRow(row.group) : chatRow(row.session!)))}
                 {itsGroups.length === 0 && itsChats.length === 0 && <p data-testid="chat-folder-empty" className="m-0 px-3 py-3 text-[13px] text-text-muted">{t("sidebar.folder.empty")}</p>}
               </div>}
             </div>
@@ -559,10 +579,10 @@ export function Sidebar() {
             <div id={OTHER_CHATS_ID} data-testid="chat-folder-others-rows">
               {byFolders ? <>
                 {looseGroups.filter(invitationRow).map(groupRow)}
-                {looseRows.map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
+                {looseRows.map((row, at) => (!drawn(row.key, at) ? rowSpace(row.key) : row.group ? groupRow(row.group) : chatRow(row.session!)))}
               </> : <>
-                {looseGroups.map(groupRow)}
-                {loose.map(chatRow)}
+                {looseGroups.map((group, at) => (drawn(groupChat(group.id), at) ? groupRow(group) : rowSpace(groupChat(group.id))))}
+                {loose.map((session, at) => (drawn(session.id, looseGroups.length + at) ? chatRow(session) : rowSpace(session.id)))}
               </>}
             </div>
           )}

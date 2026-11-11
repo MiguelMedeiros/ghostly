@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateVapidKeys } from "@ghostly/core";
 import { groupChat, setChatMute } from "../../lib/chatMute";
+import { loadSettings, saveSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { pushPlatform, rotateWake, setPushPlatform, setWake, setWakeOnline, useStandbyPush, useWakeOn, useWakeOnline, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
@@ -132,6 +133,27 @@ describe("the push worker's table", () => {
       { token: "tokennnnnnnnnnnnnnnnnn", path: "/chat/chatn", name: "Bo" },
       { token: "tokenuuuuuuuuuuuuuuuuu", path: "/chat/chatu" },
     ], { ...words, db: "ghostly" });
+  });
+
+  it("names no contact while the profile has a lock screen, and names them again when it is turned off (WISP 04)", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    saveSession({ id: "chatl", mySeedB64: "s", peerPubKeyB64: "peer-l", encKeyB64: "e", createdAt: 1, messages: [], label: "Ana" } as unknown as ChatSession);
+    const settings = loadSettings();
+    saveSettings({ ...settings, lockScreen: { ...settings.lockScreen, enabled: true, passwordHash: "hash" } });
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links: [linkView({ id: "l-l", peerPubKeyZ32: "peer-l", wakeToken: "tokenlllllllllllllllll" })],
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message", online: "{name} is online", onlineUnnamed: "A contact is online" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalled());
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenlllllllllllllllll", path: "/chat/chatl" }]);
+
+    act(() => saveSettings({ ...settings, lockScreen: { ...settings.lockScreen, enabled: false } }));
+    await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenlllllllllllllllll", path: "/chat/chatl", name: "Ana" }]));
+    // Turned on again (another tab, or this one): the name leaves the table at once.
+    act(() => saveSettings({ ...settings, lockScreen: { ...settings.lockScreen, enabled: true, passwordHash: "hash" } }));
+    await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenlllllllllllllllll", path: "/chat/chatl" }]));
   });
 
   it("says when online notices are turned off, and is written again each time the switch changes", async () => {

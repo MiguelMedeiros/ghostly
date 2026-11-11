@@ -492,7 +492,7 @@ let started = false;
 export function startSessionSync(): void {
   if (started) return;
   started = true;
-  void engine.connect().catch(() => {});
+  engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {
     void reconcile();

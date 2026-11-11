@@ -2,6 +2,7 @@ import type { AppStoreSummary } from "@ghostly/browser/engine/apps";
 import type { Translate, TranslationKey } from "../../contexts/I18nContext";
 import { date } from "../identities";
 import { problemLine } from "../problemText";
+import { LOCKED } from "./open";
 
 /*
  * The apps calls' errors start with their code (`<code>: words`, engine/apps.ts and appFetch.ts). The ones a person can
@@ -31,13 +32,19 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
+  damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",
 };
 
-/** A store's list held older or too large: said of the store's list, not of an app's version. */
+/**
+ * A store's list held older or too large: said of the store's list, not of an app's version. One dated further ahead
+ * than this device's clock allows names the clock, the one thing the person can fix.
+ */
 const STORE_KEYS: Record<string, TranslationKey> = {
   rollback: "apps.store.rollback",
   "too-large": "apps.store.tooLarge",
+  "expires-too-far": "apps.store.clockLate",
 };
 
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
@@ -86,6 +93,8 @@ export function appStoreProblemText(store: Pick<AppStoreSummary, "problem" | "pr
 }
 
 export function appErrorText(error: unknown, t: Translate): string {
+  // An Open the profile's lock overtook (open.ts): nothing failed, it opens again once unlocked.
+  if ((error instanceof Error ? error.message : error) === LOCKED) return t("apps.errors.locked");
   const code = appErrorCode(error);
   // The host's own trouble (an outage, a rate limit) is not a wrong link: trying again later may work.
   const status = code === "status" ? Number(/\b(\d{3})\b/.exec(error instanceof Error ? error.message : String(error))?.[1]) : 0;

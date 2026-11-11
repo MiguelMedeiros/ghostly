@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -178,15 +178,21 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   );
 }
 
+/** What "Version {{version}}" gets in place of the version (a private-use character), to put the version there in its own direction. */
+const VERSION_SLOT = "";
+
 function Head({ titleId, title, version, tagline, icon, installed }: { titleId: string; title: string; version?: string; tagline?: string; icon?: Uint8Array | null; installed?: InstalledAppView }) {
   const { t } = useI18n();
+  const [before = "", after = ""] = version ? t("apps.app.version", { version: VERSION_SLOT }).split(VERSION_SLOT) : [];
   return (
     <div className="flex items-center gap-3">
       <AppIcon size={48} icon={icon} installed={installed} />
       <div className="min-w-0">
         <h2 id={titleId} dir="auto" className="text-match-parent text-lg font-medium text-text-primary break-words">{title}</h2>
-        {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
-        {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
+        {/* A link, a long word or a version (64 characters, no space) breaks anywhere: unbroken, it pushed the screen
+            sideways on a phone, and cut it off in Arabic. The version keeps its own direction: in Arabic, broken
+            after "1.0.0-", its "-" was drawn at the left ("-1.0.0"). */}
+        {version && <p className="text-xs text-text-muted [overflow-wrap:anywhere]">{before}<bdi dir="ltr">{version}</bdi>{after}</p>}
         {tagline && <p dir="auto" className="text-match-parent text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
@@ -229,17 +235,50 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     return () => { live = false; };
   }, [key, have]);
 
+  // The app asks for more than this screen lists, and reading it again failed (offline, the host down): what the screen
+  // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
+  const [stale, setStale] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
+  const recheck = async () => {
+    try {
+      const again = await engine.call("appPreview", source);
+      setPreview(again); setStale(false);
+      setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+    } catch (read) {
+      // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
+      setStale(true); setError(appErrorView(read, t));
+    }
+  };
   const install = async () => {
-    if (!preview) return;
+    if (!preview || stale) return;
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { digest: preview.digest, grant: [...preview.manifest.permissions] });
+      const app = await engine.call("appInstall", { stage: preview.stage, digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
-    } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
+    } catch (e) {
+      // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
+      // installed by the check): the screen shows what it asks now, and Install grants only that.
+      if (appErrorCode(e) === "permissions-changed") await recheck();
+      else setError(appErrorView(e, t));
+    } finally { setBusy(false); }
   };
+  const retry = async () => {
+    setRechecking(true); setError(null);
+    try { await recheck(); } finally { setRechecking(false); }
+  };
+  // Install turned off with the focus on it hands the focus to Try again; Try again gone (read) hands it back to Install.
+  const wasStale = useRef(false);
+  useEffect(() => {
+    const was = wasStale.current;
+    wasStale.current = stale;
+    if (was === stale) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || active === confirmButton.current) (stale ? retryButton : confirmButton).current?.focus({ preventScroll: true });
+  }, [stale]);
   // While Install runs, the screen stays: closed, the install went on all the same, and opened the app after a Cancel.
   const close = () => { if (!busy) onClose(); };
 
@@ -266,8 +305,11 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           Cancel off the screen's start, where nothing scrolls to it. */}
       <div className="flex flex-wrap justify-end gap-2">
         <Button disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+        {preview && !blocked && stale && (
+          <Button ref={retryButton} data-testid="app-install-retry" loading={rechecking} onClick={() => void retry()}>{t("apps.page.tryAgain")}</Button>
+        )}
         {preview && !blocked && (
-          <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
+          <Button ref={confirmButton} variant="primary" data-testid="app-install-confirm" loading={busy} disabled={stale} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
               // A built-in app is already here: the button allows what it asks, it downloads nothing.
               : preview.carried ? t(openAfter ? "apps.builtIn.allowOpen" : "apps.builtIn.allow")
@@ -366,8 +408,9 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
           {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
+          {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}

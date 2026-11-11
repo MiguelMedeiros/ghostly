@@ -62,11 +62,13 @@
     "title": "Apps con {{name}}"
   },
   "errors": {
+    "damaged": "Sus archivos en este dispositivo están dañados. Descarga sus archivos de nuevo.",
     "equivocation": "Este enlace tiene otra copia de una versión que ya tienes. Ghostly conservó la tuya.",
     "expired": "Tardó demasiado. Vuelve a comprobar la app.",
     "githubLink": "Esa página de GitHub no es una app. Pega el enlace del repositorio o el del archivo de la app.",
     "host": "Las apps solo vienen de GitHub (raw.githubusercontent.com) o de jsDelivr en un commit.",
     "hostProblem": "El servidor tuvo un problema (error {{status}}). Inténtalo de nuevo más tarde.",
+    "locked": "El perfil se bloqueó antes de que la app se abriera. Ábrela de nuevo.",
     "needsFiles": "Sus archivos aún no están en este dispositivo.",
     "network": "No se pudo conectar con el servidor.",
     "notListed": "Esta tienda ya no lista esa app.",
@@ -101,6 +103,7 @@
     "note": "No se copia nada: {{app}} lee lo que elijas, en este dispositivo."
   },
   "install": {
+    "asksChanged": "Lo que pide esta app cambió. Revísalo de nuevo antes de instalarla.",
     "equivocation": "Existen dos copias distintas de esta versión. Ghostly conservó la que tienes.",
     "fetching": "Comprobando la app…",
     "foundBy": "Encontrada por {{name}}",
@@ -155,6 +158,7 @@
     "title": "Abrir {{title}} en un chat"
   },
   "store": {
+    "clockLate": "La lista de esta tienda tiene una fecha posterior al reloj de este dispositivo. Revisa la fecha y la hora de este dispositivo.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -191,6 +195,7 @@
     "resumeSharing": "compartiendo un archivo",
     "sharingWith": "compartiendo un archivo con {{name}}",
     "stoppedFailed": "{{title}} dejó de funcionar y se cerró. Si sigue pasando, avisa a su editor.",
+    "stoppedFocus": "{{title}} se detuvo: seguía tomando el teclado",
     "stoppedOffline": "{{title}} no pudo iniciarse: estás sin conexión. Ábrela de nuevo cuando tengas conexión.",
     "stoppedRemoved": "{{title}} se detuvo: {{store}} retiró esta versión",
     "stoppedRevoked": "{{title}} se detuvo: su editor revocó esta versión",

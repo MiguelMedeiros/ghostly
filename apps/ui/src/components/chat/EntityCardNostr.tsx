@@ -66,8 +66,8 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
         : <p data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
       {note && <p className="m-0 text-text-primary/65" data-testid="entity-nostr-age">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
       {result
-        ? <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
-        : <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-where">
+        ? <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
+        : <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-where">
           {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays) })}
           {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}

@@ -2,6 +2,7 @@ import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
 import { cleanOwnName } from "./ownName";
 import { sizeIn } from "./sizeText";
+import { textSizeOf, type TextSize } from "./textSize";
 import type { Translate } from "../locales/translate";
 
 export type ColorScheme = "dark" | "light" | "system";
@@ -44,6 +45,8 @@ export interface AppSettings {
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
   chatListDensity: ChatListDensity;
+  /** How large the chat's words are (lib/textSize.ts), on this device only. */
+  textSize: TextSize;
   /**
    * Where the layout has a side list (a wide window): the list folded to a rail of the chats' pictures, for more room
    * for the open chat. Kept on this device only; a phone's list is unchanged.
@@ -97,6 +100,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   reduceMotion: false,
   chatListDensity: "compact",
+  textSize: "default",
   chatListCollapsed: false,
   checkForUpdates: true,
   linkPreviews: true,
@@ -152,6 +156,7 @@ export function loadSettings(): AppSettings {
       // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
       defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      textSize: textSizeOf(parsed.textSize),
       chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,
       translateMessages: parsed.translateMessages === true,
@@ -216,6 +221,16 @@ function withChanges(base: Record<string, unknown>, before: Record<string, unkno
     else out[key] = now;
   }
   return out;
+}
+
+const sameValue = (a: unknown, b: unknown): boolean =>
+  isPlainObject(a) && isPlainObject(b)
+    ? [...new Set([...Object.keys(a), ...Object.keys(b)])].every((key) => sameValue(a[key], b[key]))
+    : JSON.stringify(a) === JSON.stringify(b);
+
+/** Whether two copies of the settings hold the same values, whatever the order of their keys. */
+export function sameSettings(a: AppSettings, b: AppSettings): boolean {
+  return a === b || sameValue(a, b);
 }
 
 /** The settings `stored` with what a page changed from `before` to `after`: its copy of the rest is not taken. */

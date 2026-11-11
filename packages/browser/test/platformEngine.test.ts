@@ -180,6 +180,23 @@ describe("calling the peer", () => {
     expect(heard).toEqual([true, false]);
   });
 
+  it("keeps trying by itself, and says so, when the page's first connection fails (a tab opened while the peer does not start)", async () => {
+    vi.useFakeTimers();
+    scripted.refuseWith(new Error("The Ghostly peer did not start. Reopen the extension to retry."));
+    engine.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scripted.connect).toHaveBeenCalledTimes(1);
+    expect(engine.reconnecting).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(scripted.connect.mock.calls.length).toBeGreaterThan(3);
+
+    // The peer starts (the minute check, or another tab): this page connects with nothing else asking it to.
+    scripted.refuseWith(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    expect(scripted.connections).toHaveLength(1);
+    expect(engine.reconnecting).toBe(false);
+  });
+
   it("stops saying it is reconnecting when a call of the page connects before the next try", async () => {
     vi.useFakeTimers();
     await engine.connect();

@@ -115,6 +115,26 @@ describe.each([
     expect(await ids({ timestamp: 5 })).toEqual([[], false]);
   });
 
+  it("kept from a whole history read (`keepNewest`): the page as read, with no frame; a write drops it", async () => {
+    const chat = Array.from({ length: 237 }, (_, i) => ({ ...message("chat-b", `m${(i * 37) % 1000}`, 1_000 + Math.floor(i / 3)), ...(i % 5 === 0 && { frame: { n: i } }) }));
+    for (const m of shuffled([...chat, message("short", "s", 1), message("written", "w", 1), message("odd", "o", Number.NaN)])) await db.putMessage(m as StoredMessage);
+    db.keepNewest(50);
+    for (const linkId of ["chat-b", "short", "written", "odd"]) await db.getMessages(linkId);
+    // A write while the history is read: what it read may be from before the write.
+    const reading = db.getMessages("raced");
+    await db.putMessage(message("raced", "r", 1));
+    await reading;
+    await db.putMessage(message("written", "w2", 2));
+    const kept = db.takeNewest();
+    const page = await db.getMessagePage("chat-b", { limit: 50 });
+    expect(kept.get("chat-b")).toEqual({ ...page, messages: page.messages.map(({ frame: _frame, ...m }) => m) });
+    expect(kept.get("short")).toEqual(await db.getMessagePage("short", { limit: 50 }));
+    expect([...kept.keys()].sort()).toEqual(["chat-b", "short"]);
+    // Taken once: keeping stopped.
+    await db.getMessages("short");
+    expect(db.takeNewest().size).toBe(0);
+  });
+
   it.each([8, 9])("works on a database kept before pages (v%i): the upgrade indexes the history already there", async (version) => {
     await new Promise<void>((resolve, reject) => {
       const open = indexedDB.open("ghostly", version);

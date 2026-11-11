@@ -2,7 +2,7 @@ import {
   ATPROTO_DECLARED_SCOPE, ATPROTO_FULL_SCOPE, ATPROTO_PROOF_COLLECTION, ATPROTO_PROOF_SCOPE, atprotoProofRecord, atprotoProofRkey,
   type AtprotoDidDocument, type IdentityStatement,
 } from "@ghostly/core";
-import type { IdentityFetch, IdentityPlatform } from "../contract";
+import { englishSay, type IdentityFetch, type IdentityPlatform, type ProviderSay } from "../contract";
 import { resolveAtprotoDid, resolveAtprotoHandle, type AtprotoResolveOptions } from "./resolve";
 
 /**
@@ -124,6 +124,8 @@ export interface AtprotoFlowOptions {
   /** The resolution the library uses: the same bounded lookups as the verifier. */
   resolve: AtprotoResolveOptions;
   onProgress(message: string): void;
+  /** Says the progress lines in the app's language (the AT Protocol provider's `say`); English when absent. */
+  say?: ProviderSay;
   /** The HTTP client for the OAuth requests and the record (the page's fetch). */
   fetch?: typeof fetch;
 }
@@ -190,7 +192,7 @@ async function withSession<T>(options: AtprotoFlowOptions, work: (session: { did
     throw new Error(`Your server (${pdsHost(account.pds)}) refused to start the sign-in.`);
   }
   if (!state) throw new Error("The sign-in could not start.");
-  options.onProgress(`Approve on ${pdsHost(account.pds)} in the window that opened…`);
+  options.onProgress((options.say ?? englishSay)("progress.approve", "Approve on {{server}} in the window that opened…", { server: pdsHost(account.pds) }));
   const redirected = await w.authorize(url.href, state, signal);
   signal.throwIfAborted();
   const params = callbackParams(redirected, w.redirectUri);
@@ -229,7 +231,7 @@ async function xrpcError(response: Response): Promise<string> {
 /** Writes the proof record (rkey = the proof key) and returns once the server has it. */
 export async function publishAtprotoProof(statement: IdentityStatement, options: AtprotoFlowOptions): Promise<void> {
   await withSession(options, async session => {
-    options.onProgress(`Publishing the proof on ${pdsHost(options.account.pds)}…`);
+    options.onProgress((options.say ?? englishSay)("progress.publishing", "Publishing the proof on {{server}}…", { server: pdsHost(options.account.pds) }));
     const response = await session.fetchHandler("/xrpc/com.atproto.repo.createRecord", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ repo: session.did, collection: ATPROTO_PROOF_COLLECTION, rkey: atprotoProofRkey(statement.binding.key), record: atprotoProofRecord(statement, new Date()) }),
@@ -242,7 +244,7 @@ export async function publishAtprotoProof(statement: IdentityStatement, options:
 /** Deletes the proof record. Deleting a record that is not there succeeds. */
 export async function unpublishAtprotoProof(proofKey: string, options: AtprotoFlowOptions): Promise<void> {
   await withSession(options, async session => {
-    options.onProgress(`Deleting the record on ${pdsHost(options.account.pds)}…`);
+    options.onProgress((options.say ?? englishSay)("progress.deleting", "Deleting the record on {{server}}…", { server: pdsHost(options.account.pds) }));
     const response = await session.fetchHandler("/xrpc/com.atproto.repo.deleteRecord", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ repo: session.did, collection: ATPROTO_PROOF_COLLECTION, rkey: atprotoProofRkey(proofKey) }),

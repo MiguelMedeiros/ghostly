@@ -1,4 +1,5 @@
 import { englishSay, type IdentityProofProvider, type IdentitySigner, type ProviderSay, type SignerField } from "@ghostly/browser/proofs/contract";
+import { displaySourceOf } from "@ghostly/browser/proofs/displaySource";
 import { builtInIdentityProvider } from "@ghostly/browser/proofs/load";
 import type { Translate, TranslationKey } from "../locales/translate";
 
@@ -16,6 +17,23 @@ export function providerSay(provider: IdentityProofProvider, t: Translate): Prov
     const said = t(path as TranslationKey, values as Record<string, string | number> | undefined);
     return said === path ? englishSay(key, english, values) : said;
   };
+}
+
+/**
+ * A proof's source in `t`'s language where the provider's words are fixed (`displaySourceOf`): who wrote a name (a
+ * key's user ID is its holder's own, a sign-in provider may not have checked the email), or how a Nostr proof was
+ * checked. Any other source is shown as written.
+ */
+export function sourceWords(provider: string, source: string, t: Translate): string {
+  const known = displaySourceOf(provider, source);
+  if (!known) return source;
+  if (known.kind === "nostr-signature") return t("identities.contact.sourceNostrSignature");
+  if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
+  if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
+  const signer = { provider: known.provider };
+  return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerified", signer)
+    : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverified", signer)
+    : t("identities.contact.sourceSigned", signer);
 }
 
 const cache = new WeakMap<Translate, WeakMap<IdentityProofProvider, IdentityProofProvider>>();

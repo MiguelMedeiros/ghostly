@@ -154,7 +154,7 @@ export const SHOWS = [
     body: "Up to six under a question. A tap is a reply, and listen gets button.pressed: which button, and who. button update --chosen and --close answer it.",
     cmd: 'ghostly send owner --button merge:Merge --button wait:Later --style merge=primary --once "Merge PR #612?"',
   },
-  { id: "groups", title: "Groups", body: "Woken only when someone writes @Casper. The Tasks panel lists each bot's cards.", cmd: 'ghostly group send crew "On it, @Ana" --mention Ana' },
+  { id: "groups", title: "Groups", body: "Woken only when someone writes @Casper or taps one of its buttons. The Tasks panel lists each bot's cards.", cmd: 'ghostly group send crew "On it, @Ana" --mention Ana' },
   { id: "calls", title: "Voice calls", body: "It answers your calls; the audio reaches your program as raw PCM.", cmd: "ghostly call auto on --from owner" },
 ] as const;
 

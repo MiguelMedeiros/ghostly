@@ -59,6 +59,29 @@ describe("the playback queue (program to call)", () => {
     expect(q.next().silent).toBe(true);
   });
 
+  // A program streams in chunks of any size (a TTS body piped through): a flush that dropped half a sample read every
+  // sample after it a byte off, loud noise until the call ended.
+  it("a flush with half a sample queued drops its other half too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, () => 0);
+    const stream = Buffer.alloc(2 * 400);
+    for (let i = 0; i < 400; i++) stream.writeInt16LE(1000 + i, i * 2);
+    q.push(stream.subarray(0, 3));
+    q.flush();
+    q.push(stream.subarray(3));
+    expect(q.next().frame.readInt16LE(0)).toBe(1002);
+  });
+
+  it("a full queue that drops an odd number of bytes drops the next byte too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, Date.now, 100);
+    q.push(Buffer.alloc(1600));
+    expect(q.push(Buffer.alloc(3))).toBe(3);
+    q.flush();
+    const rest = Buffer.alloc(2 * 160 + 1);
+    for (let i = 0; i < 160; i++) rest.writeInt16LE(-500, 1 + i * 2);
+    q.push(rest);
+    expect(q.next().frame.readInt16LE(0)).toBe(-500);
+  });
+
   it("drops what goes past its cap", () => {
     const q = new PlaybackQueue(8000, Date.now, 100);
     expect(q.push(Buffer.alloc(3000))).toBe(3000 - 1600);
@@ -274,6 +297,8 @@ function handLoop() {
   vi.stubGlobal("clearTimeout", (timer: unknown) => { timers = timers.filter((t) => t !== timer); });
   vi.stubGlobal("setImmediate", (run: () => void) => { immediates.push(run); });
   vi.spyOn(Date, "now").mockImplementation(() => time);
+  // The call's own clock (`monotonic`) too: the loop's time is what passed, whatever the time of day says.
+  vi.spyOn(performance, "now").mockImplementation(() => time);
   return {
     turn(ms: number, read: () => void): void {
       time += ms;
@@ -397,8 +422,46 @@ describe("a call's audio through Opus", () => {
     });
   }
 
+  for (const [rate, start] of [[48000, "talking"], [16000, "talking"], [48000, "silent"], [16000, "silent"]] as const) {
+    it(`does not decode the contact's silence again once it decodes the same, at ${rate} Hz on a call that starts ${start}: the program gets the same frames`, async () => {
+      const stack = await loadCallStack();
+      if (typeof stack === "string") throw new Error(stack);
+      // The contact's side: a tone (or nothing yet), three seconds of nothing, a tone, as a person who stops talking.
+      const packets: Buffer[] = [];
+      const contact = new CallAudio({ rate, payloadType: 111, ssrc: 2, track: { send: (p) => packets.push(p), onPacket: () => {} }, encoder: stack.opus(rate), decoder: stack.opus(rate), onFrame: () => {} });
+      if (start === "talking") contact.queue.push(tone(440, rate, 1000));
+      for (let i = 0; i < 200; i++) contact.tick();
+      contact.queue.push(tone(660, rate, 1000));
+      for (let i = 0; i < 50; i++) contact.tick();
+      contact.stop();
+      // Packet 120 is lost on the way, in the middle of the silence.
+      const arriving = packets.filter((_, i) => i !== 120);
+      const real = stack.opus(rate);
+      let decodes = 0;
+      const frames: Buffer[] = [];
+      let listener: (p: Buffer) => void = () => {};
+      const audio = new CallAudio({
+        rate, payloadType: 111, ssrc: 1, encoder: stack.opus(rate), onFrame: (f) => frames.push(f), track: { send: () => {}, onPacket: (l) => { listener = l; } },
+        decoder: { encode: () => Buffer.alloc(0), decode: (packet) => { if (packet.length) decodes++; return real.decode(packet); }, delete: () => real.delete?.() },
+      });
+      const during = (from: number, to: number) => { const before = decodes; for (const packet of arriving.slice(from, to)) listener(packet); return decodes - before; };
+      expect(during(0, 50)).toBeGreaterThanOrEqual(start === "talking" ? 50 : 1);
+      expect(during(50, 199)).toBeLessThanOrEqual(10);
+      expect(during(199, arriving.length)).toBe(50);
+      // What a decoder that reads every packet hands on, byte for byte.
+      const reference = stack.opus(rate), expected: Buffer[] = [];
+      for (let i = 0; i < packets.length; i++) expected.push(Buffer.from(i === 120 ? reference.decode(Buffer.alloc(0)).subarray(0, frameBytes(rate)) : reference.decode(parseRtp(packets[i])!.payload)));
+      expect(frames.length).toBe(250);
+      expect(frames.map((f, i) => f.equals(expected[i]) ? -1 : i).filter((i) => i !== -1)).toEqual([]);
+      audio.stop();
+      reference.delete?.();
+    });
+  }
+
   it("catches up after the daemon stalls, so a program writing at real time is not heard later and later", async () => {
     vi.useFakeTimers();
+    // A stall is time that passed with nothing run: the call's own clock (`monotonic`) moves with the faked one.
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => Date.now());
     try {
       const { a, b } = await pair(48000);
       const frame = tone(440, 48000, 20);
@@ -423,6 +486,7 @@ describe("a call's audio through Opus", () => {
       clearInterval(writer);
       a.stop(); b.stop();
     } finally {
+      clock.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -476,6 +540,33 @@ describe("a call's audio through Opus", () => {
       expect(a.queue.queuedMs).toBe(queued - 20);
     } finally {
       a.stop(); b.stop();
+      loop.restore();
+    }
+  });
+
+  it("moves the RTP timestamp on by the time a stall too long to catch up skipped, the sequence still continuous", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const loop = handLoop();
+    const packets: RtpPacket[] = [];
+    const audio = new CallAudio({
+      rate: 48000, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+      encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {},
+    });
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) audio.queue.push(frame); }); };
+      audio.start();
+      turns(50, 20);
+      const before = packets.length;
+      turns(1, 2980);
+      turns(5, 20);
+      const steps = packets.slice(before - 1).map((p, i, all) => i && [sequenceDelta(p.sequence, all[i - 1].sequence), (p.timestamp - all[i - 1].timestamp) >>> 0]).slice(1);
+      // The timestamp is the sampling time (RFC 3550): the packet after the stall is 2980 ms after the one before it,
+      // and the contact's jitter buffer does not read the gap as seconds of jitter.
+      expect(steps).toEqual([[1, 2980 * 48], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME]]);
+    } finally {
+      audio.stop();
       loop.restore();
     }
   });

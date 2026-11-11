@@ -60,6 +60,7 @@ describe("a contact's name, by precedence", () => {
   it("cleans a profile's name: no controls, bidi or invisible marks, one line, at most 64 characters", () => {
     expect(cleanFaceName("A\u202Eecil\u202C\u200F\u2066x\u2069\n\tB")).toBe("Aecilx B");
     expect(cleanFaceName("\u200B \u0000")).toBeUndefined();
+    expect(cleanFaceName("Alice\u{E0041}\u{E007F}")).toBe("Alice");
     expect(Array.from(cleanFaceName("\u{1F600}".repeat(80))!)).toHaveLength(64);
   });
 });

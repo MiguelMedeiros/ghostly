@@ -10,6 +10,7 @@ import { chatsByPeer, ownsKey } from "./storage";
 import { chatPath } from "./url";
 import { useEngineValue } from "./engineState";
 import { useWindowAway } from "./windowAway";
+import { isSettingsStorageEvent, loadSettings } from "./settings";
 
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
@@ -259,6 +260,21 @@ export function rotateWake(): Promise<void> {
   return rotating;
 }
 
+/** Whether this profile has a lock screen, as stored (the lock's own test, `LockScreenContext`). */
+function lockScreenOn(): boolean {
+  const { enabled, passwordHash } = loadSettings().lockScreen;
+  return enabled && !!passwordHash;
+}
+const subscribeLockSetting = (listener: () => void) => {
+  const stored = (event: StorageEvent) => { if (isSettingsStorageEvent(event)) listener(); };
+  window.addEventListener("settings-updated", listener);
+  window.addEventListener("storage", stored);
+  return () => {
+    window.removeEventListener("settings-updated", listener);
+    window.removeEventListener("storage", stored);
+  };
+};
+
 /**
  * The table the push worker reads, kept in step with the chats: a token for each chat that shared one, its route
  * and its mute (#250: a muted chat is never shown). Also puts right a subscription the browser dropped while the
@@ -283,6 +299,9 @@ export function useWakeTableSync(text: WakeWords): void {
   // apps (each hears of it on its next session with this app open): the table says so, and is written again when it changes.
   const words = JSON.stringify({ ...text, ...(onlineOff && { onlineOff: true }), db: databaseName() });
   const on = !!wake;
+  // A profile with a lock screen names nobody outside it (WISP 04): the worker shows its notices over the system's lock
+  // too, so the table holds no contact's name, and is written again when the lock is turned on or off.
+  const locked = useSyncExternalStore(subscribeLockSetting, lockScreenOn);
   useEffect(() => {
     const push = pushPlatform();
     if (!push || !held) return;
@@ -308,7 +327,7 @@ export function useWakeTableSync(text: WakeWords): void {
           if (!!link.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: link.id, muted: until !== undefined }).catch(() => {});
           if (!link.wakeToken) continue;
           // The name this app shows for the chat: an online notice says it, since the push names nobody.
-          const name = contactName(found)?.trim();
+          const name = locked ? undefined : contactName(found)?.trim();
           entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }), ...(name && { name }) });
         }
         // Private groups (WISP 902 · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
@@ -337,7 +356,7 @@ export function useWakeTableSync(text: WakeWords): void {
       window.removeEventListener("storage", stored);
       window.removeEventListener("session-updated", write);
     };
-  }, [on, held, words]);
+  }, [on, held, words, locked]);
 
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for

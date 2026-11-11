@@ -6,6 +6,7 @@ import { OIDC_PROVIDERS } from "@ghostly/browser/proofs/oidc/providers";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
 import en from "../../locales/en";
+import { LOCALES } from "../i18n/locales";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "./views";
@@ -155,6 +156,7 @@ describe("AddIdentityDialog", () => {
     it("says a built-in provider's words in the app's language, on its card, its details and its form", async () => {
       // The words a language has for the SSH key provider (identities.providers.ssh); the ones it lacks stay English.
       const area = en.identities as Record<string, unknown>;
+      const providers = area.providers;
       area.providers = { ssh: { label: "SSH-Schlüssel", summary: "Einmal mit ssh-keygen signieren", description: "Beweist, dass du einen SSH-Schlüssel hältst.", subject: { help: "Dein öffentlicher Schlüssel." } } };
       try {
         const { user } = dialog();
@@ -165,7 +167,7 @@ describe("AddIdentityDialog", () => {
         expect(screen.getByTestId("add-identity-about")).toHaveTextContent("Beweist, dass du einen SSH-Schlüssel hältst.");
         expect(screen.getByText("Dein öffentlicher Schlüssel.")).toBeInTheDocument();
         expect(screen.getByText(provider("ssh").privacy, { exact: false })).toBeInTheDocument();
-      } finally { delete area.providers; }
+      } finally { area.providers = providers; }
     });
 
     it("offers the validity periods up to the provider's maximum, starting on its default", async () => {
@@ -426,6 +428,25 @@ describe("AddIdentityDialog", () => {
       expect(onClose).toHaveBeenCalledOnce();
       // Completed: nothing to cancel.
       expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+    });
+
+    it("says a built-in provider's steps in the app's language, and in English a line that language has no words for", async () => {
+      // identities.providers.domain.dns.*: the TTL line taken out of Portuguese for this test.
+      const dns = (LOCALES.pt.identities as unknown as { providers?: { domain?: { dns?: Record<string, string> } } }).providers?.domain?.dns ?? {};
+      const ttl = dns.ttl;
+      delete dns.ttl;
+      try {
+        const { user } = renderApp(<AddIdentityDialog onClose={() => {}} />, { language: "pt" });
+        answerBegin();
+        await user.click(screen.getByTestId("add-identity-domain"));
+        await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+        await user.click(screen.getByTestId("add-identity-start"));
+        const steps = await screen.findByTestId("add-identity-steps");
+        expect(steps).toHaveTextContent("Abra as configurações de DNS de example.com no seu registrador ou provedor de DNS");
+        expect(steps).toHaveTextContent("Valor (uma única string, exatamente como aparece):");
+        expect(steps).not.toHaveTextContent("Open the DNS settings");
+        expect(steps).toHaveTextContent("Set the TTL to 300 seconds or less, so removing the record takes effect quickly.");
+      } finally { dns.ttl = ttl!; }
     });
 
     it("cancels the engine's draft when closed before finishing", async () => {

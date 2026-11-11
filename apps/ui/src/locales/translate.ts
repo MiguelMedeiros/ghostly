@@ -52,10 +52,22 @@ function writtenNumber(value: string | number, language: Language | undefined): 
  * forms only for a word it borrows, and borrowed it with its English number: "1 テスト sat", "2 テスト sats".
  */
 function pluralCategory(count: number, language: Language | undefined): string | undefined {
-  try {
-    const rules = new Intl.PluralRules(language ?? "en");
-    return (rules.resolvedOptions().pluralCategories.length > 1 ? rules : new Intl.PluralRules("en")).select(count);
-  } catch { return undefined; }
+  try { return pluralRules(language ?? "en").select(count); } catch { return undefined; }
+}
+
+/**
+ * The rules `pluralCategory` reads for `language`, made once. Made at each string with a number, they were the page's
+ * busiest code while nobody touched it: the chat list's look every few seconds says every row's time again.
+ */
+const PLURAL_RULES = new Map<string, Intl.PluralRules>();
+function pluralRules(language: string): Intl.PluralRules {
+  let rules = PLURAL_RULES.get(language);
+  if (!rules) {
+    const own = new Intl.PluralRules(language);
+    rules = own.resolvedOptions().pluralCategories.length > 1 ? own : new Intl.PluralRules("en");
+    PLURAL_RULES.set(language, rules);
+  }
+  return rules;
 }
 
 /**
@@ -98,13 +110,23 @@ function unitForm(dict: unknown, text: string, language: Language | undefined, p
   return Number.isFinite(count) ? pluralForm(dict, key, language, { count }) : undefined;
 }
 
+/**
+ * Each `{{name}}` of `text` with its param as it is (a value that reads like another place stays so); a place with no
+ * param stays for `fillNodes`. `unit`: `{{unit}}` said for its count.
+ */
+export function fillParams(text: string, params: Record<string, string | number>, unit?: string): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (place, k: string) => !Object.prototype.hasOwnProperty.call(params, k) ? place : String(k === "unit" && unit !== undefined ? unit : params[k]));
+}
+
 /** The translator for one language's dictionary: a key missing from it reads as the key itself. */
 export function translateWith(dict: unknown, language?: Language): Translate {
   const t = (key: TranslationKey, params?: Record<string, string | number>) => {
     let value = pluralForm(dict, key, language, params) ?? getNestedValue(dict, key);
     if (params) {
       const unit = unitForm(dict, value, language, params);
-      for (const [k, v] of Object.entries(params)) value = value.replace(new RegExp(`{{${k}}}`, "g"), String(k === "unit" && unit !== undefined ? unit : v));
+      // Put in by a function: a string would read `$$`, `$&` and `` $` `` in a contact's name or text as patterns. In one
+      // pass over the translation: one value after another filled a contact named "{{days}}" with the days after it.
+      value = fillParams(value, params, unit);
     }
     return value;
   };

@@ -44,7 +44,7 @@ describe("Paste from clipboard in Join", () => {
     await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/^Could not read the clipboard\. Press (⌘V|Ctrl\+V) to paste the invite below\.$/);
     expect(screen.getByRole("textbox", { name: "Invite code" })).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Paste from clipboard" })).not.toHaveAttribute("aria-busy");
     expect(onJoin).not.toHaveBeenCalled();
   });
 

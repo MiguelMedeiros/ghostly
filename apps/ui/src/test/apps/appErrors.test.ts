@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
-import { appErrorCode, appErrorView, appStoreErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorView, appStoreErrorView, appStoreProblemText } from "../../lib/apps/errors";
 // covers: apps.page
 
 /*
@@ -51,7 +51,32 @@ describe("app errors", () => {
     expect(appStoreErrorView(new Error("too-large: Too large"), en)).toEqual({ text: "This store's list is too large for Ghostly to read." });
   });
 
+  it("a store's list dated too far ahead names this device's clock, in every language, never that the link holds no valid store", () => {
+    const refused = new Error("expires-too-far: This is not a store Ghostly can read");
+    const problem = { problem: "expires-too-far" } as const;
+    const en = translateWith(locales.en);
+    expect(appStoreErrorView(refused, en)).toEqual({ text: "This store's list is dated ahead of this device's clock. Check the date and time on this device." });
+    expect(appStoreProblemText(problem, en)).toBe("This store's list is dated ahead of this device's clock. Check the date and time on this device.");
+    expect(appStoreProblemText(problem, translateWith(locales.pt))).toBe("A lista desta loja tem uma data à frente do relógio deste dispositivo. Confira a data e a hora deste dispositivo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appStoreErrorView(refused, t).text, name).not.toBe(t("apps.errors.notStore"));
+      expect(appStoreErrorView(refused, t).text, name).not.toMatch(/apps\.store/);
+    }
+  });
+
   it("other errors have no ⓘ", () => {
     expect(appErrorView(new Error("offline: no network"), translateWith(locales.en))).toEqual({ text: "You are offline." });
+  });
+
+  it("files found damaged on this device say to get them again, in every language, never that Ghostly won't install it", () => {
+    const damaged = new Error("damaged: This app's stored files do not match what was installed");
+    expect(appErrorView(damaged, translateWith(locales.en))).toEqual({ text: "Its files on this device are damaged. Get its files again." });
+    expect(appErrorView(damaged, translateWith(locales.pt)).text).toBe("Os arquivos dele neste dispositivo estão danificados. Baixe os arquivos de novo.");
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(damaged, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(damaged, t).text, name).not.toMatch(/apps\.errors|stored files/);
+    }
   });
 });

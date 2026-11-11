@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { privateFolder, runtimePath } from "../privateFolder";
-import { bytesToMs, type CallRate } from "./pcm";
+import { bytesToMs, type CallRate, type PlaybackQueue } from "./pcm";
 
 /**
  * A call's audio socket (WISP 1100 § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
@@ -33,6 +33,18 @@ export function clearAudioSockets(profileDir: string): void {
   } catch {
     // No folder yet, or one it cannot read: nothing to clear.
   }
+}
+
+/**
+ * The socket's handlers for a call's queue: what the program writes is queued, and a program that takes the socket
+ * (the first, or one that replaces the last) starts on a queue of its own (`PlaybackQueue.newWriter`): the last
+ * one's leftover, half a sample included, would otherwise shift all of its audio by a byte.
+ */
+export function feedQueue(queue: PlaybackQueue): { onAudio(chunk: Buffer): void; onClient(connected: boolean): void } {
+  return {
+    onAudio: (chunk) => { queue.push(chunk); },
+    onClient: (connected) => { if (connected) queue.newWriter(); },
+  };
 }
 
 /** How far a program may fall behind reading the call's audio before frames are dropped for it. */

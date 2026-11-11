@@ -17,7 +17,8 @@
  * comment), added at the end of that section, in the files' name order.
  *
  * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
- * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it.
+ * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it. A release at or
+ * before the repository's major.minor (package.json) is out already, holds nothing, and the check refuses it.
  *
  *   node tools/scripts/changes.mjs                    check every file, held ones too (CI)
  *   node tools/scripts/changes.mjs --preview          print "## Unreleased" with every entry
@@ -136,13 +137,22 @@ export function parseFragment(name, text, version) {
   if (release !== undefined && !releaseOk) {
     problems.push(`${name}: "release" is the release that takes the entry, as <major>.<minor> (such as 1.2)`);
   }
+  let guarded = false;
   for (const guard of RELEASE_GUARDS) {
     if (version !== undefined && !versionBefore(version, guard.from)) continue;
     if (!guard.entry({ group, body })) continue;
     if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
       const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;
       problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
+      guarded = true;
     }
+  }
+  // A release already out holds nothing: every bump from here takes the entry, and a patch would announce it.
+  if (releaseOk && version !== undefined && !guarded && !heldFor(release, version)) {
+    const [major, minor] = numbers(version);
+    problems.push(
+      `${name}: "release: ${release}" is out (package.json is ${version}): drop the line, or name the release that ships it, such as ${major}.${minor + 1}`,
+    );
   }
   return { heading, group, body, release, problems };
 }

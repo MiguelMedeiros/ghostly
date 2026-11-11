@@ -22,8 +22,17 @@ export interface ProfileEntry {
    * staged state). Everything that names the profile's storage goes through `namespaceOf`.
    */
   space?: string;
+  /**
+   * The name is the built-in one (`"Personal"`), shown in the app's language: the first profile never renamed, or a copy
+   * of it restored from a backup. A name someone typed, "Personal" included, has no mark and is shown as written.
+   */
+  builtIn?: true;
 }
-interface Registry { version: 1; active: string; profiles: ProfileEntry[] }
+/**
+ * Version 2 marks the built-in name (`builtIn`). A version 1 registry had no mark: in it, every entry named `"Personal"`
+ * is read as the built-in name, as clients then showed it.
+ */
+interface Registry { version: 2; active: string; profiles: ProfileEntry[] }
 
 /** Desktop's GHOSTLY_PROFILE: the process's own space, with its own profiles inside (for side-by-side testing). */
 let base = "";
@@ -55,7 +64,7 @@ const ID = /^[a-z0-9]{10}$/;
 export const PROFILE_THEMES: ColorTheme[] = ["cyan", "purple", "classic", "monochrome"];
 /** The swatch each theme shows in the switcher and on the profile's avatar. */
 export const THEME_COLOR: Record<ColorTheme, string> = { cyan: "#22d3ee", purple: "#a78bfa", classic: "#00a884", monochrome: "#d4d4d8" };
-const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0 };
+const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0, builtIn: true };
 /**
  * The first profile's name until someone renames it, in the app's language: the registry keeps the built-in English
  * one, so a change of language changes it too. A backup of it carries the built-in one and says that it is
@@ -75,7 +84,7 @@ export function setRestoredProfileName(format: (name: string) => string): void {
  * backup) by the name of the app's language; a restored one with the app's word for restored.
  */
 const shown = (entry: ProfileEntry): ProfileEntry => {
-  const name = entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
+  const name = entry.builtIn ? defaultName : entry.name;
   return entry.restored ? { ...entry, name: restoredName(name) } : name === entry.name ? entry : { ...entry, name };
 };
 /**
@@ -121,21 +130,25 @@ export function builtInNameBefore(name: string, language: string | undefined): b
 
 function read(): Registry {
   try {
-    const raw = JSON.parse(localStorage.getItem(registryKey()) ?? "null") as Partial<Registry> | null;
-    const profiles = (Array.isArray(raw?.profiles) ? raw!.profiles : [])
+    const raw = JSON.parse(localStorage.getItem(registryKey()) ?? "null") as { version?: unknown; active?: unknown; profiles?: unknown } | null;
+    const marks = raw?.version === 2;
+    const profiles = (Array.isArray(raw?.profiles) ? raw!.profiles as ProfileEntry[] : [])
       .filter((p): p is ProfileEntry => !!p && typeof p.id === "string" && (p.id === "" || ID.test(p.id)) && typeof p.name === "string")
       .map((p) => {
         const { name, marked } = nameAndMark(p.id, p.name);
+        // The first profile with no name left is the built-in one again.
+        const builtIn = !name ? !p.id : marks ? p.builtIn === true && name === DEFAULT_ENTRY.name : name === DEFAULT_ENTRY.name;
         const entry: ProfileEntry = { id: p.id, name: name || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 };
+        if (builtIn) entry.builtIn = true;
         if (p.restored === true || marked) entry.restored = true;
         if (typeof p.space === "string" && SPACE.test(p.space)) entry.space = p.space;
         return entry;
       });
     if (!profiles.some((p) => p.id === "")) profiles.unshift({ ...DEFAULT_ENTRY });
     const active = typeof raw?.active === "string" && profiles.some((p) => p.id === raw.active) ? raw.active : "";
-    return { version: 1, active, profiles };
+    return { version: 2, active, profiles };
   } catch {
-    return { version: 1, active: "", profiles: [{ ...DEFAULT_ENTRY }] };
+    return { version: 2, active: "", profiles: [{ ...DEFAULT_ENTRY }] };
   }
 }
 function write(registry: Registry, notify = true): void {
@@ -165,7 +178,7 @@ export function listProfiles(): ProfileEntry[] { return read().profiles.map(show
 /** A profile's name as shown, without the word the app adds to a restored one: what the Profile page's field holds. */
 export function baseProfileName(id: string): string | undefined {
   const entry = read().profiles.find((p) => p.id === id);
-  return entry && shown({ id: entry.id, name: entry.name, createdAt: entry.createdAt }).name;
+  return entry && shown({ id: entry.id, name: entry.name, createdAt: entry.createdAt, ...(entry.builtIn && { builtIn: true }) }).name;
 }
 
 /**
@@ -176,8 +189,8 @@ export function storedProfileName(id: string): string | undefined {
   return read().profiles.find((p) => p.id === id)?.name;
 }
 
-/** Whether a name the registry keeps is the built-in one, which is shown in the app's language: what a backup marks. */
-export const isBuiltInName = (name: string) => name === DEFAULT_ENTRY.name;
+/** Whether a profile's name is the built-in one, which is shown in the app's language: what a backup of it marks. */
+export const hasBuiltInName = (id: string) => read().profiles.find((p) => p.id === id)?.builtIn === true;
 
 /**
  * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
@@ -205,6 +218,23 @@ export function themeOf(id: string): ColorTheme {
 }
 
 /**
+ * Calls `changed` when a save of this profile's settings gives it another colour, the one thing of its settings that
+ * its badge and the profile lists show (`themeOf`, read from the saved copy). Any other setting (a name typed key by
+ * key, a switch) is no reason to draw them again, nor to read the other profiles. Returns the way to stop.
+ */
+export function onOwnThemeSaved(changed: () => void): () => void {
+  let theme = themeOf(activeProfileId());
+  const saved = () => {
+    const now = themeOf(activeProfileId());
+    if (now === theme) return;
+    theme = now;
+    changed();
+  };
+  window.addEventListener("settings-updated", saved);
+  return () => window.removeEventListener("settings-updated", saved);
+}
+
+/**
  * A new, empty profile with its own name and a theme no other profile uses yet, so switching is visible at
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
@@ -218,8 +248,9 @@ export function createProfile(name: string): ProfileEntry {
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
-    // The lock goes with it: a new profile must not be a way around the lock of the one it came from.
-    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
+    // The lock goes with it: a new profile must not be a way around the lock of the one it came from. The text size too:
+    // it is for the eyes of who uses this device.
+    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, textSize: current.textSize, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
   const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };
@@ -250,6 +281,7 @@ export function registerProfile(id: string, name: string, restored = false, buil
   // the flag says it now.
   const { name: clean, marked } = nameAndMark(id, name);
   const entry: ProfileEntry = { id, name: builtIn ? DEFAULT_ENTRY.name : clean || "Restored", createdAt: Date.now() };
+  if (builtIn) entry.builtIn = true;
   if (restored || marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
   return shown(entry);
@@ -264,6 +296,21 @@ export function unregisterProfile(id: string): void {
 }
 
 /**
+ * The profile this page runs as was removed from this device ("Remove this profile here", WISP 06): its data must
+ * already be gone. Another profile goes off the list, and the next page starts as the first one, if it was the choice.
+ * The first profile keeps its place, pointed at its own namespace again, and starts empty.
+ */
+export function forgetProfileHere(id: string): void {
+  const registry = read();
+  if (id) { write({ ...registry, active: registry.active === id ? "" : registry.active, profiles: registry.profiles.filter((p) => p.id !== id) }); return; }
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id) return p;
+    const { space: _was, ...rest } = p;
+    return rest;
+  }) });
+}
+
+/**
  * Gives a profile a new name. A restored one stays marked restored (the Profile page's tag takes the mark off): the
  * field edits the name only, and the word for restored typed or pasted into it is the mark, never part of the name.
  */
@@ -271,13 +318,18 @@ export function renameProfile(id: string, name: string): void {
   const { name: clean, marked } = nameAndMark(id, name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean, ...(marked ? { restored: true as const } : {}) } : p)) });
+  // A name given is kept as written, "Personal" included: the built-in name's mark goes.
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id !== id) return p;
+    const { builtIn: _was, ...rest } = p;
+    return { ...rest, name: clean, ...(marked ? { restored: true as const } : {}) };
+  }) });
 }
 
 /** Takes the restored mark off a profile: from now on it is shown by its name alone. */
 export function clearRestoredMark(id: string): void {
   const registry = read();
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt, ...(p.space ? { space: p.space } : {}) } : p)) });
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt, ...(p.space ? { space: p.space } : {}), ...(p.builtIn ? { builtIn: true as const } : {}) } : p)) });
 }
 
 /** The database name of a namespace. */

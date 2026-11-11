@@ -1,0 +1,1 @@
+"Clear all data" also drops this device's device state for the profile ([06](../../06-devices.md#durable-device-state)): its device record, the Desktop's copy of it and the device signing key, as removing the profile does. The profile starts again as `single`; the confirmation's list of what stays is unchanged.

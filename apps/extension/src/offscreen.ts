@@ -1,4 +1,5 @@
-import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { GhostlyHttpError, fromBase64, parseLocalTarget, toBase64 } from "@ghostly/core";
+import { localAccessPattern } from "@ghostly/browser/host";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
@@ -11,6 +12,7 @@ import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
 import { setStorageProfile } from "../../ui/src/lib/storage";
+import { allowedLocalFetch } from "./localAllowList";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -47,6 +49,14 @@ setStorageProfile(profile);
  * replaced document still closing, the new one waits for it rather than run beside it on the same data.
  */
 let running: PeerServer | null = null;
+/** When the peer's start failed for good (its database did not open: the device is full, or another window held it). */
+let failedAt: number | null = null;
+/**
+ * How long a peer whose start failed is kept before the worker may replace it. The pages on it connect again as its
+ * document closes, each asking for the peer: were they to replace the one just made, the documents would follow one
+ * another for as long as the device stays full. A page's Try again, the toolbar button or the minute check, later, do.
+ */
+const FAILED_KEPT_MS = 5_000;
 const server = new Promise<PeerServer>((resolve, reject) => {
   void navigator.locks.request(peerLockFor(profile), () => {
     // The device state is read first (WISP 06 § The gate), at browser start with no page open too: a device that is
@@ -55,12 +65,22 @@ const server = new Promise<PeerServer>((resolve, reject) => {
     // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
     // No mini-app runner here yet (WISP 1200 § Per client: Extension, and the TODO below): the engine offers no apps/1
     // and refuses the app calls, whatever the build's APPS_ENABLED says.
-    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
+    // A contact reaches only the local addresses this profile's person allowed in this browser, as the worker reads them
+    // (localAllowList.ts: this document has no `chrome.storage` nor `chrome.permissions`).
+    void createPeerServer({ platform: "extension", irohWeb: true, apps: false, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e"), localFetch: allowedLocalFetch(profile) }).then((peer) => {
       running = peer;
+      // A message that came with no tab open: the peer tells the person, as a tab would have (attentionNotices.ts).
+      const engine = engineOf(peer);
+      if (engine) engine.unheardAttention = (event) => void import("./attentionNotices").then(({ noticeUnheard }) => noticeUnheard(event, engine.node.getState().links)).catch(() => {});
       // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
       if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
+      // Heard before any `ping` waits on it, so a ping that comes once it failed knows.
+      peer.ready.catch(() => { failedAt ??= Date.now(); });
       resolve(peer);
-    }, reject);
+    }, (error: unknown) => {
+      failedAt ??= Date.now();
+      reject(error);
+    });
     return new Promise<never>(() => {});
   });
 });
@@ -150,6 +170,24 @@ function serviceName(peer: EngineServer, peerPubKeyZ32: string, serviceId: strin
   }
 }
 
+/**
+ * Chrome no longer lets the extension reach `patterns` (`http://127.0.0.1/*`): every app this profile shares at one of
+ * those hosts, on any port, is turned off ("Share" off, `setServiceEnabled`), so contacts no longer see it and are
+ * answered as for any app not shared. Turning it on again is the person's to do.
+ */
+async function turnOffAppsAt(patterns: string[]): Promise<void> {
+  const peer = engineOf(await server);
+  if (!peer) return;
+  await peer.ready;
+  const gone = new Set(patterns);
+  for (const service of peer.node.getState().services) {
+    if (!service.enabled) continue;
+    let pattern: string;
+    try { pattern = localAccessPattern(parseLocalTarget(service.target).origin); } catch { continue; }
+    if (gone.has(pattern)) peer.node.setServiceEnabled({ serviceId: service.id, enabled: false });
+  }
+}
+
 let stopping: Promise<void> | null = null;
 /** A page's "Clear all data" stopped the peer: it does not run again in this document. */
 let cleared = false;
@@ -168,8 +206,12 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    // A peer that stopped for good says so, and the worker starts another in its place.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null } satisfies EngineStatus));
+    // A peer that stopped for good says so, and the worker starts another in its place: one whose start failed too, so
+    // the person who freed some space and pressed Try again gets a new start, not this one again until Chrome restarts.
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => {
+      const failed = failedAt !== null && Date.now() - failedAt >= FAILED_KEPT_MS;
+      sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId(), stopped: cleared || stopping !== null || failed } satisfies EngineStatus);
+    });
     return true;
   }
   if (message.type === "stop") {
@@ -180,6 +222,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "http-request") {
     void handleHttpRequest(message).then(sendResponse);
+    return true;
+  }
+  if (message.type === "local-access-removed") {
+    const origins = Array.isArray(message.origins) ? message.origins.filter((o): o is string => typeof o === "string") : [];
+    void turnOffAppsAt(origins).then(() => sendResponse(true), () => sendResponse(false));
     return true;
   }
   return false;

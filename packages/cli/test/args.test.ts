@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, nearest, parseArgs } from "../src/args";
-import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { idSlot, numberSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
@@ -97,6 +97,46 @@ describe("the argument parser", () => {
     // Only where text comes, and only for a word with one dash: there is no text to put after `--` in these.
     expect(() => parseArgs(["-x"], {}, undefined, { command: "version" })).toThrow(new CliError("usage", "Unknown option -x for ghostly version (ghostly help version)"));
     expect(() => parseArgs(["bob", "--nope"], send.options, idSlot(send), { command: "send", text: true })).toThrow(new CliError("usage", "Unknown option --nope for ghostly send (ghostly help send)"));
+  });
+
+  it("takes a negative number where the command takes a number, and refuses it there as <sats>", () => {
+    // Before, `wallet receive -5` was "Unknown option -5": an option nobody has, not the amount.
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, number: numberSlot(command) });
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const [name, argv, shown] of [["wallet receive", ["-5"], "-5"], ["chat pay", ["bob", "-1"], "-1"], ["chat request", ["bob", "-20", "--memo", "x"], "-20"], ["wallet receive", ["0"], "0"], ["wallet receive", ["x"], "\"x\""]] as const)
+      expect(() => params(name, [...argv]), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`));
+    expect(params("wallet receive", ["1000"])).toMatchObject({ amount: 1000 });
+    expect(params("chat pay", ["bob", "21", "--memo", "-x"])).toMatchObject({ chat: "bob", amount: 21, memo: "-x" });
+    // Only a word that starts with a dash and a digit, only in a number's place, and never over a real option.
+    expect(numberSlot(COMMANDS["chat pay"])(0)).toBe(false);
+    expect(numberSlot(COMMANDS["chat pay"])(1)).toBe(true);
+    expect(() => params("chat pay", ["-1", "5"])).toThrow(/^Unknown option -1 for ghostly chat pay/);
+    expect(() => params("wallet receive", ["-x"])).toThrow(/^Unknown option -x for ghostly wallet receive/);
+    expect(() => params("wallet receive", ["5", "-6"])).toThrow(/^Unknown option -6 for ghostly wallet receive/);
+    expect(parseArgs(["-5"], { five: { type: "boolean", short: "5", description: "" } }, undefined, { command: "x", number: () => true })).toEqual({ positionals: [], options: { five: true } });
+  });
+
+  // Before, `chat pay payee 1e3` paid 1,000 sats: an amount was read as JavaScript reads a number, so a typo of `2e3`
+  // for `23` paid 2,000, and `0x10` paid 16.
+  it("reads an amount and a number flag only as decimal digits, refusing 1e3, 0x10, 0b11 and 0o7", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, number: numberSlot(command) });
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const typed of ["1e3", "2E3", "0x10", "0b11", "0o7", " 21", "21 ", "+21", "1_000"]) {
+      for (const [name, argv] of [["chat pay", ["bob", typed]], ["chat request", ["bob", typed]], ["wallet receive", [typed]]] as const)
+        expect(() => params(name, [...argv]), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `<sats> takes a whole number from 1 up, not ${JSON.stringify(typed)}`));
+      for (const flag of ["amount", "max-fee"])
+        expect(() => params("pay", ["lnurl1x", `--${flag}`, typed]), `pay --${flag} ${typed}`).toThrow(new CliError("usage", `--${flag} takes a number, not ${JSON.stringify(typed)}`));
+    }
+    expect(params("chat pay", ["bob", "0021"])).toMatchObject({ amount: 21 });
+    expect(params("pay", ["lnurl1x", "--amount", "1000", "--max-fee", "0"])).toMatchObject({ amount: 1000, maxFee: 0 });
+    expect(parseArgs(["--left", "12.5"], COMMANDS["usage send"].options!).options).toEqual({ left: 12.5 });
+    expect(parseArgs(["--hold", "-5"], COMMANDS["chat disconnect"].options!).options).toEqual({ hold: -5 });
   });
 
   it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
@@ -513,6 +553,11 @@ describe("errors", () => {
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
     expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
+    // A mint that failed `pay`'s quote or `wallet faucet` (a 500, a closed socket) said only its own words ("internal
+    // error"): now it is named, with nothing paid and the next step, its words kept last. Its code is still `engine`.
+    const mint = { host: "testnut.cashu.space", reason: "internal error" };
+    expect(asCliError(engineError("mintFailedQuote", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not take this payment right now, and no sats left your wallet: try again later. The mint said: internal error" });
+    expect(asCliError(engineError("mintFailedFaucet", mint)).toJSON()).toEqual({ code: "engine", message: "testnut.cashu.space could not give test coins right now: try again later. The mint said: internal error" });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

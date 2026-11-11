@@ -256,6 +256,9 @@
     "keep": "Manter este",
     "link": "Um link de grupo que você abriu",
     "switch": "Trocar por este",
+    "switchBody": "{{other}}. Você sai deste grupo, ele é apagado deste dispositivo com o histórico, e o outro fica no lugar.",
+    "switchConfirm": "Trocar",
+    "switchTitle": "Trocar pelo outro grupo?",
     "title": "Outro grupo tem o id deste grupo"
   },
   "readNote": "Todos no grupo podem ler tudo o que é enviado enquanto são membros. Quem é removido mantém o que já recebeu e não pode ler o que vem depois; quem entra depois não pode ler o que veio antes. As mensagens vão para cada membro; quem estava ausente recebe o que perdeu de qualquer membro que tenha (as últimas {{count}} mensagens do grupo) quando se encontrarem de novo.",
