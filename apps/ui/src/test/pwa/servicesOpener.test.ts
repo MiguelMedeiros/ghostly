@@ -74,6 +74,18 @@ describe("the cookies one opened app keeps", () => {
     jar.take("=nameless");
     expect(jar.header()).toBeNull();
   });
+  it("read Max-Age before Expires, and skip a Max-Age that is no number of seconds", () => {
+    const jar = new CookieJar();
+    const past = new Date(Date.now() - 3_600_000).toUTCString();
+    // What Express sends for `maxAge` when the contact's clock is behind this device's.
+    jar.take(`sid=abc; Max-Age=3600; Path=/; Expires=${past}; HttpOnly`);
+    jar.take("a=2; Max-Age=");
+    jar.take("b=3; Max-Age=soon");
+    expect(jar.header()).toBe("sid=abc; a=2; b=3");
+    jar.take(`sid=; Expires=${new Date(Date.now() + 3_600_000).toUTCString()}; Max-Age=-1`);
+    jar.take("a=; Max-Age=60; Max-Age=0");
+    expect(jar.header()).toBe("b=3");
+  });
   it("hold a bounded number of names", () => {
     const jar = new CookieJar();
     for (let i = 0; i < CookieJar.MAX + 10; i++) jar.take(`c${i}=1`);
