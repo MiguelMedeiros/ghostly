@@ -4,6 +4,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
 import { connectionSummary } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
+import { heldTime } from "../heldTime";
 import { renderApp } from "../render";
 
 // covers: chat.paired.discovery-health, chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait, invite.delivery-mode
@@ -798,7 +799,7 @@ describe("ChatConnection: how contacts are found", () => {
     const block = screen.getByTestId("connection-discovery");
     expect(screen.getByTestId("connection-details")).toContainElement(block);
     expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("DHT direct");
-    const time = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = heldTime(new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" }), until);
     expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, r.textContent, r.title])).toEqual([
       ["ok", "pkarr.pubky.org ok", ""],
       ["throttled", `pkarr.pubky.app throttled until ${time}`, "rate limited (429)"],
