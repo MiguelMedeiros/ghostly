@@ -3910,7 +3910,8 @@ export class GhostlyNode implements EngineImplementation {
     this.wakeLimiter.reset(linkId);
     this.callWakeLimiter.reset(linkId);
     if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
-    void db.deleteLink(linkId);
+    // Its apps' storage counts go once its rows have: the same invite joined again is a chat of the same id.
+    void db.deleteLink(linkId).finally(() => this.appShelf?.forgetScope(linkId));
     void this.desk.forgetLink(linkId);
     // Ecash the contact has not taken is kept: the Wallet page offers it back, now that its bubble is gone.
     this.awaitingSoon();
