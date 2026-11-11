@@ -7,6 +7,7 @@ import { useUpdate } from "../contexts/UpdateContext";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { externalLinkProps } from "../lib/externalLink";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
+import { updateFailure } from "../lib/updateFailure";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const failureNow = () => engine.startFailure;
@@ -112,7 +113,7 @@ function UpdateAction() {
           whole screen read again. Always there, as a live region must be before what it says. */}
       <div role="status">
         {busy && <span className="sr-only">{said}</span>}
-        {!update && (error ? <p className="mt-2 text-xs text-danger break-words">{error}</p>
+        {!update && (error ? <p className="mt-2 text-xs text-danger break-words">{t(`updates.why.${updateFailure(error)}` as const)}</p>
           : lastCheckedAt !== null && stage === "idle" && <p data-testid="profile-unavailable-no-update" className="mt-2 text-xs text-text-muted break-words">{t("app.profileUnavailable.noUpdate")}</p>)}
       </div>
     </div>
