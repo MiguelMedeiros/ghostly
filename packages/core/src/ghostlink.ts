@@ -250,6 +250,11 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
   "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
 /**
+ * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
+ * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
+ */
+const RETIRING_FRAMES = new Set(["paired-message", "paired-received", REACTION_FRAME, REACTED_FRAME, PIN_FRAME, PINNED_FRAME, EDIT_FRAME, EDITED_FRAME]);
+/**
  * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
  * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
  * They are read now. Nothing more: the session is let go only by `LIVENESS_MISSED_PINGS`, or by the contact's offer
@@ -1910,6 +1915,14 @@ export class GhostLink {
     const done = new Promise<void>(resolve => { closed = resolve; });
     const close = () => { this.retiring.delete(old); old.close(); also(); closed(); };
     this.retiring.set(old, { close, timer: setTimeout(close, SWITCH_RETIRE_MS), rtc, closed: done });
+  }
+  /**
+   * Where the receipt of a frame read on `channel` goes: that session while it carries the chat, the one now when a move
+   * replaced it (or moved while the frame was shown), or nowhere.
+   */
+  private answerOn(channel: FrameChannel): FrameChannel | null {
+    const live = this.channel;
+    return live && (live === channel || this.retiring.has(channel)) && this.isDataLinkOpen ? live : null;
   }
   /**
    * The WebRTC session a switch moved off is still retiring (`SWITCH_RETIRE_MS`): its data link is open, and a new offer
@@ -4497,7 +4510,7 @@ export class GhostLink {
           if (replaced) { this.options.events?.onDataLinkState?.("open"); this.emitFilesSession(true); }
         },
         onApplication: async data => {
-          // A session a move replaced, while its channel retires: only the contact's texts and receipts are read on it.
+          // A session a move replaced, while its channel retires: only what `RETIRING_FRAMES` names is read on it.
           const retired = this.channel !== channel;
           if (retired && !this.retiring.has(channel)) return;
           // Anything from the peer shows the session is alive.
@@ -4520,7 +4533,7 @@ export class GhostLink {
           if (data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
-          if (retired && frame?.t !== "paired-message" && frame?.t !== "paired-received") return;
+          if (retired && !RETIRING_FRAMES.has(String(frame?.t))) return;
           // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.
           if (frame && typeof frame === "object" && !QUIET_FRAMES.has(String(frame.t))) this.activityAt = Date.now();
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
@@ -4627,8 +4640,8 @@ export class GhostLink {
             if (!this.supportsReactions || !this.reactionsReceived.take()) return;
             const reaction = parseReactionFrame(frame);
             if (!reaction) return;
-            if (await this.options.events?.onReaction?.(reaction) && this.channel === channel && this.isDataLinkOpen)
-              try { channel.send(reactedFrame(reaction.n)); } catch { /* it comes again */ }
+            const reacted = await this.options.events?.onReaction?.(reaction), live = this.answerOn(channel);
+            if (reacted && live) try { live.send(reactedFrame(reaction.n)); } catch { /* it comes again */ }
             return;
           }
           if (frame?.t === REACTED_FRAME) {
@@ -4641,8 +4654,8 @@ export class GhostLink {
             if (!this.supportsPins || !this.pinsReceived.take()) return;
             const pin = parsePinFrame(frame);
             if (!pin) return;
-            if (await this.options.events?.onPin?.(pin) && this.channel === channel && this.isDataLinkOpen)
-              try { channel.send(pinnedFrame(pin.n)); } catch { /* it comes again */ }
+            const pinned = await this.options.events?.onPin?.(pin), live = this.answerOn(channel);
+            if (pinned && live) try { live.send(pinnedFrame(pin.n)); } catch { /* it comes again */ }
             return;
           }
           if (frame?.t === PINNED_FRAME) {
@@ -4655,8 +4668,8 @@ export class GhostLink {
             if (!this.supportsEdits || !this.editsReceived.take()) return;
             const edit = parseEditFrame(frame);
             if (!edit) return;
-            if (await this.options.events?.onMessageEdit?.(edit) && this.channel === channel && this.isDataLinkOpen)
-              channel.send(editedFrame(edit.id, edit.e));
+            const edited = await this.options.events?.onMessageEdit?.(edit), live = this.answerOn(channel);
+            if (edited && live) live.send(editedFrame(edit.id, edit.e));
             return;
           }
           if (frame?.t === EDITED_FRAME) {
@@ -4759,10 +4772,8 @@ export class GhostLink {
             // A card that does not hold is left out: the message shows its text, as an older app shows it.
             const card = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
             await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }), ...(card && { card }) });
-            // Read on a session a move replaced (or one that moved while it was shown): its receipt goes on the one now.
-            const live = this.channel;
-            if (live && (live === channel || this.retiring.has(channel)) && this.isDataLinkOpen)
-              live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
+            const live = this.answerOn(channel);
+            if (live) live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {

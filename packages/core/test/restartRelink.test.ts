@@ -931,3 +931,59 @@ describe("texts sent each way while Automatic moves the session from Iroh to Web
     expect({ goes: sent.goes.filter(id => !receipts.goes.has(id)), stays: sent.stays.filter(id => !receipts.stays.has(id)) }, "receipts missing").toEqual({ goes: [], stays: [] });
   }, 240_000);
 });
+
+/**
+ * The same move, and what else a person does to a message: a reaction, a pin, an edit (a deletion for everyone is one).
+ * Sent by the side that has not swapped yet, the moment its contact did, each went on the session the contact had just
+ * replaced. That session read only texts and receipts while it retired: the rest was dropped, and the app said it again
+ * only after its 30 s resend (reactions, pins), with the sender's mark unconfirmed until then.
+ */
+describe("a reaction, a pin and an edit sent while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key back ($how): each arrives, and its receipt within 2 s", async ({ restarted, how }) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const got: string[] = [], receipts: string[] = [], moves: string[] = [];
+    const id = "m".padEnd(22, "x");
+    const apps = {} as Record<"goes" | "stays", App>;
+    let armed = false;
+    // The first side to swap after the restart: its contact, still on the old session, reacts, pins and edits at once.
+    const other = (who: "goes" | "stays") => apps[who === "goes" ? "stays" : "goes"];
+    const events = (who: "goes" | "stays") => ({ reactionsSupport: true, pinSupport: true, editSupport: true, events: {
+      onReaction: async (r: { n: number }) => { got.push(`reaction ${r.n}`); return true; },
+      onReactionReceipt: async (n: number) => { receipts.push(`reaction ${n}`); },
+      onPin: async (p: { n: number }) => { got.push(`pin ${p.n}`); return true; },
+      onPinReceipt: async (n: number) => { receipts.push(`pin ${n}`); },
+      onMessageEdit: async (e: { e: number }) => { got.push(`edit ${e.e}`); return true; },
+      onEditReceipt: async (_id: string, e: number) => { receipts.push(`edit ${e}`); },
+      onTransportSwitched: (from?: string, to?: string) => {
+        moves.push(`${who} ${from}->${to}`);
+        if (!armed || moves.length !== 1) return;
+        const link = other(who).link;
+        expect((link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport, "the contact has not swapped yet").toBe("iroh/1");
+        expect(link.sendReaction({ id, e: "❤️", n: 7 })).toBeNull();
+        expect(link.sendPin({ id, n: 8 })).toBeNull();
+        void link.sendEdit({ id, e: 9, ts: Date.now(), m: "edited" });
+      },
+    } });
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("goes"));
+    apps.stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("stays"));
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, apps.goes, how);
+    await run(RESTART_AFTER_MS);
+    // The first session moved from Iroh to WebRTC too: what counts starts with the restart.
+    moves.length = 0; got.length = 0; receipts.length = 0; armed = true;
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", apps.goes.dhtState, true, undefined, false, up, events("goes"));
+    expect(await until(() => moves.length === 2, 60_000)).toBeLessThan(Infinity);
+    await run(2_000);
+    expect(moves.map(m => m.split(" ")[1]), "the session moved on both sides").toEqual(["iroh/1->webrtc/1", "iroh/1->webrtc/1"]);
+    // Before: none of the three arrived, and none was confirmed.
+    expect(got.sort(), "arrived").toEqual(["edit 9", "pin 8", "reaction 7"]);
+    expect(receipts.sort(), "confirmed").toEqual(["edit 9", "pin 8", "reaction 7"]);
+  }, 240_000);
+});
