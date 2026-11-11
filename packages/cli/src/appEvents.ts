@@ -1,5 +1,5 @@
 import type { AppFrameEvent } from "@ghostly/core";
-import { servedApps } from "./appServe";
+import { servedApps, servedStamp } from "./appServe";
 import type { EventHub } from "./events";
 
 /*
@@ -24,21 +24,41 @@ export function peerVersion(hub: object, chat: string, ref: string): string | un
 export function reportAppFrames(hub: Pick<EventHub, "onAppFrame" | "emitLive">, node: AppIds, profileDir: string): () => void {
   const open = new Map<string, string>();
   peers.set(hub, open);
-  /** Per chat: chat app id to reference, of the apps served when the contact last opened one there. */
-  const known = new Map<string, Map<string, string>>();
+  /**
+   * Per chat: chat app id to reference, of the apps served when they were learned there; the list's stamp then
+   * (undefined when an id could not be derived, so the next open tries again); and the version of each served app's
+   * last open since.
+   */
+  const known = new Map<string, { ids: Map<string, string>; stamp?: string; versions: Map<string, string> }>();
   let count = 0;
-  const learn = (chat: string): Map<string, string> => {
+  const learn = (chat: string) => {
+    // The stamp is taken before the read: a write in between makes the next open learn again.
+    let stamp: string | undefined = servedStamp(profileDir);
     const ids = new Map<string, string>();
     for (const { ref } of servedApps(profileDir)) {
-      try { ids.set(node.appId({ linkId: chat, ref }).app, ref); } catch { /* not a paired chat: it has no app ids */ }
+      try { ids.set(node.appId({ linkId: chat, ref }).app, ref); } catch { stamp = undefined; /* not a paired chat: it has no app ids */ }
     }
-    known.set(chat, ids);
-    return ids;
+    const learnt = { ids, stamp, versions: new Map<string, string>() };
+    known.set(chat, learnt);
+    return learnt;
+  };
+  /**
+   * An open learns the served list again only when it changed since (a stat, no read), or names another version of a
+   * served app than its last open did: an app served or unserved since is taken or left from its next open, and a
+   * contact repeating opens (up to 50 a second for each of 16 apps) costs no read of the list nor derivation of ids.
+   */
+  const current = (chat: string, frame: AppFrameEvent) => {
+    const learnt = known.get(chat);
+    if (!learnt) return learn(chat);
+    if (!("o" in frame) || frame.o !== "open") return learnt;
+    const was = learnt.versions.get(frame.app);
+    return learnt.stamp === undefined || learnt.stamp !== servedStamp(profileDir) || (was !== undefined && was !== frame.v) ? learn(chat) : learnt;
   };
   return hub.onAppFrame((chat: string, frame: AppFrameEvent) => {
-    // An open reads the served list again, so an app served or unserved since is taken or left from its next open.
-    const app = ("o" in frame && frame.o === "open" ? learn(chat) : known.get(chat) ?? learn(chat)).get(frame.app);
+    const learnt = current(chat, frame);
+    const app = learnt.ids.get(frame.app);
     if (!app) return;
+    if ("o" in frame && frame.o === "open") learnt.versions.set(frame.app, frame.v);
     // Frames are not stored, so nothing names one but its place in this run: the id is unique, and never derived again.
     // Nor are their events: live only, never in the journal, where a contact's app would push out the other chats'.
     const id = `${chat}:${app}:${Date.now()}-${++count}`;
