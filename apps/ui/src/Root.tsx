@@ -38,6 +38,7 @@ import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import { watchAppInSight } from "./lib/appInSight";
 import { guardContextMenu } from "./lib/contextMenu";
+import { linkInAddress } from "./lib/otherTabLink";
 import { isDesktopApp } from "./lib/externalLink";
 import "./index.css";
 
@@ -303,6 +304,22 @@ function isIntake(pathname: string): boolean {
   return !!rest && (rest.includes("/") || session === null || !loadSession(session));
 }
 
+/**
+ * On standby no intake runs, so nothing would take an invite's keys or a group's link out of the address: they leave it
+ * here, as the page starts and as the address changes, dropped rather than held (a standby takes nothing in). The
+ * entry is replaced, so neither the address bar nor Back keeps them.
+ */
+function dropLinksFromAddress(): () => void {
+  const drop = () => {
+    const route = window.location.hash.replace(/^#/, "");
+    if (linkInAddress(route) === null && !isIntake(route.split(/[?#]/)[0])) return;
+    window.history.replaceState(null, "", "#/");
+  };
+  drop();
+  window.addEventListener("hashchange", drop);
+  return () => window.removeEventListener("hashchange", drop);
+}
+
 function HomeAnchor() {
   // A named device link is an intake too: home is not put under it, and its name is never kept as a route.
   const { hash } = useLocation();
@@ -364,6 +381,8 @@ export function Root() {
   const standby = useDeviceGate();
   // Device-link-only mode starts as the engine does, before the lock is passed; it is what the screen hears from.
   useEffect(() => { if (standby) void engine.connect().catch(() => {}); }, [standby]);
+  const onStandby = !!standby;
+  useEffect(() => (onStandby ? dropLinksFromAddress() : undefined), [onStandby]);
   return (
     <SettingsProvider>
       <ThemeProvider>
