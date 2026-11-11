@@ -4,6 +4,7 @@ import type { PersonStatus } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals, takesText } from "../src/commands";
+import { CARD_TIME_FORMS } from "../src/commands/shared";
 import { error, ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.cli
 
@@ -49,7 +50,10 @@ describe("status set's line", () => {
     expect(usage("hi", "--until", "2020-01-01")).toBe('--until takes a time to come, not "2020-01-01": a status that ended is none');
     expect(usage("hi", "--until", "0m")).toMatch(/^--until takes a time to come/);
     expect(usage("hi", "--until", "400d")).toBe('--until takes a time within a year from now, not "400d"');
-    expect(usage("hi", "--until", "soon")).toMatch(/^--until takes a time in milliseconds or a date/);
+    // A time it cannot read names every form it takes, as its help does: before, only milliseconds and dates.
+    for (const until of ["soon", "2y", "30s", "1.5h", "-1h"]) {
+      expect(usage("hi", "--until", until)).toBe(`--until takes 30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(until)}`);
+    }
     expect(usage()).toBe("Nothing to set: give a <text>, --emoji or --availability");
     expect(usage("--until", "1h")).toBe("Nothing to set: give a <text>, --emoji or --availability");
   });
@@ -125,7 +129,7 @@ describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {
     expect(error(await ghostly(["--home", dir, "status", "set", "x".repeat(61)]), "usage", 2).message).toBe("<text> is up to 60 characters, not 61 characters");
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--until", "yesterday"]), "usage", 2).message).toMatch(/^--until takes/);
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--availability", "lunch"]), "usage", 2).message).toMatch(/^--availability takes/);
-    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Too many arguments: ghostly status");
+    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)");
     expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "Here" } });
   });
 

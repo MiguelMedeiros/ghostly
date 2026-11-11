@@ -5,8 +5,8 @@ import type { WalletRail } from "./walletCardTypes";
 
 /**
  * Where a card's part of a total stands. `counted`: its amount is in the total. `shared`: it spends another card's
- * balance (Lightning through the Cashu mints spends Cashu's; a Breez Lightning card on the Spark wallet's own phrase
- * is that Spark wallet), so it is not counted again. `unknown`: its balance could not be read now (an error, a source
+ * balance (Lightning through the Cashu mints spends Cashu's, Lightning through a federation the Fedimint card's; a
+ * Breez Lightning card on the Spark wallet's own phrase is that Spark wallet), so it is not counted again. `unknown`: its balance could not be read now (an error, a source
  * still connecting, a balance not read yet, a locked wallet): never counted as 0, it stays out of the total. `away`: at
  * home on another device. `none`: not set up, it holds nothing.
  */
@@ -78,6 +78,7 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
   const instanceOf = (card: InstanceCard) => instances.find((w) => deckId(w, state) === card.id);
   const cashuCard = shown.find((c) => c.rail === "cashu");
   const sparkCard = shown.find((c) => c.rail === "spark");
+  const fedimintCard = shown.find((c) => c.rail === "fedimint");
   // What the network's Spark wallet holds, when read: a Breez Lightning card showing the same is that wallet.
   const sparkAmount = sparkCard ? bitcoinPart("spark", networkState(state, network)).amount : undefined;
   const bitcoin: TotalRow<number>[] = [], usdt: TotalRow<bigint>[] = [];
@@ -102,6 +103,11 @@ export function walletTotals(state: WalletState, network: WalletNetwork, cards: 
     }
     if (card.rail === "lightning" && s.lightning?.providerId === "breez" && sparkCard && part.state === "counted" && part.amount === sparkAmount) {
       bitcoin.push({ ...base, ...part, state: "shared", sharedWith: sparkCard.name });
+      continue;
+    }
+    if (card.rail === "lightning" && s.lightning?.providerId === "fedimint" && fedimintCard && part.state === "counted") {
+      // Lightning through a joined federation spends that federation's ecash, which the Fedimint card already sums.
+      bitcoin.push({ ...base, ...part, state: "shared", sharedWith: fedimintCard.name, note: undefined });
       continue;
     }
     bitcoin.push({ ...base, ...part });

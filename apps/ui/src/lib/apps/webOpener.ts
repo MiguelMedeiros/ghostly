@@ -120,7 +120,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     overlay.setAttribute("aria-label", entry.title);
     overlay.setAttribute("data-testid", "mini-app");
     overlay.setAttribute("data-place", "alone");
-    overlay.className = "fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
+    // `app-alone`: on a touch screen it ends where the keyboard starts (index.css), or the app's field is under it.
+    overlay.className = "app-alone fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
     const bar = document.createElement("div");
     // `alone-bar`: on a phone the layer covers the whole screen, status bar included, so the bar starts below the clock
     // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).

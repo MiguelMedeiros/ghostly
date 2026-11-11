@@ -17,7 +17,7 @@ const typedInto = (element: Element | null): element is HTMLElement =>
  * these and nowhere else: index.css registers it as not inherited, since an inherited value on `<html>` restyled the
  * whole document at each change of the visible height, about 60ms in WebKit with a long chat open.
  */
-export const APP_HEIGHT_READERS = ".app-shell, .two-pane, dialog, .sheet, .toast-place, .fixed.inset-0, [data-app-height]";
+export const APP_HEIGHT_READERS = ".app-shell, .two-pane, dialog, .sheet, .toast-place, .fixed.inset-0, .chat-app-panel, [data-app-height]";
 
 /**
  * Keeps `--app-height` equal to the part of the screen that is really visible, on each element that reads it

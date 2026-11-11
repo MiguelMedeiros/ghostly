@@ -544,6 +544,33 @@ describe("a call's audio through Opus", () => {
     }
   });
 
+  it("moves the RTP timestamp on by the time a stall too long to catch up skipped, the sequence still continuous", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const loop = handLoop();
+    const packets: RtpPacket[] = [];
+    const audio = new CallAudio({
+      rate: 48000, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+      encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {},
+    });
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) audio.queue.push(frame); }); };
+      audio.start();
+      turns(50, 20);
+      const before = packets.length;
+      turns(1, 2980);
+      turns(5, 20);
+      const steps = packets.slice(before - 1).map((p, i, all) => i && [sequenceDelta(p.sequence, all[i - 1].sequence), (p.timestamp - all[i - 1].timestamp) >>> 0]).slice(1);
+      // The timestamp is the sampling time (RFC 3550): the packet after the stall is 2980 ms after the one before it,
+      // and the contact's jitter buffer does not read the gap as seconds of jitter.
+      expect(steps).toEqual([[1, 2980 * 48], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME]]);
+    } finally {
+      audio.stop();
+      loop.restore();
+    }
+  });
+
   for (const rate of [48000, 16000] as const) {
     it(`conceals a packet lost on the way at ${rate} Hz, not 20 ms of silence (a click) in what the program gets`, async () => {
       const stack = await loadCallStack();

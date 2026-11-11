@@ -1293,9 +1293,22 @@ html .toast-place.toast-place-page[data-at="top"] {
 .chat-text-preview-site { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-title { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-description { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+/* An app's card (apps/AppCardView.tsx): its title, its lines under it, the publisher's fingerprint. Its icon, buttons
+   and time keep their size. */
+.chat-text-card-title { font-size: calc(14rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+/* A file, voice note, audio or video in a chat: its name, its lines under it (size, state, free space), an offer or a
+   problem. Only their size: each keeps its own line height. Buttons, icons and what is drawn on a video keep theirs. */
+.chat-text-media-name { font-size: calc(14rem / 16 * var(--chat-text-scale)); }
+.chat-text-audio-name { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-media-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-media-meta { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A word on a single line of its own height: "edited" in a bubble, a reaction's count. */
+.chat-text-tag { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: 1; }
 /* The chat list's rows (ChatRow.tsx). */
 .chat-text-row-name { font-size: calc(15rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
 .chat-text-row-preview { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
@@ -1717,6 +1730,22 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   padding-top: max(0.5rem, env(safe-area-inset-top));
   padding-inline-start: max(0.75rem, env(safe-area-inset-left));
   padding-inline-end: max(0.75rem, env(safe-area-inset-right));
+}
+
+/* With the keyboard up it ends where the keyboard starts: iOS keeps the page's height, and the field the person types
+   in, at the app's bottom, was under the keyboard. So does an app in a chat on a phone, which covers the whole screen
+   (components/apps/chat-app-panel.css). */
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .fixed.inset-0.app-alone {
+    bottom: calc(100% - var(--app-height, 100%));
+  }
+}
+@media (pointer: coarse) and (max-width: 767px) {
+  /* Its `height: 100%` would win over `bottom`. */
+  html[data-keyboard="true"] .chat-app-panel {
+    bottom: calc(100% - var(--app-height, 100%));
+    height: auto;
+  }
 }
 
 /* Forced colors (Windows Contrast themes, Edge and Chrome's forced colors): the keyboard focus's mark. Most controls

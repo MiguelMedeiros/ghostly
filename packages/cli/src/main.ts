@@ -645,6 +645,16 @@ function commandWords(usage: string): string[] {
 }
 
 /**
+ * A command that takes no argument and is also a group (`status`, with `status set`; `daemon`, with `daemon stop`): a
+ * word after it that names none of its commands is a typo of one (`status shwo`). Before, the line said "Too many
+ * arguments: ghostly status" and `help status shwo` answered status's help with exit 0.
+ */
+function groupWithNoArguments(usage: string): boolean {
+  const words = commandWords(usage), rest = usage.split(" ").slice(words.length);
+  return !rest.some((word) => /^[<[](?!-)/.test(word)) && helpRows().some((row) => { const own = commandWords(row.usage); return own.length > words.length && words.every((word, i) => own[i] === word); });
+}
+
+/**
  * Help for one command (`ghostly help file send`, `ghostly file send --help`): its usage, what it does and its
  * options; for a group (`ghostly help file`), the group's commands.
  */
@@ -662,7 +672,7 @@ export function commandHelp(words: readonly string[]): string {
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
-  if (!exact.length && words.length < given.length) throw unknownCommand(given[0], given[1], given[2]);
+  if (words.length < given.length && (!exact.length || exact.every((row) => groupWithNoArguments(row.usage)))) throw unknownCommand(given[0], given[1], given[2]);
   const lines: string[] = [];
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
@@ -1590,6 +1600,7 @@ export async function main(input: string[]): Promise<number> {
   if (two && text(two)) { await textCommand(two, argv.slice(2)); return 0; }
   if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
   if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
+  if (table(first) && two && groupWithNoArguments(COMMANDS[first].usage)) throw unknownCommand(first, second);
   if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
   // Lifting stopped at it: a word with a dash there is a mistyped global option, not a command (`-` and `--` are none).
   if (first.startsWith("-") && first !== "-" && first !== "--") throw unknownGlobalOption(first);
