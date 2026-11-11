@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { FoundUpdate } from "../../lib/updates";
@@ -40,14 +40,14 @@ describe("the update banner after a failure", () => {
   it("a later check that fails keeps the warning beside Reload, and no updater English", async () => {
     const { check, again } = host({ version: "1.2.0", apply: "reload" });
     renderApp(<UpdateProvider><UpdateBanner /></UpdateProvider>);
-    expect(await screen.findByText("Ghostly 1.2.0 is available")).toBeInTheDocument();
-    expect(screen.getByText("Updating ends your calls and connections.")).toBeInTheDocument();
+    expect(await within(await screen.findByTestId("update-banner")).findByText("Ghostly 1.2.0 is available")).toBeInTheDocument();
+    expect(within(screen.getByTestId("update-banner")).getByText("Updating ends your calls and connections.")).toBeInTheDocument();
 
     again();
     await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.queryByText(/answered 502/)).toBeNull();
-    expect(screen.getByText("Updating ends your calls and connections.")).toBeInTheDocument();
+    expect(within(screen.getByTestId("update-banner")).getByText("Updating ends your calls and connections.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
 
@@ -55,7 +55,7 @@ describe("the update banner after a failure", () => {
     host({ version: "1.2.0", apply: "restart" }, () => Promise.reject(new Error("signature verification failed: invalid encoding in minisign data")));
     renderApp(<UpdateProvider><UpdateBanner /></UpdateProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Update and restart" }));
-    expect(await screen.findByText("The update's signature did not check out, so it was not used.")).toBeInTheDocument();
+    expect(await within(await screen.findByTestId("update-banner")).findByText("The update's signature did not check out, so it was not used.")).toBeInTheDocument();
     expect(screen.queryByText(/minisign/)).toBeNull();
   });
 });
