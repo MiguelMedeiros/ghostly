@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
 import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
-import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTree";
+import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile } from "./sqlTree";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -145,6 +146,8 @@ const FOLLOWS = "__ghostly_journal__";
 const SEQ = "__ghostly_entry__";
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
+/** Records of rows.db an export reads in one turn of the event loop: a few milliseconds' worth. */
+const EXPORT_PAGE = 256;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
 const RELAXED_SYNC_MS = 1_000;
 const BLOB = "__ghostlyBlob";
@@ -500,28 +503,48 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    */
   async function capture(journalName: string | undefined, inline: boolean): Promise<Snapshot> {
     const snapshot: Snapshot = { format: 1, ...(journalName !== undefined && { journal: journalName }), databases: [] };
-    for (const db of raw._databases.values()) {
-      if (db.name === PROBE) continue;
-      const stores: SnapshotStore[] = [];
-      for (const store of db.rawObjectStores.values()) {
-        if (store.deleted) continue;
-        const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
-        const meta = {
-          name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
-          indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
-        };
-        if (!inline && disk(store)) {
-          if (!onTrees(store)) toDisk(store);
-          stores.push({ ...meta, records: [], onDisk: true });
-          snapshot.format = 3;
-          continue;
+    // Everything is taken in this turn, one point in time: the records held in memory (their Blobs read after), and
+    // the stores in rows.db as a reader of it now with their finished transactions' layers, read a page at a time after.
+    // An export of 100,000 messages read them all in one turn: the daemon answered nothing for 1.1-1.7 s.
+    const held: SnapshotStore[] = [];
+    const later: [SnapshotStore, SqlTree][] = [];
+    let reader: TreeFile | null = null;
+    try {
+      for (const db of raw._databases.values()) {
+        if (db.name === PROBE) continue;
+        const stores: SnapshotStore[] = [];
+        for (const store of db.rawObjectStores.values()) {
+          if (store.deleted) continue;
+          const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+          const meta = {
+            name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
+            indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
+          };
+          if (!inline && disk(store)) {
+            if (!onTrees(store)) toDisk(store);
+            stores.push({ ...meta, records: [], onDisk: true });
+            snapshot.format = 3;
+            continue;
+          }
+          const saved: SnapshotStore = { ...meta, records: [] };
+          stores.push(saved);
+          if (onTrees(store)) {
+            reader ??= openTreeReader(sqlite!, rowsPath, classes.constraintError);
+            later.push([saved, (store.records.records as unknown as SqlTree).at(reader)]);
+          } else {
+            for (const record of store.records.values()) saved.records.push([record.key, record.value]);
+            held.push(saved);
+          }
         }
-        const records: [Key, unknown][] = [];
-        for (const record of store.records.values()) records.push([record.key, await blobsToDisk(record.value)]);
-        stores.push({ ...meta, records });
+        snapshot.databases.push({ name: db.name, version: db.version, stores });
       }
-      snapshot.databases.push({ name: db.name, version: db.version, stores });
-    }
+      for (const store of held) for (const record of store.records) record[1] = await blobsToDisk(record[1]);
+      for (const [saved, tree] of later) {
+        for (const record of tree.getAllRecords()) {
+          if (saved.records.push([record.key, record.value]) % EXPORT_PAGE === 0) await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+    } finally { reader?.db.close(); }
     return snapshot;
   }
 
@@ -622,8 +645,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           return [key, link];
         });
       }
-      const fd = openSync(path, "w", 0o600);
-      try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+      // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
+      const file = await open(path, "w", 0o600);
+      try { await file.writeFile(serialize(snapshot)); await file.sync(); } finally { await file.close(); }
     },
   };
 }

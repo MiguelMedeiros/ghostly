@@ -239,8 +239,9 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
     // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
     // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
-    // someone. The operator has them in the log.
-    if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
+    // someone. The operator has them in the log. A monitor's HEAD and its query string are read as the GET (Node
+    // sends no body for a HEAD), as the HyperDHT relay reads them: a HEAD refused here would count as a refused client.
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify({ ok: true }))
       return
@@ -369,8 +370,32 @@ function setting (env, name, fallback, kind) {
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
 
 /**
+ * The GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables in `env` that are none of `known`, sorted, each with the known
+ * name at most 3 edits away when there is one (`GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)`): a misspelt name was the
+ * default without a word, often the less safe one. Not a refusal: one env file may serve both relays.
+ */
+function ignoredSettings (env, known) {
+  return Object.keys(env).filter(name => /^GHOSTLY_(RELAY|HYPERDHT)_/.test(name) && !known.includes(name)).sort().map(name => {
+    const [closest] = known.map(other => ({ other, edits: editDistance(name, other) })).sort((a, b) => a.edits - b.edits)
+    return closest && closest.edits <= 3 ? `${name} (${closest.other}?)` : name
+  })
+}
+
+/** Levenshtein distance: the fewest characters to add, drop or change to turn `a` into `b`. */
+function editDistance (a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    row = next
+  }
+  return row[b.length]
+}
+
+/**
  * The relay's settings from its environment (server.mjs): PORT (49480), HOST (0.0.0.0; 127.0.0.1 behind proxies),
- * GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_PROXIES (0). Throws on one present but not of its kind.
+ * GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_PROXIES (0). Throws on one present but not of its kind. `ignored` names the
+ * other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
   const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
@@ -379,6 +404,7 @@ export function readSettings (env) {
     host: setting(env, 'HOST', proxies ? '127.0.0.1' : '0.0.0.0', 'text'),
     origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
     proxies,
+    ignored: ignoredSettings(env, ['GHOSTLY_RELAY_ORIGINS', 'GHOSTLY_RELAY_PROXIES']),
   }
 }
 

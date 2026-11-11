@@ -79,7 +79,9 @@ Other settings:
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
 start with one line that names it; leave a setting out for its default. The start line says how clients are counted,
-each limit set away from its default, and which origins it serves (`any origin` when none is set).
+each limit set away from its default, and which origins it serves (`any origin` when none is set). Before it, a line
+names each `GHOSTLY_RELAY_*` or `GHOSTLY_HYPERDHT_*` variable the relay does not read, with the closest name it does
+(`GHOSTLY_RELAY_PROXY (GHOSTLY_RELAY_PROXIES?) is not a setting of this relay; ignored`).
 
 ## Running it
 
@@ -109,7 +111,7 @@ an `.env` file next to it):
 - `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, or every browser on it is refused (403).
 
 `GET /healthz` answers with the HyperDHT node's state: `nodes` in its routing table and `firewalled`
-(`{"ok":true,"firewalled":false,"nodes":20}`). Anyone who reaches the relay may read it, so it carries no count of
+(`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
 says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its

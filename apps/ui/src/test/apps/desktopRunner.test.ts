@@ -185,20 +185,23 @@ it("gives the app an answer with a __proto__ member as a key", async () => {
   expect(Object.getOwnPropertyDescriptor(value, "__proto__")!.value).toEqual({ admin: true });
 });
 
-// Tauri drops an app window's message far over the broker's 64 KiB unread (`message_limit`), so the runner refuses a
-// request over 64 KiB itself: the app gets "too-large", and the request never leaves the window.
-it("refuses a request over 64 KiB without sending it", async () => {
+// Tauri drops an app window's message far over the broker's 66 KiB unread (`message_limit`), so the runner refuses a
+// request over 66 KiB itself: the app gets "too-large", and the request never leaves the window.
+it("refuses a request over 66 KiB without sending it", async () => {
   const sent: unknown[] = [];
   const { window } = open((request) => (request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true,"value":null}`), undefined, sent);
   await settle();
   sent.length = 0;
-  // The request as JSON, {"id":2,"type":"storage.set","args":["k","x…"]}, is 64 KiB and then a byte more; "é" is two
+  // The request as JSON, {"id":2,"type":"storage.set","args":["k","x…"]}, is 66 KiB and then a byte more; "é" is two
   // bytes in UTF-8.
   const around = JSON.stringify({ id: 2, type: "storage.set", args: ["k", ""] }).length;
-  await expect(window.ghostly.storage.set("k", "x".repeat(64 * 1024 - around))).resolves.toBeNull();
+  await expect(window.ghostly.storage.set("k", "x".repeat(66 * 1024 - around))).resolves.toBeNull();
   expect(sent).toHaveLength(1);
-  await expect(window.ghostly.storage.set("k", "x".repeat(64 * 1024 - around + 1))).rejects.toThrow("too-large");
-  await expect(window.ghostly.storage.set("k", "é".repeat(32 * 1024))).rejects.toThrow("too-large");
+  await expect(window.ghostly.storage.set("k", "x".repeat(66 * 1024 - around + 1))).rejects.toThrow("too-large");
+  // A stored value's 64 KiB under the longest key (256 control characters, six bytes each in JSON) is sent.
+  await expect(window.ghostly.storage.set("\u0001".repeat(256), "x".repeat(64 * 1024 - 2))).resolves.toBeNull();
+  expect(sent).toHaveLength(2);
+  await expect(window.ghostly.storage.set("k", "é".repeat(33 * 1024))).rejects.toThrow("too-large");
   await expect(window.ghostly.storage.set("k", new Array(8 * 1024 * 1024).fill(0))).rejects.toThrow("too-large");
-  expect(sent).toHaveLength(1);
+  expect(sent).toHaveLength(2);
 });
