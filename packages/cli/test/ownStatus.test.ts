@@ -125,7 +125,7 @@ describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {
     expect(error(await ghostly(["--home", dir, "status", "set", "x".repeat(61)]), "usage", 2).message).toBe("<text> is up to 60 characters, not 61 characters");
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--until", "yesterday"]), "usage", 2).message).toMatch(/^--until takes/);
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--availability", "lunch"]), "usage", 2).message).toMatch(/^--availability takes/);
-    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Too many arguments: ghostly status");
+    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)");
     expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "Here" } });
   });
 
