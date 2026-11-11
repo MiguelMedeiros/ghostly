@@ -91,3 +91,17 @@ test("Check now pressed from the keyboard keeps the focus, then hands it to Relo
   await expect(page.getByTestId("update-status")).toContainText("9.9.9");
   await expect(page.getByTestId("settings-page").getByRole("button", { name: "Reload" })).toBeFocused();
 });
+
+test("on a narrow phone the banner's lines wrap, the warning beside Reload never cut", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { mobile: true, viewport: { width: 320, height: 568 } });
+  await page.route("**/version.json", (route) => route.fulfill({ contentType: "application/json", body: NEWER }));
+  // In Portuguese the warning is the longest of the eight beside Reload at 320 px.
+  await page.evaluate(() => { const key = "ghostly_app_settings"; localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? "{}"), language: "pt" })); });
+  await page.reload();
+
+  const banner = page.getByTestId("update-banner");
+  await expect(banner).toContainText("Atualizar encerra suas chamadas e conexões.");
+  const cut = await banner.locator("p").evaluateAll((lines) => lines.filter((line) => line.scrollWidth > line.clientWidth).map((line) => line.textContent));
+  expect(cut).toEqual([]);
+  await expect(banner.getByRole("button", { name: "Recarregar" })).toBeInViewport();
+});
