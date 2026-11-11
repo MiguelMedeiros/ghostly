@@ -358,7 +358,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
     };
   }, [wallet, value]);
 
-  if (!inspection) return <span className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">{value}</span>;
+  if (!inspection) return <span className="chat-text-message wrap-break-word whitespace-pre-wrap">{value}</span>;
 
   const host = (url: string) => {
     try {
@@ -491,7 +491,7 @@ export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: Money
   const off = !!method && offHere(method, network);
   return (
     <>
-      {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
+      {money.rest && <p className="chat-text-message wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
         {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}
