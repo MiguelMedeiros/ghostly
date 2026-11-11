@@ -3,7 +3,8 @@
  * (`isServiceHostname`). Every request that origin's pages make, but the bridge's own files, is handed to the bridge
  * page with a port of its own, and answered with what comes back on it: the contact's answer, streamed. A navigation
  * goes only when it is a frame's this origin started (`startedHere`): at the top, the app says it opens inside Ghostly. Built on its
- * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage.
+ * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
+ * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
 import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
@@ -83,13 +84,56 @@ function bridge(all: WindowClient[]): WindowClient | undefined {
  * Whether this origin started a navigation: a frame's (the bridge's first, a link in the app), with this origin's
  * referrer or, with none, from one of its own pages. Another site may navigate a window or a frame of its own here;
  * where this worker is in its partition (a services host on the app's own site), that would reach the contact as this
- * person, with the page's cookies.
+ * person, with the page's cookies. Undefined when nothing says: a frame's navigation with no referrer (the app's page
+ * sends none) and no client, as Firefox and WebKit hand every one.
  */
-function startedHere(event: FetchEvent, all: WindowClient[]): boolean {
+function startedHere(event: FetchEvent, all: WindowClient[]): boolean | undefined {
   const { destination, referrer } = event.request;
   if (destination !== "iframe" && destination !== "frame") return false;
   if (referrer) { try { return new URL(referrer).origin === worker.location.origin; } catch { return false; } }
-  return !!event.clientId && all.some((client) => client.id === event.clientId);
+  if (!event.clientId) return undefined;
+  return all.some((client) => client.id === event.clientId);
+}
+
+/** A navigation `goOn` keeps until its page goes on with it: what goes to the contact then, in its place. */
+interface Kept { url: string; method: string; headers: Headers; body: ArrayBuffer | null; until: number }
+const kept = new Map<string, Kept>();
+const KEPT_MS = 30_000;
+const MAX_KEPT = 4;
+
+/** The query key the "go on" page puts its token under, on its own address: the next navigation's referrer. */
+export const GO_KEY = "ghostly-go";
+/** The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. */
+export const GO_SCRIPT = `(()=>{const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
+let goHash: Promise<string> | undefined;
+
+/**
+ * A frame's navigation nothing places (`startedHere`), answered with a page of this worker's own in place of the
+ * contact's: one that renders only inside Ghostly (`frame-ancestors`), so in another site's frame nothing runs and
+ * nothing reaches the contact. Inside Ghostly its script asks again, now with this origin's referrer and a token, and
+ * the request kept here goes as it was made (a form's POST and its body too). Kept once, for a little while.
+ */
+async function goOn(request: Request): Promise<Response> {
+  const body = await readBody(request);
+  if (body === "too-large") return plain(413, "The request body is too large.");
+  const now = Date.now();
+  for (const [token, one] of kept) if (one.until <= now || kept.size >= MAX_KEPT) kept.delete(token);
+  const token = crypto.randomUUID();
+  kept.set(token, { url: request.url, method: request.method, headers: new Headers(request.headers), body, until: now + KEPT_MS });
+  goHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT))
+    .then((digest) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`);
+  const html = `<!doctype html><meta charset="utf-8"><script data-go="${token}">${GO_SCRIPT}</script>`;
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` } });
+}
+
+/** The navigation a "go on" page asked for again (its token in the referrer, the same address): taken, once. */
+function takeKept(request: Request): Kept | undefined {
+  let token: string | null;
+  try { token = new URL(request.referrer).searchParams.get(GO_KEY); } catch { return undefined; }
+  const one = token ? kept.get(token) : undefined;
+  if (!one) return undefined;
+  kept.delete(token!);
+  return one.url === request.url && one.until > Date.now() ? one : undefined;
 }
 
 /** The request body, read up to the data link's limit: null past it. */
@@ -118,15 +162,21 @@ async function readBody(request: Request): Promise<ArrayBuffer | null | "too-lar
 async function forward(event: FetchEvent): Promise<Response> {
   const request = event.request;
   const all = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
-  if (request.mode === "navigate" && !startedHere(event, all)) return plain(403, "This app opens only inside Ghostly.");
+  let again: Kept | undefined;
+  if (request.mode === "navigate") {
+    const started = startedHere(event, all);
+    if (started === undefined) return goOn(request);
+    if (!started) return plain(403, "This app opens only inside Ghostly.");
+    again = takeKept(request);
+  }
   const to = bridge(all);
   if (!to) return plain(503, "This app is open only while Ghostly shows it.");
-  const body = await readBody(request);
+  const body = again ? again.body : await readBody(request);
   if (body === "too-large") return plain(413, "The request body is too large.");
   const url = new URL(request.url);
   const headers: [string, string][] = [];
-  request.headers.forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
-  const message: ServiceRequestMessage = { type: "request", method: request.method, path: url.pathname + url.search, headers, body, destination: request.destination };
+  (again?.headers ?? request.headers).forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
+  const message: ServiceRequestMessage = { type: "request", method: again?.method ?? request.method, path: url.pathname + url.search, headers, body, destination: request.destination };
   const channel = new MessageChannel();
   const port = channel.port1;
   let controller!: ReadableStreamDefaultController<Uint8Array>;
