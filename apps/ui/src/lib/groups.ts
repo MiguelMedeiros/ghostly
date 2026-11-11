@@ -38,12 +38,26 @@ export const fitGroupNameEdit = (before: string, after: string, caret: number | 
 const DRAWS_NOTHING = /[\p{Default_Ignorable_Code_Point}⠀]/gu;
 
 /**
- * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`) nor the
- * key's end a name already shows ("Alice (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce"
- * and "Alice (…k1p0aa)" are all "Alice".
+ * The Cyrillic and Greek letters drawn as a Latin one (Unicode TR39's confusables among the three), each to that
+ * letter: capitals before a name's case is folded (Greek Η is H, its small η is n), small ones after.
  */
-const sameNameForm = (nick: string) =>
-  nick.normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+const lookalikes = (pairs: string) => new Map([...pairs.matchAll(/(\S)(\S)/gu)].map(([, from, to]) => [from!, to!]));
+const LOOKALIKE_CAPITALS = lookalikes("АA ВB ЕE ЅS ІI ЈJ КK МM НH ОO РP СC ТT УY ХX ҮY ӀI ԚQ ԜW ΑA ΒB ΕE ΖZ ΗH ΙI ΚK ΜM ΝN ΟO ΡP ΤT ΥY ΧX ϹC");
+const LOOKALIKE_SMALL = lookalikes("аa еe оo рp сc уy хx ѕs іi јj һh ӏl үy ԁd ԛq ԝw αa γy ιi νv οo ρp υu ϲc ϳj");
+const foldLookalikes = (s: string, letters: Map<string, string>) => s.replace(/\p{L}/gu, c => letters.get(c) ?? c);
+/** `s` in small letters, each look-alike as its Latin letter, accents apart (NFD) so "Ё" is "Ë". */
+const lookalikeForm = (s: string) => foldLookalikes(foldLookalikes(s.normalize("NFD"), LOOKALIKE_CAPITALS).toLocaleLowerCase(), LOOKALIKE_SMALL);
+
+/**
+ * A name as two are compared: told apart by neither case, width, spacing, what draws nothing (`DRAWS_NOTHING`), a
+ * letter of another alphabet drawn the same (`lookalikeForm`) nor the key's end a name already shows ("Alice
+ * (…3r69cg)", isolated as `withKeyEnd` shows it or not), so "alice ", "Ali‍ce", "Аlice" (a Cyrillic А) and "Alice
+ * (…k1p0aa)" are all "Alice". Look-alikes are folded both before NFKC (which turns Greek Ϲ into Σ) and after it (which
+ * turns 𝚨 into Α). Only the comparison: the name is shown as chosen.
+ */
+const sameNameForm = (nick: string) => lookalikeForm(
+  lookalikeForm(nick).normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim(),
+).normalize("NFC");
 
 /**
  * The app's own word for me in each language it speaks, which its lines about me start with ("You removed Bob",

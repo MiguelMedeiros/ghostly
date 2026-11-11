@@ -83,6 +83,24 @@ describe("a group's members with one name", () => {
     expect(memberName(member(OTHER, "👩‍💻 Ana"), undefined, sameNamed([member(ADMIN, "Bob", "admin"), member(OTHER, "👩‍💻 Ana")]))).toBe("👩‍💻 Ana");
   });
 
+  it("are told apart whatever letter of another alphabet that looks the same a name swaps in", () => {
+    // Cyrillic А, Greek Α, Cyrillic е, і and с, Greek ι, all capital Greek and Cyrillic (Greek Ϲ too, which NFKC
+    // makes Σ), a mathematical Greek 𝚨, Cyrillic ё with its dots.
+    const lookalikes = ["Аlice", "Αlice", "Alicе", "Аlісе", "Alιce", "ΑLICΕ", "АLІСЕ", "ΑLΙϹΕ", "𝚨lice", "Alicё"];
+    for (const nick of lookalikes) {
+      expect(sanitizeNick(nick)).toBe(nick);
+      const roster = [member(ADMIN, nick === "Alicё" ? "Alicë" : "Alice", "admin"), member(OTHER, nick)];
+      expect([...sameNamed(roster)], nick).toEqual([ADMIN, OTHER]);
+      // Shown as chosen, told apart by the key's end.
+      expect(authorName({ members: roster }, OTHER)).toBe(apart(nick, "0th3r9"));
+      expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, nick)], roster[0]!.nick)], nick).toEqual([ME, OTHER]);
+    }
+    // A name all in another alphabet reads as it is, apart from any Latin one.
+    expect(sameNamed([member(ADMIN, "Алиса", "admin"), member(OTHER, "Alice")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "Δημήτρης", "admin"), member(OTHER, "Dimitris")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "Алиса", "admin"), member(OTHER, "Алиса")]).size).toBe(2);
+  });
+
   it("in a private group, a member removed and invited again is named as before, her old key's messages as her new key's", () => {
     // Carol's key before her removal is a former member's; her new one is in the roster. Only the admin invites in a
     // private group: no stranger came in by a link to take her name.
