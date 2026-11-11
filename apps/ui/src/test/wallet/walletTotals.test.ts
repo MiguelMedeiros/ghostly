@@ -56,6 +56,25 @@ describe("one balance per currency", () => {
     expect(totals.bitcoin).toMatchObject({ total: 213_500, ready: 171_000 });
   });
 
+  it("counts Cashu sats set aside for a payment the mint has not answered as not spendable yet, as Bark's send on its way out; they leave once paid, or come back spendable", () => {
+    // Cashu: 1,000 spendable, 4,000 set aside for a payment. Bark: 1,000 spendable, 4,000 on their way out.
+    const cashu = (balance: number, setAside: number) => totalsOf({
+      mints: [mint(TEST_MINT, balance)], balance, setAside,
+      bark: barkReady({ read: true, balance: 1_000, pending: 4_000 }),
+    }, "testnet", (s) => ({ ...s, networks: { ...s.networks!, testnet: { ...s.networks!.testnet, setAside } } }));
+    const pending = cashu(1_000, 4_000);
+    expect(pending.bitcoin).toMatchObject({ total: 10_000, ready: 2_000 });
+    expect(rows(pending.bitcoin)).toEqual(["cashu:testnet: counted 5000", "lightning:testnet: shared 5000", "bark:testnet: counted 5000"]);
+    expect(pending.bitcoin?.rows[0]).toMatchObject({ pending: 4_000, note: "waiting" });
+    expect(pending.bitcoin?.rows[2]).toMatchObject({ pending: 4_000, note: "waiting" });
+    // The mint answered: paid, the set-aside sats are gone; failed, they are back in the balance, spendable.
+    const paid = cashu(1_000, 0), failed = cashu(5_000, 0);
+    expect(paid.bitcoin).toMatchObject({ total: 6_000, ready: 2_000 });
+    expect(paid.bitcoin?.rows[0]).toEqual({ id: "cashu:testnet", rail: "cashu", name: "Cashu", state: "counted", amount: 1_000, note: "mint" });
+    expect(failed.bitcoin).toMatchObject({ total: 10_000, ready: 6_000 });
+    expect(failed.bitcoin?.rows[0]).toEqual({ id: "cashu:testnet", rail: "cashu", name: "Cashu", state: "counted", amount: 5_000, note: "mint" });
+  });
+
   it("never counts a balance it could not read as 0: the card is a row with no amount, out of the total, and counted as such", () => {
     const base = { mints: [mint(TEST_MINT, 500)], balance: 500 };
     // A source that failed, one reconnecting with its last balance, one connected that has not read yet, a read that failed.
