@@ -19,7 +19,9 @@ export interface Device { id: string; label: string }
 /** Sent on this page when a choice changes (another page of the app sees `storage`). */
 export const DEVICES_EVENT = "media-devices-updated";
 
-const key = () => `${getPrefix()}media_devices`;
+/** The local key's suffix after a profile's prefix: a move leaves it on each device (lib/handoffProfile.ts). */
+export const MEDIA_DEVICES_SUFFIX = "media_devices";
+const key = () => `${getPrefix()}${MEDIA_DEVICES_SUFFIX}`;
 
 export function loadDeviceChoices(): DeviceChoices {
   try {
