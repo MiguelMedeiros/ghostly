@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { writeProfileBackup } from "../../lib/profileBackup";
 import { pinnedOrder } from "../../lib/storage";
-// covers: devices.handoff, app.backup
+// covers: devices.handoff, backup.profile.file, chats.list.pin-order
 
 /*
  * The first profile's keys share `ghostly_` with every other profile's and space's, so a pass over local storage asks
