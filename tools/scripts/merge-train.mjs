@@ -34,7 +34,9 @@
 //   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
 //     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
 //     the batch lands the old way with a warning: its own rebase merge, whose commits GitHub does not sign, and each
-//     original closes with "Merged via #<batch>".
+//     original closes with "Merged via #<batch>". Only a rule's refusal does that: one that left the line in the
+//     meantime (a draft, closed, new commits) stops the landing as above, and "not mergeable" or "Base branch was
+//     modified" is asked twice more, 5 s apart, then the batch closes with nothing landed.
 //   - A landing that a run left half done (a crash, the API budget) goes on in the next run from what GitHub shows:
 //     the first pull requests are merged at the heads the batch holds, and dev's tip still has the tree of the last of
 //     them in the batch. If dev holds anything else, the batch closes and the rest go back to the line.
@@ -105,6 +107,12 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
  */
 export const HOLD = "queue:hold";
 export const onHold = (p) => !!p?.labels?.includes(HOLD);
+/**
+ * GitHub's refusals of a batch's first squash merge that the batch's own rebase merge gets past: dev's rule (the queue
+ * app is not a bypass actor yet) and squash merges turned off. Not "not mergeable", a draft or "Base branch was
+ * modified": those say the pull request, or the moment, is the trouble, and the rebase merge would land it anyway.
+ */
+const WHOLE_WAY = /Repository rule violations|merges are not allowed/i;
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
@@ -972,14 +980,25 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       for (; at < stop; at++) {
         const s = state.prs[at];
         let r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
-        // Right after dev moved, GitHub may refuse the next merge for a moment ("Base branch was modified").
-        for (let again = 0; !r.ok && r.status !== 409 && at > from && again < 2; again++) {
+        if (!r.ok && r.status !== 409 && at === from) {
+          // The first one refused: read it again (which also has GitHub work its mergeability out). Turned into a draft,
+          // closed or pushed to since the run read it, it left the line: nothing lands, nor by the rebase merge below.
+          const read = await gh.pull(s.number);
+          if (!read.open || read.draft || read.sha !== s.sha || onHold(read)) {
+            why = changedText([s]);
+            break;
+          }
+        }
+        // Right after dev moved, GitHub may refuse the next merge for a moment ("Base branch was modified", "not
+        // mergeable" while it works that out). A rule's refusal comes back every time: it is not asked again.
+        for (let again = 0; !r.ok && r.status !== 409 && !(at === from && WHOLE_WAY.test(r.message ?? "")) && again < 2; again++) {
           await pause(5000);
           r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
         }
-        if (!r.ok && r.status !== 409 && at === 0 && stop === state.prs.length) {
-          // Nothing landed yet and the first is refused: most likely the queue app may not merge past dev's rule yet
-          // (a pull request in a batch is seldom up to date with dev by itself). The batch as a whole still can.
+        if (!r.ok && WHOLE_WAY.test(r.message ?? "") && at === 0 && stop === state.prs.length) {
+          // Nothing landed yet and a rule refuses the first: most likely the queue app may not merge past dev's rule yet
+          // (a pull request in a batch is seldom up to date with dev by itself), or squash merges are turned off. The
+          // batch as a whole still can. Any other refusal stops the landing below, and nothing lands.
           say(
             `::warning::GitHub refused the squash merge of #${s.number} (${r.message}), so batch #${batch.number} lands by the rebase merge and its commits will not be verified. The queue app must be a bypass actor (pull requests only) of \`${base}\`'s ruleset.`,
           );
