@@ -1,5 +1,5 @@
 import { act, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { engine } from "@ghostly/browser/platform/engine";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -49,9 +49,15 @@ describe("the chat list on an engine state that changes nothing it shows", () =>
   afterEach(() => {
     for (const [name, original] of originals) Object.defineProperty(Array.prototype, name, { configurable: true, writable: true, value: original });
     originals.clear();
+    vi.restoreAllMocks();
   });
 
   it("does not have each row scan the whole list of chats", () => {
+    // A list as tall as all its rows: every row drawn, none left to a space (hooks/useListWindow.ts).
+    const list = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return this.getAttribute("data-testid") === "chat-list" ? new DOMRect(0, 0, 400, N * 80) : list.call(this);
+    });
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     expect(screen.getAllByTestId("chat-row")).toHaveLength(N);
     countPasses();
