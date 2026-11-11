@@ -1269,8 +1269,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
+    onStopSignals(stop);
     return;
   }
   const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
