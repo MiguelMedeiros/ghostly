@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "密码错误",
   "language": "语言",
+  "languageNeedsUpdate": "{{language}} 需要新版本的 Ghostly。",
   "languageNotLoaded": "无法加载 {{language}}。请检查网络连接。",
   "languageRetry": "重试",
   "license": "许可证",
