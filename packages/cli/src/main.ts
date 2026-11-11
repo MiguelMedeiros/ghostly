@@ -241,9 +241,17 @@ const LOCAL_WRITES: ReadonlySet<string> = new Set([
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
 export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoDownloads", "serveFiles"]);
 
-/** Whether a one-shot for this call opens the profile offline: a read, or a change that stays on this device. */
+/**
+ * Said on a live session only (WISP 401 § Typing, WISP 902 · Group Mesh § Typing). A one-shot starts the chat or group
+ * as it says it, so nothing is live yet and it reached nobody; online it then waited for the link's records on the
+ * relays (3.4 s with a relay that takes 1.5 s, 10 s with one that does not answer). With `--for` it waits for the chat
+ * to be live (`keepOneShot`), so that one stays online.
+ */
+const LIVE_ONLY: ReadonlySet<string> = new Set(["chat.typing", "group.typing"]);
+
+/** Whether a one-shot for this call opens the profile offline: a read, a change that stays on this device, or typing. */
 export function offlineCall(method: string, params: Record<string, unknown>): boolean {
-  return readOnly(method, params) || LOCAL_WRITES.has(method);
+  return readOnly(method, params) || LOCAL_WRITES.has(method) || (LIVE_ONLY.has(method) && params.for === undefined);
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the

@@ -549,6 +549,17 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.typing", { chat: "zed" })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  // A one-shot opens the profile offline for it (`offlineCall`): it answered `live: false` and exit 0, and the contact saw nothing.
+  it("typing in a one-shot without --for says it reached nobody and how to make it reach the contact", async () => {
+    const { ctx } = fake();
+    Object.assign(ctx, { mode: "one-shot" });
+    for (const stop of [false, true]) {
+      expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop })).toMatchObject({ live: false, note: expect.stringContaining("reached nobody") });
+    }
+    Object.assign(ctx, { mode: "daemon" });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).not.toHaveProperty("note");
+  });
+
   it("group typing says it in a private group, with the same checks, and refuses a community", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "group.typing", { group: "Crew" })).rejects.toMatchObject({ code: "unavailable" });
