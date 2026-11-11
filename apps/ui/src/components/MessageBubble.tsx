@@ -1199,9 +1199,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nickRun = <bdi>{nick}</bdi>;
   const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px]`}>
+    // One line, cut with an ellipsis inside the bubble, the whole name in the tooltip (as a chat's row and header do):
+    // a long one-word name ran past the bubble and off a phone's screen.
+    <div data-testid="message-nick" data-key={author?.key} title={nick} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px] min-w-0 truncate`}>
       {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
+        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="block max-w-full truncate cursor-pointer text-start hover:underline">{nickRun}</button>
         : nickRun}
     </div>
   ) : null;
