@@ -1,5 +1,6 @@
 import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
+import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
 import type { CallManager } from "./calls/manager";
@@ -339,17 +340,36 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   return { link: chat.link };
 }
 
+/** The calls that act on one message (`message`) of the chat they name; `pin --remove` names none it needs. */
+const ON_A_MESSAGE: ReadonlySet<string> = new Set(["chat.react", "chat.pin", "chat.edit", "chat.delete", "chat.retry"]);
+
+/**
+ * Whether the chat may have the message `ref` names: by its row's id, or by an id both sides know it by (its wire id,
+ * the one a reaction or a pin names), as every call of `ON_A_MESSAGE` looks for it. The chat is read whole only when
+ * the row's id finds nothing.
+ */
+async function mayHaveMessage(ctx: ApiContext, linkId: string, ref: string): Promise<boolean> {
+  if (await node(ctx).getMessage(linkId, ref)) return true;
+  return (await node(ctx).getMessages(linkId)).some((m) => m.wireId === ref || replyRef(m, false) === ref);
+}
+
 /**
  * Starts the chats a call names (its `chat`, a forward's `to`) in a runtime that left the saved chats unstarted
  * (`RuntimeOptions.deferChats`). A ref that names no chat, or names a group, starts nothing: the call says so itself.
+ * Nor does a call on a message the chat does not have (`ON_A_MESSAGE`): it is refused `not_found` with nothing sent.
+ * Started, the chat put its records on the relays and the one-shot's close waited for its leave packet there: a
+ * mistyped message id took 4 to 10 s to say "No message".
  */
-export function startNamedChats(ctx: ApiContext, params: Params): void {
+export async function startNamedChats(ctx: ApiContext, method: string, params: Params): Promise<void> {
   const { links, groups } = state(ctx);
+  const message = false && ON_A_MESSAGE.has(method) && !(method === "chat.pin" && params.remove === true) && typeof params.message === "string" ? params.message : undefined;
   for (const ref of [params.chat, ...(Array.isArray(params.to) ? params.to : [])]) {
     if (typeof ref !== "string") continue;
     let found: ReturnType<typeof findChatOrGroup>;
     try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
-    if ("link" in found) node(ctx).startDeferredChat(found.link.id);
+    if (!("link" in found)) continue;
+    if (message !== undefined && !await mayHaveMessage(ctx, found.link.id, message)) continue;
+    node(ctx).startDeferredChat(found.link.id);
   }
 }
 
