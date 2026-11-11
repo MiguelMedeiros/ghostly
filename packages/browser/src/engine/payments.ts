@@ -337,6 +337,8 @@ const within = (now: number, at: number | undefined, ms: number): boolean => at 
  * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
  */
 export const RECEIPT_FRESH_MS = 7 * 86_400_000;
+/** What a contact reads about a request of ours closed for good (`close`), when it closes and each time their chat opens again. */
+const CLOSED_TOLD = "your contact removed the wallet it was paid to";
 /**
  * How often a wallet's own refresh asks about an open Ark request (at its server's indexer) or a contact's pending Ark
  * or USDT receipt (at the server or the chain) that has no answer yet (`AskBackoff`): at the wallet's pace while the
@@ -2003,17 +2005,17 @@ export class PaymentDesk {
   /**
    * A request of ours closed for good: the wallet it was paid through was removed. Nothing sends it again (replay,
    * a group edge opening), and the contact is told now when the chat is open (a request to a group: every member
-   * reachable), so their app stops offering to pay it. `reason`: shown here; `told`: what the contact reads. Returns
-   * whether it was open.
+   * reachable; one away is told when their chat opens, `replay`), so their app stops offering to pay it. `reason`: shown
+   * here. Returns whether it was open.
    */
-  async close(id: string, reason: string, told: string): Promise<boolean> {
+  async close(id: string, reason: string): Promise<boolean> {
     const request = this.payments.get(id);
     if (request?.kind !== "request" || request.direction !== "out" || request.state !== "pending") return false;
     await this.save({ ...request, state: "failed", closed: true, error: reason });
     const links = request.group ? this.host.groupLinks?.(request.group) ?? [] : [request.linkId];
     for (const linkId of links) {
       const link = this.host.getLink(linkId);
-      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: told, closed: true }); } catch { /* not reachable now */ } }
+      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: CLOSED_TOLD, closed: true }); } catch { /* not reachable now */ } }
     }
     return true;
   }
@@ -2030,6 +2032,9 @@ export class PaymentDesk {
       if (request.group !== group || request.kind !== "request" || request.direction !== "out") continue;
       if (request.state === "pending") await this.sendGroupRequest(linkId, request);
       else if (request.state === "settled" && Date.now() - request.createdAt < RECEIPT_FRESH_MS) link.sendPaymentResult({ id: request.id, ok: true });
+      // Closed while this member was away: their copy is still open, with a Pay that would pay a wallet that is gone.
+      // Said at every opening, whatever its age: only a wallet's removal closes one, so there are few.
+      else if (request.closed) link.sendPaymentResult({ id: request.id, ok: false, error: CLOSED_TOLD, closed: true });
     }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
@@ -2038,6 +2043,8 @@ export class PaymentDesk {
       // (a Fedimint request's invoice, an address paid from outside) has no token or receipt the payer says again, so
       // its copy would stay open with a Pay button that pays it twice.
       if (payment.kind === "request" && payment.state === "settled" && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
+      // One closed while the contact was away, as for a group's above.
+      if (payment.kind === "request" && payment.closed) { link.sendPaymentResult({ id: payment.id, ok: false, error: CLOSED_TOLD, closed: true }); continue; }
       if(payment.target?.method==='usdt') {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});
