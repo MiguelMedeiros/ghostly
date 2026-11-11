@@ -798,7 +798,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
       if (parsed.options.use) selectProfile(g.home, name);
-      print({ restored: name, folder: paths.dir, protection });
+      // Whether --use made it the current profile, as profile create says it.
+      print({ restored: name, folder: paths.dir, protection, current: currentProfile(g.home) === name });
       return;
     }
     default:
