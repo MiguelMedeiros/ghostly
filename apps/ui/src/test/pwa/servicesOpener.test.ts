@@ -4,7 +4,8 @@ import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCl
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
 import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { createHash } from "node:crypto";
+import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -289,6 +290,120 @@ describe("one request from the app, over the contact's link", () => {
       expect(replies).toEqual([{ type: "error", status: 400, text: "Failed" }]);
       expect(closed()).toBe(true);
     }
+  });
+});
+
+/**
+ * A port as the browser's: what is posted reaches the worker by structured clone, and a transferred buffer moves (it
+ * reads empty on the page after), so a test sees what the worker gets and what the page copied to send it.
+ */
+function workerPort() {
+  const replies: ServiceReply[] = [];
+  const transfers: ArrayBuffer[][] = [];
+  let closed = false;
+  const port = {
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    postMessage: (reply: ServiceReply, transfer: Transferable[] = []) => {
+      transfers.push(transfer as ArrayBuffer[]);
+      replies.push(structuredClone(reply, { transfer }));
+    },
+    close: () => { closed = true; },
+  };
+  return { port: port as unknown as MessagePort, replies, transfers, closed: () => closed, cancel: () => port.onmessage?.({ data: { type: "cancel" } }) };
+}
+
+/** The engine's own client for one contact's link, with the link's side recorded: answers are fed as link frames. */
+function linkClient() {
+  const sent: (string | Uint8Array)[] = [];
+  const client = new HttpClient({ send: (data) => { sent.push(data); }, bufferedAmount: 0, drained: async () => {}, close: () => {}, onMessage: null, onClose: null });
+  const controls = () => sent.filter((d): d is string => typeof d === "string").map((d) => JSON.parse(d) as { t: string; id: number });
+  /** One body chunk as it comes off the link: its payload a view into the frame, as `decodeChunk` gives it. */
+  const chunk = (id: number, payload: Uint8Array, end: boolean) => client.handleChunk(decodeChunk(encodeChunk({ kind: CHUNK_KIND.responseBody, id, end, payload }))!);
+  return { client, controls, chunk };
+}
+
+/** Bytes copied by `Uint8Array.prototype.slice` while `run` runs. */
+async function bytesSliced(run: () => Promise<void>): Promise<{ calls: number; bytes: number }> {
+  const slice = Uint8Array.prototype.slice;
+  const counted = { calls: 0, bytes: 0 };
+  const spy = vi.spyOn(Uint8Array.prototype, "slice").mockImplementation(function (this: Uint8Array, ...args: [number?, number?]) {
+    const copy = slice.apply(this, args);
+    counted.calls++;
+    counted.bytes += copy.byteLength;
+    return copy;
+  });
+  try { await run(); } finally { spy.mockRestore(); }
+  return counted;
+}
+
+const sha256 = (parts: Uint8Array[]) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest("hex"); };
+
+describe("a contact's answer on its way to the services worker", () => {
+  it("copies each chunk once: a 10 MB answer costs 10 MB of copies, not 20, and reaches the worker byte for byte", async () => {
+    const size = 10_000_000;
+    const body = new Uint8Array(size);
+    for (let i = 0; i < size; i++) body[i] = (i * 31 + (i >>> 11)) & 0xff;
+    const link = linkClient();
+    const { port, replies, transfers, closed } = workerPort();
+    const copied = await bytesSliced(async () => {
+      const done = serve(port, { type: "request", method: "GET", path: "/big.bin", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+      await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+      link.client.handleResponse({ t: "res", id: 1, st: 200, h: [["content-type", "application/octet-stream"]], b: true });
+      for (let at = 0; at < size; at += MAX_CHUNK_PAYLOAD_BYTES) {
+        link.chunk(1, body.subarray(at, Math.min(size, at + MAX_CHUNK_PAYLOAD_BYTES)), at + MAX_CHUNK_PAYLOAD_BYTES >= size);
+      }
+      await done;
+    });
+    const chunks = replies.filter((r): r is Extract<ServiceReply, { type: "chunk" }> => r.type === "chunk");
+    const links = Math.ceil(size / MAX_CHUNK_PAYLOAD_BYTES);
+    expect(chunks).toHaveLength(links);
+    expect(replies).toHaveLength(links + 2);
+    expect(replies[0]).toMatchObject({ type: "head", status: 200 });
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    // One copy per chunk, out of the link's frame (`HttpClient`): none more on the page to send it on.
+    expect(copied).toEqual({ calls: links, bytes: size });
+    // Each chunk's own buffer moved to the worker, exactly its bytes: none left behind on the page.
+    for (const [i, transfer] of transfers.slice(1, -1).entries()) {
+      expect(transfer).toHaveLength(1);
+      expect(transfer[0]!.byteLength, `chunk ${i} left on the page`).toBe(0);
+      expect(chunks[i]!.bytes.byteLength).toBe(chunks[i]!.bytes.buffer.byteLength);
+    }
+    const received = chunks.map((c) => c.bytes);
+    expect(received.reduce((n, c) => n + c.byteLength, 0)).toBe(size);
+    expect(sha256(received)).toBe(sha256([body]));
+    expect(closed()).toBe(true);
+  });
+
+  it("copies a chunk that is only part of its buffer, and leaves that buffer whole", async () => {
+    const shared = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    const { port, replies, transfers } = workerPort();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, async () => ({
+      status: 200, headers: [], bytes: async () => new Uint8Array(),
+      body: (async function* () { yield shared.subarray(0, 3); yield shared.subarray(3); })(),
+    }), new CookieJar(), words);
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && [...r.bytes])).toEqual([[1, 2, 3], [4, 5, 6, 7, 8]]);
+    expect(transfers.slice(1, -1).map((t) => t.map((b) => b === shared.buffer))).toEqual([[false], [false]]);
+    expect([...shared]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("still stops the contact's answer when the page stops reading partway, sending nothing after", async () => {
+    const link = linkClient();
+    const { port, replies, cancel, closed } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let seen = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      sent(reply, transfer as Transferable[]);
+      if (reply.type === "chunk" && ++seen === 3) cancel();
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    for (let i = 0; i < 10; i++) link.chunk(1, new Uint8Array(1024).fill(i), false);
+    await done;
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && r.bytes[0])).toEqual([0, 1, 2]);
+    expect(replies.map((r) => r.type)).toEqual(["head", "chunk", "chunk", "chunk", "end"]);
+    expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 }));
+    expect(closed()).toBe(true);
   });
 });
 
