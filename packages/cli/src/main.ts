@@ -343,12 +343,20 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
 const HOLDER_WAIT_MS = 5_000;
 /** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
 const STARTING_WAIT_MS = 30_000;
+/**
+ * The longest a one-shot waits for the profile in all, while it passes from one process to the next (each holder is
+ * waited for on its own, above): commands that keep taking it in turn do not keep this one waiting for ever.
+ */
+const TURNS_WAIT_MS = 60_000;
 
 /**
  * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
  * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
- * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
- * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. Each process that takes the
+ * profile in turn is waited for that long of its own, up to TURNS_WAIT_MS in all: counted from the first look, the
+ * wait failed busy while the profile was only passing from one process to the next (the last of six reads started at
+ * once, behind five others that each held it for a second on a busy machine). A daemon takes the profile before its
+ * socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
  * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
  * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
  * STARTING_WAIT_MS, and named as the holder. A `listen` with no daemon opens it the same way, as the daemon (`mode`).
@@ -356,6 +364,8 @@ const STARTING_WAIT_MS = 30_000;
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const from = performance.now();
+  // The process that holds the profile, as last seen, and since when.
+  let holder: unknown, since = from;
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
@@ -364,11 +374,14 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
       const starting = startingDaemon(g.paths);
       const client = await connectDaemon(g.paths);
       if (client) return client;
-      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - performance.now();
+      const pid = error.details?.pid;
+      if (pid !== holder) { holder = pid; since = performance.now(); }
+      const now = performance.now();
+      const left = Math.min(since + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS), from + TURNS_WAIT_MS) - now;
       if (left <= 0) {
-        if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${STARTING_WAIT_MS / 1000} s: ghostly daemon status shows when it is up`, { pid: starting });
-        const pid = error.details?.pid;
-        throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+        if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: starting });
+        const held = now - since >= HOLDER_WAIT_MS ? `was not free after ${HOLDER_WAIT_MS / 1000} s` : `was taken by one process after another for ${TURNS_WAIT_MS / 1000} s`;
+        throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and ${held}: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
     }
