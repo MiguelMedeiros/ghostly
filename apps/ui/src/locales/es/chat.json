@@ -394,6 +394,7 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
+    "notCopied": "No copiado",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toca para mostrarlo",
