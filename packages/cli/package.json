@@ -36,7 +36,7 @@
     "@arkade-os/sdk": "0.4.79",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.8.9",
-    "@bitcoindevkit/bdk-wallet-web": "0.3.0",
+    "@bitcoindevkit/bdk-wallet-web": "0.4.0",
     "@bitcoinerlab/descriptors-scure": "^3.2.1",
     "@cashu/cashu-ts": "^4.13.0",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
