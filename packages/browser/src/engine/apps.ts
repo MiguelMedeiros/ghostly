@@ -695,6 +695,8 @@ export class Apps {
   private readonly behindReads = new Map<string, { url: string; index: AppStoreIndex; digest: string }>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused, and the bytes the held list counts for. */
   private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
+  /** The `ghostly-revoke.json` files being checked now, by the same SHA-256. */
+  private readonly revocationChecks = new Map<string, Promise<SignedAppRevocation[] | null>>();
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -1317,6 +1319,16 @@ export class Apps {
     const id = toBase64Url(await sha256Paced(bytes));
     const known = this.revocationFiles.get(id);
     if (known !== undefined) return known.revocations;
+    // Apps whose bundles sit in one folder share its file, and the update check reads them side by side: they wait for
+    // the check already running, not one each of the same bytes.
+    const running = this.revocationChecks.get(id);
+    if (running) return running;
+    const check = this.checkRevocationsFile(id, bytes).finally(() => this.revocationChecks.delete(id));
+    this.revocationChecks.set(id, check);
+    return check;
+  }
+
+  private async checkRevocationsFile(id: string, bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
     const read = readCanonicalJson(bytes);
     let out: SignedAppRevocation[] | null = null;
     if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
