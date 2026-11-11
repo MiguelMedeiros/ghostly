@@ -145,6 +145,8 @@ describe("an app card whose Open was refused, once the installed app changes", (
     run = REMOVED;
     await user.click(open);
     expect(await within(card).findByTestId("app-card-error")).toHaveTextContent("A store you added removed this app.");
+    // Red words in the ink meant for text, as Stopped beside it: the plain danger red is 2.0:1 on a dark theme's sent card.
+    expect(within(card).getByTestId("app-card-error")).toHaveClass("text-danger-ink");
     expect(within(card).getByTestId("app-card-run-anyway")).toBeInTheDocument();
     return card;
   }

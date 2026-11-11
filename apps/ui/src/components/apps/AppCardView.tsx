@@ -98,7 +98,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         </div>
       </div>
       {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="chat-text-card-line text-danger" data-testid="app-card-error">{error}</p>}
+      {error && <p role="alert" className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>

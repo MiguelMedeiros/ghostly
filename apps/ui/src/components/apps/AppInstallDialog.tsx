@@ -104,7 +104,7 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
 
 /** An error's line, with its ⓘ when it has a longer story (a browser that keeps no app files). */
 function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) {
-  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger whitespace-pre-line">{error.text}</InfoLine></div>;
+  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
 }
 
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
