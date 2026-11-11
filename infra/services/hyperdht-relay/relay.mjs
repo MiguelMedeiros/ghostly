@@ -653,7 +653,8 @@ export async function startRelay(options = {}) {
 
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
-    if (request.url === '/healthz') {
+    // A GET or a monitor's HEAD (Node sends no body for it), with or without a query string, as the push relay reads it.
+    if ((request.method === 'GET' || request.method === 'HEAD') && request.url.split('?')[0] === '/healthz') {
       // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
       // Anyone may read it (behind a proxy every caller is on loopback), so only the node's state: the client counts
       // and the time of the last answer move with each browser, and on a small relay would tell when one opens the app.
