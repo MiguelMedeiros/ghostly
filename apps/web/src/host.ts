@@ -183,6 +183,7 @@ export const webHost = createInPageHost({
       words: {
         unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
         tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },

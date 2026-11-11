@@ -7,7 +7,7 @@ import { SERVICE_VIEW_ID, closeServiceView, parseServicesHost } from "../../../.
  * The profile locking while a contact's app is still on its way (its address worked out, before it is drawn) closes
  * nothing yet: the app is never drawn, so nothing behind the lock answers it, and the lock screen stays usable.
  */
-const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", label: "Demo", owner: "Not Ghostly", hostError: () => null };
+const words = { unreachable: "", failed: "", close: "Close", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "Demo", owner: "Not Ghostly", hostError: () => null };
 const open = () => openServiceView({ host: parseServicesHost("https://*.svc.ghostly.example")!, tag: "ybndrfg8ejkmcpqx", peer: "o".repeat(52), service: "demo", title: "Demo", send: () => new Promise(() => {}), words });
 
 beforeAll(() => {
