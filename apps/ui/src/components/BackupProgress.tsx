@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../contexts/I18nContext";
-import { useTabTrap } from "../hooks/useDismiss";
+import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { BackupJob } from "../hooks/useBackupJob";
 import { byteSize } from "../lib/backupFile";
@@ -30,6 +30,9 @@ export function BackupProgress({ job, onCancel }: { job: BackupJob; onCancel: ()
   }, []);
   // Tab and Shift+Tab stay on Cancel (or the dialog, once Cancel is gone): from Cancel they went on to the page behind.
   useTabTrap(ref);
+  // Back (Android's back gesture) leaves it, and the page under it, as they are while the work runs: it takes an entry
+  // again. It moved the page hidden under the sheet, or left the app.
+  useBackCloses(() => {});
   const moving = job.bytesTotal > 0 && (job.stage === "writing" || job.stage === "restoring");
   const percent = job.stage === "saving" || job.stage === "verifying" ? 100 : moving ? Math.min(100, Math.floor((job.bytes / job.bytesTotal) * 100)) : null;
   const stage = job.stage === "writing" && !job.sealed ? t("profile.backups.progress.stage.writingPlain") : t(`profile.backups.progress.stage.${job.stage}`);
