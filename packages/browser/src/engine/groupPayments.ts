@@ -103,8 +103,10 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
 export interface Placement { groupId: string; me: string; peer?: string }
 
 const federationOf = (p: PaymentView): string | undefined => p.federation ?? p.federations?.[0];
+/** A request's `mint` is where its invoice was paid in (a Cashu mint's Lightning, `onLightningPaid`), not how it was asked. */
 const railOf = (p: PaymentView): GroupPayRail =>
-  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint" : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
+  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint"
+    : p.invoice && !p.mints?.length && (p.kind === "request" || !p.mint) ? "lightning" : "cashu";
 /** Test money as the chat's bubble reads it (paymentIsTest): a target's chain, else the record's network, else a Fedimint federation's network, else its mints. */
 const testOf = (p: PaymentView, federationNetwork: (federation: string) => string | undefined): boolean => {
   if (p.target) return p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin";
