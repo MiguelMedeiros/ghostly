@@ -117,7 +117,7 @@ function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, 
         {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}
       </span>}
       <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${checked ? "border-accent" : "border-border"}`}>
-        {checked && <span className="h-2 w-2 rounded-full bg-accent" />}
+        {checked && <span className="h-2 w-2 rounded-full bg-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight]" />}
       </span>
     </button>
   );
