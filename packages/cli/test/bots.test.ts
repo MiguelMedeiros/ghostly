@@ -6,7 +6,7 @@ import type { EngineState, FileTransferView, LinkView } from "@ghostly/browser/s
 import { callApi, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
 import type { CliError } from "../src/errors";
-import { resumeHolds } from "../src/holds";
+import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.files, headless.typing, headless.chat, headless.api
 
@@ -430,6 +430,72 @@ describe("chat disconnect --hold", () => {
     await vi.waitFor(() => expect(JSON.parse(readFileSync(holds, "utf8"))).toEqual({}));
     expect(second.emitted.at(-1)).toMatchObject({ type: "chat.released", reason: "expired" });
     expect(existsSync(holds)).toBe(true);
+  });
+
+  // Each hold read holds.json before its engine call and wrote that copy back after it: five at once on a daemon kept
+  // one, and the four others stayed on DHT only for good (no record, so neither the timer nor --hold 0 took them back).
+  it("five chats held at once keep every hold, and each comes back when its time is up", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, s, dir, setLink } = fake();
+    s.links = ["a", "b", "c", "d", "e"].map((n) => link(`chat-${n}`, { label: n }));
+    // The engine's switch takes a turn of the event loop, as its store's write does.
+    node.setChatTransport.mockImplementation(async ({ linkId }) => {
+      await new Promise((r) => setTimeout(r, 5));
+      setLink(linkId, { deliveryMode: "dht", textDelivery: "dht" });
+    });
+    const held = Promise.all(s.links.map((l, i) => callApi(ctx, "chat.disconnect", { chat: l.id, hold: 1 + i }) as Promise<{ heldUntil: number }>));
+    await vi.advanceTimersByTimeAsync(10);
+    const answers = await held;
+    const file = () => JSON.parse(readFileSync(join(dir, "holds.json"), "utf8")) as Record<string, { until: number }>;
+    expect(Object.keys(file()).sort()).toEqual(["chat-a", "chat-b", "chat-c", "chat-d", "chat-e"]);
+    for (const [i, l] of s.links.entries()) {
+      expect(file()[l.id].until).toBe(answers[i].heldUntil);
+      expect(await callApi(ctx, "chat.get", { chat: l.id })).toMatchObject({ heldUntil: answers[i].heldUntil, deliveryMode: "dht" });
+    }
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(file()).toEqual({});
+    expect(node.setDeliveryMode.mock.calls.map(([p]) => p.linkId).sort()).toEqual(["chat-a", "chat-b", "chat-c", "chat-d", "chat-e"]);
+    expect(s.links.map((l) => l.deliveryMode)).toEqual(["stream", "stream", "stream", "stream", "stream"]);
+  });
+
+  it("a hold that ends while another chat is being held stays ended", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted, setLink } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 });
+    // Bob's switch is still under way when Alice's time is up, and her release writes the file.
+    let switched!: () => void;
+    node.setChatTransport.mockImplementationOnce(async ({ linkId }) => {
+      await new Promise<void>((r) => { switched = r; });
+      setLink(linkId, { deliveryMode: "dht", textDelivery: "dht" });
+    });
+    const bob = callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 30 }) as Promise<{ heldUntil: number }>;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "expired" });
+    switched();
+    const { heldUntil } = await bob;
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({ "chat-two": { until: heldUntil, since: expect.any(Number) } });
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+    // Nothing takes Alice back to DHT only later, and her release is said once.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(emitted.filter((e) => e.type === "chat.released")).toHaveLength(1);
+  });
+
+  // A removed chat's hold stayed in the folder until its time was up: a backup carried it, a chat joined again from the
+  // same invite showed its heldUntil, and its end said chat.released for a chat that was gone.
+  it("goes with its chat when the chat is removed, with no release said", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8")) as object)).toEqual(["chat-two"]);
+    expect(holdOf(ctx, "chat-one")).toBeNull();
+    // Bob's hold runs on and ends on time; Alice's end is never said.
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"], ["chat.held", "chat-two"], ["chat.released", "chat-two"]]);
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
+    expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-two", mode: "stream" });
   });
 
   // A one-shot that only read (`chat show`, `chat list`, `status`) opens no chat, and the engine refuses to switch one

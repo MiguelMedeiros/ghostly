@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, HOLD, HOLD_HELP, holdBatch, holdText, isBatch, LABEL, listBases, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -28,7 +28,8 @@ const greenTested = [
 function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
   const events = new Map<number, { event: string; label?: { name: string }; created_at: string }[]>();
-  const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
+  /** `editor`: who last wrote the comment, when not its author (an edit by another login). */
+  const comments = new Map<number | string, { id: number; node_id?: string; body: string; user?: { login: string }; editor?: string }[]>();
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
@@ -115,15 +116,20 @@ function fakeRepo() {
       return first && moved && moved > first ? moved : first;
     },
     comments: async (n: number) => read(comments.get(n) ?? []),
+    lastEditors: async (ids: string[]) => {
+      const all = [...comments.values()].flat();
+      return new Map(ids.flatMap((id) => all.filter((c) => c.node_id === id).map((c) => [id, c.editor ?? c.user?.login])));
+    },
     branchSha: async (base: string) => tips[base],
     behindBy: async (tip: string, head: string) => (sitsOn.get(head) === tip ? 0 : 3),
     comment: async (n: number, body: string) => {
-      const c = { id: ids++, body, user: { login: "train" } };
+      const id = ids++;
+      const c = { id, node_id: `IC_${id}`, body, user: { login: "train" } };
       comments.set(n, [...(comments.get(n) ?? []), c]);
       return { id: c.id };
     },
     editComment: async (id: number, body: string) => {
-      for (const list of comments.values()) for (const c of list) if (c.id === id) c.body = body;
+      for (const list of comments.values()) for (const c of list) if (c.id === id) Object.assign(c, { body, editor: "train" });
     },
     deleteComment: async (id: number) => {
       for (const [n, list] of comments) comments.set(n, list.filter((c) => c.id !== id));
@@ -1062,6 +1068,54 @@ describe("a run of the train", () => {
     repo.runs.set("h12later", green);
     const again = await repo.run();
     expect(again.dropped).toEqual([12]); // the train's own record (h12) counts, not the planted one
+  });
+
+  it("trusts the marks of its position comment only while it wrote it last: edited by another login, the pull request counts as queued again", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red }); // waits in line, so its position comment records h11
+    await repo.run();
+    // An account that may edit any comment pushes a head nobody reviewed, and edits the train's comment to vouch for it.
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    repo.pushed.set("h11b", "2026-10-08T00:05:00Z");
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace("merge-train:head h11 ", "merge-train:head h11b "), editor: "admin" });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(r.log).toContain("#11: its position comment was last edited by admin, so its marks do not count.");
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(11)!.map((x) => x.body)).toEqual([expect.stringMatching(/h11b was pushed after `queue` was added/)]);
+  });
+
+  it("rewrites a position comment another login edited, and trusts it again once it wrote it", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red });
+    await repo.run();
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace("merge-train:head h11 ", "merge-train:head 0000000 "), editor: "admin" }); // would read as new commits
+    expect((await repo.run()).dropped).toEqual([]);
+    expect(repo.comments.get(11)).toHaveLength(1);
+    expect(repo.comments.get(11)![0]).toMatchObject({ editor: "train", body: expect.stringMatching(/merge-train:head h11 /) });
+    repo.pulls.get(11)!.sha = "h11c"; // the train's own record counts again
+    repo.runs.set("h11c", green);
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
+  it("does not land a head that another login's edit of its alone mark names", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    expect(repo.alone(11)).toMatchObject({ baseSha: "dev0" });
+    // A push of an unreviewed head that sits on dev's tip and is green, and the alone mark edited to name it.
+    repo.pulls.get(11)!.sha = "h11x";
+    repo.runs.set("h11x", green);
+    repo.sitsOn.set("h11x", "dev0");
+    repo.pushed.set("h11x", "2026-10-08T00:05:00Z");
+    const c = repo.comments.get(11)![0];
+    Object.assign(c, { body: c.body.replace(/"sha":"[^"]+"/, '"sha":"h11x"'), editor: "admin" });
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.dropped).toEqual([11]);
   });
 
   it("needs its own login", async () => {
@@ -3593,6 +3647,105 @@ describe("the bases with a train", () => {
     expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
   });
 
+  // A red batch (or lone pull request) is held while CI Success on the base's tip still runs, and only that CI ending
+  // moves it: CI on a push to the base woke nothing, so it waited for the schedule (20 to 64 minutes apart).
+  it("woken by CI on a push to a base are that base, while the commit is its tip and the base has a train", () => {
+    const a = "a".repeat(40), tip = "1".repeat(40), old = "2".repeat(40), epicTip = "3".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("epic/x", "c".repeat(40), [LABEL.queue])];
+    const tips = { dev: tip, "epic/x": epicTip };
+    expect(trainBases(pulls, tip, tips)).toEqual(["dev"]);
+    expect(trainBases(pulls, epicTip, tips)).toEqual(["epic/x"]);
+    // A commit the base has moved past: a newer push's CI (or a push's own run of the train) serves the tip.
+    expect(trainBases(pulls, old, tips)).toEqual([]);
+    // A base with no train: nothing to hold, nothing to run.
+    expect(trainBases([pr("epic/x", "c".repeat(40), [LABEL.queue])], tip, tips)).toEqual([]);
+    // With the tips unread (or a base whose tip is not known), a base's commit wakes nothing, as before.
+    expect(trainBases(pulls, tip)).toEqual([]);
+    expect(trainBases(pulls, [old, tip], tips)).toEqual(["dev"]);
+  });
+
+  /** The workflow's view of `repo` for --list-bases: every open pull request, and this run alone among its runs. */
+  const listing = (repo: ReturnType<typeof fakeRepo>) => {
+    const reads: string[] = [];
+    const gh = {
+      ...repo.gh,
+      pulls: async () => [...repo.pulls.values()].filter((p) => p.open).map((p) => ({ ...p, labels: [...p.labels] })),
+      queueRuns: async () => [{ id: 7, conclusion: null, display_title: "Merge queue: CI ended on x" }],
+      runJobs: async () => [],
+      branchSha: async (base: string) => (reads.push(base), repo.gh.branchSha(base)),
+    };
+    return { gh, reads };
+  };
+  const DEV = "d".repeat(40);
+
+  it("woken by dev's own CI ending: a red batch held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    // dev's CI ends green: its run wakes the workflow, which lists dev, and the train blames the batch's own red.
+    repo.runs.set(DEV, green);
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, DEV, 7)).toEqual(["dev"]);
+    expect(reads).toEqual(["dev"]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    expect(repo.members()).toEqual([11]);
+    // Ended red: listed too; the train then says the hold is for dev's red, not its CI still running.
+    const pending = fakeRepo();
+    pending.tips.dev = DEV;
+    for (const n of [11, 12]) pending.add(n);
+    await pending.run();
+    pending.runs.set(DEV, running);
+    pending.settle([11, 12]);
+    await pending.run();
+    pending.runs.set(DEV, red);
+    expect(await listBases(listing(pending).gh, DEV, 7)).toEqual(["dev"]);
+    expect((await pending.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is red/);
+  });
+
+  it("woken by dev's own CI ending: a lone pull request held while it ran goes on at once", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.runs.set(DEV, running);
+    repo.settle([11]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #11: .*itself is still running/);
+    repo.runs.set(DEV, green);
+    expect(await listBases(listing(repo).gh, DEV, 7)).toEqual(["dev"]);
+    const first = repo.pulls.get(11)!.sha;
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/HOLD/);
+    // Its one more run on a fresh rebase, as for any lone pull request red on a green base.
+    expect(repo.pulls.get(11)!.sha).not.toBe(first);
+    expect(repo.alone(11)).toMatchObject({ retried: true });
+  });
+
+  it("woken by a pull request's CI are as before: dev's tip is read, and lists dev once at most", async () => {
+    const repo = fakeRepo();
+    repo.tips.dev = DEV;
+    repo.add(11);
+    repo.pulls.set(20, { number: 20, title: "draft", body: "", draft: true, sha: "e".repeat(40), branch: "wip", fork: false, labels: [], createdAt: "", open: true, base: "dev" });
+    const queued = "f".repeat(40);
+    repo.pulls.get(11)!.sha = queued;
+    // A draft's CI, or any commit that heads nothing in line and is no base's tip: no train.
+    expect(await listBases(listing(repo).gh, "e".repeat(40), 7)).toEqual([]);
+    expect(await listBases(listing(repo).gh, "0".repeat(40), 7)).toEqual([]);
+    // A queued one's CI: dev, once, even when a replaced wake was dev's own CI.
+    expect(await listBases(listing(repo).gh, queued, 7)).toEqual(["dev"]);
+    expect(trainBases([...repo.pulls.values()], [queued, DEV], { dev: DEV })).toEqual(["dev"]);
+    // Not woken by CI (the schedule, a label, a push, by hand): every base with a train, and no tip is read.
+    const { gh, reads } = listing(repo);
+    expect(await listBases(gh, undefined, 7)).toEqual(["dev"]);
+    expect(await listBases(gh, "", 7)).toEqual(["dev"]);
+    expect(reads).toEqual([]);
+  });
+
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
     const refs = ["refs/heads/epic/x", "refs/heads/epic/apps-1.2", "refs/heads/epic/a/b"].map((ref) => ({ ref }));
     const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(refs) }), wait: async () => {} });
@@ -3630,6 +3783,30 @@ describe("GitHub over REST", () => {
     const gh = restLayer("t", "o/r", { budget: 0, fetchImpl: async () => answers.shift(), wait: async (ms: number) => void waits.push(ms) });
     expect(await gh.branchSha("dev")).toBe("abc");
     expect(waits).toEqual([5000, 7000]);
+  });
+
+  it("reads who last wrote each comment in one GraphQL request: the editor, else the author, a bot by its REST login", async () => {
+    const sent: { url: string; body: { query: string; variables: { ids: string[] } } }[] = [];
+    const nodes = [
+      { id: "IC_1", author: { __typename: "Bot", login: "queue-app" }, editor: null },
+      { id: "IC_2", author: { __typename: "Bot", login: "queue-app" }, editor: { __typename: "User", login: "admin" } },
+      { id: "IC_3", author: { __typename: "Bot", login: "queue-app" }, editor: { __typename: "Bot", login: "queue-app" } },
+      { id: "IC_4", author: null, editor: null }, // its author's account is gone
+      { id: "IC_5", author: { __typename: "Bot", login: "queue-app" }, editor: null, lastEditedAt: "2026-10-08T00:00:00Z" }, // its editor's account is gone
+      null, // deleted since it was listed
+    ];
+    const errors = [{ type: "NOT_FOUND", message: "Could not resolve to a node with the global id of 'IC_6'" }];
+    const fetchImpl = async (url: string, init: { body: string }) => (sent.push({ url, body: JSON.parse(init.body) }), reply(200, { data: { nodes }, errors }));
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.lastEditors([])).toEqual(new Map());
+    expect(sent).toEqual([]); // nothing to ask, nothing asked
+    const editors = await gh.lastEditors(["IC_1", "IC_2", "IC_3", "IC_4", "IC_5", "IC_6"]);
+    expect(editors).toEqual(new Map([["IC_1", "queue-app[bot]"], ["IC_2", "admin"], ["IC_3", "queue-app[bot]"]]));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("https://api.github.com/graphql");
+    expect(sent[0].body.variables.ids).toEqual(["IC_1", "IC_2", "IC_3", "IC_4", "IC_5", "IC_6"]);
+    const failing = restLayer("t", "o/r", { fetchImpl: async () => reply(200, { errors: [{ message: "Something went wrong" }] }), wait: async () => {} });
+    await expect(failing.lastEditors(["IC_1"])).rejects.toThrow(/Something went wrong/);
   });
 
   it("keeps the status of an HTML error page readable once retries run out", async () => {
