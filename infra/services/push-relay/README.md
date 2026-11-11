@@ -25,8 +25,8 @@ PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
 curl -s http://127.0.0.1:49480/healthz           # {"ok":true}
 ```
 
-`GET /healthz` answers 200 `{"ok":true}` while the relay runs. Point a monitor at it; any other `GET` is refused
-(405). Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
+`GET /healthz` answers 200 `{"ok":true}` while the relay runs. Point a monitor at it: `HEAD` and a query string
+(`/healthz?x=1`) answer the same, and are not logged as refusals; any other `GET` is refused (405). Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
 the log (below).
 
 A port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of
