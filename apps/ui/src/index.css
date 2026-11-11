@@ -1301,6 +1301,8 @@ html .toast-place.toast-place-page[data-at="top"] {
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A word on a single line of its own height: "edited" in a bubble, a reaction's count. */
+.chat-text-tag { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: 1; }
 /* The chat list's rows (ChatRow.tsx). */
 .chat-text-row-name { font-size: calc(15rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
 .chat-text-row-preview { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }

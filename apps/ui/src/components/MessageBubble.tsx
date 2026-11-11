@@ -311,7 +311,7 @@ function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage[
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`text-[11px] leading-none italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`chat-text-tag italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -1036,7 +1036,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
   const refusal = isMe && refused && refused.on === shown && (
-    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 chat-text-note" />
   );
   // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" && !fileUnsent ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
