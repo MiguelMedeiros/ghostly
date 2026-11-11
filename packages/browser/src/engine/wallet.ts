@@ -944,7 +944,22 @@ export class CashuWallet {
       if (sent) return sent;
     }
     if (room > 0) throw engineError("notEnoughForFee", { amount: room });
+    // The sats are there, only set aside by a split the mint has not answered: said as the first attempt said it.
+    const held = await this.heldBySilentSplit(candidates, amount);
+    if (held) throw new SwapUnsettledError(held);
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
+  }
+
+  /** An open send swap at one of `mints` whose reserved inputs, with the coins free there, would cover `amount`. */
+  private async heldBySilentSplit(mints: string[], amount: number): Promise<PendingSwap | undefined> {
+    for (const mint of mints) {
+      const open = (await this.swapsAt(mint)).filter((s) => s.kind === "send" && !s.released && !s.finished);
+      if (open.length === 0) continue;
+      const held = await Promise.all(open.map((s) => this.storedInputs(s)));
+      const swap = open.find((_, i) => held[i].length > 0);
+      if (swap && total(await this.proofsAt(mint)) + total(held.flat()) >= amount) return swap;
+    }
+    return undefined;
   }
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {

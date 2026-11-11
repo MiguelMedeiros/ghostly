@@ -719,7 +719,11 @@ export class PaymentDesk {
     } else if (!lightning) throw new Error("No way of paying this request is allowed in this chat");
 
     // Through the Lightning card the person picked; the network's default one otherwise.
-    const quote = await this.lightning[network].quote(request.invoice!, params.card).catch((error: unknown) => { throw unsettled ?? error; });
+    // Said as the mint that has not answered only when Lightning found nothing to pay with: any other reason is its own.
+    const quote = await this.lightning[network].quote(request.invoice!, params.card).catch((error: unknown) => {
+      const code = (error as { engineCode?: unknown } | undefined)?.engineCode;
+      throw unsettled && (code === "notEnoughSats" || code === "notEnoughForFee") ? unsettled : error;
+    });
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     // Never above the ceiling the person approved, when they set one.
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);

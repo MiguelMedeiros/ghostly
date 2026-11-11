@@ -173,6 +173,17 @@ describe("paying a contact's request, never twice", () => {
     expect(state("r1")?.state).toBe("settled");
   });
 
+  it("ecash whose mint has not answered does not hide why Lightning could not pay when that is not a lack of sats", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    wallet.createToken.mockRejectedValue(new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 }));
+    lightning.quote.mockRejectedValueOnce(engineError("mintsNoAnyAmount"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "mintsNoAnyAmount" });
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughForFee", { amount: 5 }));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("has not answered yet");
+    expect(state("r1")).toMatchObject({ state: "pending" });
+  });
+
   it("pays an invoice only for the amount asked, and for at most 3% in fees (10 sats at least)", async () => {
     const { desk, lightning, allowed, state } = setup([record({ id: "r1", amount: 1_000, invoice: INVOICE })]);
     await desk.start();
