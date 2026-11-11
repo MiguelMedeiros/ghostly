@@ -88,13 +88,19 @@ export async function holdChat(ctx: ApiContext, link: LinkView, minutes: number)
   if (link.deliveryMode === "dht" && !holds[link.id]) throw new CliError("refused", "This chat is on DHT only already, by its own choice: chat transport auto leaves it");
   if (!link.profile) throw new CliError("unavailable", "A chat of the older protocol has no DHT only");
   const until = Date.now() + minutes * 60_000;
+  // The hold before DHT only, taken back if the switch fails: the store never has the chat on DHT only while
+  // holds.json has no hold to end it (a profile backup reads that file again after the store).
+  const before = holds[link.id];
+  holds[link.id] = { until, since: before?.since ?? Date.now() };
+  writeHolds(ctx, holds);
   if (link.deliveryMode !== "dht") {
     try { await node(ctx).setChatTransport({ linkId: link.id, transport: "dht" }); } catch (error) {
+      const now = readHolds(ctx);
+      if (before) now[link.id] = before; else delete now[link.id];
+      writeHolds(ctx, now);
       throw new CliError("unavailable", error instanceof Error ? error.message : String(error));
     }
   }
-  holds[link.id] = { until, since: holds[link.id]?.since ?? Date.now() };
-  writeHolds(ctx, holds);
   schedule(ctx, link.id, until);
   ctx.hub.emit("chat.held", `chat.held:${link.id}:${until}`, { chat: link.id, until });
   return until;
