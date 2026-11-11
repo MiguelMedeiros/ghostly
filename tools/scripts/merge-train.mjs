@@ -395,8 +395,12 @@ const batchShaped = (p, base) => !p.fork && p.branch.startsWith(`batch/${base}-`
  */
 export const isBatch = (p, base, login) => !!login && p.author === login && batchShaped(p, base) && readState(p.body).prs?.length > 0;
 
-/** An epic's umbrella (or main) merges into its base with a merge commit, never squashed into a batch. */
-const mergeCommitOnly = (p) => p.branch.startsWith("epic/") || p.branch === "main";
+/**
+ * An epic's umbrella, `main`, a release branch or a back-merge of `main` merges into its base with a merge commit, never
+ * squashed into a batch: a squash drops the other parent, so the next merge between the two conflicts over everything.
+ */
+const MERGE_COMMIT_ONLY = /^(main|epic\/.*|release\/.*|chore\/back-merge-.*)$/;
+const mergeCommitOnly = (p) => MERGE_COMMIT_ONLY.test(p.branch);
 
 /**
  * A batch's body: what it holds, and the train's mark. `commits` names the batch's commit of each pull request (by
