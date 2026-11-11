@@ -1293,6 +1293,11 @@ html .toast-place.toast-place-page[data-at="top"] {
 .chat-text-preview-site { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-title { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-description { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+/* An app's card (apps/AppCardView.tsx): its title, its lines under it, the publisher's fingerprint. Its icon, buttons
+   and time keep their size. */
+.chat-text-card-title { font-size: calc(14rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
