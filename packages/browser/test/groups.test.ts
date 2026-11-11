@@ -826,6 +826,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: alice.views()[0].epoch });
       });
 
+      // 300 changes, each settled: about 7 s on a quiet machine and 12 on a busy one, past the 5 s a test gets.
       it("that was several hundred changes behind gets them a slice at a time, never more than its app holds waiting, and is told", async () => {
         const { world, alice, bob, groupId, key, edge } = await trio();
         const aliceKey = key(alice), bobKey = key(bob);
@@ -895,7 +896,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         }
         expect(epochs.slice(before)).toEqual([removal - 2, removal - 1, removal, removal - 2, removal - 1, removal]);
         expect((await world.peers.get("alice")!.store.getGroups())[0].farewells?.[bobKey]).toMatchObject({ answered: 3 });
-      });
+      }, 60_000);
 
       it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
         const { world, alice, bob, carol, groupId, key, edge } = await trio();
