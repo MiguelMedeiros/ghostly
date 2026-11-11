@@ -125,7 +125,7 @@ async function busy(a: Awaited<ReturnType<typeof adminOf>>, other: Member) {
   for (const lightning of Object.values(inner.desk.lightning)) lightning.createInvoice = async () => ({ invoice: "lnbc1test" });
   const { paymentId } = await node.requestGroupPayment({ groupId, amount: 21, memo: "pizza", timestamp: Date.now(), rail: "lightning" });
   await inner.groupPayments.sync();
-  expect(await inner.desk.close(paymentId, "closed here", "closed")).toBe(true);
+  expect(await inner.desk.close(paymentId, "closed here")).toBe(true);
   await inner.groupPayments.sync();
   // Muted, then not: members are told to forget how to wake this app, then how to.
   await inner.setGroupWakeMuted(groupId, true);

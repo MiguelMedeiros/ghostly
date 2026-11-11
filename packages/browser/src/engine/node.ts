@@ -6646,7 +6646,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A request of ours closes for good (its wallet was removed): never sent again, taken back from the contact's storage too. */
   private async closeRequest(paymentId: string, reason: string): Promise<void> {
     const request = this.desk.payment(paymentId);
-    if (!request || !(await this.desk.close(paymentId, reason, "your contact removed the wallet it was paid to"))) return;
+    if (!request || !(await this.desk.close(paymentId, reason))) return;
     const message = await this.paymentMessage(request.linkId, paymentId);
     if (message) await this.hold.forget(request.linkId, message.id).catch(() => {});
   }
