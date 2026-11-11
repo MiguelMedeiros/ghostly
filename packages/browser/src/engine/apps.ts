@@ -1950,8 +1950,18 @@ export class Apps {
     const revokeRead = new Set<string>();
     const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
     app = withRevocations(app, before ?? []);
+    // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
+    // being taken again, once the record keeps it no more and its store's next index does not carry it.
+    const kept = await this.keptRevocationsOf(app.ref);
+    const judge = (version: AppVersion) => this.runStatus(version, this.storeViews(stores), [...(app.revocations ?? []), ...kept]);
     // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
-    if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
+    if (app.pending && judge(versionOf(app.pending.manifest, app.pending.digest)).status !== "ok") {
+      const stops = stopping([versionOf(app.pending.manifest, app.pending.digest)], [...(app.revocations ?? []), ...stores.flatMap((s) => s.index?.revoked ?? [])]);
+      if (stops.length) {
+        const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+        keepRevocations(tx.objectStore(STORES.settings), app.ref, stops);
+        await done(tx);
+      }
       dropped.push(app.pending);
       const { pending: _p, ...rest } = app;
       app = rest;
@@ -1975,7 +1985,7 @@ export class Apps {
       // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
       // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
       const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
-      if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      if (holds && !twin && judge(holds).status !== "ok") continue;
       // Unless the app is marked for that very one already (a mark is only taken from a bundle read whole and checked,
       // and the peek's digest is the SHA-256 of the manifest it read): nothing new is learned, and the mark keeps its `at`.
       if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
@@ -2006,7 +2016,7 @@ export class Apps {
         if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
         continue;
       }
-      if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      if (judge(version).status !== "ok") continue;
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
       if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") continue;
       if (app.pending && version.sequence < app.pending.sequence) continue;
