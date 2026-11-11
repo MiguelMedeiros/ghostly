@@ -102,6 +102,9 @@ export class CatchUpAnswers<F> {
     })();
   }
 
+  /** Whether an answer to `to` still has frames to send, or sent ones its app has not said it handled yet (`hooks.handled`). */
+  busy(to: string): boolean { return this.going.has(to) || !!this.onTheirWay.get(to)?.size; }
+
   /** The next slice of `rest` to `to`, as sent: undefined, and nothing left, when the edge did not take one. */
   private sendSlice(to: string, rest: F[]): F[] | undefined {
     const slice = rest.splice(0, CATCH_UP_SLICE);
