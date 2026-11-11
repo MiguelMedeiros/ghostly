@@ -5,6 +5,7 @@ import { Chat } from "../../pages/Chat";
 import { saveSession } from "../../lib/storage";
 import { clockTime, formatAt } from "../../lib/time";
 import { linkView } from "../fakeEngine";
+import { heldTime } from "../heldTime";
 import { renderApp } from "../render";
 
 // covers: app.i18n
@@ -30,9 +31,12 @@ describe("an Arabic time keeps its day period on its line", () => {
     }
   });
 
-  it("other languages read as before", () => {
+  // ICU 72-77 writes English's "PM" after a narrow no-break space, ICU 78 after a plain one the app holds: either way it stays on the line.
+  it("other languages read as before, with no plain space a line could break at before a day period", () => {
     const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
-    expect(formatAt(EVENING, options, "en")).toBe(new Intl.DateTimeFormat("en", options).format(EVENING));
+    const english = formatAt(EVENING, options, "en");
+    expect(english).toBe(heldTime(new Intl.DateTimeFormat("en", options), EVENING));
+    expect(english).toMatch(/[\u00a0\u202f]PM$/);
     expect(formatAt(EVENING, options, "pt")).toBe(new Intl.DateTimeFormat("pt-BR", options).format(EVENING));
     expect(clockTime(EVENING, "ja")).toBe(new Intl.DateTimeFormat("ja", { hour: "2-digit", minute: "2-digit" }).format(EVENING));
   });
