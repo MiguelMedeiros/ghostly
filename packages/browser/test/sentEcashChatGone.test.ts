@@ -45,9 +45,10 @@ function fakeMint() {
     }
     return undefined;
   };
+  const state = { down: false };
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
-    if (url.origin !== new URL(MINT).origin) return new Response("offline", { status: 503 });
+    if (url.origin !== new URL(MINT).origin || state.down) return new Response("offline", { status: 503 });
     const path = url.pathname;
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (path === "/v1/info") {
@@ -81,8 +82,9 @@ function fakeMint() {
     }
     return new Response("not found", { status: 404 });
   }));
-  return { paid: (quote: string, amount: number) => quotes.set(quote, { amount, state: "PAID" }) };
+  return { paid: (quote: string, amount: number) => quotes.set(quote, { amount, state: "PAID" }), down: (down: boolean) => { state.down = down; } };
 }
+let mint: ReturnType<typeof fakeMint>;
 
 const balance = async () => (await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll())).filter((p) => !p.reserved).reduce((sum, p) => sum + p.amount, 0);
 
@@ -123,7 +125,7 @@ const sent = (node: GhostlyNode): WalletAwaitingView[] => (node.getState().walle
 
 beforeEach(async () => {
   await transact([STORES.proofs, STORES.payments, STORES.walletTx, STORES.swaps, STORES.melts, STORES.quotes, STORES.settings, STORES.intents], (s) => { for (const name of Object.keys(s)) s[name].clear(); });
-  const mint = fakeMint();
+  mint = fakeMint();
   // 100 test sats in the wallet.
   mint.paid("q0", 100);
   const quote: StoredQuote = { quote: "q0", mint: MINT, amount: 100, invoice: "lnbc", createdAt: Date.now(), expiresAt: null };
@@ -177,6 +179,29 @@ describe("ecash sent in a chat deleted before the contact took it", () => {
     await node.reclaimPayment({ paymentId });
     expect(node.getState().payments[paymentId]).toMatchObject({ state: "settled" });
     expect(await balance()).toBe(79);
+    await vi.waitFor(() => expect(sent(node)).toEqual([]));
+  });
+
+  it("is offered back when the contact refused it and the mint was down for the automatic take back", async () => {
+    const node = await engine();
+    const frames: Payment[] = [];
+    const chat = addChat(node, frames);
+    const { paymentId } = await node.sendPayment({ linkId: chat.id, amount: 34, timestamp: 2_500, network: "testnet" });
+    // Refused (a mint they don't use): the ecash would come straight back, but the mint does not answer.
+    mint.down(true);
+    await node["desk"].onPaymentResult(chat.id, { id: paymentId, ok: false, error: "Unknown mint" });
+    mint.down(false);
+    // Kept with its ecash: its bubble still says Take it back, and so does the Wallet page's list.
+    expect(node.getState().payments[paymentId]).toMatchObject({ state: "failed" });
+    expect(await balance()).toBe(66);
+    await vi.waitFor(() => expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 34, paymentId }]));
+
+    node.removeLink({ linkId: chat.id });
+    await vi.waitFor(() => expect(sent(node)).toEqual([{ type: "cashu", kind: "sent", amount: 34, paymentId, chatGone: true }]));
+    // Taken back from there once the wallet asks the mint again (its own pace after the missed answer, `swapAsk`).
+    vi.spyOn(node["wallet"]["swapAsk"], "due").mockReturnValue(true);
+    await node.reclaimPayment({ paymentId });
+    expect(await balance()).toBe(100);
     await vi.waitFor(() => expect(sent(node)).toEqual([]));
   });
 
