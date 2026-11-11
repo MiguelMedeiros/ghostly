@@ -1,7 +1,7 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
-import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
+import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
@@ -472,8 +472,8 @@ async function closeLeftoverViewers(): Promise<void> {
     const kept = await chrome.storage.local.get(null);
     const targets = await chrome.debugger.getTargets();
     const unbound = async (tabId: number) => !(await bindingOf(tabId));
-    // A tab still at a contact's app address with no binding is one too, recorded or not.
-    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && parseViewerUrl(target.url)).map((target) => target.tabId!));
+    // A tab still on a contact's app's origin with no binding is one too, recorded or not.
+    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && isViewerOrigin(target.url)).map((target) => target.tabId!));
     for (const key of Object.keys(kept)) {
       const tabId = boundTab(key);
       if (tabId === null) continue;
@@ -654,7 +654,11 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     // Once the tab leaves the virtual origin there is nothing left to serve, and it is no viewer any more.
     const { frame } = params as { frame: { parentId?: string; url: string } };
     if (frame.parentId || frame.url === "about:blank" || parseViewerUrl(frame.url)) return;
-    void forget(tabId).then(() => chrome.debugger.detach({ tabId }).catch(() => {}));
+    // Still the app's origin at an address no closer finds (a `blob:` it made): the app goes with the tab.
+    const close = isViewerOrigin(frame.url);
+    void forget(tabId)
+      .then(() => chrome.debugger.detach({ tabId }).catch(() => {}))
+      .then(() => (close ? chrome.tabs.remove(tabId).catch(() => {}) : undefined));
   }
 });
 

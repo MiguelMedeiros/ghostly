@@ -35,3 +35,15 @@ export function parseViewerUrl(input: string): { peerPubKeyZ32: string; serviceI
   if (!isValidServiceId(serviceId) || !isZ32Key(peerPubKeyZ32) || !isViewerTag(tag)) return null;
   return { peerPubKeyZ32, serviceId, tag, path: `${url.pathname}${url.search}` };
 }
+
+/**
+ * A document of a contact's app's origin, at a viewer address or not: a `blob:` URL the app made keeps the app's
+ * origin, its storage and its script, though it is no address a viewer serves.
+ */
+export function isViewerOrigin(input: string): boolean {
+  try {
+    return parseViewerUrl(new URL(input).origin) !== null;
+  } catch {
+    return false;
+  }
+}

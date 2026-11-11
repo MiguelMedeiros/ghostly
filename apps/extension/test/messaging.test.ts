@@ -620,6 +620,18 @@ describe("viewer tabs", () => {
     expect(world.session.has(`viewer:${tabId}`)).toBe(false);
   });
 
+  it("closes the tab when its page goes to a document of its own origin that is no viewer address", async () => {
+    const tabId = await openViewer(world);
+    // `location = URL.createObjectURL(blob)`: the app's code would go on running on its origin, out of every closer's reach.
+    fire(world.chrome.debugger.onEvent, { tabId }, "Page.frameNavigated", {
+      frame: { url: `blob:https://${SERVICE}.${PEER}.${TAG}.invalid/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45` },
+    });
+    await settle();
+    expect(world.tabs.has(tabId)).toBe(false);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+    expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
+  });
+
   it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {
     const tabId = await openViewer(world);
     fire(world.chrome.debugger.onDetach, { tabId }, "canceled_by_user");
