@@ -109,6 +109,19 @@ export class PlaybackQueue {
     return Math.max(0, frames) * FRAME_MS;
   }
 
+  /**
+   * Another program writes from now on (it replaced the last one on the call's socket): what the last one left is
+   * dropped, half a sample included, so the new one starts on a whole sample and is heard at once. Returns how much
+   * was dropped, in milliseconds.
+   */
+  newWriter(): number {
+    const ms = this.queuedMs;
+    this.chunks = [];
+    this.head = 0;
+    this.length = 0;
+    return ms;
+  }
+
   private take(bytes: number): Buffer {
     const out = Buffer.allocUnsafe(bytes);
     let filled = 0;

@@ -500,7 +500,9 @@ with no framing:
   no sooner than 2 s later: `call start` refuses sooner with `busy` and `details.retryAfterMs`. The contact's app
   would not ring a call that comes that fast after a missed one.
 - The socket exists from `call start`/`call answer`, so the program may connect before the media is up. One program
-  at a time: a new connection (once it sent the token, on Windows) replaces the old one. When the call ends, the program reads EOF and the socket is
+  at a time: a new connection (once it sent the token, on Windows) replaces the old one. The new program starts on an
+  empty queue: what the last one wrote and was not played yet (half a sample included) is dropped, so it is heard at
+  once and on a whole sample. When the call ends, the program reads EOF and the socket is
   removed.
 - Added latency inside the CLI: at most one 20 ms frame going out; coming in, a frame as soon as its packet is
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
