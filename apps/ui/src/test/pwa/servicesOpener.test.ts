@@ -4,7 +4,7 @@ import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCl
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
 import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, HttpClient, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -109,7 +109,8 @@ describe("one request from the app, over the contact's link", () => {
       async (request) => { sent.push(request); return answer(200, [["content-type", "text/plain"], ["set-cookie", "theme=dark; Path=/"], ["x-bad", "a\r\nb"]], ["he", "llo"]); }, jar, words);
     expect(sent[0]).toMatchObject({ method: "POST", path: "/api", headers: [["content-type", "text/plain"], ["cookie", "sid=abc"]] });
     expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
-    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
+    // A page the clipboard guard cannot go into (no destination said, so taken for one) runs no script.
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
     expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
@@ -122,14 +123,15 @@ describe("one request from the app, over the contact's link", () => {
     await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
       async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
     expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
-    // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's.
+    // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's
+    // and the clipboard guard's.
     const off = recorder();
     await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
       async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
-    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
+    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]] });
   });
 
-  it("puts the WebRTC guard first in each page of an app opened while Hide my IP from contacts is on, and nowhere else", async () => {
+  it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
     // covers: settings.network.relay-only
     const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
     const served = async (destination: string | undefined, relayOnly: boolean, type = "text/html") => {
@@ -141,22 +143,22 @@ describe("one request from the app, over the contact's link", () => {
       return { headers: head.headers, text };
     };
     const guarded = await served("iframe", true);
-    expect(guarded.text).toBe(`<!doctype html><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
     // The contact's policy lets it run; its length is not the page's any more.
     expect(guarded.headers).toEqual([
       ["content-type", "text/html"],
-      ["content-security-policy", `script-src 'nonce-a' ${VIEWER_GUARD_HASH}`],
+      ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}`],
       ["content-security-policy", VIEWER_GUARD_CSP],
       ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY],
     ]);
     // A page the guard cannot go into runs no script.
     expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"]);
-    // What is not a page (a fetch, a script) is the contact's as it was; and with it off, every answer is.
+    // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
     expect((await served("", true)).text).toBe(page);
     expect((await served("script", true, "text/javascript")).text).toBe(page);
     const off = await served("iframe", false);
-    expect(off.text).toBe(page);
-    expect(off.headers).toEqual([["content-type", "text/html"], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"], ["content-security-policy", VIEWER_SERVICE_CSP]]);
+    expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    expect(off.headers).toEqual([["content-type", "text/html"], ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}`], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
   });
 
   it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -414,7 +416,7 @@ describe("a contact's app shown over the app", () => {
       const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
       channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
       const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
-      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : [["content-security-policy", VIEWER_SERVICE_CSP]]);
+      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
       // The bridge, on the app's origin, runs the WebRTC guard too while it is on.
       expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly });
       document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();

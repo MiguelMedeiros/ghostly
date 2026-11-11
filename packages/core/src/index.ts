@@ -27,6 +27,7 @@ export * from "./signal";
 export * from "./frames";
 export * from "./http";
 export * from "./viewerGuard";
+export * from "./clipboardGuard";
 export * from "./link";
 export * from "./datalink";
 export * from "./ghostlink";

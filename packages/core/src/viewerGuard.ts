@@ -169,12 +169,18 @@ const NO_SCRIPTS_OR_FRAMES_CSP = "script-src 'none'; frame-src 'none'; object-sr
 /** The `Sec-Fetch-Dest` (a request's `destination`) of a page: the ones the guard goes into. */
 const DOCUMENT_DESTINATIONS = new Set(["document", "iframe", "frame", "object", "embed", "fencedframe"]);
 
+/** A script `guardViewerAnswer` puts first in each page, and its hash, as a CSP source. */
+export interface PageGuard { script: string; hash: string }
+
+/** The WebRTC guard, the one `guardViewerAnswer` puts in when it is given none. */
+export const WEBRTC_GUARD: PageGuard = { script: VIEWER_GUARD_SCRIPT, hash: VIEWER_GUARD_HASH };
+
 /**
- * A contact's `Content-Security-Policy` value (one policy or several, joined by commas), each given the guard's hash
+ * A contact's `Content-Security-Policy` value (one policy or several, joined by commas), each given the guards' hashes
  * where it would refuse an inline script: in the directive that governs `<script>` elements (`script-src-elem`, else
  * `script-src`, else `default-src`), unless it lets every inline script run already. Nothing else of it changes.
  */
-export function allowingViewerGuard(value: string): string {
+export function allowingViewerGuard(value: string, hashes: readonly string[] = [VIEWER_GUARD_HASH]): string {
   return value.split(",").map((policy) => {
     const directives = policy.split(";");
     const names = directives.map((directive) => directive.trim().split(/\s+/)[0].toLowerCase());
@@ -184,7 +190,7 @@ export function allowingViewerGuard(value: string): string {
     // A nonce, a hash or 'strict-dynamic' turns 'unsafe-inline' off.
     const everyInline = sources.includes("'unsafe-inline'") && !sources.some((source) => source.startsWith("'nonce-") || /^'sha(256|384|512)-/.test(source) || source === "'strict-dynamic'");
     if (everyInline) return policy;
-    directives[at] = `${directives[at].trimEnd()} ${VIEWER_GUARD_HASH}`;
+    directives[at] = `${directives[at].trimEnd()} ${hashes.join(" ")}`;
     return directives.join(";");
   }).join(",");
 }
@@ -247,15 +253,16 @@ export function viewerGuardOffset(head: Uint8Array, done: boolean): number | nul
 const LOOK_BYTES = 64 * 1024;
 
 /**
- * A contact's answer as a viewer serves it while Hide my IP from contacts is on, where the viewer cannot run the guard
- * in every frame itself (the web runner): the contact's policies take the guard's hash
- * (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
- * that is HTML gets the guard first in it; one the guard cannot be put in (another type, more than one type, a
+ * A contact's answer as a viewer serves it where it cannot run `guards` in every frame itself (the web runner; the
+ * WebRTC guard while Hide my IP from contacts is on, unless it is given others): the contact's policies take the guards'
+ * hashes (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
+ * that is HTML gets the guards first in it, in their order; one they cannot be put in (another type, more than one type, a
  * compressed, UTF-16 or ISO-2022-JP body, a type with a quote or a backslash in it, an escape byte before the guard's
  * place) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
  */
-export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
-  const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value) : value]);
+export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null, guards: readonly PageGuard[] = [WEBRTC_GUARD]): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
+  const hashes = guards.map((guard) => guard.hash);
+  const out: HeaderList = headers.map(([name, value]) => [name, name.toLowerCase() === "content-security-policy" ? allowingViewerGuard(value, hashes) : value]);
   out.push(["content-security-policy", VIEWER_GUARD_CSP]);
   if (destination !== null && !DOCUMENT_DESTINATIONS.has(destination.toLowerCase())) return { headers: out, body };
   const values = (name: string) => headers.filter(([n]) => n.toLowerCase() === name).map(([, value]) => value.toLowerCase().trim());
@@ -300,6 +307,6 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   }
   // Nothing to run in an empty answer (a HEAD, a 304): it stays empty.
   if (done && head.length === 0) return { headers: out, body: resumed(head) };
-  const guarded = concatBytes(head.subarray(0, offset), utf8Encode(`<script>${VIEWER_GUARD_SCRIPT}</script>`), head.subarray(offset));
+  const guarded = concatBytes(head.subarray(0, offset), utf8Encode(guards.map((guard) => `<script>${guard.script}</script>`).join("")), head.subarray(offset));
   return { headers: out.filter(([name]) => name.toLowerCase() !== "content-length"), body: resumed(guarded) };
 }
