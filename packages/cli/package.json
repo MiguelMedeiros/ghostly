@@ -52,7 +52,7 @@
     "@scure/btc-signer": "2.4.1",
     "@secondts/bark": "0.27.0",
     "@serenity-kit/opaque": "1.1.0",
-    "@synonymdev/pubky": "0.16.2",
+    "@synonymdev/pubky": "0.18.0",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.24",
     "b4a": "1.9.0",
     "bittorrent-dht": "11.0.12",
