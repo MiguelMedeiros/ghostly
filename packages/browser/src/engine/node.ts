@@ -6358,8 +6358,18 @@ export class GhostlyNode implements EngineImplementation {
   /** Per chat: when the contact's status ends, so its view is drawn again without it. */
   private readonly peerStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  /** WISP 401 § Presence and status: `active` at a page's word, `idle` 10 minutes after the last one (or at a page's). */
-  setPresence({ presence }: { presence: Presence }): void {
+  /**
+   * WISP 401 § Presence and status: `active` at a page's word, `idle` 10 minutes after the last one (or at a page's).
+   * `null`: none again, as before the first word (a headless daemon whose `daemonPresence` was turned off).
+   */
+  setPresence({ presence }: { presence: Presence | null }): void {
+    if (presence === null) {
+      clearTimeout(this.idleTimer);
+      if (this.ownPresence === undefined) return;
+      this.ownPresence = undefined;
+      this.sayStatus();
+      return;
+    }
     if (presence !== "active" && presence !== "idle") return;
     clearTimeout(this.idleTimer);
     if (presence === "active") this.idleTimer = setTimeout(() => this.setPresence({ presence: "idle" }), STATUS_IDLE_AFTER_MS);
@@ -7341,6 +7351,11 @@ export class GhostlyNode implements EngineImplementation {
       else this.settings.sharePresence = false;
       await db.putSettings(this.settings);
       this.sayStatus();
+    }
+    // A headless daemon's presence (the CLI's `daemonPresence`): absent means off, as kept; the daemon says it.
+    if (settings.daemonPresence !== undefined) {
+      if (settings.daemonPresence !== true) delete this.settings.daemonPresence;
+      await db.putSettings(this.settings);
     }
     // Automatic downloads and serving group files (WISP 503): absent means on, as kept.
     for (const key of ["autoDownloads", "serveFiles"] as const) {

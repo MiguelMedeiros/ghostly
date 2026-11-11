@@ -358,9 +358,10 @@ export interface EngineApi {
   /**
    * The person is using the app (`active`, on input: a key, a click, a touch), or a page knows they left (`idle`). The
    * engine says `idle` by itself 10 minutes after the last `active` (WISP 401 § Presence and status). Nothing is said
-   * before a page's first word, nor while Settings `sharePresence` is off.
+   * before a page's first word, nor while Settings `sharePresence` is off. `null` takes it back: frames say no
+   * presence again (a headless daemon whose `daemonPresence` was turned off).
    */
-  setPresence(params: { presence: Presence }): void;
+  setPresence(params: { presence: Presence | null }): void;
   /**
    * This profile's status (availability, one emoji, a text of 60 characters, `until` in Unix ms), checked, kept and said
    * to every paired 1:1 contact whose app offers `status/1`, now or on its next session. While its availability is
