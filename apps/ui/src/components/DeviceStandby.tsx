@@ -127,7 +127,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         {removingHere && <RemoveHereDialog onClose={() => setRemovingHere(false)} />}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
-        {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
+        {/* Out of its set, the set this device kept is an old one: its Active device may not be the one in use now. */}
+        {gate.state !== "unreadable" && !offersReenroll && !unfinished && <Links />}
         {others.length > 0 && (
           <nav aria-label={t("devices.standby.others")} className="space-y-2 border-t border-border pt-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.others")}</p>
