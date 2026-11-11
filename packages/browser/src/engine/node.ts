@@ -1145,11 +1145,13 @@ export class GhostlyNode implements EngineImplementation {
    */
   private openReviews: Set<string> | null = null;
   /**
-   * The pace of each submitted Cashu payment the contact has not taken: asked at 10 s while new, then twice as late up
-   * to 10 min (as a payee retries a redeem). At the poll's own 10 s, a contact online whose redeems fail cost the mint
-   * 12 checkstates a minute for each such payment, for as long as the app ran. The contact taking one says so at once.
+   * The pace of each submitted payment whose outcome is still open: asked at 10 s while new, then twice as late up to
+   * 10 min (as a payee retries a redeem). At the poll's own 10 s, a contact online whose redeems fail cost the mint 12
+   * checkstates a minute for each such Cashu payment, and an on-chain payment waiting in the mempool its source 360
+   * reads an hour (each with the Ark, Bark, Spark and USDT wallets read again), for as long as it stayed so. The
+   * contact taking one says so at once.
    */
-  private readonly cashuPayAsk = new AskBackoff(10_000, 600_000);
+  private readonly payAsk = new AskBackoff(10_000, 600_000);
   private noteOpenReviews(reviews: readonly PaymentReview[]): void {
     const open = this.openReviews ??= new Set();
     for (const review of reviews) if (review.state === "submitted" || review.state === "unknown") open.add(review.id);
@@ -2308,9 +2310,9 @@ export class GhostlyNode implements EngineImplementation {
       // The whole store once, when nothing has read it yet; after that, the open reviews alone.
       if(!this.openReviews)this.noteOpenReviews((await intentRepository.list()).map((saved)=>saved.review));
       const open=this.openReviews!;
-      this.cashuPayAsk.keepOnly(open);
+      this.payAsk.keepOnly(open);
       for(const id of [...open]){
-        if(!this.cashuPayAsk.due(id,Date.now()))continue;
+        if(!this.payAsk.due(id,Date.now()))continue;
         const saved=await intentRepository.get(id),review=saved?.review;
         if(!review || !["submitted","unknown"].includes(review.state)){open.delete(id);continue;}
         // Each through its own network's wallet, once that one is open.
@@ -2321,10 +2323,11 @@ export class GhostlyNode implements EngineImplementation {
         if(review.method==="cashu" && !prepared.abandoned && !prepared.spentElsewhere && !this.wallet.mintDue(prepared.mint,Date.now()))continue;
         if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         const after=await this.reconcilePayment({id:review.id}).catch(()=>review);
-        // A token out and not taken yet: new for its first minute. A swap with no token yet (its mint gave no answer):
-        // new while it may still land, so the mint's word that it never did is asked at once after that.
-        if(review.method==="cashu" && ["submitted","unknown"].includes(after.state)){
-          this.cashuPayAsk.missed(id,Date.now(),Date.now()<(prepared.token?(review.submittedAt ?? review.createdAt)+60_000:swapSettledAt(review,prepared)));
+        // Any payment, and a token out and not taken yet: new for its first minute. A swap with no token yet (its mint
+        // gave no answer): new while it may still land, so the mint's word that it never did is asked at once after that.
+        if(["submitted","unknown"].includes(after.state)){
+          const sent=review.submittedAt ?? review.createdAt;
+          this.payAsk.missed(id,Date.now(),Date.now()<(review.method==="cashu" && !prepared.token?swapSettledAt(review,prepared):sent+60_000));
         }
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
