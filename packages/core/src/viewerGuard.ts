@@ -245,6 +245,8 @@ function wait(look: GuardLook, from: number, seen: number): null {
 
 /** `viewerGuardOffset` going on from `look`, which it moves along when the head is too short to tell. */
 function guardOffsetFrom(head: Uint8Array, done: boolean, look: GuardLook): number | null {
+  // A part of a byte order mark: before it, the guard would leave the page with none (and windows-1252 for UTF-8).
+  if (look.from === 0 && !done && head.length < 3 && at(head, 0, "ï»¿".slice(0, head.length))) return null;
   let offset = look.from === 0 && at(head, 0, "ï»¿") ? 3 : look.from;
   // Its close was looked for up to `seen`: again from a little before, in case it was cut in two there.
   const after = (start: number) => (offset === look.from ? Math.max(start, look.seen - 3) : start);
