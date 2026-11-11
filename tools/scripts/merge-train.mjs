@@ -11,7 +11,9 @@
 //   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
 //   count; the run before it does. Nor does a
 //   green pull request run that is not its own: from another branch, from before its base was changed, or while another
-//   pull request from its branch into another base holds the same head (that base's ci.yml ran it).
+//   pull request from its branch into another base holds the same head (that base's ci.yml ran it). A run that ended
+//   cancelled (or skipped, or never started) says nothing either: the run before it on the same head decides, so a
+//   newer run cancelled seconds after leaving draft never hides a green one. A newer run still going is waited for.
 // - One batch per base at a time: up to 12 pull requests from the front of the line, once 3 can board, or the one that
 //   has waited longest has waited 15 minutes since it could (queued, and its CI green), or one has `queue:priority`
 //   (MIN_BATCH, MAX_WAIT). Until then it says it is holding (in its log, and in each held one's position comment with
@@ -197,6 +199,15 @@ export function ciState(runs) {
   if (gate.conclusion === "cancelled" || gate.conclusion === "skipped") return running ? "pending" : "none";
   return "failure";
 }
+
+/**
+ * Whether one of CI's runs on a commit says nothing about it, so the run before it on the same commit speaks: the run
+ * has ended (a run whose status is not given counts as ended) and its gate's state (`ciState`, or `draftState` for the
+ * fast tier) is "none": cancelled, skipped, or never started. Leaving draft can make two pull request runs a second
+ * apart on one head and cancel the newer one at once; that run never outranks the older one that ended. A run still
+ * going speaks ("pending"): it may yet end red, so an older green run waits for it to end.
+ */
+export const saysNothing = (jobs, run, state = ciState) => (!run?.status || run.status === "completed") && state(jobs) === "none";
 
 /**
  * ci.yml's jobs that its plan (tools/scripts/ci-changes.mjs) may leave out, by the start of their names, each with the
@@ -1511,7 +1522,9 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions
      * instead, with a warning once: any workflow of the repository can post one named "CI Success" there. `counts`
      * (given the jobs of a run, and the run: its event and branch) may pass over a run: then the one before it is read,
-     * up to CI_RUNS_READ runs. Check
+     * up to CI_RUNS_READ runs. A run that ended saying nothing about the commit (`saysNothing`: cancelled, skipped or
+     * never started) is passed over too, so a newer run on the same head counts only once it ran: a cancelled one never
+     * hides the green (or red) run before it, and one still going is pending. Check
      * runs are not asked: they mix every run on the commit.
      */
     ciJobs: async (sha, counts = () => true) => {
@@ -1523,6 +1536,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ)) {
         const jobs = await runJobs(run.id);
+        if (saysNothing(jobs, run)) continue;
         if (await counts(jobs, run)) return jobs;
       }
       return [];
@@ -1543,14 +1557,15 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     },
     /**
      * The draft gate of the newest of CI's runs on a commit that has one (leaving draft starts a newer, full run on the
-     * same commit), from its three newest runs; check runs when the token may not read Actions, as `ciJobs`.
+     * same commit), from its three newest runs; check runs when the token may not read Actions, as `ciJobs`. A run whose
+     * draft gate ended cancelled or skipped is passed over as `ciJobs` passes one (`saysNothing`).
      */
     draftJobs: async (sha) => {
       const r = await ciRunsOn(sha);
       if (r.status === 403) return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions" && c.name === DRAFT_GATE);
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, 3)) {
         const gates = (await runJobs(run.id)).filter((j) => j.name === DRAFT_GATE);
-        if (gates.length) return gates;
+        if (gates.length && !saysNothing(gates, run, draftState)) return gates;
       }
       return [];
     },
