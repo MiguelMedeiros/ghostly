@@ -199,8 +199,11 @@ export type MiniAppEvent = { event: "chat.message"; data: MiniAppJson } | { even
 
 /** Limits the broker enforces (and an app can plan for). */
 export const MINI_APP_LIMITS = {
-  /** One request, serialized. */
-  requestBytes: 64 * 1024,
+  /**
+   * One request, serialized: a stored value's 64 KiB with room for its key (256 bytes, at most six times that as JSON)
+   * and `{"id", "type", "args"}` around them.
+   */
+  requestBytes: 66 * 1024,
   /** Requests per second, per app. */
   requestsPerSecond: 50,
   /**

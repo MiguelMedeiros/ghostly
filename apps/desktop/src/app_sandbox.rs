@@ -44,8 +44,8 @@ script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-sr
 media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; \
 worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
-const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The largest request an app may send the broker (WISP 1200: 66 KiB, a 64 KiB stored value with its key), as JSON.
+const MAX_REQUEST_BYTES: usize = 66 * 1024;
 /// The largest IPC message an app window may post: its largest request with room for Tauri's envelope. Tauri
 /// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
 /// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
@@ -181,8 +181,8 @@ const RUNNER: &str = r#"<!doctype html>
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
     const request = { id, type, args };
-    // Over the broker's 64 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
-    if (utf8(stringify(request)).length > 65536) return Promise.reject(refusal("too-large"));
+    // Over the broker's 66 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
+    if (utf8(stringify(request)).length > 67584) return Promise.reject(refusal("too-large"));
     return broker(request).then((answer) => {
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
@@ -2233,7 +2233,7 @@ mod tests {
             ),
             Ok(Admitted::Relay(MAX_ID, _))
         ));
-        // The whole request, as JSON: 64 KiB passes, a byte more does not.
+        // The whole request, as JSON: 66 KiB passes, a byte more does not.
         let request = |length: usize, id: u64| json!({"id": id, "type": "storage.set", "args": ["k", "x".repeat(length)]});
         let fixed = serde_json::to_vec(&request(0, 2)).unwrap().len();
         assert!(matches!(
@@ -2244,6 +2244,12 @@ mod tests {
             admitted(&state, "app-1", request(MAX_REQUEST_BYTES - fixed + 1, 3)).unwrap_err(),
             "too-large"
         );
+        // A stored value's 64 KiB (WISP 1200) under the longest key, 256 control characters at six bytes each in JSON.
+        let longest = json!({"id": 4, "type": "storage.set", "args": ["\u{1}".repeat(256), "x".repeat(64 * 1024 - 2)]});
+        assert!(matches!(
+            admitted(&state, "app-1", longest),
+            Ok(Admitted::Relay(4, _))
+        ));
     }
 
     /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
