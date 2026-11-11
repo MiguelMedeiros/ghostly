@@ -4,6 +4,49 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.11.1
+
+### Security
+
+**Apps**
+
+- On the web, a contact's shared app can write to the clipboard only while you are tapping it, and can never read it.
+- An app uninstalled while it was being updated, or while its files were being fetched again, no longer comes back.
+
+**Chat and transports**
+
+- A chat link whose address is written with escaped characters in its host now shows the host it opens, and a link label using three more look-alike dots now falls back to showing the real address.
+- A link record dated far in the future no longer keeps a contact's connection offers from being accepted.
+
+**CLI**
+
+- A chat made by accepting a contact request now keeps the requester's name as the contact's own name, so the CLI no longer treats it as a name you gave.
+
+**Devices**
+
+- Taking the first profile back to another device, and removing a profile from this device, now also deletes the chat data its earlier copy left in this device's local storage, so its old chats no longer come back. The device's own switches (keep awake, stay connected) stay.
+
+**Files**
+
+- Audio files and voice notes are now sent and forwarded without their tags (location included), as pictures and videos already were. A file whose tags cannot be removed is refused.
+
+**Groups**
+
+- Private groups: a group name or picture update waiting for a membership change is no longer replaced by an invalid or out-of-date update from another member.
+
+**Identities**
+
+- A contact's identity proof checked while the device clock was ahead no longer shows a check date in the future.
+
+**Relays (self-hosted)**
+
+- The push relay keeps its per-subscription and per-address limits when its table of counts is full.
+
+**Web app**
+
+- Deleting a chat or profile, or clearing its data, now also erases the data a contact's app kept in browser storage buckets.
+- For a profile with a lock screen, the "is online" notice no longer names the contact.
+
 ## 1.11.0
 
 Ghostly 1.11 shows when your contacts are online and the status they set, adds up your wallets into one balance per currency, can hide your IP address from contacts, reads identities in the app's language, connects chats over Iroh first, keeps Android chats connected in the background, and lets you pick the chat's text size.
