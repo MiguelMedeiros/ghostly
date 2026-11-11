@@ -1,5 +1,6 @@
 import { MEMBER_KEY } from "@ghostly/core";
 import { isWorthlessMint } from "../shared/mints";
+import { groupPayLineId } from "../shared/groupPayNotes";
 import { paymentWireId } from "../shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, GroupPayRail, GroupView, PaymentView, StoredMessage } from "../shared/types";
 
@@ -20,7 +21,7 @@ const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const RESEND = 32;
 /** Notes from others still waiting for their initiator, kept per group in memory only; the oldest go first. */
 export const WAITING = 256;
-export const NOTE_ID = (id: string) => `gpay:${id}`;
+export const NOTE_ID = groupPayLineId;
 
 /** A `group-pay` frame, strictly: anything else is dropped. */
 export function parseGroupPay(raw: unknown, groupId: string): GroupPayFrame | null {
