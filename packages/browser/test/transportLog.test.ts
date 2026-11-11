@@ -88,6 +88,36 @@ describe("transport log: the timeline says what matters", () => {
     expect(log.history.at(-1)).toMatchObject({ kind: "live", transport: "hyperdht/1", downMs: 2 * MIN });
   });
 
+  it("adds no row for Automatic's way back (WISP 100, revision 2026-11-08): live over Iroh's relay a moment, then on WebRTC again", () => {
+    // Each start, and each short drop, came back over Iroh and moved to WebRTC a second later: two rows, a line in the chat.
+    const iroh = live("iroh/1", { relayed: true });
+    let log = new TransportLog();
+    log.observe(live("webrtc/1"), 0);
+    for (let i = 1; i <= 5; i++) {
+      log = new TransportLog(log.entries, log.history);
+      log.observe(down(), i * 7 * MIN);
+      log.observe(iroh, i * 7 * MIN + 600);
+      log.observe(live("webrtc/1"), i * 7 * MIN + 1_500);
+    }
+    log.observe(down({ text: "dht" }), 50 * MIN);
+    log.observe(iroh, 51 * MIN);
+    log.observe(live("webrtc/1"), 51 * MIN + 900);
+    expect(kinds(log)).toEqual(["connected"]);
+    // The history has each stretch over Iroh, and each move.
+    expect(log.history.filter(e => e.kind === "switched" && e.from === "iroh/1" && e.transport === "webrtc/1")).toHaveLength(6);
+    // A long outage is one row on the transport the chat is on once back, not a row for the move after it.
+    log.observe(down({ text: "dht" }), 60 * MIN);
+    log.observe(iroh, 60 * MIN + QUIET_DROP_MS + 1);
+    log.observe(live("webrtc/1"), 60 * MIN + QUIET_DROP_MS + 900);
+    expect(log.entries.slice(1)).toEqual([expect.objectContaining({ kind: "back", transport: "webrtc/1", downMs: QUIET_DROP_MS + 1 })]);
+    expect(log.entries.at(-1)!.from).toBeUndefined();
+    // On Iroh for a while (WebRTC did not connect), that stretch is news, and so is the move that ends it.
+    log.observe(down(), 90 * MIN);
+    log.observe(iroh, 90 * MIN + 1_000);
+    log.observe(live("webrtc/1"), 100 * MIN);
+    expect(log.entries.slice(2).map(e => [e.kind, e.from, e.transport])).toEqual([["switched", "webrtc/1", "iroh/1"], ["switched", "iroh/1", "webrtc/1"]]);
+  });
+
   it("says a short drop that came back on another transport, in one row", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);

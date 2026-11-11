@@ -97,6 +97,18 @@ describe("transport cues", () => {
     step(log, down(), 10);
     expect(step(log, live("iroh/1"), 20)).toBeUndefined();
   });
+
+  it("never for Automatic's way back over Iroh and the move to WebRTC after it; once for an outage it ends", () => {
+    const iroh = live("iroh/1", { relayed: true });
+    const first = new TransportLog();
+    step(first, live("webrtc/1"), 0);
+    const restarted = new TransportLog(first.entries, first.history);
+    expect(step(restarted, iroh, 60_000)).toBeUndefined();
+    expect(step(restarted, live("webrtc/1"), 61_000)).toBeUndefined();
+    step(restarted, down(), 120_000);
+    expect(step(restarted, iroh, 120_000 + QUIET_DROP_MS + 1)).toBe("back");
+    expect(step(restarted, live("webrtc/1"), 120_000 + QUIET_DROP_MS + 900)).toBeUndefined();
+  });
 });
 
 const progress = (over: Partial<PairingProgress>): PairingProgress => ({ role: "inviter", stage: "waiting", since: 0, startedAt: 0, attempt: 1, ...over });
