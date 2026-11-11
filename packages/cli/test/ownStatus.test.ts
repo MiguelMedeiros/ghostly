@@ -90,6 +90,10 @@ describe("the socket's status.set|clear|get", () => {
     await expect(callApi(ctx, "status.set", { text: "hi", emoji: "a" })).rejects.toMatchObject({ code: "bad_request", message: 'emoji takes one emoji, not "a"' });
     await expect(callApi(ctx, "status.set", { text: "hi", until: Date.now() - 1 })).rejects.toMatchObject({ code: "bad_request", message: "until is a time to come: a status that ended is none" });
     await expect(callApi(ctx, "status.set", { text: "hi", until: "tomorrow" })).rejects.toMatchObject({ code: "bad_request" });
+    // Within a year, as the command line's --until: past the last time a Date holds, the picker read "Invalid Date".
+    for (const until of [Date.now() + 400 * 86_400_000, 8.64e15 + 1, Number.MAX_SAFE_INTEGER]) {
+      await expect(callApi(ctx, "status.set", { text: "hi", until })).rejects.toMatchObject({ code: "bad_request", message: "until is a time within a year from now" });
+    }
     await expect(callApi(ctx, "status.set", {})).rejects.toMatchObject({ code: "bad_request", message: "Nothing to set: give a text, emoji or availability" });
     const seed = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
     await expect(callApi(ctx, "status.set", { text: seed })).rejects.toMatchObject({ code: "confirm" });
