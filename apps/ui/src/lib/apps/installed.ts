@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, appCardUrl, statusCardText, type AppCard } from "@ghostly/core";
-import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open";
+import { appsRunning, openApp, readingApps, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
  * The apps installed in this profile, as the engine lists them (`appList`, no request), shared by every screen that
@@ -51,11 +51,12 @@ export function refreshInstalledApps(): Promise<void> {
   // An engine from before built-in apps (the extension's, another tab's) has no `appBuiltIns`: none offered.
   const builtIns = engine.call("appBuiltIns").catch((): BuiltInAppOffer[] => []);
   const mine = ++asked;
+  const at = readingApps();
   // One that a later read overtook waits for that one, so what is awaited is the list as it is now.
   const read: Promise<void> = engine.call("appList").then(async (list) => {
     const offered = await builtIns;
     if (mine !== asked) return loading ?? undefined;
-    offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list);
+    offers = kept(offers, offered); apps = kept(apps, list); failed = null; tell(); stopTakenDown(list, at);
   }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
