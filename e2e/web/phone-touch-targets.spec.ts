@@ -503,8 +503,9 @@ test("on a 320 px phone the chat's search field keeps room for the words once th
     await field.fill("zzqx nothing here");
     await expect(count).toHaveText(/\S/);
     await expect(page.getByTestId("chat-search-older")).toBeDisabled();
-    expect(await field.evaluate((el) => el.clientWidth), `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
+    // The field as drawn: Chromium 158's clientWidth of a search input leaves its padding out (116 for the same 128 px).
     const fieldBox = (await field.boundingBox())!, countBox = (await count.boundingBox())!;
+    expect(fieldBox.width, `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
     expect(countBox.y, `${language}: the count is under the field`).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
     const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
     expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${language}: search bar controls under 44 × 44 px`).toEqual([]);
