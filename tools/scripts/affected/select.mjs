@@ -108,6 +108,7 @@ export const UNIT_PROJECTS = [
       "packages/cli/package.json": ["npmPublish"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
+      ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
       "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
