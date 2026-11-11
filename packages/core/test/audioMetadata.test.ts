@@ -25,7 +25,7 @@ async function retagged(name: string, format: Mp3OutputFormat | FlacOutputFormat
   const input = new Input({ source: new BlobSource(new Blob([file])), formats: ALL_FORMATS });
   const target = new BufferTarget();
   const output = new Output({ format, target });
-  const conversion = await Conversion.init({ input, output, tags: { title: `Recording at ${PLACE}`, comment: PLACE, raw: { LOCATION: PLACE } } });
+  const conversion = await Conversion.init({ input, output, copy: { mode: "forced", shiftTolerance: 1 }, tags: { title: `Recording at ${PLACE}`, comment: PLACE, raw: { LOCATION: PLACE } } });
   await conversion.execute();
   return Buffer.from(target.buffer!);
 }
