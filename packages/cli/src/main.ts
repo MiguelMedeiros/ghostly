@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, DaemonClient, endedUnanswered, isNotTheDaemon } from "./client";
+import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
@@ -21,7 +21,7 @@ import { completeWithPipedEvidence, identityFields, identitySecretFields, secret
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownNameOption, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
-  startingDaemon,
+  claimForDaemon, daemonClaim, startingDaemon,
   type ProfilePaths,
 } from "./profiles";
 
@@ -293,7 +293,9 @@ function waitLeft(method: string, params: Record<string, unknown>, spentMs: numb
  * (`endedUnanswered`): the daemon stopped or restarted under it. The read is asked once more there, through the daemon
  * that answers now or on the profile itself, and so is every call after it. It failed as a timeout told to check
  * `ghostly chat history` for a message that was never sent (exit 4), as "The daemon went away" (exit 1), or refused as
- * a daemon of an older release (exit 1), while a command started a moment later answered.
+ * a daemon of an older release (exit 1), while a command started a moment later answered. So is any call whose
+ * connection ended before it was written (`endedUnsent`): nothing reached the daemon, and a bot's `typing` or `send`
+ * that met a `daemon restart` failed as "The daemon went away" while the new daemon came up.
  */
 function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Session {
   // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
@@ -318,14 +320,14 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
     const from = performance.now();
     try { return await first(m, p); }
     catch (error) {
-      const params = (p ?? {}) as Record<string, unknown>;
-      if (!again || aborted || !endedUnanswered(error) || !(readOnly(m, params) || READ_WAITS.has(m))) throw error;
+      const params = (p ?? {}) as Record<string, unknown>, read = readOnly(m, params) || READ_WAITS.has(m);
+      if (!again || aborted || !endedUnanswered(error) || !(read || endedUnsent(error))) throw error;
       next ??= again();
       try { return await (await next).call(m, READ_WAITS.has(m) ? waitLeft(m, params, performance.now() - from) : p); }
       catch (failure) {
         // The daemon asked once more went away as well: a read changed nothing, so it says so, and not to check a chat.
         // A listener refused again is one that does not prove itself, and is named so.
-        if (endedUnanswered(failure) && !isNotTheDaemon(failure)) throw new CliError("unavailable", `The daemon went away before it answered ${m}, twice; a read changes nothing: run it again`, { method: m });
+        if (read && endedUnanswered(failure) && !isNotTheDaemon(failure)) throw new CliError("unavailable", `The daemon went away before it answered ${m}, twice; a read changes nothing: run it again`, { method: m });
         throw failure;
       }
     }
@@ -359,7 +361,9 @@ const TURNS_WAIT_MS = 60_000;
  * socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
  * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
  * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
- * STARTING_WAIT_MS, and named as the holder. A `listen` with no daemon opens it the same way, as the daemon (`mode`).
+ * STARTING_WAIT_MS, and named as the holder. So is a profile a `daemon restart` or `daemon --detach` keeps for the daemon
+ * it starts (`daemonClaim`): the commands that took the profile in turn in the gap kept that daemon from ever starting.
+ * A `listen` with no daemon opens it the same way, as the daemon (`mode`).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
@@ -371,14 +375,15 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
       // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
-      const starting = startingDaemon(g.paths);
+      const starting = startingDaemon(g.paths), claimed = starting === null ? daemonClaim(g.paths) : null;
       const client = await connectDaemon(g.paths);
       if (client) return client;
       const pid = error.details?.pid;
       if (pid !== holder) { holder = pid; since = performance.now(); }
       const now = performance.now();
-      const left = Math.min(since + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS), from + TURNS_WAIT_MS) - now;
+      const left = Math.min(since + (starting === null && claimed === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS), from + TURNS_WAIT_MS) - now;
       if (left <= 0) {
+        if (claimed !== null) throw new CliError("busy", `Profile ${g.profile} is kept for the daemon that process ${claimed} (ghostly daemon) starts, still not up after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: claimed });
         if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: starting });
         const held = now - since >= HOLDER_WAIT_MS ? `was not free after ${HOLDER_WAIT_MS / 1000} s` : `was taken by one process after another for ${TURNS_WAIT_MS / 1000} s`;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and ${held}: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
@@ -941,34 +946,44 @@ async function daemonCommand(argv: string[]): Promise<void> {
     return;
   }
   if (sub === "restart") {
-    // The running one stops (if one runs), and this command's own code starts in the background.
+    // The running one stops (if one runs), and this command's own code starts in the background. The profile is kept
+    // for it from before the stop until it holds the profile (`claimForDaemon`): one-shot commands taking it in turn in
+    // between left it never starting, and the profile with no daemon until someone started one by hand.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
-    // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
-    // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
-    // failed as `unavailable` and never reached the signals).
-    const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
-    const ended = client ? await stopDaemon(g, client, stopFor) : null;
-    const stopped = ended?.pid ?? null;
-    // A listen that ran the profile ended with it: the daemon started below has no reader until one listens again.
-    if (ended?.listen) process.stderr.write(listenEnded(ended.pid));
-    const before = (await probe)?.version ?? null;
-    let started: Awaited<ReturnType<typeof startDetached>>;
-    try { started = await startDetached(g, startFor); }
-    catch (error) {
-      // A start that failed after the stop leaves the profile with no daemon: the answer says so, and how to start one.
-      if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
-      throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
-    }
-    const older = restartWarning(before, VERSION);
-    if (older) process.stderr.write(older + "\n");
-    print({ restarted: true, stopped, ...(ended?.listen && { listen: true }), before, version: VERSION, ...started });
+    requireProfile(g);
+    ownProfile(g.paths.dir);
+    const unclaim = claimForDaemon(g.paths);
+    try { await restartDaemon(g, stopFor, startFor); } finally { unclaim(); }
     return;
   }
   if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
   print(await startDetached(g, startFor));
+}
+
+/** `daemon restart`, while the profile is kept for the daemon it starts. */
+async function restartDaemon(g: Globals, stopFor: number, startFor: number): Promise<void> {
+  const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
+  // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
+  // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
+  // failed as `unavailable` and never reached the signals).
+  const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
+  const ended = client ? await stopDaemon(g, client, stopFor) : null;
+  const stopped = ended?.pid ?? null;
+  // A listen that ran the profile ended with it: the daemon started below has no reader until one listens again.
+  if (ended?.listen) process.stderr.write(listenEnded(ended.pid));
+  const before = (await probe)?.version ?? null;
+  let started: Awaited<ReturnType<typeof startDetached>>;
+  try { started = await startDetached(g, startFor); }
+  catch (error) {
+    // A start that failed after the stop leaves the profile with no daemon: the answer says so, and how to start one.
+    if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
+    throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
+  }
+  const older = restartWarning(before, VERSION);
+  if (older) process.stderr.write(older + "\n");
+  print({ restarted: true, stopped, ...(ended?.listen && { listen: true }), before, version: VERSION, ...started });
 }
 
 /**
@@ -1075,16 +1090,20 @@ async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
   // Before the log is opened in the profile's folder; the child checks again before it takes the profile (`openHost`).
   ownProfile(g.paths.dir);
-  const until = performance.now() + seconds * 1000;
-  for (;;) {
-    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
-    if (lockOwner(g.paths) === null) {
-      const started = await spawnDaemon(g, until);
-      if (started) return started;
+  // Kept for the child until it holds the profile (`claimForDaemon`; `daemon restart` claimed it before its stop).
+  const unclaim = claimForDaemon(g.paths);
+  try {
+    const until = performance.now() + seconds * 1000;
+    for (;;) {
+      if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+      if (lockOwner(g.paths) === null) {
+        const started = await spawnDaemon(g, until);
+        if (started) return started;
+      }
+      if (performance.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
     }
-    if (performance.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - performance.now()))));
-  }
+  } finally { unclaim(); }
 }
 
 /** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
