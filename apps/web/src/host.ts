@@ -12,9 +12,10 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { hostErrorText, serviceFraming, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { SERVICE_LOCKED, hostErrorText, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
-import { activeProfileId } from "../../ui/src/lib/profiles";
+import { activeProfileId, listProfiles } from "../../ui/src/lib/profiles";
+import { OPENED_KEY } from "../../ui/src/lib/openedServices";
 import { chatNamesForPeer } from "../../ui/src/lib/storage";
 import { translatorFor } from "../../ui/src/locales";
 
@@ -73,6 +74,32 @@ function servicesUnderTest(): boolean {
  * shares with this side, and the apps strip shows it. Sharing one stays with the extension and the desktop app.
  */
 const openServices = !!servicesHost && serviceWorkersHere() && servicesUnderTest();
+/**
+ * What the contacts' apps a deleted profile opened kept on their origins, where Delete profile could not reach them
+ * (offline, the services host down): cleared at each start and each return online (`forgetServicesOfGone`). Nothing
+ * of it loads while no app was ever noted.
+ */
+let forgettingGone = false;
+function forgetServicesOfDeleted(): void {
+  const host = servicesHost;
+  try {
+    if (!host || forgettingGone || !navigator.onLine || !localStorage.getItem(OPENED_KEY)) return;
+  } catch { return; }
+  forgettingGone = true;
+  void import("./svc/forget")
+    .then(({ forgetServicesOfGone }) => forgetServicesOfGone(host, listProfiles().map((p) => p.id)))
+    .catch(() => {})
+    .finally(() => { forgettingGone = false; });
+}
+forgetServicesOfDeleted();
+addEventListener("online", forgetServicesOfDeleted);
+/**
+ * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
+ * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
+ * frame), and that server would see this device's address. The extension (`RELAY_ONLY_REFUSED` in its background.ts)
+ * and `ghostly service open` refuse too; the Desktop app opens one.
+ */
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the web app while Hide my IP from contacts is on";
 let peer: EngineServer | null = null;
 // A contact's app closes when the profile locks, as Desktop's windows do: this page answers its requests.
 // A reload ends it with the page.
@@ -132,20 +159,25 @@ export const webHost = createInPageHost({
   oidc: { platform: "web", open: async () => popupWindow() },
   // The same popup and callback page, for an AT Protocol server (Bluesky or another PDS).
   atproto: { platform: "web", open: async () => atprotoPopupWindow() },
-  openService: async (peerPubKeyZ32, serviceId, tag) => {
+  openService: async (peerPubKeyZ32, serviceId, tag, relayOnly) => {
+    if (relayOnly) throw new Error(RELAY_ONLY_REFUSED);
     const node = peer?.node;
     if (!servicesHost || !node) throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
     const t = translatorFor(loadSettings().language);
     const title = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name ?? serviceId;
+    // The profile locking while it loads closes nothing yet: the app is never shown (`openServiceView` asks too).
+    const locked = serviceWindowsClosedSince();
     // Loaded when first used: nothing of it is in the app's start.
     const [{ openServiceView, serviceLabel }, { noteOpened }] = await Promise.all([import("./svc/opener"), import("./svc/forget")]);
+    if (locked()) throw new Error(SERVICE_LOCKED);
     // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
     noteOpened({ profile: activeProfileId(), tag, label: await serviceLabel(tag, peerPubKeyZ32, serviceId) });
+    if (locked()) throw new Error(SERVICE_LOCKED);
     // The contact is offline once their app no longer says what it shares (the chat's strip drops the app then): a
     // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
     const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };
     await openServiceView({
-      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
+      host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
       presence: { offline, watch: (changed) => engine.subscribe(changed) },
       words: {

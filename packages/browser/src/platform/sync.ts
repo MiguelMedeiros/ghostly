@@ -109,6 +109,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }),
     ...(message.forwarded && { forwarded: message.forwarded }),
+    ...(message.unconfirmed && { unconfirmed: true as const }),
     ...(message.card && { card: message.card }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
@@ -259,6 +260,10 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
         if (message.preview) row.preview = message.preview; else delete row.preview;
         // A status card belongs to its version (WISP 405 · Status Cards): the edit's, or none.
         if (message.card) row.card = message.card; else delete row.card;
+      }
+      // A contact request's text, confirmed by its requester's app since (WISP 8xx § Accept).
+      if (!!previous.unconfirmed !== !!message.unconfirmed) {
+        if (message.unconfirmed) change().unconfirmed = true; else delete change().unconfirmed;
       }
       // Only a joined line has one; the others are not mapped again. A row of the contact's is that line only as the
       // engine says (`isJoinLine`): one mirrored as it from its words alone is their message again.
@@ -487,7 +492,7 @@ let started = false;
 export function startSessionSync(): void {
   if (started) return;
   started = true;
-  void engine.connect().catch(() => {});
+  engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {
     void reconcile();

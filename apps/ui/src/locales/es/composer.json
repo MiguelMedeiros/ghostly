@@ -1,7 +1,9 @@
 {
   "attach": "Adjuntar",
   "camera": "Cámara",
+  "cameraBlocked": "Cámara bloqueada. Permite la cámara en los ajustes de Android para Ghostly.",
   "cameraFailed": "No se pudo iniciar la cámara.",
+  "cameraRefused": "Sin acceso a la cámara. Toca Cámara de nuevo y permítelo.",
   "caption": "Añadir un pie",
   "captionTooLong": "Este pie ocupa {{bytes}} bytes UTF-8. La DHT admite hasta {{max}}.",
   "category": {
@@ -15,10 +17,12 @@
     "recent": "Recientes",
     "symbols": "Símbolos"
   },
+  "chooseFiles": "Elegir archivos",
   "closeCamera": "Cerrar cámara",
   "dhtTooLong": "Demasiado largo para la DHT ({{bytes}} de {{max}} bytes). Acórtalo o conéctate en vivo; el borrador se guarda.",
   "document": "Documento",
   "dropFiles": "Suelta para enviar",
+  "dropReading": "Leyendo lo que soltaste…",
   "emoji": "Emoji",
   "emojiCategories": "Categorías de emoji",
   "emojiFound": "{{count}} emojis",
@@ -73,6 +77,7 @@
   "services": "Servicios compartidos",
   "servicesNeedApp": "Necesita la extensión o la app de escritorio de Ghostly",
   "servicesShared": "{{count}} compartido(s) en este chat",
+  "shareWaitsForEdit": "Lo que compartiste entra cuando termine esta edición.",
   "sharedTextFile": "Texto compartido",
   "skinTone": "Tono de piel",
   "takePhoto": "Hacer foto",

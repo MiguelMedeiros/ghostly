@@ -26,12 +26,14 @@
     "title": "確認待ち"
   },
   "notCopied": "コピーできませんでした",
+  "quotedName": "「{{name}}」",
   "save": "保存",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "成功",
   "unnamedContact": "連絡先 · {{key}}",

@@ -97,6 +97,11 @@ export interface ProviderDescriptor<P> {
   experimental?: boolean;
   /** Checks the form before anything is contacted; throws a message fit for the person. */
   validate?(settings: ProviderSettings, mode: WalletMode): void;
+  /**
+   * The wallet these (validated) settings reach, whatever their spelling: two sources with the same answer are one
+   * wallet, and the same balance. Absent: the same settings, byte for byte.
+   */
+  wallet?(settings: ProviderSettings): string;
   /** Connects. The engine then asks `info()` and refuses a network of the other mode. */
   create(settings: ProviderSettings, host: ProviderHost): Promise<P>;
 }
@@ -138,11 +143,12 @@ export function providerDescriptorProblems(d: ProviderDescriptor<unknown>): stri
   }
   if (typeof d.create !== "function") problems.push("create is not a function");
   if (d.validate !== undefined && typeof d.validate !== "function") problems.push("validate is not a function");
+  if (d.wallet !== undefined && typeof d.wallet !== "function") problems.push("wallet is not a function");
   return problems;
 }
 
 /** The serializable part of a descriptor, for the UI (a function cannot cross the extension's port). */
-export type ProviderDescriptorView = Omit<ProviderDescriptor<unknown>, "create" | "validate">;
+export type ProviderDescriptorView = Omit<ProviderDescriptor<unknown>, "create" | "validate" | "wallet">;
 /** Only these fields reach the UI, whatever else a provider module keeps on its descriptor. */
 export const describeProvider = ({ id, label, kind, description, networks, platforms, fields, custodial, experimental }: ProviderDescriptor<unknown>): ProviderDescriptorView =>
   ({ id, label, kind, description, networks, platforms, fields, custodial, experimental });

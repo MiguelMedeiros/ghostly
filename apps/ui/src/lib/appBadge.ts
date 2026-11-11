@@ -1,6 +1,6 @@
-import { useEffect, useSyncExternalStore } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
-import { getUnreadCount, listShownSessions } from "./storage";
+import { useEffect } from "react";
+import { useEngineValue } from "./engineState";
+import { getUnreadCount, listShownSessions, ownsKey } from "./storage";
 import { groupReadAt, groupUnreadAt } from "./groups";
 import { MUTE_EVENT, groupChat, mutedFor } from "./chatMute";
 import type { ChatSession } from "./types";
@@ -112,30 +112,32 @@ export function resetAppBadge(): void {
   shown = null;
 }
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
-
 /** Chats are re-read this often too: a message stored by the peer says nothing to this page. As the chat list does. */
 const REFRESH_MS = 3000;
 
 /** Keeps the icon's number in step with the chats: on every change the app hears of, and every few seconds. */
 export function useAppBadge(): void {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  const groups = state?.groups;
+  // What the badge reads of each group, compared by content: the engine sends its groups as a new list in every state,
+  // which drew the app's shell (and every chat it holds) and counted the badge again on each.
+  const groups = useEngineValue((state) => state?.groups?.map(({ id, lastMessageAt, lastPeerMessageAt, lastMentionAt, invitation }): BadgeGroup =>
+    ({ id, lastMessageAt, lastPeerMessageAt, lastMentionAt, invitation: invitation ? true : undefined })));
   useEffect(() => {
     if (!canBadge()) return;
     // Through the page's one cache: a chat whose stored text changed is parsed once for every reader, and the badge never changes one.
     const update = () => showAppBadge(badgeCount(listShownSessions(), groups ?? []));
+    // Only this profile's keys: another profile's tab writes its own a few times for each message it gets, and each
+    // read every chat here again.
+    const stored = (event: StorageEvent) => { if (event.key === null || ownsKey(event.key)) update(); };
     update();
     const timer = setInterval(update, REFRESH_MS);
     window.addEventListener("session-updated", update);
     window.addEventListener(MUTE_EVENT, update);
-    window.addEventListener("storage", update);
+    window.addEventListener("storage", stored);
     return () => {
       clearInterval(timer);
       window.removeEventListener("session-updated", update);
       window.removeEventListener(MUTE_EVENT, update);
-      window.removeEventListener("storage", update);
+      window.removeEventListener("storage", stored);
     };
   }, [groups]);
 }

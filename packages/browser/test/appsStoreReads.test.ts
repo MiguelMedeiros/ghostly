@@ -96,6 +96,50 @@ describe("the stores' records read and written", () => {
     expect((await rows(STORES.appStores) as { problem?: string }[])[0]!.problem).toBeUndefined();
   });
 
+  it("a host that answers with an error keeps its status with the problem, a new one written and cleared with it", async () => {
+    await installed();
+    const store = apps(net);
+    const files = new Map(net.files);
+    const answer = (status: number) => net.fetch.mockImplementation(async () => new Response("down", { status }));
+    answer(503);
+    expect(await store.refreshStores(), "the host's own trouble: try later").toMatchObject([{ problem: "status", problemStatus: 503 }]);
+    answer(404);
+    expect(await store.refreshStores(), "nothing at the link any more").toMatchObject([{ problem: "status", problemStatus: 404 }]);
+    expect(await rows(STORES.appStores)).toMatchObject([{ problem: "status", problemStatus: 404 }]);
+    net.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const body = files.get(String(input));
+      return body ? new Response(body.slice(), { status: 200 }) : new Response("not found", { status: 404 });
+    });
+    const [back] = await store.refreshStores();
+    expect(back!.problem).toBeUndefined();
+    expect(back!.problemStatus).toBeUndefined();
+    expect((await rows(STORES.appStores) as { problemStatus?: number }[])[0]!.problemStatus).toBeUndefined();
+  });
+
+  it("a store that signed two indexes under one number is written once, and keeps when that was first seen", async () => {
+    await installed();
+    let now = NOW_MS + 3600_000;
+    const store = apps(net, { now: () => now });
+    await store.listStores();
+    const calls = counted();
+    // Its own URL now serves another index under the same sequence 1.
+    await net.putStore(await storeFiles({ apps: [] }));
+    const first = now;
+    expect(await store.refreshStores()).toMatchObject([{ sequence: 1, problem: "equivocation", equivocation: { sequence: 1, at: first } }]);
+    for (let i = 0; i < 3; i++) {
+      now += 60_000;
+      expect(await store.refreshStores()).toMatchObject([{ problem: "equivocation", equivocation: { at: first } }]);
+    }
+    expect(calls.put, "the same other index is not written again").toBe(1);
+    expect(await rows(STORES.appStores)).toMatchObject([{ index: { sequence: 1 }, equivocation: { sequence: 1, at: first } }]);
+
+    // Yet another index under sequence 1: written once more, seen now.
+    await net.putStore(await storeFiles({ apps: [], name: "Another" }));
+    now += 60_000;
+    expect(await store.refreshStores()).toMatchObject([{ problem: "equivocation", equivocation: { at: now } }]);
+    expect(calls.put).toBe(2);
+  });
+
   it("a write that fails leaves what was held, and the next one is written", async () => {
     await installed();
     const store = apps(net);

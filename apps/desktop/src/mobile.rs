@@ -137,6 +137,7 @@ pub mod viewer {
         _tag: String,
         _title: String,
         _unreachable: Option<String>,
+        _relay_only: Option<bool>,
     ) -> Result<(), String> {
         Err(NOT_HERE.into())
     }

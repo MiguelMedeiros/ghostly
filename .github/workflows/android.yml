@@ -24,6 +24,11 @@ on:
         required: false
         default: ""
         type: string
+      release_tag:
+        description: "The tag release.yml publishes (VITE_RELEASE_TAG: Home's version link opens its page); empty otherwise"
+        required: false
+        default: ""
+        type: string
     outputs:
       signed:
         description: "true when the APK is a release build signed with the upload key, false for a debug APK"
@@ -72,7 +77,7 @@ jobs:
 
       # The Android Gradle Plugin of Tauri's generated project runs on JDK 17.
       - name: Setup JDK 17
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"
@@ -104,6 +109,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           THROWAWAY_KEY: ${{ github.event_name == 'pull_request' }}
+          VITE_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           version="$(node -p "require('./apps/desktop/tauri.conf.json').version")"
           if [ "$THROWAWAY_KEY" = "true" ]; then

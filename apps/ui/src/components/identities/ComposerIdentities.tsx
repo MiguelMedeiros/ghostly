@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { identityRefusal } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { useCopyKey } from "../../hooks/useCopyKey";
-import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineState, useEngineValue, useNewProof } from "../../lib/identities";
+import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
@@ -90,6 +91,19 @@ export function ComposerIdentityPicker({ peerKey, contact, initial, onClose, onS
     )} />;
 }
 
+/** What the picker reads of the engine's state: the profile's proofs and Ghostly card, and this chat's link. */
+function pickerView(state: NonNullable<typeof engine.state>, peerKey: string) {
+  const link = state.links.find(l => l.peerPubKeyZ32 === peerKey);
+  return {
+    identityProofs: state.identityProofs ?? [],
+    me: { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false },
+    link: link && {
+      id: link.id, myPubKeyZ32: link.myPubKeyZ32, identities: link.identities,
+      connected: link.dataLink === "open" && link.pairing?.status === "ready",
+    },
+  };
+}
+
 /**
  * The identity picker itself: in the composer's sheet (ComposerIdentityPicker). `frame` wraps it, wearing the chosen
  * card's colour; `head` shows the sheet's title over the cards. With
@@ -105,9 +119,11 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   onShared?: () => void;
   frame: (place: { side: "cards" | "back"; tone: string }, children: ReactNode) => ReactNode; head?: boolean; focusOnOpen?: boolean;
 }) {
-  const state = useEngineState();
+  // Only what the picker shows of the engine's state: it stays open over the chat while a file moves (up to 20 states
+  // a second), and drew itself again on each.
+  const state = useEngineValue(s => s && pickerView(s, peerKey));
   const { t } = useI18n();
-  const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
+  const link = state?.link;
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
   const [chosen, setChosen] = useState<string | undefined>(initial);
@@ -144,7 +160,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   }, [done, turnBack]);
   useEffect(() => { if (side === "cards") setDone(null); }, [side]);
   const now = Math.floor(Date.now() / 1000);
-  const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
+  const connected = !!link?.connected;
   const unsupported = connected && !ids?.support;
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
@@ -159,7 +175,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
 
   const ghostly: Ghostly | undefined = state && link ? {
     id: GHOSTLY, ghostly: true, on: true,
-    card: ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false }, { chat: { key: link.myPubKeyZ32, contact } }),
+    card: ghostlyCard(t, state.me, { chat: { key: link.myPubKeyZ32, contact } }),
   } : undefined;
   const proofs = mine.map((proof): Proof => {
     const shared = ids?.shared.find(s => s.id === proof.id);
@@ -311,8 +327,10 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
   const retry = on && status?.status === "rejected";
   /** The main action stops the share. */
   const stops = on && !retry;
+  // Why the contact's app refused it, only in words this app writes itself (identityRefusal).
+  const why = status?.status === "rejected" ? identityRefusal(status.error) : undefined;
   const state = status && status.status !== "withdrawn"
-    ? (status.status === "rejected" && status.error ? t("identities.picker.rejectedWhy", { status: sharedStatus(status.status, t), error: problemLine(status.error, t) }) : sharedStatus(status.status, t))
+    ? (why ? t("identities.picker.rejectedWhy", { status: sharedStatus(status.status, t), error: problemLine(why, t) }) : sharedStatus(status.status, t))
     : t("identities.shared.notShared");
   const days = daysLeft(p.expiresAt, now);
   const warn = p.expiresAt > now && expiringSoon(p, now) ? (days === 1 ? t("identities.card.expiresInOne") : t("identities.card.expiresIn", { count: days })) : "";

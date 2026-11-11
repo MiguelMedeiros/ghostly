@@ -79,11 +79,57 @@ describe("a chat's header on a phone", () => {
     expect(document.activeElement).toBe(control);
   });
 
+  it("gives the name its room before the status's emoji: it does not shrink beside it, and is cut only alone", async () => {
+    viewport(375, 667);
+    const { engine } = openChat();
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" }, peerPresence: "active", peerStatus: { emoji: "🍕", text: "At lunch" } } as never)] });
+    const emoji = await screen.findByTestId("chat-presence-status-emoji");
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toContainElement(screen.getByTestId("chat-name"));
+    // The heading keeps its whole width (`shrink-0`) up to the row's (`max-w-full`), where the name is cut at its end.
+    expect(heading).toHaveClass("shrink-0", "max-w-full", "min-w-0");
+    expect(screen.getByTestId("chat-name")).toHaveClass("min-w-0", "truncate");
+    // The emoji is in the line beside it, which gives way (wraps out of sight) when the name leaves it no room.
+    const line = screen.getByTestId("chat-presence");
+    expect(line).toContainElement(emoji);
+    expect(heading).not.toContainElement(emoji);
+    expect(line).toHaveClass("min-w-0", "max-md:flex-wrap", "max-md:overflow-hidden");
+  });
+
+  it("wider than a phone, the name shrinks with what is beside it, as before", async () => {
+    viewport(1024, 768);
+    openChat();
+    const name = await screen.findByTestId("chat-name");
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toContainElement(name);
+    expect(heading).not.toHaveClass("shrink-0");
+    expect(heading).not.toHaveClass("max-w-full");
+  });
+
   it("wider than a phone, every button is in the header as before", async () => {
     viewport(1024, 768);
     openChat();
     await screen.findByTestId("chat-options");
     for (const id of ["connection-options", "call-audio", ...MOVED]) expect(screen.getByTestId(id), id).toBeInTheDocument();
+  });
+});
+
+describe("a chat's name in the header, in Arabic", () => {
+  // agents#3088: the button cut the name in the page's direction with the name in a <bdi> inside it, so a Latin name
+  // too long for a phone lost its start ("…a Maria Fernanda d"). The box that cuts it reads it in its own direction,
+  // as the group header's name does, and the rename pencil stays beside it.
+  it("is cut by a box in the name's own direction, so a Latin name keeps its start", async () => {
+    viewport(375, 667);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana Maria Fernanda de Souza", messages: [], createdAt: 1_700_000_000_000 });
+    const { engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "ar" });
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
+    const name = await screen.findByTestId("chat-name");
+    expect(name).toHaveTextContent("Ana Maria Fernanda de Souza");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // The button around it lays the name out and does not cut it in the page's direction itself.
+    expect(name.closest("button")).not.toHaveClass("truncate");
   });
 });
 

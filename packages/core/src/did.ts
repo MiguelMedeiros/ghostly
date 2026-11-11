@@ -384,7 +384,8 @@ export function parseDidJws(input: string): DidJws {
   } catch { throw new DidError("The JWS header is not base64url JSON"); }
   if (!isObject(header)) throw new DidError("The JWS header is not a JSON object");
   const alg = header.alg;
-  if (typeof alg !== "string" || !DID_JWS_ALGS[alg]) throw new DidError(`The JWS uses ${typeof alg === "string" ? alg.slice(0, 16) : "no algorithm"}: Ghostly checks EdDSA, ES256K and ES256`);
+  // The reasons here are shown on the checking side: never a word the signer chose (alg, kid, key ids), only what is wrong.
+  if (typeof alg !== "string" || !DID_JWS_ALGS[alg]) throw new DidError(`The JWS uses ${typeof alg === "string" ? "another algorithm" : "no algorithm"}: Ghostly checks EdDSA, ES256K and ES256`);
   if (header.kid !== undefined && (typeof header.kid !== "string" || header.kid.length > DID_MAX_LENGTH + 128)) throw new DidError("The JWS kid is not a key id");
   if (header.b64 !== undefined && typeof header.b64 !== "boolean") throw new DidError("The JWS b64 header is not true or false");
   const crit = header.crit;
@@ -415,7 +416,7 @@ function verifyWith(key: DidKey, signature: Uint8Array, message: Uint8Array, for
 
 export interface DidSignatureCheck { key: DidKey; alg: string }
 
-const refusedKey = (key: DidKey) => new DidError(`Signed by ${key.id}, which the DID document does not list under authentication or assertionMethod`);
+const refusedKey = () => new DidError("Signed by a key the DID document does not list under authentication or assertionMethod");
 
 /**
  * Which key of `doc` made this JWS over one of `messages` (the statement, and the statement with a
@@ -427,9 +428,9 @@ export function checkDidJws(input: string, messages: Uint8Array[], doc: DidDocum
   let candidates = doc.keys.filter(k => k.curve === jws.curve);
   if (jws.kid !== undefined) {
     const kid = methodId(doc.did, jws.kid);
-    if (!kid) throw new DidError(`The JWS names key ${jws.kid.slice(0, 100)}, which is not a key of ${doc.did}`);
+    if (!kid) throw new DidError(`The JWS names a key that is not a key of ${doc.did}`);
     candidates = candidates.filter(k => k.id === kid);
-    if (!candidates.length) throw new DidError(doc.keys.some(k => k.id === kid) ? `Key ${kid} is not a ${jws.curve} key: the JWS says ${jws.alg}` : `The DID document lists no key ${kid}`);
+    if (!candidates.length) throw new DidError(doc.keys.some(k => k.id === kid) ? `The key the JWS names is not a ${jws.curve} key: the JWS says ${jws.alg}` : "The DID document does not list the key the JWS names");
   }
   if (!candidates.length) throw new DidError(`The DID document lists no ${jws.curve} key for ${jws.alg}`);
   let inputs: Uint8Array[];
@@ -442,7 +443,7 @@ export function checkDidJws(input: string, messages: Uint8Array[], doc: DidDocum
     if (!key.relationships.length) { refused ??= key; continue; }
     return { key, alg: jws.alg };
   }
-  if (refused) throw refusedKey(refused);
+  if (refused) throw refusedKey();
   throw new DidError("The JWS signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 
@@ -455,9 +456,9 @@ export function checkDidSignature(signature: Uint8Array, messages: Uint8Array[],
   let candidates = doc.keys;
   if (vm !== undefined) {
     const id = methodId(doc.did, vm);
-    if (!id) throw new DidError(`${vm.slice(0, 100)} is not a key of ${doc.did}`);
+    if (!id) throw new DidError(`The proof names a key that is not a key of ${doc.did}`);
     candidates = candidates.filter(k => k.id === id);
-    if (!candidates.length) throw new DidError(`The DID document lists no key ${id}`);
+    if (!candidates.length) throw new DidError("The DID document does not list the key the proof names");
   }
   const der = signature.length !== 64 && signature[0] === 0x30;
   if (signature.length !== 64 && !der) throw new DidError("A signature is 64 bytes (or DER, for ECDSA)");
@@ -469,7 +470,7 @@ export function checkDidSignature(signature: Uint8Array, messages: Uint8Array[],
     const canonical = der ? (key.curve === "secp256k1" ? secp256k1 : p256).Signature.fromBytes(signature, "der").toBytes("compact") : signature;
     return { key, alg: key.curve === "Ed25519" ? "Ed25519" : `ECDSA ${key.curve}`, signature: canonical };
   }
-  if (refused) throw refusedKey(refused);
+  if (refused) throw refusedKey();
   throw new DidError("The signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 

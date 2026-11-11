@@ -204,7 +204,7 @@ describe("a request to the whole group", () => {
   it("a member whose edge was down gets the request when it opens, and a request already paid is closed on their side instead", async () => {
     const { world, members: [a, b, c] } = await group("A", "B", "C");
     world.down.add("AC");
-    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" });
+    const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: Date.now(), rail: "cashu" });
     await world.settle();
     expect(view(c, paymentId)).toBeUndefined();
     world.down.delete("AC");
@@ -220,6 +220,28 @@ describe("a request to the whole group", () => {
     await a.desk.replay("AC");
     await world.settle();
     expect(view(c, paymentId).state).toBe("settled");
+  });
+
+  it("an edge opening says paid again only the requests under a week old, not the group's whole history", async () => {
+    const names = Array.from({ length: 30 }, (_, i) => `M${i}`);
+    const { world, members: [a] } = await group(...names);
+    for (const linkId of a.edges.keys()) world.down.add(linkId);
+    // 200 settled requests from months ago, 100 from the last days.
+    const old: string[] = [], recent: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      const timestamp = i < 200 ? Date.now() - 90 * 86_400_000 + i : Date.now() - 86_400_000 + i;
+      const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp, rail: "cashu" });
+      await a.desk.onLightningPaid({ paymentId });
+      (i < 200 ? old : recent).push(paymentId);
+    }
+    for (const linkId of a.edges.keys()) world.down.delete(linkId);
+    const before = a.sent.length;
+    for (const linkId of a.edges.keys()) await a.desk.replay(linkId);
+    const said = a.sent.slice(before);
+    // 29 edges × 100 recent requests, every one said paid; none of the 200 old ones.
+    expect(said.length).toBe(29 * 100);
+    expect(said.every(s => s.kind === "res" && s.frame.ok === true && recent.includes(s.frame.id as string))).toBe(true);
+    expect(said.filter(s => s.linkId === "M0M1").map(s => s.frame.id).sort()).toEqual([...recent].sort());
   });
 
   it("wants Cashu or Lightning, a mint for Cashu, and a whole amount", async () => {

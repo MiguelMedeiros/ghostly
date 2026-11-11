@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SPECIAL } from "../src/main";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
 
@@ -97,6 +98,10 @@ describe("help", () => {
       [["daemon", "frob"], "Unknown command: daemon frob: ghostly daemon takes status, stop or restart (ghostly help daemon)"],
       [["help", "profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
       [["help", "x401", "key", "frob"], "Unknown command: x401 key frob: ghostly x401 key takes new (ghostly help x401 key)"],
+      // `status` and `daemon` are commands and groups: `help status frob` answered status's help with exit 0.
+      [["status", "frob"], "Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)"],
+      [["help", "status", "frob"], "Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)"],
+      [["help", "daemon", "frob"], "Unknown command: daemon frob: ghostly daemon takes status, stop or restart (ghostly help daemon)"],
       [["wallet", "frob", "--help"], expect.stringMatching(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/)],
     ] as const) {
       const result = await ghostly([...args]);
@@ -118,6 +123,9 @@ describe("help", () => {
       [["grup", "list"], "Unknown command: grup list (did you mean group list? ghostly help group list)"],
       [["chat", "lst"], "Unknown command: chat lst (did you mean chat list? ghostly help chat list)"],
       [["help", "sned"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      // Before: "Too many arguments: ghostly status", as if `status` took a word.
+      [["status", "shwo"], "Unknown command: status shwo (did you mean status show? ghostly help status show)"],
+      [["status", "sett", "hi"], "Unknown command: status sett (did you mean status set? ghostly help status set)"],
       [["send", "ecp", "hi", "--wiat", "sent"], "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"],
       [["chat", "history", "ecp", "--limt", "5"], "Unknown option --limt for ghostly chat history (did you mean --limit? ghostly help chat history)"],
       [["chat", "list", "--show-secrets"], "Unknown option --show-secrets for ghostly chat list (did you mean --show-secret? ghostly help chat list)"],
@@ -128,6 +136,24 @@ describe("help", () => {
       [["chat", "list", "-x"], "Unknown option -x for ghostly chat list (ghostly help chat list)"],
       [["profile", "list", "-x"], "Unknown option -x for ghostly profile list (ghostly help profile list)"],
       [["daemon", "status", "-x"], "Unknown option -x for ghostly daemon status (ghostly help daemon status)"],
+    ] as const) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+
+  it("a mistyped global option before the command is an unknown option, as after it, not a command", async () => {
+    // Before: "Unknown command: --porfile (ghostly help)", where `status --profle x` named --profile.
+    const dir = home("global-typos");
+    for (const [args, message] of [
+      [["--porfile", "bot", "send", "alice", "hi"], "Unknown option --porfile (did you mean --profile? ghostly help)"],
+      [["--porfile=bot", "status"], "Unknown option --porfile (did you mean --profile? ghostly help)"],
+      [["--hme", "/tmp", "status"], "Unknown option --hme (did you mean --home? ghostly help)"],
+      [["-x", "status"], "Unknown option -x (ghostly help)"],
+      [["--pretty", "--bogus", "status"], "Unknown option --bogus (ghostly help)"],
+      [["-", "status"], "Unknown command: - (ghostly help)"],
     ] as const) {
       const result = await ghostly(["--home", dir, ...args]);
       expect(result.code, args.join(" ")).toBe(2);
@@ -260,7 +286,7 @@ describe("help", () => {
     expect(wide).toMatch(/^ {2}profile list {2,}Profiles, and which one is current$/m);
     // Piped, as grep reads it: no wrapping.
     const piped = (await ghostly(["help"], { env: { COLUMNS: "" } })).stdout;
-    expect(piped).toMatch(/^ {2}profile create <name> \[--use\] \[--name <shown name>\] {2,}Make a profile \(its own keys, chats and wallets\)$/m);
+    expect(piped).toMatch(/^ {2}settings set <key> <json-value> \[--force\] {2,}Change one: relays, .* a TURN password stays out of ps$/m);
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
   });
 
@@ -284,6 +310,15 @@ describe("help", () => {
     for (const words of [["profile", "backup"], ["profile", "restore"]]) {
       const { stdout } = await ghostly(["help", ...words]);
       expect(stdout, words.join(" ")).toMatch(/--passphrase-file <value> {2,}The passphrase/);
+    }
+  });
+
+  // `profile create`, `profile set` and `settings set` took and listed --force under Options, but their usage lines
+  // (also the rows of `ghostly help` and their usage errors) left it out: a bot that reads the list never learnt of it.
+  it("the usage line of a command with its own flow names every option its help lists", () => {
+    for (const [usage, , options] of SPECIAL) {
+      const shown = Object.entries(options ?? {}).filter(([, o]) => o.description).map(([name, o]) => `--${o.negatedOnly ? "no-" : ""}${name}`);
+      expect(shown.filter((flag) => !new RegExp(`${flag}(?![a-z0-9-])`).test(usage)), usage).toEqual([]);
     }
   });
 });

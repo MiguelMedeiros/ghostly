@@ -382,4 +382,13 @@ describe("IdentityProofsSection", () => {
     expect(line.textContent).toMatch(/^Nostr signature \(NIP-01, BIP-340\)\. يقول accounts\.google\.com \(OIDC\) إن/);
     expect(line.textContent).not.toContain("{{");
   });
+
+  it("says how a Nostr proof was checked in the app's language, still in its own direction", () => {
+    const npub = "a".repeat(64);
+    const { engine } = renderApp(<IdentityProofsSection />, { language: "ar" });
+    act(() => engine.update({ identityProofs: [proofView({ id: "n", provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } })] }));
+    const how = within(panel()).getByText((_, el) => el?.tagName === "BDI" && !!el.textContent?.startsWith("توقيع Nostr"));
+    expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+    expect(how.parentElement!.textContent).not.toContain("signature");
+  });
 });

@@ -70,6 +70,64 @@ describe("wallets", () => {
     expect(listed.offers.find((o) => o.type === "bark")).toMatchObject({ available: false, reason: expect.stringMatching(/browser/) });
   });
 
+  it("the Lightning card through the mints answers the Cashu balance, not its copy read up to 15 s before", async () => {
+    // Found in a bug hunt: right after `chat pay bob 100` or a `pay` through that card, `wallet list` answered the card's
+    // balance from before the payment (10000 next to Cashu's 9900) until its next 15 s read.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [...s.wallet.wallets!, { id: "lightning:testnet:nwc1", type: "lightning", network: "testnet", config: {}, card: "nwc1", name: "Hub", receive: false }];
+      const networks = s.wallet.networks!;
+      networks.testnet = { ...networks.testnet, balance: 30, lightnings: [{ card: "cashu", providerId: "cashu-mint", balance: 42, status: "ready" }, { card: "nwc1", providerId: "nwc", balance: 500, status: "ready" }] } as typeof networks.testnet;
+      return s;
+    };
+    const listed = await callApi(ctx, "wallet.list", {}) as { wallets: { id: string; balance: number }[] };
+    expect(listed.wallets.map((w) => [w.id, w.balance])).toEqual([["cashu:testnet", 30], ["lightning:testnet:cashu", 30], ["lightning:testnet:nwc1", 500]]);
+  });
+
+  it("a Spark, Arkade, Bark or Fedimint balance not read yet (or locked) is null with a status, never 0", async () => {
+    // Found in a bug hunt: those views hold 0 until the wallet read its balance, and `wallet list` answered that 0 with
+    // no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const federation = (read: boolean, status: string, error?: string) => ({ federationId: "f", balance: 7, status, lightning: true, invite: "fed1", ...(read ? { read: true } : {}), ...(error ? { error } : {}) });
+    let fedimint = [federation(true, "ready"), federation(false, "connecting")];
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = (["spark", "arkade", "bark", "fedimint"] as const).map((type) => ({ id: `${type}:testnet`, type, network: "testnet", config: {} }));
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, spark: { configured: true, locked: true, balance: 0 }, ark: { configured: true, locked: false, balance: 0 },
+        bark: { configured: true, locked: false, read: true, balance: 9 }, fedimint: { balance: 7, federations: fedimint, history: [] } } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { type: string; balance: number | null; status: string | null; error: string | null }[] }).wallets.map((w) => [w.type, w.balance, w.status, w.error]);
+    expect(await list()).toEqual([["spark", null, "locked", null], ["arkade", null, "reading", null], ["bark", 9, null, null], ["fedimint", null, "reading", null]]);
+    fedimint = [federation(true, "ready"), federation(false, "error", "unreachable")];
+    expect((await list())[3]).toEqual(["fedimint", null, "error", "unreachable"]);
+    fedimint = [federation(true, "ready")];
+    expect((await list())[3]).toEqual(["fedimint", 7, null, null]);
+  });
+
+  it("a USDT balance not read yet (or locked) is null with a status, never \"0\"", async () => {
+    // Found in a bug hunt: a USDT wallet's view holds "0" until its RPC answered (a slow one takes a minute, one that is
+    // down never does), and `wallet list` answered that "0" with no status, where the app's total says "?".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    let usdt: Record<string, unknown> = { configured: true, locked: true, balance: "0", gasBalance: "0" };
+    node.getState = () => {
+      const s = engine();
+      s.wallet.wallets = [{ id: "usdt:testnet", type: "usdt", network: "testnet", config: {} }];
+      s.wallet.networks!.testnet = { ...s.wallet.networks!.testnet, usdt } as unknown as NonNullable<typeof s.wallet.networks>["testnet"];
+      return s;
+    };
+    const list = async () => (await callApi(ctx, "wallet.list", {}) as { wallets: { balance: string | null; status: string | null }[] }).wallets.map((w) => [w.balance, w.status]);
+    expect(await list()).toEqual([[null, "locked"]]);
+    usdt = { configured: true, locked: false, balance: "0", gasBalance: "0" };
+    expect(await list()).toEqual([[null, "reading"]]);
+    usdt = { configured: true, locked: false, read: true, balance: "1500000", gasBalance: "0" };
+    expect(await list()).toEqual([["1500000", null]]);
+  });
+
   it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bark" })).rejects.toMatchObject({ code: "unavailable" });
@@ -167,7 +225,7 @@ describe("wallets", () => {
       [() => node.walletCreate.mockRejectedValueOnce(refused("You already have a Testnet Cashu wallet")), "wallet.create", { type: "cashu" }, "refused"],
       [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "wallet.receive", { amount: 10 }, "unavailable"],
       [() => node.requestPayment.mockRejectedValueOnce(refused("No mint could create an invoice: No mint configured")), "chat.request", { chat: "Alice", amount: 10 }, "unavailable"],
-      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "unavailable"],
+      [() => node.bitcoinReceiveAddress.mockRejectedValueOnce(refused("No Bitcoin source is set up")), "wallet.address", { type: "bitcoin" }, "refused"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("The faucet did not pay: This wallet has no test mint to ask for test coins")), "wallet.faucet", { type: "cashu" }, "unavailable"],
       [() => node.walletTestCoins.mockRejectedValueOnce(refused("Ghostly cannot ask this wallet's faucet by itself: open it instead")), "wallet.faucet", { type: "bitcoin" }, "unavailable"],
     ];
@@ -180,6 +238,44 @@ describe("wallets", () => {
     // A mint that did not answer stays the engine's.
     node.walletReceiveLightning.mockRejectedValueOnce(refused("No mint could create an invoice: mint.example did not answer"));
     expect(asCliError(await callApi(ctx, "wallet.receive", { amount: 10 }).catch((e: unknown) => e)).code).toBe("engine");
+  });
+
+  it("a payment's state that refuses what was asked is said with its code, not as the engine failing", async () => {
+    // Found in a bug hunt: each of these was `engine` (exit 1), on two real daemons with a local test mint.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      s.payments.sent = { id: "sent", linkId: "chat-one", kind: "payment", direction: "out", amount: 3, unit: "sat", state: "settled", createdAt: 3, network: "testnet" } as unknown as typeof s.payments[string];
+      s.payments.asked = { id: "asked", linkId: "chat-one", kind: "request", direction: "out", amount: 3, unit: "sat", state: "pending", createdAt: 4, network: "testnet" } as unknown as typeof s.payments[string];
+      return s;
+    };
+    Object.assign(node, {
+      reclaimPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Nothing to reclaim"); }),
+      checkPayment: vi.fn(async (_: unknown): Promise<void> => { throw new Error("Unknown payment request"); }),
+    });
+    // The mint asked for the swap of a payment and did not answer: the engine's `SwapUnsettledError`, read by its name.
+    const unsettled = Object.assign(new Error("testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."), { name: "SwapUnsettledError" });
+    const cases: [() => void, string, Record<string, unknown>, string, RegExp?][] = [
+      [() => {}, "payment.reclaim", { payment: "sent" }, "refused", /^Nothing to reclaim$/],
+      [() => {}, "payment.reclaim", { payment: "asked" }, "refused"],
+      [() => {}, "payment.check", { chat: "Alice", payment: "sent" }, "bad_request", /^"sent" is a payment you sent: payment check is for a request the contact made of you$/],
+      [() => {}, "payment.check", { chat: "Alice", payment: "asked" }, "bad_request", /^"asked" is your own request: /],
+      [() => node.payRequest.mockRejectedValueOnce(new Error("This request is no longer open")), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused"],
+      [() => node.walletPayQuote.mockRejectedValueOnce(new Error("This invoice is already paid")), "pay", { target: "lntbs10u1pxyz" }, "refused"],
+      [() => node.sendPayment.mockRejectedValueOnce(unsettled), "chat.pay", { chat: "Alice", amount: 3 }, "unavailable", /^testnut\.cashu\.space has not answered yet\. The payment was not made\./],
+    ];
+    const answered = [], wanted = [];
+    for (const [arrange, method, params, code, message] of cases) {
+      arrange();
+      const error = asCliError(await callApi(ctx, method, params).catch((e: unknown) => e));
+      answered.push({ method, params, code: error.code, message: error.message });
+      wanted.push({ method, params, code, message: message ? expect.stringMatching(message) : expect.any(String) });
+    }
+    expect(answered).toEqual(wanted);
+    // A check of the contact's own request still reaches the engine.
+    (node as unknown as { checkPayment: ReturnType<typeof vi.fn> }).checkPayment.mockResolvedValueOnce(undefined);
+    expect(await callApi(ctx, "payment.check", { chat: "Alice", payment: "test" })).toEqual({ chat: "chat-one", paymentId: "test" });
   });
 
   it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
@@ -205,6 +301,36 @@ describe("wallets", () => {
     // A contact with no wallet is still said first: that is the engine's answer before any of these.
     node.sendPayment.mockRejectedValueOnce(Object.assign(new Error("Your contact has no wallet yet: they need one to pay or be paid"), { engineCode: "contactNoWallet" }));
     expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toMatchObject({ code: "refused", details: { reason: "contact_no_wallet" } });
+  });
+
+  it("faucet, receive or an address from a profile with no wallet of the type: refused, naming the wallet to make", async () => {
+    // Found in a bug hunt: each was `unavailable` (try again later) "This wallet has no test mint", "No mint configured"
+    // or "No Bitcoin source is set up", on a profile that had no wallet at all.
+    const { ctx, node } = fake();
+    const answer = async (method: string, params: Record<string, unknown>) => asCliError(await callApi(ctx, method, params).catch((e: unknown) => e)).toJSON();
+    const noMint = () => new Error("The faucet did not pay: This wallet has no test mint to ask for test coins");
+    // With the wallet, the engine's words stay `unavailable`: its mint or source did not answer.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toMatchObject({ code: "unavailable" });
+    const engine = node.getState;
+    node.getState = () => { const s = engine(); s.wallet.wallets!.push(...[{ id: "arkade:testnet", type: "arkade", network: "testnet", config: {} }, { id: "bitcoin:testnet", type: "bitcoin", network: "testnet", config: {} }] as never[]); return s; };
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual({ code: "unavailable", message: "No arkade wallet with an address on testnet" });
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual({ code: "unavailable", message: "No Bitcoin source is set up" });
+    node.getState = () => { const s = engine(); s.wallet.wallets = []; return s; };
+    const none = (type: string, name: string) => ({ code: "refused", message: `You have no Testnet ${name} wallet: ghostly wallet create ${type}`, details: { reason: "no_wallet" } });
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "cashu" })).toEqual(none("cashu", "Cashu"));
+    // The faucet of a Lightning card with no source of its own is the test mint's.
+    node.walletTestCoins.mockRejectedValueOnce(noMint());
+    expect(await answer("wallet.faucet", { type: "lightning" })).toEqual(none("cashu", "Cashu"));
+    node.walletReceiveLightning.mockRejectedValueOnce(new Error("No mint could create an invoice: No mint configured"));
+    expect(await answer("wallet.receive", { amount: 100 })).toEqual(none("cashu", "Cashu"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin" })).toEqual(none("bitcoin", "Bitcoin"));
+    expect(await answer("wallet.address", { type: "arkade" })).toEqual(none("arkade", "Arkade"));
+    node.bitcoinReceiveAddress.mockRejectedValueOnce(new Error("No Bitcoin source is set up"));
+    expect(await answer("wallet.address", { type: "bitcoin", network: "mainnet" })).toEqual({ ...none("bitcoin", "Bitcoin"), message: "You have no Mainnet Bitcoin wallet: ghostly wallet create bitcoin --network mainnet" });
   });
 
   it("a wallet source that is not offered is the person's value, refused before the engine is asked", async () => {

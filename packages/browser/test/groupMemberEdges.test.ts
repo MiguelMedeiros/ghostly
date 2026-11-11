@@ -376,7 +376,8 @@ describe("a hub and an edge to someone out of the roster", () => {
   const roster = (...keys: string[]) => keys.map((key, i) => [key, i ? "member" : "admin"]);
   const chain = [roster(admin), roster(admin, hub, gone), roster(admin, hub, gone, member), roster(admin, hub, member), roster(admin, hub, member)]
     .map((m, e) => ({ e, m, by: admin })) as unknown as GroupCommit[];
-  const session = { roster: chain[4].m, myKey: hub, state: { chain } } as unknown as GroupSession;
+  const session = { roster: chain[4].m, myKey: hub, state: { chain },
+    handOnTo: (to: string, frame: GroupEdgeFrame) => frame.t === "group-commit" ? { ...frame, secret: `sealed for ${to}` } : frame } as unknown as GroupSession;
 
   function hubs() {
     const sent: { to: string; frame: { t: string; commit?: { e: number } } }[] = [];
@@ -402,6 +403,13 @@ describe("a hub and an edge to someone out of the roster", () => {
     mesh.passOn("g", session, admin, [commit(3), commit(4), message]);
     expect(sent.filter(s => s.to === "e-gone").map(s => [s.frame.t, s.frame.commit?.e])).toEqual([["group-commit", 3]]);
     expect(sent.filter(s => s.to === "e-member").map(s => s.frame.t)).toEqual(["group-commit", "group-commit", "group-msg"]);
+  });
+
+  it("passes a commit on to a member with the epoch's secret sealed for it, and none to someone taken out", () => {
+    const { mesh, sent } = hubs();
+    mesh.passOn("g", session, admin, [{ t: "group-commit", g: "g", commit: chain[3] } as unknown as GroupEdgeFrame]);
+    const secrets = Object.fromEntries(sent.map(s => [s.to, (s.frame as { secret?: string }).secret]));
+    expect(secrets).toEqual({ "e-member": `sealed for ${member}`, "e-gone": undefined });
   });
 
   it("does not tell it whom the hub reaches", () => {
@@ -447,4 +455,58 @@ describe("a member's pins in a private group are paced, and one that changes not
     expect(checks).toHaveBeenCalledTimes(PIN_LIMITS.receive);
     expect(shown()?.id).toBe(absent);
   });
+});
+
+/**
+ * A group has no receipts: `group react --wait sent` waits for an edge to take my reaction (`groupTaken`), as `group
+ * send` does for a message. A one-shot's reaction counted for nothing, so the CLI could only leave before it went.
+ */
+describe("my reaction in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it again", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "react to me" }) as { messageId: string };
+    const first = await node.react({ linkId: chat, messageId, emoji: "👍" });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, reaction: n });
+    expect(frames(bob).filter(f => f.t === "group-react")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // A new reaction is a new number: the old one taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.react({ linkId: chat, messageId, emoji: "🎉" });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears my latest reaction again: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-react")).toMatchObject([{ n: second.n, e: "🎉" }]);
+  }, 30_000);
+});
+
+/**
+ * `pin <group> --wait sent` waits for an edge to take my pin (`groupTaken` with its number), as `group react` does for
+ * a reaction. A one-shot's pin counted for nothing, so the CLI answered before it went and the pin left with it.
+ */
+describe("my pin in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "pin me" }) as { messageId: string };
+    const first = await node.pinMessage({ linkId: chat, messageId });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, pin: n });
+    expect(frames(bob).filter(f => f.t === "group-pin")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // An unpin is a new number: the pin taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.pinMessage({ linkId: chat, remove: true });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears the group's pin: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-pin")).toMatchObject([{ n: second.n, id: "" }]);
+  }, 30_000);
 });

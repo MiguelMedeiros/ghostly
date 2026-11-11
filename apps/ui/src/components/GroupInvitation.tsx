@@ -22,12 +22,12 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
 
 /**
  * What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. A
- * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too.
+ * link replaced since it was shared waits on nothing: the row says so, as the group's page does. A full group too, or one waiting for its members' updates.
  */
-export function invitationStatus(group: GroupView, t: Translate): string {
+export function invitationStatus(group: Pick<GroupView, "invitation" | "profile">, t: Translate): string {
   const invitation = group.invitation!;
   return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
-    : invitation.stage === "full" ? t("group.join.full") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitation.stage === "full" ? t("group.join.full") : invitation.stage === "blocked" ? t("group.join.blocked") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
     : invitationLine(invitation, t);
 }
 
@@ -51,9 +51,9 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
 const rowOpen = (groupId: string) =>
   [...document.querySelectorAll<HTMLElement>('[data-testid="group-row"]')].find(row => row.dataset.group === groupId)?.querySelector<HTMLElement>('[data-testid="group-row-open"]') ?? null;
 
-/** The open button of the chat list's row after this group's, if there is one. */
+/** The open button of the chat list's row after this group's, if there is one and it is drawn (not a space far from the view). */
 export function rowAfter(groupId: string): HTMLElement | null {
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"], [data-row-space]')];
   const at = rows.findIndex(row => row.dataset.group === groupId);
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
 }
@@ -79,7 +79,7 @@ export function focusPastRow(next: HTMLElement | null, pressed: Element | null, 
  * chat list row), the row's open button. A Decline that takes the invitation away (its row, or its page going home)
  * hands the focus to the next row of the list.
  */
-export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
+export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Problem | null>(null);
@@ -90,6 +90,7 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
     return () => clearTimeout(timer);
   }, [refused]);
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
+    if (busy) return;
     setBusy(true);
     setRefused(null);
     const pressed = document.activeElement;
@@ -130,6 +131,12 @@ export function InvitationRefusal({ refused, className }: { refused: Problem; cl
   return <div onClick={e => e.stopPropagation()} className={className}><Notice problem={refused} testId="group-answer-refused" /></div>;
 }
 
+/**
+ * An answer button while an answer goes: busy, not disabled, which would drop a keyboard's focus to the page and leave
+ * it there on a refusal. `answer` takes no second press.
+ */
+const answering = (busy: boolean) => ({ "aria-disabled": busy || undefined, "aria-busy": busy || undefined });
+
 /** A chat list row's answer buttons: small on a desktop; a thumb's height on a phone, where the list is the home screen. */
 const ROW_BUTTON = "px-3 py-1 text-xs max-md:min-h-11 max-md:px-4";
 
@@ -138,25 +145,25 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
   const { t } = useI18n();
   const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
-    <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
-    <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-      className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
+    <button {...answering(busy)} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
+    <button {...answering(busy)} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+      className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
   </>;
 }
 
 /** A group link nobody answered for an hour: its row's action, Try again, knocks again (`acceptGroupInvitation`). */
 export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
   const { t } = useI18n();
-  return <button disabled={busy} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
+  return <button {...answering(busy)} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */
 export function TakenBackDelete({ busy, answer, large = false }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer"> & { large?: boolean }) {
   const { t } = useI18n();
-  return <button disabled={busy} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
-    className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
+  return <button {...answering(busy)} data-testid="group-taken-back-delete" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
+    className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${large ? "min-h-11 px-5 text-sm" : ROW_BUTTON}`}>{t("common.delete")}</button>;
 }
 
 /**

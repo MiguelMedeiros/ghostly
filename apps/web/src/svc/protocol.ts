@@ -14,6 +14,8 @@
 export const BRIDGE_DIR = "/_ghostly-svc/";
 export const BRIDGE_PAGE = `${BRIDGE_DIR}bridge.html`;
 export const BRIDGE_SCRIPT = `${BRIDGE_DIR}bridge.js`;
+/** Answered by the server with `Clear-Site-Data: "cookies"` (nginx-services.conf): the one way to every cookie's path. */
+export const CLEAR_COOKIES = `${BRIDGE_DIR}clear-cookies`;
 /** At the root, so its scope can be the whole origin without a `Service-Worker-Allowed` header. */
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
@@ -21,8 +23,9 @@ export const WORKER_SCRIPT = "/ghostly-services-sw.js";
  * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
  * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
  * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
- * address, an invoice) every second with no further tap. A copy button in it still copies on its tap
- * (`document.execCommand("copy")`).
+ * address, an invoice) every second with no further tap. `document.execCommand("copy")` is not under it: each of the
+ * app's pages, and the bridge, run the clipboard guard first (`CLIPBOARD_GUARD_SCRIPT`), so a copy button in it still
+ * copies on its own tap and nothing else writes the clipboard.
  */
 export const SERVICE_FRAME_ALLOW = "";
 
@@ -76,6 +79,8 @@ export interface ServiceRequestMessage {
   path: string;
   headers: [string, string][];
   body: ArrayBuffer | null;
+  /** The request's `destination` ("iframe", "script", …): whether the answer is a page (`guardViewerAnswer`). */
+  destination?: string;
 }
 
 /** What comes back on the request's own port: one `head`, then `chunk`s, then `end`; or `error` at any point. */
@@ -111,12 +116,15 @@ export const BRIDGE_CLEARED = "ghostly-svc-cleared";
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
   if (!data || typeof data !== "object") return null;
-  const { type, method, path, headers, body } = data as Record<string, unknown>;
+  const { type, method, path, headers, body, destination } = data as Record<string, unknown>;
   if (type !== "request" || typeof method !== "string" || !/^[A-Z]{1,16}$/.test(method)) return null;
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.length > 8192) return null;
   if (!Array.isArray(headers) || headers.length > 128 || !headers.every((h) => Array.isArray(h) && h.length === 2 && typeof h[0] === "string" && typeof h[1] === "string")) return null;
   if (body !== null && !(body instanceof ArrayBuffer && body.byteLength <= MAX_REQUEST_BYTES)) return null;
-  return { type, method, path, headers: headers as [string, string][], body: body as ArrayBuffer | null };
+  return {
+    type, method, path, headers: headers as [string, string][], body: body as ArrayBuffer | null,
+    ...(typeof destination === "string" && /^[a-z]{0,32}$/.test(destination) ? { destination } : {}),
+  };
 }
 
 /** Statuses a Response has no body for. */

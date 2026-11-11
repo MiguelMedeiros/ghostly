@@ -3,7 +3,7 @@ import {
   type HomeserverEndpoint,
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
-import type { ApprovalRequest, IdentityFetch } from "./contract";
+import { englishSay, type ApprovalRequest, type IdentityFetch, type ProviderSay } from "./contract";
 import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
 import { PUBKY_RELAYS } from "./pubkyRelays";
@@ -21,19 +21,23 @@ export { PUBKY_RELAYS };
 
 /**
  * The newest DNS packet the relays hold for `key`, its signature checked against `key`. Every relay is asked; one
- * that is down, answers garbage or holds an older packet does not count. Throws when none has a valid one.
+ * that is down, answers garbage or holds an older packet does not count. Throws when none has a valid one: as
+ * IdentityCheckUnavailable when none answered (not reached, or an error status), since that says nothing of the key.
  */
 export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: AbortSignal, relays: readonly string[] = PUBKY_RELAYS): Promise<Uint8Array> {
   const failed: unknown[] = [];
+  let answered = false;
   const answers = await Promise.all(relays.map(async relay => {
     let r;
     try { r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX_BYTES, signal }); }
     catch (e) { failed.push(e); return undefined; }
+    if (r.status === 200 || r.status === 404) answered = true;
     try { return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined; } catch { return undefined; }
   }));
   const newest = answers.filter(a => !!a).sort((a, b) => (b.seq > a.seq ? 1 : b.seq < a.seq ? -1 : 0))[0];
-  // No relay answered at all (offline, a time-out): say that, not that the key has no records.
-  if (!newest && failed.length === relays.length && failed[0] instanceof Error) throw failed[0];
+  // No relay answered at all (offline, a time-out, an error status): say that, not that the key has no records.
+  if (!newest && failed.length === relays.length && (failed[0] instanceof IdentityCheckUnavailable || /too large/i.test(String(failed[0])))) throw failed[0];
+  if (!newest && !answered) throw new IdentityCheckUnavailable("No relay answered");
   if (!newest) throw new NoPkarrRecords("This Pubky key has no records on the Pkarr relays");
   return newest.dnsPacket;
 }
@@ -114,6 +118,8 @@ export interface PubkyApprovalOptions {
   signal: AbortSignal;
   onApproval(request: ApprovalRequest | null): void;
   onProgress(message: string): void;
+  /** Says the request's words and progress lines in the app's language (the Pubky provider's `say`); English when absent. */
+  say?: ProviderSay;
   /** Where Passport opens. The desktop app hands it to the system browser; elsewhere a popup from the click. */
   openPassport?: (url: string) => Window | null | void;
   /** Tests: the SDK's relay, and a shorter wait. */
@@ -263,24 +269,25 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
   } catch (e) { grant.free(); throw failure("Could not start a Pubky request", e); }
 
   const opened: { window?: Window | null } = {};
+  const say = options.say ?? englishSay;
   options.onApproval({
     open: {
-      label: "Approve in your browser (Pubky Passport)",
-      description: "Opens Pubky Passport. No Passport identity yet? It offers “Continue with Google” and makes one.",
+      label: say("approval.passport", "Approve in your browser (Pubky Passport)"),
+      description: say("approval.passportAbout", "Opens Pubky Passport. No Passport identity yet? It offers “Continue with Google” and makes one."),
       run: () => {
         const window = (options.openPassport ?? openPassportWindow)(passportUrl(grant.authorizationUrl));
         opened.window = window ?? null;
         // null: the browser refused the popup (undefined: it opened elsewhere, the system browser).
-        if (window === null) options.onProgress("Your browser blocked the Passport window: allow pop-ups for Ghostly and press the button again, or scan the code with Pubky Ring.");
+        if (window === null) options.onProgress(say("progress.popupBlocked", "Your browser blocked the Passport window: allow pop-ups for Ghostly and press the button again, or scan the code with Pubky Ring."));
       },
     },
     // Ring gets the cookie request (`pubkyauth://signin?…`), not the grant one: the Ring in the app stores (1.19)
     // predates pubky/pubky-ring#360 and answers "Unrecognized format" to a `signin_grant` link. Move this to
     // grant.authorizationUrl, and drop the cookie flow, once Ring's store build parses `signin_grant`.
-    qr: { value: cookie.authorizationUrl, label: "Or scan with Pubky Ring" },
+    qr: { value: cookie.authorizationUrl, label: say("approval.ring", "Or scan with Pubky Ring") },
     notes: [
-      "An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can.",
-      "The code is your request: scan it yourself, and do not share it.",
+      say("approval.googleNote", "An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can."),
+      say("approval.qrNote", "The code is your request: scan it yourself, and do not share it."),
     ],
   });
 
@@ -315,7 +322,7 @@ async function approveAndWork<T>(options: PubkyApprovalOptions, work: (session: 
     try { if (opened.window && !opened.window.closed) opened.window.close(); } catch { /* another origin's window: best effort */ }
   }
 
-  options.onProgress("Approved. Checking what Pubky granted…");
+  options.onProgress((options.say ?? englishSay)("progress.approved", "Approved. Checking what Pubky granted…"));
   let key: string;
   try {
     const info = session.info;

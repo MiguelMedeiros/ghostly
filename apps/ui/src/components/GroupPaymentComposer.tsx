@@ -1,19 +1,23 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { pairLinkId } from "@ghostly/browser/shared/payLinks";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { useOutsideDismiss } from "../hooks/useDismiss";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
-import { edgeDot, memberName } from "../lib/groups";
+import { edgeDot, memberName, sameNamed } from "../lib/groups";
+import { useEngineValue } from "../lib/engineState";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
 import { problemText } from "../lib/problemText";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
 const EVERYONE = "*";
 const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
+
+/** Of a member's link, what the sheet reads: whom a payment goes to, and whether their app said it takes payments (absent: not said yet). */
+type PayLink = Pick<LinkView, "id" | "peerPubKeyZ32"> & { payments?: boolean };
+const payLink = ({ id, peerPubKeyZ32, capabilities }: LinkView): PayLink => ({ id, peerPubKeyZ32, payments: capabilities && !!capabilities.payments });
 
 /**
  * ⚡ in a group (WISP 902 § Payments): first whom — one member, or the whole group for a request anyone may pay
@@ -23,25 +27,35 @@ const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
  */
 export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onClose(): void }) {
   const { t } = useI18n();
-  const state = useSyncExternalStore(subscribe, snapshot);
-  const wallet = useServicesPlatform()?.wallet;
+  // Drawn again when the wallets change (the balance below), not on every change of the platform.
+  const wallet = useWalletPlatform();
   const [to, setTo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, to === null, onClose);
+  // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
+  useTabTrap(ref, useIsMobile() && to === null);
   const others = group.members.filter(m => !m.me);
+  const same = sameNamed(group.members);
   const community = group.profile === "community";
   // A community member is reached through the group: a link the engine lists once their ways of paying are known.
   const linkIdOf = (m: GroupMemberView) => community ? pairLinkId(group.id, m.key) : m.edge?.linkId;
-  const linkOf = (m: GroupMemberView): LinkView | undefined => { const id = linkIdOf(m); return id ? state?.edges?.find(l => l.id === id) : undefined; };
+  // Of the engine's state, only the links of these members, by id and compared by content (lib/engineState): the whole
+  // state drew every row (or the payment form being typed in) again on every change, up to 20 a second while a file moves.
+  const links = useEngineValue(state => {
+    const wanted = new Set(others.map(linkIdOf)), found: Record<string, PayLink> = {};
+    for (const l of state?.edges ?? []) if (wanted.has(l.id)) found[l.id] = payLink(l);
+    return found;
+  });
+  const linkOf = (m: GroupMemberView): PayLink | undefined => { const id = linkIdOf(m); return id ? links[id] : undefined; };
   // Their app is asked what it takes, so the cards say what the two of you share.
   useEffect(() => { if (community && to && to !== EVERYONE) void engine.call("groupPaymentHello", { groupId: group.id, member: to }).catch(() => {}); }, [community, group.id, to]);
   /** Why this member cannot be paid right now, if they cannot. */
   const why = (m: GroupMemberView): string | undefined => {
     const link = linkOf(m);
     // Through the group it goes now or when they are back; only a member who said it takes nothing cannot be paid.
-    if (community) return link?.capabilities && !link.capabilities.payments ? t("payments.group.why.noWay") : undefined;
+    if (community) return link?.payments === false ? t("payments.group.why.noWay") : undefined;
     if (!link || m.edge?.state !== "open") return t("payments.group.why.unreachable");
-    if (!link.capabilities?.payments) return t("payments.group.why.noPayments");
+    if (!link.payments) return t("payments.group.why.noPayments");
     return undefined;
   };
   const balance = wallet?.getState()?.balance ?? 0;
@@ -61,7 +75,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const member = to ? others.find(m => m.key === to) : undefined;
   const found = member && linkOf(member);
   const link = found ?? (member && community ? { id: pairLinkId(group.id, member.key), peerPubKeyZ32: member.key } : undefined);
-  if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t)} onBack={() => setTo(null)} onClose={onClose}
+  if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t, same)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
     onSend={async (amount, memo, network, confirmedReal) => {
       try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return problemText(e, t); }
@@ -91,7 +105,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
               {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
                   keeps its start, and a short one stays at the line's start. */}
               <span className="min-w-0 flex-1 flex flex-col items-start">
-                <span dir="auto" className="max-w-full truncate text-sm text-text-primary">{memberName(m, t)}</span>
+                <span dir="auto" className="max-w-full truncate text-sm text-text-primary">{memberName(m, t, same)}</span>
                 {reason && <span className="max-w-full truncate text-[11px] text-text-muted">{reason}</span>}
               </span>
             </button>

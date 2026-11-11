@@ -1,6 +1,7 @@
 import { useEffect, useReducer } from "react";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { NotificationSettings } from "./settings";
+import { keyedStorage } from "./keyedStorage";
 import { getPrefix, sessionIdForPeer } from "./storage";
 
 /*
@@ -128,22 +129,22 @@ export function callRings(chat: string, now = Date.now()): boolean {
   return !(MUTE_SILENCES.call && mutedUntil(chat, now) !== undefined);
 }
 
+/** The chat a stored key is this profile's mute (or mentions choice) of. */
+const chatOfKey = (key: string) => {
+  const mute = `${getPrefix()}mute_`, mentions = `${mute}mentions_`;
+  return key.startsWith(mentions) ? key.slice(mentions.length) : key.startsWith(mute) ? key.slice(mute.length) : undefined;
+};
+
+// Every row of the chat list has a mute (two hooks each): they share one window listener, which calls a chat's own.
+const subscribeMute = keyedStorage(MUTE_EVENT, chatOfKey);
+
 /**
  * A chat's mute, kept current: redrawn when it changes here or in another page of the app, and when it ends.
  */
 export function useChatMute(chat: string): MutedUntil | undefined {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const until = mutedUntil(chat);
-  useEffect(() => {
-    // Only a mute's key: every row of the chat list has this, and another page writes other keys many times a second.
-    const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}mute_`)) redraw(); };
-    window.addEventListener(MUTE_EVENT, redraw);
-    window.addEventListener("storage", stored);
-    return () => {
-      window.removeEventListener(MUTE_EVENT, redraw);
-      window.removeEventListener("storage", stored);
-    };
-  }, []);
+  useEffect(() => subscribeMute(chat, redraw), [chat]);
   useEffect(() => {
     if (typeof until !== "number") return;
     const timer = setTimeout(redraw, Math.min(Math.max(until - Date.now(), 0) + 50, 2 ** 31 - 1));

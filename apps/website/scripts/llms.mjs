@@ -70,7 +70,7 @@ export function llmsIndex(entries, numbering) {
 
 > An open-source, end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account. Two apps meet through small signed records on the Mainline DHT, then talk over a direct link. It runs in the browser, on the desktop (macOS, Windows, Linux) and as a browser extension, and a headless CLI, \`@ghostlytools/cli\`, puts bots and AI agents in the same chats as people.
 
-On Android and iPhone the web app installs as an app; a native Android app is in the repository but in no release yet. Every wire contract is an open draft called a WISP (Wire Interoperability Specification Proposal); each says what is implemented. A page under ${SITE}/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. This file, the agent guides, the full CLI reference and every WISP are in one file: ${SITE}/llms-full.txt.
+On Android and iPhone the web app installs as an app. Each release since 1.6.0 also attaches the native Android app, an arm64 APK signed with Ghostly's upload key and listed in SHA256SUMS.txt (\`ghostly-<version>-android-arm64.apk\`, ${REPO}/releases/latest); it is not yet the whole Desktop app (${REPO}/blob/dev/docs/ANDROID.md). Every wire contract is an open draft called a WISP (Wire Interoperability Specification Proposal); each says what is implemented. A page under ${SITE}/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. This file, the agent guides, the full CLI reference and every WISP are in one file: ${SITE}/llms-full.txt.
 
 ${AGENTS_INTRO}
 
@@ -79,7 +79,8 @@ ${AGENTS_INTRO}
 ${[
   line("Ghostly", `${SITE}/`, "what the app does: chats, wallets, identity proofs, files, calls and groups"),
   line("Web app", "https://app.ghostly.tools", "Ghostly in the browser, nothing to install"),
-  line("Download", `${REPO}/releases/latest`, "macOS, Windows, Linux and the browser extension"),
+  line("Download", `${REPO}/releases/latest`, "macOS, Windows, Linux, the browser extension and the Android APK"),
+  line("Android", `${SITE}/android`, "installing the Android APK, its updates, and the signing certificate's SHA-256 fingerprint to check it"),
   line("Roadmap", `${SITE}/roadmap`, "what comes next, in dependency order, with no dates"),
 ].join("\n")}
 

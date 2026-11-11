@@ -98,7 +98,8 @@
       "older": "Atualize o Ghostly neste dispositivo primeiro.",
       "password": "Senha errada.",
       "payment": "Um pagamento ainda está em andamento. Tente de novo em instantes.",
-      "refused": "{{device}} não deixa este dispositivo assumir o perfil.",
+      "refused": "{{device}} não deixou este dispositivo assumir o perfil.",
+      "refusedNext": "Se senhas erradas foram digitadas aqui, desbloqueie {{device}} e deixe este dispositivo tentar de novo.",
       "room": "Não há espaço suficiente neste dispositivo.",
       "settle": "Não foi possível verificar qual dispositivo está ativo. Confira sua conexão e tente de novo.",
       "stalled": "A mudança parou",
@@ -347,6 +348,15 @@
     "reenroll": {
       "hint": "Adicione este dispositivo de novo a partir do dispositivo que você usa agora.",
       "title": "Seus dispositivos mudaram enquanto este estava desligado"
+    },
+    "removeHere": {
+      "button": "Remover este perfil daqui",
+      "confirm": "Digite {{name}} para confirmar",
+      "first": "Um perfil vazio fica no lugar dele aqui.",
+      "go": "Remover",
+      "hint": "As conversas, chaves e carteiras dele saem deste dispositivo. Seus outros dispositivos continuam com o perfil.",
+      "removing": "Removendo…",
+      "title": "Remover {{name}} deste dispositivo?"
     },
     "title": {
       "moving": "Quase lá",

@@ -1,5 +1,5 @@
 import {
-  turnInstance, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
+  turnInstance, DEVICE_INVITE_LIFETIME_S, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollDoneFrame, enrollGrantFrame, enrollHelloFrame, enrollProofFrame, firstDeviceSetSecret, fromBase64Url,
   nextTurnPosition, publicKeyFromZ32, randomBytes, readDeviceInvite, readEnrollGrant, readEnrollHello, signTurnPacket, toBase64Url, turnKeys, turnName, verifyEnrollProof,
   type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollNetwork, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
@@ -154,8 +154,11 @@ interface Shared {
   /** Seconds and milliseconds since 1970: the code's expiry is in seconds. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** Runs after this device's record was written with the device set: the network settings go in, and the links start. */
-  afterWrite?: () => Promise<void>;
+  /**
+   * Runs after this device's record was written with the device set: the network settings go in, and the links start.
+   * `added`: on the inviter, the signing key (base64url) of the device it just added.
+   */
+  afterWrite?: (added?: string) => Promise<void>;
   /** A view changed. */
   onChange?: (view: EnrollView) => void;
   /** A stored seed in place of a non-extractable key (tests). */
@@ -463,7 +466,7 @@ export class EnrollInviter extends Enrollment {
     }
     this.crash("inviter:after-put");
     const published = await confirmPublished(keeper, this.sleep);
-    await this.options.afterWrite?.().catch(() => {});
+    await this.options.afterWrite?.(toBase64Url(joiner.key)).catch(() => {});
     await this.end({ role: "inviter", step: "done", device: joiner.name, published });
   }
 }
@@ -555,8 +558,11 @@ export class EnrollJoiner extends Enrollment {
       if (!verifyEnrollProof(frame, this.hash, inviterKey, this.key.publicKey)) { await this.fail("proof", "failed"); return; }
       this.proven = true;
       // The person confirms on the other device within the code's ten minutes; no grant by then (and a little after),
-      // and the other device is gone: nothing was written here.
-      const grantMs = this.options.timing?.grantMs ?? Math.max(0, this.invite.invite.expires * 1000 - this.now()) + ENROLL_DONE_TIMEOUT_MS;
+      // and the other device is gone: nothing was written here. The code's expiry is read on this device's clock, which
+      // may be days behind the other's (a phone with a wrong date takes the code as good for that long): the wait is
+      // never longer than a code's whole lifetime, and a timer past 2^31 - 1 ms (some 25 days) would run at once.
+      const left = Math.min(Math.max(0, this.invite.invite.expires * 1000 - this.now()), DEVICE_INVITE_LIFETIME_S * 1000);
+      const grantMs = this.options.timing?.grantMs ?? left + ENROLL_DONE_TIMEOUT_MS;
       this.timer(grantMs, () => { if (!this.committed && this.view.step === "confirm") void this.fail("unanswered", "failed"); });
       this.show({ role: "joiner", step: "confirm", digits: enrollDigits(this.hash, inviterKey, this.key.publicKey) });
       return;

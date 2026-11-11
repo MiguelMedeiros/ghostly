@@ -5,6 +5,7 @@ import { IdentityActivity } from "../../components/identities/IdentityActivity";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { saveSession } from "../../lib/storage";
+import { LANGUAGES, lookup } from "../i18n/locales";
 
 // covers: proofs.public-activity, proofs.public-activity.graph, proofs.public-profile.setting
 
@@ -137,6 +138,15 @@ describe("a contact's identity: profile, people you know, posts", () => {
     await act(async () => {});
     expect(engine.callsTo("loadPublicPosts").length).toBe(asked);
     expect(screen.queryByTestId("contact-activity-posts")).toBeNull();
+  });
+
+  it.each(LANGUAGES)("with public profiles off, the note names the Settings section the menu shows (%s)", async (language) => {
+    const { engine, unmount } = renderApp(<IdentityActivity provider="pubky" subject={KEY} profile={profile()} links={links} />, { language });
+    act(() => engine.update({ settings: { ...engine.state.settings, publicProfiles: false } }));
+    const note = await screen.findByTestId("contact-activity-off");
+    expect(note).toHaveTextContent(lookup(language, "settings.title")!);
+    expect(note).toHaveTextContent(lookup(language, "settings.security")!);
+    unmount();
   });
 
   it("a network without posts shows nothing", () => {

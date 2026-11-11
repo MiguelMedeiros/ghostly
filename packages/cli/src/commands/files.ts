@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
@@ -46,21 +47,24 @@ export const commands: Record<string, Command> = {
       if (options.dir === "") throw new CliError("usage", "--dir needs a folder");
       if (options.dir !== undefined && options.path !== undefined) throw new CliError("usage", "--path names the file: not with --dir");
       if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
+      // A separator at its end names a folder: kept for the daemon to refuse, as resolving the path drops it.
+      const path = here(options.path), folder = typeof options.path === "string" && (options.path.endsWith("/") || options.path.endsWith(sep)) && !path!.endsWith(sep);
       return {
-        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
+        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: folder ? `${path}${sep}` : path, force: options.force === true,
         wait: options.wait === true ? true : undefined, timeout: timeout(options, LONG_WAIT_SECONDS),
       };
     },
   },
   "file send": {
-    method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>] [--wait none|sent] [--timeout s]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
+    method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>] [--force] [--wait none|sent] [--timeout s]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
     args: ["chat", "path"],
     options: {
       name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
       wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat (default: none with a daemon, sent without; a group: none)" },
       timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
+      force: { type: "boolean", description: "Send even if --name looks like a seed, a key or ecash" },
     },
-    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply, wait: options.wait, timeout: timeout(options, LONG_WAIT_SECONDS) }),
+    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply, force: options.force === true, wait: options.wait, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",

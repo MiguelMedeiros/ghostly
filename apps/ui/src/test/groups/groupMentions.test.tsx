@@ -112,6 +112,14 @@ describe("the composer's @", () => {
     expect(screen.queryByTestId("mention-picker")).not.toBeInTheDocument();
   });
 
+  it("reads a member's key end left to right in every language: in Arabic the \"…\" stays before it", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@b");
+    expect(within(options()[0]).getByText("…" + BOB.slice(-6))).toHaveAttribute("dir", "ltr");
+    // The name in its own: a Latin one cut in Arabic keeps its start.
+    expect(within(options()[0]).getByText("Bob")).toHaveAttribute("dir", "auto");
+  });
+
   it("tells two members of one name apart by key", async () => {
     const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }));
     await user.type(composer(), "@bob");
@@ -224,6 +232,17 @@ describe("an unread mention in the chat list", () => {
     expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
     expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument();
     again.unmount();
+  });
+
+  it("goes at once when an edit takes the mention out: the engine's view moves the group's mark back", async () => {
+    const t = 1_700_000_000_000;
+    markGroupRead("group-1", t - 10);
+    list([active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t })]);
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    // The edited message is still the newest, unread; the mention before it was read.
+    act(() => { fakeEngine.update({ groups: [active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t - 20 })] }); });
+    await waitFor(() => expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument());
+    expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
   });
 
   it("goes grey in a muted group only when mentions are kept quiet too", () => {

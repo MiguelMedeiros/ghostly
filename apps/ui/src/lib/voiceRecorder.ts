@@ -51,6 +51,8 @@ export class VoiceRecorder {
   onLevel?: (level: number) => void;
   /** The recording reached the longest a voice message may be; it is paused until the caller decides. */
   onLimit?: () => void;
+  /** The microphone went (unplugged, taken away) and the recorder stopped by itself: what was recorded is kept, to send or discard. */
+  onEnded?: () => void;
 
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
@@ -59,9 +61,15 @@ export class VoiceRecorder {
   private chunks: Blob[] = [];
   private readonly levels: number[] = [];
   private type: { recorder: string; file: string } | null = null;
+  /** On the monotonic clock (`performance.now()`): the device's clock being set mid-recording changes nothing. */
   private startedAt = 0;
   private before = 0;
   private closed = false;
+  /** Running now (not paused): the time since `startedAt` counts. */
+  private running = false;
+  /** Stop or cancel asked the recorder to stop: its `stop` is not the microphone going. */
+  private stopping = false;
+  private endedAlone = false;
 
   /** Asks for the microphone and starts recording. Rejects with a `MicrophoneError`. */
   async start(): Promise<void> {
@@ -80,6 +88,16 @@ export class VoiceRecorder {
     try {
       const recorder = new MediaRecorder(stream, { mimeType: this.type.recorder, audioBitsPerSecond: VOICE_LIMITS.audioBitsPerSecond });
       recorder.ondataavailable = (event) => { if (event.data.size > 0) this.chunks.push(event.data); };
+      // Every track ended (the microphone unplugged, or taken by the system): the recorder stops by itself, with its
+      // last data. The time recorded until then is kept, and the recording waits to be sent or discarded.
+      recorder.addEventListener("stop", () => {
+        if (this.stopping) return;
+        if (this.running) this.before += performance.now() - this.startedAt;
+        this.running = false;
+        this.endedAlone = true;
+        this.release();
+        this.onEnded?.();
+      });
       // A timeslice keeps what is recorded so far playable for the preview.
       recorder.start(1000);
       this.recorder = recorder;
@@ -87,12 +105,18 @@ export class VoiceRecorder {
       this.release();
       throw new MicrophoneError("unsupported", error instanceof Error ? error.message : MICROPHONE_MESSAGES.unsupported);
     }
-    this.startedAt = Date.now();
+    this.startedAt = performance.now();
+    this.running = true;
     this.startMeter(stream);
   }
 
   get recording(): boolean {
     return this.recorder?.state === "recording";
+  }
+
+  /** The microphone ended under the recording (see `onEnded`): it can be sent or discarded, not resumed. */
+  get ended(): boolean {
+    return this.endedAlone;
   }
 
   get paused(): boolean {
@@ -101,7 +125,7 @@ export class VoiceRecorder {
 
   /** Milliseconds recorded, pauses left out. */
   elapsed(): number {
-    return this.before + (this.recording ? Date.now() - this.startedAt : 0);
+    return this.before + (this.recording ? performance.now() - this.startedAt : 0);
   }
 
   /** The waveform so far, for the preview of a paused recording. */
@@ -116,13 +140,15 @@ export class VoiceRecorder {
 
   pause(): void {
     if (!this.recording) return;
-    this.before += Date.now() - this.startedAt;
+    this.before += performance.now() - this.startedAt;
+    this.running = false;
     this.recorder!.pause();
   }
 
   resume(): void {
     if (!this.paused || this.before >= VOICE_LIMITS.maxDurationMs) return;
-    this.startedAt = Date.now();
+    this.startedAt = performance.now();
+    this.running = true;
     this.recorder!.resume();
   }
 
@@ -146,6 +172,7 @@ export class VoiceRecorder {
     const recorder = this.recorder;
     const duration = Math.min(this.elapsed(), VOICE_LIMITS.maxDurationMs);
     if (recorder && recorder.state !== "inactive") {
+      this.stopping = true;
       await new Promise<void>((resolve) => {
         recorder.addEventListener("stop", () => resolve(), { once: true });
         recorder.stop();
@@ -166,6 +193,7 @@ export class VoiceRecorder {
     const recorder = this.recorder;
     if (recorder && recorder.state !== "inactive") {
       recorder.ondataavailable = null;
+      this.stopping = true;
       try { recorder.stop(); } catch { /* already stopping */ }
     }
     this.chunks = [];

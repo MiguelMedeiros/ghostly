@@ -202,10 +202,11 @@ export function useTabTrap(ref: RefObject<HTMLElement | null>, on = true) {
 
 /**
  * Tab and Shift+Tab go round `root`'s own controls, and a Tab from the page's body goes into it. Focus in a layer of
- * its own (a select's list, a menu drawn over the page) keeps its Tab.
+ * its own (a select's list, a menu drawn over the page) keeps its Tab. By the key's place too: the Linux Desktop's
+ * WebKitGTK names a real Shift+Tab (GTK's ISO_Left_Tab) "Unidentified", with the code "Tab".
  */
 export function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
-  if (e.key !== "Tab" || e.defaultPrevented || !root) return;
+  if ((e.key !== "Tab" && e.code !== "Tab") || e.defaultPrevented || !root) return;
   const active = document.activeElement;
   const inside = !!active && root.contains(active);
   if (!inside && active && active !== document.body) return;

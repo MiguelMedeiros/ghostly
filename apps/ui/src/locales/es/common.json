@@ -26,12 +26,14 @@
     "title": "Te espera"
   },
   "notCopied": "No se copió",
+  "quotedName": "«{{name}}»",
   "save": "Guardar",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
     "kb": "{{n}} KB",
-    "mb": "{{n}} MB"
+    "mb": "{{n}} MB",
+    "tb": "{{n}} TB"
   },
   "success": "Éxito",
   "unnamedContact": "Contacto · {{key}}",

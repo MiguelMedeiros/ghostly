@@ -3,9 +3,12 @@
  * on an origin of its own, full screen over the app, and every request it makes sent over the contact's data link
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
-import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
 import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
-import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
+import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
+import { appInput } from "../../../ui/src/lib/apps/open";
+
+const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
@@ -80,11 +83,34 @@ export class CookieJar {
 }
 
 /**
+ * What one opened app (its jar) may have waiting in this page at once, requests and their bodies' bytes: past either, a
+ * request is refused at once, so the app cannot make the page that runs the peer hold unbounded memory.
+ */
+export const MAX_PENDING_REQUESTS = 32;
+export const MAX_PENDING_BODY_BYTES = 32 * 1024 * 1024;
+const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number }>();
+
+/** Takes room for one request of the app's: how to give it back, or null with none left. */
+function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
+  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0 };
+  if (pending.count >= MAX_PENDING_REQUESTS || pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
+  pending.count++;
+  pending.bytes += bytes;
+  pendingOf.set(jar, pending);
+  return () => { pending.count--; pending.bytes -= bytes; };
+}
+
+/**
  * Sends one request from the app over the link and streams the answer back on its port. `view`: aborted once the page
  * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
- * too, rather than running on their machine and holding one of the link's places.
+ * too, rather than running on their machine and holding one of the link's places. Every answer carries Ghostly's viewer
+ * policy after the contact's own (`viewerServicePolicy`, as Desktop, the extension and `ghostly service open` add it):
+ * the app talks to nothing but its own origin, and nothing over plain http. Its pages run the clipboard guard first
+ * (`guardViewerAnswer`, `CLIPBOARD_GUARD_SCRIPT`): it writes the clipboard only in the person's own tap in it.
+ * `relayOnly`: Hide my IP from contacts was on when the app opened, and the policy is `VIEWER_SERVICE_CSP_RELAY_ONLY`:
+ * the app loads nothing but its own origin. Its pages run the WebRTC guard first too.
  */
-export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal): Promise<void> {
+export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
   const request = readRequest(data);
   if (!request) { port.close(); return; }
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
@@ -100,6 +126,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
+  const release = holdRoom(jar, request.body?.byteLength ?? 0);
+  if (!release) {
+    post({ type: "error", status: 503, text: words.failed });
+    port.close();
+    return;
+  }
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
   const pageGone = () => stop.abort();
@@ -122,16 +154,24 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       post({ type: "error", status: answer.status, text: hostError });
       return;
     }
-    const out: [string, string][] = [];
+    let out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
       if (name.toLowerCase() === "set-cookie") jar.take(value);
       else out.push([name, value]);
     }
+    // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
+    // pages runs the guards first.
+    const guards: PageGuard[] = [CLIPBOARD_GUARD, ...(relayOnly ? [WEBRTC_GUARD] : [])];
+    const guarded = await guardViewerAnswer(out, answer.body, request.destination ?? null, guards);
+    out = guarded.headers;
+    const body = guarded.body;
+    // A browser enforces every policy it is sent: the contact's own cannot widen this one.
+    out.push(["content-security-policy", viewerServicePolicy(relayOnly)]);
     headed = true;
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
-    for await (const chunk of answer.body) {
+    for await (const chunk of body) {
       if (stop.signal.aborted) break;
       const bytes = chunk.slice();
       post({ type: "chunk", bytes }, [bytes.buffer]);
@@ -142,11 +182,18 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
+    release();
     clearTimeout(late);
     view?.removeEventListener("abort", pageGone);
     port.close();
   }
 }
+
+/**
+ * How often an open view looks whether the person is using the app (`navigator.userActivation`): well within the time
+ * a tap or a key keeps the page active (5 s in Chromium, Firefox and WebKit), so none goes unseen.
+ */
+const INPUT_LOOK_MS = 1_000;
 
 /** What `openServiceView` puts over the app, so a test (or a second open, or the lock) can find and close it. */
 export const VIEW_ID = SERVICE_VIEW_ID;
@@ -190,12 +237,15 @@ function watchDeadEntries(): void {
 
 /**
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
- * time: opening another closes the one before.
+ * time: opening another closes the one before. `relayOnly`: Hide my IP from contacts is on (`serve`).
  */
-export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence }): Promise<void> {
+export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
+  // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
+  const locked = serviceWindowsClosedSince();
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
+  if (locked()) throw new Error(SERVICE_LOCKED);
   // Drawn over everything, a call's windows too: not over a call on screen (one that comes later closes it).
   if (callWindowOn()) throw new Error(options.words.callOn);
   const jar = new CookieJar();
@@ -291,15 +341,21 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     const { signal } = bridge;
     const channel = new MessageChannel();
     ports.add(channel.port1);
-    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal); };
-    frame.contentWindow!.postMessage({ type: BRIDGE_PORT }, origin, [channel.port2]);
+    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal, options.relayOnly === true); };
+    // With Hide my IP on, the bridge runs the WebRTC guard too: the app's frame, on its origin, reaches its window.
+    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   let unwatch = () => {};
+  // The person's taps and keys in the app go to its frame, never to this page, whose lock screen would lock them out
+  // mid-use and close the app with what they typed. The browser's user activation does reach it: real input in a frame
+  // activates every frame above it, and no script can, so the contact's page cannot keep the lock away by itself.
+  const using = setInterval(() => { if (navigator.userActivation?.isActive) appInput(); }, INPUT_LOOK_MS);
   const end = () => {
+    clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);

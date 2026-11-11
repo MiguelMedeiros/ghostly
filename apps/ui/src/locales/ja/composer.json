@@ -1,7 +1,9 @@
 {
   "attach": "添付",
   "camera": "カメラ",
+  "cameraBlocked": "カメラがブロックされています。Android の設定で Ghostly にカメラを許可してください。",
   "cameraFailed": "カメラを起動できませんでした。",
+  "cameraRefused": "カメラを使用できません。もう一度「カメラ」をタップして許可してください。",
   "caption": "キャプションを追加",
   "captionTooLong": "このキャプションは {{bytes}} バイト（UTF-8）です。DHT は最大 {{max}} バイトまでです。",
   "category": {
@@ -15,10 +17,12 @@
     "recent": "最近使用",
     "symbols": "記号"
   },
+  "chooseFiles": "ファイルを選ぶ",
   "closeCamera": "カメラを閉じる",
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
   "document": "書類",
   "dropFiles": "ドロップして送信",
+  "dropReading": "ドロップした内容を読み込んでいます…",
   "emoji": "絵文字",
   "emojiCategories": "絵文字のカテゴリ",
   "emojiFound": "{{count}} 件の絵文字",
@@ -73,6 +77,7 @@
   "services": "共有サービス",
   "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
   "servicesShared": "このチャットで {{count}} 件共有中",
+  "shareWaitsForEdit": "共有した内容は、この編集が終わると入ります。",
   "sharedTextFile": "共有されたテキスト",
   "skinTone": "肌の色",
   "takePhoto": "写真を撮る",

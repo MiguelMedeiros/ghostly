@@ -52,6 +52,49 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed / Wallet", "- x").problems[0]).toMatch(/"Wallets", not "Wallet"/);
   });
 
+  it("refuses a heading the release notes do not use, naming the ones they do", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    for (const heading of ["Security", "For users", "Fixed", "For developers"]) expect(fragment(`${heading} / Chat`, "- x").problems, heading).toEqual([]);
+    // 1.8.0 put its wallet features under these two, after "For developers".
+    for (const old of ["Changed", "Added", "Fixes"]) {
+      expect(fragment(`${old} / Wallets`, "- x").problems, old).toEqual([
+        `${x}: "${old}" is not a heading of the release notes: write Security, For users, Fixed or For developers`,
+      ]);
+    }
+    expect(fragment("fixed / Chat", "- x").problems).toEqual([`${x}: the heading is written "Fixed", not "fixed"`]);
+    expect(fragment("FOR USERS", "- x").problems).toEqual([`${x}: the heading is written "For users", not "FOR USERS"`]);
+  });
+
+  it("refuses a section without the spaces around /, naming the right spelling", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    expect(fragment("For users/Chat", "- x").problems).toEqual([`${x}: "section" is written "For users / Chat", with a space on each side of /`]);
+    expect(fragment("Fixed / Chat", "- x").problems).toEqual([`${x}: "section" is written "Fixed / Chat", with a space on each side of /`]);
+    expect(fragment("Fixed /Chat", "- x").problems).toEqual([`${x}: "section" is written "Fixed / Chat", with a space on each side of /`]);
+  });
+
+  it("refuses a group that differs from the changelog's only by case", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    expect(fragment("Fixed / chat", "- x").problems).toEqual([`${x}: the group is written "Chat", not "chat"`]);
+    expect(fragment("Fixed / Cli", "- x").problems).toEqual([`${x}: the group is written "CLI", not "Cli"`]);
+    expect(fragment("Fixed / wallet", "- x").problems).toEqual([`${x}: the group is written "Wallets", not "wallet"`]);
+    expect(fragment("Fixed / newthing", "- x").problems).toEqual([`${x}: the group is written "Newthing", not "newthing"`]);
+    expect(fragment("Fixed / Linux Desktop", "- x").problems).toEqual([]);
+    expect(fragment("Fixed / A new group", "- x").problems).toEqual([]);
+  });
+
+  it("refuses a line of the text that would be a heading or the Unreleased note", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    const line = (text: string) => `${x}: the line "${text}" would be a heading or a note in the changelog: write it as a list item ("- ...")`;
+    expect(fragment("Fixed", "- First.\n<!-- note -->\n- Second.").problems).toEqual([line("<!-- note -->")]);
+    expect(fragment("Fixed", "- First.\n\n## 9.9.9\n- second").problems).toEqual([line("## 9.9.9")]);
+    expect(fragment("Fixed", "- First.\n  ### Inside").problems).toEqual([line("  ### Inside")]);
+    expect(fragment("Fixed", "- First, with #1 and <!-- inline -->.\n  - A sub-item.").problems).toEqual([]);
+  });
+
+  it("passes every entry waiting in docs/changelog/unreleased/", () => {
+    expect(readFragments(root).flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+  });
+
   it("adds items at the end of their group, of their heading, or in a new one", () => {
     const out = assembleChangelog(CHANGELOG, [
       fragment("For users / Chat", "- Forwards."),
@@ -128,6 +171,23 @@ Ghostly next.
     expect(held("10.12")).toMatchObject({ release: "10.12", problems: [] });
     expect(fragment("Fixed", "- A.").release).toBeUndefined();
     for (const wrong of ["1.2.0", "1", "next", '"1.2"', "v1.2", ""]) expect(held(wrong).problems, wrong).toEqual([expect.stringMatching(/"release"/)]);
+  });
+
+  it("refuses a release that is already out, which would hold nothing", () => {
+    const at = (release: string, version: string) =>
+      parseFragment("docs/changelog/unreleased/x.md", `---\nsection: Fixed\nrelease: ${release}\n---\n- A.\n`, version);
+    const out = (release: string, version: string, next: string) =>
+      `release: ${release}" is out (package.json is ${version}): drop the line, or name the release that ships it, such as ${next}`;
+    expect(at("1.10", "1.10.2").problems).toEqual([expect.stringContaining(out("1.10", "1.10.2", "1.11"))]);
+    expect(at("1.9", "1.10.2").problems).toEqual([expect.stringContaining(out("1.9", "1.10.2", "1.11"))]);
+    expect(at("0.1", "1.10.2").problems).toEqual([expect.stringContaining(out("0.1", "1.10.2", "1.11"))]);
+    expect(at("1.10", "1.10.0").problems).toEqual([expect.stringContaining(out("1.10", "1.10.0", "1.11"))]);
+    // The next minor or major is still to come, and a patch from here holds it.
+    expect(at("1.11", "1.10.2")).toMatchObject({ release: "1.11", problems: [] });
+    expect(at("2.0", "1.10.2")).toMatchObject({ release: "2.0", problems: [] });
+    expect(heldFor("1.11", "1.10.3")).toBe(true);
+    // Without the repository's version (no package.json) there is nothing to compare with.
+    expect(parseFragment("docs/changelog/unreleased/x.md", "---\nsection: Fixed\nrelease: 1.1\n---\n- A.\n").problems).toEqual([]);
   });
 
   it("refuses a front matter key it does not know, or one given twice", () => {

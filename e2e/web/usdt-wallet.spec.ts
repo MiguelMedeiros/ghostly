@@ -47,10 +47,11 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  await bob.page.getByTestId('payment-amount').fill('1.25');
  await bob.page.getByTestId('payment-request').click();
  const request=chat(alice).getByTestId('payment-bubble').filter({hasText:'Requests'});
- await expect(request).toContainText('1.25 TEST-USDT');
+ // A USDT request asks a little more than typed (under a thousandth): its own amount.
+ await expect(request).toContainText(/1\.250\d* TEST-USDT/);
  await request.getByTestId('payment-pay').click();
  const review=request.getByTestId('payment-review');
- await expect(review).toContainText('1.25 TEST-USDT');
+ await expect(review).toContainText(/1\.250\d* TEST-USDT/);
  await review.getByRole('button',{name:'Approve payment'}).click();
  await expect(review.getByTestId('review-status')).toHaveText('confirmed');
  await expect(request.getByTestId('payment-state')).toHaveText('Paid');
@@ -58,7 +59,7 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  await expect(review.getByRole('button',{name:'Approve payment'})).toHaveCount(0);
  await alice.page.screenshot({path:testInfo.outputPath('usdt-payer.png'),fullPage:true});
  await openWallet(bob,'usdt-testnet');
- await expect(panel(bob).getByTestId('usdt-balance')).toHaveText('1.25 TEST-USDT',{timeout:30000});
+ await expect(panel(bob).getByTestId('usdt-balance')).toHaveText(/^1\.250\d* TEST-USDT$/,{timeout:30000});
  await bob.page.screenshot({path:testInfo.outputPath('usdt-recipient.png'),fullPage:true});
 
  // Send, with no request: Bob's app asks Alice's for an address, then the payment waits for his approval.
@@ -69,12 +70,12 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  await bob.page.getByTestId('payment-amount').fill('0.5');
  await bob.page.getByTestId('payment-send').click();
  const direct=bob.page.getByTestId('payment-composer').getByTestId('payment-review');
- await expect(direct).toContainText('0.5 TEST-USDT',{timeout:60000});
+ await expect(direct).toContainText(/0\.500\d* TEST-USDT/,{timeout:60000});
  await direct.getByRole('button',{name:'Approve payment'}).click();
  // Gone out: the sheet closes, back to the chat.
  await expect(bob.page.getByTestId('payment-composer')).toHaveCount(0,{timeout:60000});
  await openWallet(alice,'usdt-testnet');
- await expect(panel(alice).getByTestId('usdt-balance')).toHaveText('9.25 TEST-USDT',{timeout:30000});
+ await expect(panel(alice).getByTestId('usdt-balance')).toHaveText(/^9\.(249\d*|25(0\d*)?) TEST-USDT$/,{timeout:30000});
 });
 
 test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced motion',{tag:['@feature:wallet.deck','@feature:wallet.instances.create']},async({peer},testInfo)=>{

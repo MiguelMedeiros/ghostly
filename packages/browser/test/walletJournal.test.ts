@@ -71,6 +71,16 @@ describe("amounts and mint addresses", () => {
     expect(mint.createMintQuoteBolt11).not.toHaveBeenCalled();
   });
 
+  // The app reads the limit back out of the English line (errorText.ts) to say it in its language. A browser in
+  // Egyptian Arabic writes its numbers "١٬٠٠٠٬٠٠٠" by itself, which no rule read: the line showed in English.
+  it("says the limit in the English line the app translates, whatever the browser's own numbers", () => {
+    const own = Number.prototype.toLocaleString;
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return own.call(this, locales ?? "ar-EG", options);
+    });
+    expect(() => assertAmount(1_000_001)).toThrow(/^Amounts above 1,000,000 sats are not supported$/);
+  });
+
   it("takes only https mints, or plain http on this very machine, and drops the trailing slash", () => {
     expect(normalizeMintUrl("  https://mint.example/Bitcoin//  ")).toBe("https://mint.example/Bitcoin");
     expect(normalizeMintUrl("http://localhost:3338/")).toBe("http://localhost:3338");
@@ -469,7 +479,7 @@ describe("Lightning out", () => {
   });
 
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
@@ -514,8 +524,8 @@ describe("Lightning out", () => {
   describe("a melt whose answer was lost", () => {
     /** A melt request's longest life plus the margin for a mint slow to act on it: past it, none can reach the mint. */
     const OVERDUE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
-    // The wallet's clock moves with the polls: a melt is only given up once its request can no longer land.
-    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    // The wallet's clocks (wall and monotonic) move with the polls: a melt is only given up once its request can no longer land.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }); });
 
     it("stays pending while its request may still reach the mint, and is paid when the mint acts on it late", async () => {
       mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
@@ -557,6 +567,47 @@ describe("Lightning out", () => {
       expect(rows("melts")).toEqual([]);
       expect(balance()).toBe(108);
       expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+      await wallet.stop();
+    });
+  });
+
+  describe("a payment the mint holds pending for hours", () => {
+    const HOUR = 3_600_000;
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    /** Payments written down an hour ago, each for another invoice, that the mint keeps pending. */
+    const held = (n: number) => seed("melts", Array.from({ length: n }, (_, i) => ({ quote: `held${i}`, mint: MINT, request: `lnbc-held-${i}`, amount: 1, secrets: [], outlay: 1, outputs: [], createdAt: Date.now() - HOUR }) satisfies PendingMelt));
+    const asked = () => mint.checkMeltQuoteBolt11.mock.calls.length;
+
+    it("is asked about less and less often, each at its own pace, and still settles once the mint answers", async () => {
+      held(10);
+      mint.checkMeltQuoteBolt11.mockImplementation(async (quote: string) => meltQuote("PENDING", { quote }));
+      const { wallet, events } = setup();
+      wallet.start();
+      // At once on start, as an explicit look would.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(asked()).toBe(10);
+      await vi.advanceTimersByTimeAsync(3 * HOUR);
+      // 10 every 30 s would be 3,600 in these 3 hours.
+      expect(asked()).toBeLessThanOrEqual(10 * 12);
+      const before = asked();
+      await vi.advanceTimersByTimeAsync(HOUR);
+      expect(asked() - before, "at most every half hour, 3 hours on").toBeLessThanOrEqual(10 * 2);
+
+      // A new payment left pending is asked about at once; the others keep their pace.
+      mint.checkMeltQuoteBolt11.mockImplementation(async (quote: string) => meltQuote(quote === "m1" ? "UNPAID" : "PENDING", { quote }));
+      const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
+      mint.checkMeltQuoteBolt11.mockImplementation(async (quote: string) => meltQuote("PENDING", { quote }));
+      mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
+      mint.checkMeltQuoteBolt11.mockClear();
+      expect(await wallet.payQuote(quote, at)).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mint.checkMeltQuoteBolt11.mock.calls.map(([q]) => q).filter((q) => q !== "m1"), "no other payment asked about with it").toEqual([]);
+
+      // The mint settles one of the old ones: it is booked within the half hour.
+      mint.checkMeltQuoteBolt11.mockImplementation(async (quote: string) => meltQuote(quote === "held3" ? "PAID" : "PENDING", { quote }));
+      await vi.advanceTimersByTimeAsync(HOUR / 2);
+      expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "held3" }), true);
+      expect(rows<PendingMelt>("melts").map((m) => m.quote)).not.toContain("held3");
       await wallet.stop();
     });
   });

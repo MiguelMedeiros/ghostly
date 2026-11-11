@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
-import { copyText } from "../../lib/shareLink";
+import { useSameValue } from "../../hooks/useSameValue";
+import { copySecret } from "../../lib/shareLink";
 import { cardQuiet } from "./EntityCardFrame";
 
 /** How long Copy says Copied. */
@@ -21,7 +22,7 @@ function useCopyLink(url: string) {
   const copy = async () => {
     clearTimeout(timer.current); setState("");
     try {
-      await copyText(url);
+      await copySecret(url);
       setState("copied");
       timer.current = setTimeout(() => setState(""), COPIED_MS);
     } catch { setState("failed"); }
@@ -50,6 +51,8 @@ export function LinkQrDialog({ title, url, qr, onClose }: { title: string; url: 
   useDialogFocus(dialog, onClose);
   const backdrop = useBackdropDismiss(onClose);
   const { copied, failed, copy } = useCopyLink(url);
+  // Its segments come as a new array at every draw of the chat behind it: the same ones are not encoded again.
+  const encoded = useSameValue(qr ?? url);
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:p-0 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} data-testid="link-qr"
@@ -58,7 +61,7 @@ export function LinkQrDialog({ title, url, qr, onClose }: { title: string; url: 
         <p id={`${id}-hint`} className="m-0 mt-1 text-xs text-text-muted">{t("chat.entity.qrHint")}</p>
         {/* It gives up some of its size on a short screen before the sheet has to scroll. */}
         <div data-testid="link-qr-code" className="mx-auto mt-4 w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:w-[clamp(140px,34dvh,232px)]">
-          <QRCodeSVG value={qr ?? url} size={232} marginSize={1} title={t("chat.entity.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
+          <QRCodeSVG value={encoded} size={232} marginSize={1} title={t("chat.entity.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
         </div>
         <input readOnly value={url} dir="ltr" aria-label={t("chat.entity.link")} data-testid="link-qr-url" onFocus={e => e.currentTarget.select()}
           className="mt-4 w-full min-w-0 rounded-lg bg-input-bg px-3 py-2.5 font-mono text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent" />

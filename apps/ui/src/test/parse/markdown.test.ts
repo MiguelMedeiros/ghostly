@@ -216,7 +216,7 @@ describe("[text](url) links", () => {
     // Dots drawn like one at the baseline or a little above, and letters and digits that look like one.
     for (const dot of [
       "\u02d9", "\u0660", "\u06f0", "\u0702", "\u0f0b", "\u1427", "\u16eb", "\u2022", "\u2219", "\u22c5", "\u2e31", "\u2e33",
-      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}",
+      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}", "\u{1d16d}", "\u2981", "\u0323",
     ]) {
       expect(labelMisleads(`paypal${dot}com`, "https://evil.example/login"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(true);
       expect(labelMisleads(`ghostly${dot}tools`, "https://ghostly.tools"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(false);
@@ -233,6 +233,23 @@ describe("[text](url) links", () => {
 
   it("shows the address when a character that draws as nothing splits the text's host", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
+  });
+
+  it("shows the address when formatting splits the text's host, as the bubble joins it again", () => {
+    for (const label of [
+      "paypal.**com**", "paypal._com_", "paypal.*com*", "paypal.__com__", "paypal.~~com~~", "paypal.||com||",
+      "**pay**pal.com", "paypal͏.**com**", "paypal.**c­om**", "pay​pal._com_",
+    ]) {
+      expect(link(`[${label}](https://evil.example/login)`), label).toMatchObject({ data: { showUrl: true } });
+      expect(plainText(`[${label}](https://evil.example/login)`), label).toBe("https://evil.example/login");
+    }
+    expect(link("[ghostly.**tools**](https://ghostly.tools/docs)")).toMatchObject({ data: { showUrl: false } });
+  });
+
+  it("shows the text when its bold or italic words are not a host", () => {
+    for (const label of ["**the plan**", "read _this_ first", "v1.**2** notes", "**Node**.js docs", "e.g. *this*", "the **docs**."]) {
+      expect(link(`[${label}](https://ghostly.tools/p)`), label).toMatchObject({ data: { showUrl: false } });
+    }
   });
 
   it("shows the text when its only hidden characters are an emoji's own", () => {

@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
-  type DiscoveryBudgetError, type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
+  BACKGROUND_REQUESTS_PER_MINUTE, DiscoveryBudgetError, HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
 /**
@@ -27,6 +27,86 @@ export interface MainlineOptions {
 
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
+
+/** Queries the node answers, a second: from each address (as libtorrent's default), and from all of them together. */
+const QUERY_LIMITS = { perAddress: 5, perAddressBurst: 20, total: 50, totalBurst: 200 };
+/** Addresses `DhtQueryLimit` remembers: forged source addresses must not grow it without end. */
+const ADDRESSES_KEPT = 4_096;
+/** Mutable items others put on the node: as many as bittorrent-dht keeps, each for the two hours BEP44 suggests. */
+const VALUES_KEPT = { max: 1_000, maxAge: 2 * 60 * 60_000 };
+
+/**
+ * The queries a DHT node answers, as token buckets: a burst then a rate per source address, and a total for all. UDP
+ * has no handshake, so a query's address can be someone else's: answered without a limit, a stranger who parked a
+ * 1000-byte item on the node had it send ~12.5x the bytes of each forged `get` (5-6x with nothing parked) to that
+ * address, as fast as they came. Queries past either limit go unanswered, as an overloaded node's do. This node's own
+ * lookups (answers to its queries, not queries) are not counted.
+ */
+export class DhtQueryLimit {
+  private readonly addresses = new Map<string, { tokens: number; at: number }>();
+  private all: { tokens: number; at: number } | null = null;
+
+  constructor(private readonly limits: typeof QUERY_LIMITS = QUERY_LIMITS) {}
+
+  /** Addresses remembered (`ADDRESSES_KEPT` at most). */
+  get size(): number { return this.addresses.size; }
+
+  /** Whether a query from `host` is answered now (counted if so). */
+  take(host: string, now = Date.now()): boolean {
+    const refill = (bucket: { tokens: number; at: number } | null | undefined, rate: number, burst: number) => {
+      if (!bucket) return { tokens: burst, at: now };
+      // A clock that went back refills nothing, and counts from now on.
+      bucket.tokens = Math.min(burst, bucket.tokens + Math.max(0, now - bucket.at) * rate / 1_000);
+      bucket.at = now;
+      return bucket;
+    };
+    const all = this.all = refill(this.all, this.limits.total, this.limits.totalBurst);
+    const own = refill(this.addresses.get(host), this.limits.perAddress, this.limits.perAddressBurst);
+    // Kept in the order last asked: the address not heard from the longest goes first.
+    this.addresses.delete(host);
+    this.addresses.set(host, own);
+    if (this.addresses.size > ADDRESSES_KEPT) this.addresses.delete(this.addresses.keys().next().value!);
+    if (own.tokens < 1 || all.tokens < 1) return false;
+    own.tokens -= 1; all.tokens -= 1;
+    return true;
+  }
+}
+
+type Query = { q?: Buffer | string; a?: { k?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
+type QueryPeer = { address: string; port: number };
+/** The parts of bittorrent-dht's node (no API for them) through which it answers queries. */
+interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { error(peer: QueryPeer, query: Query, error: [number, string]): void } }
+
+/**
+ * A source on loopback is this machine, never a forged address from outside (a packet from the network claiming one is
+ * dropped before it gets here): each of its ports is a node of its own (a loopback testnet's nodes all share the host),
+ * counted apart. Any other address is counted whatever its port, as a forged source's port is the sender's choice.
+ */
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+const bytes = (value: unknown, length: number): boolean => Buffer.isBuffer(value) && value.length === length;
+
+/**
+ * What the node answers strangers: queries at `DhtQueryLimit`'s rate, ping, find_node and get/get_peers as BEP5/BEP44
+ * say, and puts of signed mutable items only, which is what Pkarr packets are (the testnet's nodes and the public DHT
+ * keep each other's that way). It refuses what the app has no use for and bittorrent-dht kept for anyone and served to
+ * anyone: immutable items and peers announced for torrents. A query whose hash, key, signature or salt is not the
+ * string BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error
+ * nobody caught, one per datagram. It is refused before bittorrent-dht reads it.
+ */
+function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
+  const node = dht as unknown as DhtInternals;
+  const answer = node._onquery.bind(dht);
+  node._onquery = (query, peer) => {
+    if (!query || !peer || !limit.take(LOOPBACK.test(peer.address) ? `${peer.address}:${peer.port}` : peer.address)) return;
+    const q = query.q?.toString(), a = query.a ?? {};
+    if (q === "announce_peer") return node._rpc.error(peer, query, [204, "announce_peer is not served here"]);
+    if (q === "put" && (!bytes(a.k, 32) || !bytes(a.sig, SIGNATURE))) return node._rpc.error(peer, query, [203, "only signed mutable items are stored here"]);
+    const malformed = ((q === "get" || q === "find_node") && !bytes(a.target, 20)) || (q === "get_peers" && !bytes(a.info_hash, 20))
+      || (q === "put" && a.salt !== undefined && !(Buffer.isBuffer(a.salt) && a.salt.length <= 64));
+    if (malformed) return node._rpc.error(peer, query, [203, "malformed query"]);
+    try { answer(query, peer); } catch { /* a query bittorrent-dht could not read goes unanswered */ }
+  };
+}
 
 /**
  * Every DHT node asked refused a put for holding a later-dated packet of the key (BEP44 error 302, "sequence number less
@@ -60,9 +140,11 @@ export class Mainline {
     if (this.node) return this.node;
     const { host } = this.options;
     const bootstrap = this.options.bootstrap === false ? false : this.options.bootstrap?.length ? this.options.bootstrap : undefined;
-    const dht = new DHT({ verify, ...(bootstrap !== undefined ? { bootstrap } : {}), ...(host ? { host } : {}) });
+    // `maxValues` reaches the `lru` that holds others' items, which takes `{ max, maxAge }` as well as a number.
+    const dht = new DHT({ verify, maxValues: VALUES_KEPT, ...(bootstrap !== undefined ? { bootstrap } : {}), ...(host ? { host } : {}) });
     // A node of the table that errors must not end the process.
     dht.on("error", () => {});
+    answerBounded(dht);
     this.node = { dht, listening: new Promise((resolve) => dht.listen(0, host, () => resolve())) };
     return this.node;
   }
@@ -125,10 +207,68 @@ export class Mainline {
 /** Keys a `RelaysAndDht` remembers as found nowhere (`missing`). */
 const MISSING_KEPT = 256;
 
+/** How long a key that asked for a background DHT read counts among those that share the budget (`DhtBackgroundBudget`). */
+const ASKERS_WINDOW_MS = 2 * 60_000;
+const MINUTE_MS = 60_000;
+
+/**
+ * Background reads that go to the DHT in the relays' place (every relay failing, or failing this read), within the share
+ * the relays would have given them (`BACKGROUND_REQUESTS_PER_MINUTE` a minute on each relay): a minute's lookups at
+ * most, and each key in its turn, no sooner than the keys asking share that minute (`n` keys at `perMinute` a minute:
+ * once every `n / perMinute` minutes). Without it, a daemon looked up every contact away on the DHT four times a minute
+ * for as long as the relays failed (200 lookups a minute at 50 contacts, 1,200 at 300), where with the relays up it
+ * made 26-54 relay reads a minute in all; each lookup on the real DHT is dozens of UDP queries.
+ * Reads someone waits on (not `background`, or `urgent`, `signal`, `door`, `resume`) never wait for it, nor count.
+ */
+export class DhtBackgroundBudget {
+  private readonly spent: number[] = [];
+  /** Per key, when it last asked (oldest first) and when its last lookup went. */
+  private readonly askedAt = new Map<string, number>();
+  private readonly lookedAt = new Map<string, number>();
+  /** The time of the last `take`: none of the above is dated after it. */
+  private latest = -Infinity;
+
+  constructor(private readonly perMinute: () => number) {}
+
+  /** 0: the lookup goes now (counted). Otherwise how long until this key's turn, in ms; nothing is counted. */
+  take(pubKeyZ32: string, now = Date.now()): number {
+    // The clock went back (an NTP step, a clock that ran ahead fixed by hand): what is dated after now counts as of now,
+    // as just spent. Counted as it was, an hour's step back held every key's lookup for 56 minutes (bug hunt, 2026-11-07).
+    if (now < this.latest) {
+      this.spent.forEach((at, i) => { this.spent[i] = Math.min(at, now); });
+      for (const times of [this.askedAt, this.lookedAt]) for (const [key, at] of times) if (at > now) times.set(key, now);
+    }
+    this.latest = now;
+    this.askedAt.delete(pubKeyZ32);
+    this.askedAt.set(pubKeyZ32, now);
+    for (const [key, at] of this.askedAt) {
+      if (now - at < ASKERS_WINDOW_MS) break;
+      this.askedAt.delete(key);
+      this.lookedAt.delete(key);
+    }
+    while (this.spent.length && now - this.spent[0]! >= MINUTE_MS) this.spent.shift();
+    const limit = Math.max(1, this.perMinute());
+    const turn = Math.ceil(this.askedAt.size * MINUTE_MS / limit);
+    const last = this.lookedAt.get(pubKeyZ32);
+    const ownTurn = last === undefined ? 0 : last + turn - now;
+    // The minute's lookups are spent (keys new to it, all at once): this key's turn, or the minute's next free one if later.
+    const minute = this.spent.length >= limit ? this.spent[0]! + MINUTE_MS - now : 0;
+    if (ownTurn > 0 || minute > 0) return Math.max(ownTurn, minute, last === undefined ? turn : 0);
+    this.spent.push(now);
+    this.lookedAt.set(pubKeyZ32, now);
+    return 0;
+  }
+}
+
+/** A read nobody waits on: what the relays' budget calls background, and what the DHT's (`DhtBackgroundBudget`) holds. */
+const waitable = (options: PkarrRequestOptions): boolean =>
+  !!options.background && !options.urgent && !options.signal && !options.door && !options.resume;
+
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
  * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
- * request budget held it back (the DHT has no budget). A background read the budget holds waits for it.
+ * request budget held it back (the DHT has no budget). A background read the budget holds waits for it. Background reads
+ * the DHT answers in the relays' place keep to the relays' background share (`DhtBackgroundBudget`).
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -141,6 +281,8 @@ export class RelaysAndDht implements PkarrTransport {
    * hedges late too (`HEDGE_MISSING_MS`), not only once that 404 lands. The newest `MISSING_KEPT`.
    */
   private readonly missing = new Set<string>();
+  /** Background reads on the DHT in the relays' place, at their background share (`DhtBackgroundBudget`). */
+  private readonly dhtBackground = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length);
 
   constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
@@ -201,8 +343,8 @@ export class RelaysAndDht implements PkarrTransport {
     }
   }
 
-  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
-    if (!this.dht) return this.relays.resolve(pubKeyZ32, options);
+  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}, keptOnFailure = true): Promise<SignedPacket | null> {
+    if (!this.dht) return this.relays.resolve(pubKeyZ32, options, keptOnFailure);
     let fromRelays: SignedPacket | null = null, failed: unknown = null;
     // Every relay left alone for failing: the relays answer from what they last saw, if anything; the DHT is asked.
     const down = () => this.relays.discovery().relays.every((relay) => relay.state === "failing");
@@ -238,11 +380,19 @@ export class RelaysAndDht implements PkarrTransport {
       if (!failed && !down()) return fromRelays;
     }
     try {
+      // A background read the DHT answers instead of the relays waits its turn there (`DhtBackgroundBudget`), as it did
+      // on them: held back, as their budget holds one. With no relay set at all the DHT is the only way, not a stand-in.
+      if (waitable(options) && this.relays.describe().relays.length > 0) {
+        const wait = this.dhtBackground.take(pubKeyZ32);
+        if (wait > 0) throw new DiscoveryBudgetError(wait, "Background DHT reads in the relays' place are at their share; retry shortly");
+      }
       const fromDht = await this.fromDht(pubKeyZ32);
       this.lastVia = "dht";
       return newerPacket(fromRelays, fromDht);
     } catch (error) {
-      if (fromRelays) return fromRelays;
+      // Nothing answered, the DHT neither: the relays' last copy is the answer, or, for a caller that asks, the failure
+      // that carries it (`keptOnFailure`).
+      if (fromRelays && (keptOnFailure || !(failed instanceof RelaysFailedError))) return fromRelays;
       throw failed ?? error;
     }
   }
@@ -305,4 +455,9 @@ export class RelaysAndDht implements PkarrTransport {
   publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
+  /**
+   * The relays' side only: the DHT side keeps nothing per key it puts. What it keeps per key it reads is bounded
+   * (`missing`, `MISSING_KEPT`; the background budget's two-minute window).
+   */
+  forget(keys: Iterable<string>): void { this.relays.forget(keys); }
 }

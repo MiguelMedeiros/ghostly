@@ -6,7 +6,8 @@
  *   `load`. Nothing an app sends names it; extra fields in a request are never read.
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
- * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
+ * - Requests are `{id, type, args}`, at most 66 KiB as JSON (a 64 KiB stored value with its key) and 50 a second;
+ *   answers `{id, ok, value | error}`; events
  *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file`,
  *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
  * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
@@ -48,9 +49,10 @@ export interface AppView {
 /**
  * Why an app stopped: it asked (`closed`), its frame loaded when it should not have (`navigated`), it broke the
  * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), it stopped
- * answering the page's watchdog (`unresponsive`, `watchApp`), or the client stopped it (`stopped`).
+ * answering the page's watchdog (`unresponsive`, `watchApp`), it kept taking the page's focus by script (`focus`,
+ * `holdFocus`), or the client stopped it (`stopped`).
  */
-export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "unresponsive" | "stopped";
+export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "unresponsive" | "focus" | "stopped";
 
 export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped";
 
@@ -186,7 +188,7 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
 /**
  * At least how many bytes `value` takes as JSON, counted only until it passes `budget`: a string by its length (UTF-8
  * and escapes only add), anything else by its fewest. Binary data (an ArrayBuffer or a view on one) and a value too
- * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
+ * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 66 KiB is refused
  * without JSON.stringify writing it whole: a 16 MiB Uint8Array took that 1.6 s on the page's thread.
  */
 function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_JSON {
@@ -731,6 +733,68 @@ export function watchApp({ ping, hung, boundMs = UNRESPONSIVE_AFTER_MS, now = ()
   };
 }
 
+/** How long after a key typed in the page the focus stays there, even with the pointer resting on an app's frame. */
+const TYPING_MS = 1_000;
+/** A Tab this recent moved the focus into the frame (keyboard navigation), not the app. */
+const TAB_MS = 500;
+/** An app whose frame took the focus by script this many times in a row is stopped. */
+export const FOCUS_TAKEOVERS = 3;
+
+/**
+ * Keeps the page's focus from an app that takes it by script (`focus()` in its frame, no tap or key in it): the keys and
+ * pastes the person types into the page would go to the app. The focus may go into the frame only with the pointer on
+ * it (a click; a tap, whose compatibility `mouseover` the page sees too) and no key typed in the page while it rested
+ * there in the last `TYPING_MS`, or with a Tab; else it goes back where it was. Giving it back takes a turn of the event
+ * loop, and an app that takes it again and again gets the keys typed in between: at the `FOCUS_TAKEOVERS`th time in a
+ * row (the count starts again when the person goes into the app) the focus goes back at once and `stop` is called, which
+ * stops the app. One that focuses itself when it opens is refused once and keeps running. The returned function stops it.
+ */
+export function holdFocus(frame: HTMLIFrameElement, stop: () => void, now = () => performance.now()): () => void {
+  let previous: HTMLElement | null = null;
+  let refused = 0;
+  let overAt: number | null = null;
+  let keyAt = -Infinity;
+  let tabAt = -Infinity;
+  const focusin = (event: FocusEvent) => {
+    if (event.target instanceof HTMLElement && !(event.target instanceof HTMLIFrameElement)) previous = event.target;
+  };
+  const keydown = (event: KeyboardEvent) => { if (event.key === "Tab") tabAt = now(); else keyAt = now(); };
+  const over = () => { overAt ??= now(); };
+  const out = () => { overAt = null; };
+  const blur = () => {
+    if (document.activeElement !== frame) return;
+    const at = now();
+    if (at - tabAt < TAB_MS || (overAt !== null && !(keyAt >= overAt && at - keyAt < TYPING_MS))) { refused = 0; return; }
+    if (++refused >= FOCUS_TAKEOVERS) {
+      // From inside the blur this time: the frame goes with the app, so the focus cannot finish moving into it.
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      stop();
+      // The browser took the focus from the page for a frame that is gone: the page asks for it back, or the field
+      // would get the keys with no caret and no focus ring.
+      window.focus();
+      return;
+    }
+    // Not from inside the blur: the browser is still moving the focus, and would finish moving it into the frame.
+    setTimeout(() => {
+      if (document.activeElement !== frame) return;
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      if (document.activeElement === frame) frame.blur();
+    }, 0);
+  };
+  window.addEventListener("focusin", focusin, true);
+  window.addEventListener("keydown", keydown, true);
+  window.addEventListener("blur", blur);
+  frame.addEventListener("pointerover", over);
+  frame.addEventListener("mouseover", over);
+  frame.addEventListener("pointerout", out);
+  frame.addEventListener("mouseout", out);
+  return () => {
+    window.removeEventListener("focusin", focusin, true);
+    window.removeEventListener("keydown", keydown, true);
+    window.removeEventListener("blur", blur);
+  };
+}
+
 /**
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
  * teardown, and once it runs the watchdog (`watchApp`). The frame is removed when the app stops, for whatever reason.
@@ -758,6 +822,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   let watch: AppWatch | null = null;
   let watching: ReturnType<typeof setInterval> | null = null;
   const hidden = () => { if (document.visibilityState === "hidden") watch?.hidden(); };
+  const unhold = holdFocus(frame, () => broker.stop("focus"));
 
   const broker = createBroker({
     host, launch, view,
@@ -775,6 +840,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       if (timer) clearTimeout(timer);
       if (watching) clearInterval(watching);
       document.removeEventListener("visibilitychange", hidden);
+      unhold();
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;

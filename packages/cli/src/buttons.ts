@@ -1,9 +1,9 @@
 import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
-import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
+import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits, str, type Method, type Params, type RefPlace } from "./apiKit";
 import { CliError } from "./errors";
-import { findSecret } from "./secretGuard";
+import { findSecret, secretWords } from "./secretGuard";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -83,8 +83,8 @@ export function pressable(link: LinkView): boolean | null {
 }
 
 /** The message of mine with buttons that `button update` names, by its id here (or the id both sides know). */
-function buttonsMessage(message: StoredMessage | undefined, ref: string, group: boolean): StoredMessage & { card: ButtonsCard } {
-  if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} of yours in this ${group ? "group" : "chat"}: the messageId send gave`);
+function buttonsMessage(message: StoredMessage | undefined, ref: string, place: RefPlace): StoredMessage & { card: ButtonsCard } {
+  if (!message) throw noMessage(ref, place, { whose: "of yours" });
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons: send one with send --button id:Label");
   return message as StoredMessage & { card: ButtonsCard };
 }
@@ -103,9 +103,9 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   // A new text is a message like any other: the same guard as `send` and `edit`.
   if (newText !== undefined && !bool(params, "force")) {
     const secret = findSecret(newText);
-    if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; update with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; update with --force if you mean to`, { kind: secret.kind });
   }
-  const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, target.group);
+  const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, { group: target.group, ref: str(params, "chat", true) });
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
     throw new CliError("refused", `This message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: ask again with a new send`, { messageId: message.id, edits: message.edit!.seq });
   const before = message.card;
@@ -139,13 +139,13 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   const buttonId = str(params, "button", true);
   const where = target.group ? "group" : "chat";
   const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender !== "me");
-  if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} from someone else in this ${where}: the id its event or history gave`);
+  if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "from someone else" });
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons");
   const button = message.card.buttons.find((b) => b.id === buttonId);
   if (!button) throw new CliError("not_found", `That message has no button ${JSON.stringify(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
-    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const result = await node(ctx).pressButton({ linkId: target.linkId, messageId: message.id, buttonId });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error, result.paced ? { paced: true } : undefined);

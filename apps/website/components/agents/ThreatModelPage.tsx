@@ -8,7 +8,8 @@ import "@/app/agents.css";
 
 /**
  * /developers/agents/threat-model: who can reach an agent on Ghostly, what a sender cannot make it do (each with the
- * command that sets the control), which control stops what, the limits no control removes, and what is not built yet.
+ * command that sets the control), which control stops what, the limits no control removes, how to keep a profile's keys
+ * under an OS user of their own, and what is not built yet.
  * The agents page links here from its security model.
  */
 export function ThreatModelPage() {
@@ -91,6 +92,30 @@ export function ThreatModelPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="wrap cl-block ag-section" id="apart" aria-labelledby="tm-apart" data-testid="threat-apart">
+        <span className="eyebrow">{t.apart.eyebrow}</span>
+        <h2 id="tm-apart" className="ag-h2">
+          {t.apart.title}
+        </h2>
+        <p className="muted ag-lead">{t.apart.lead}</p>
+        <ul className="ag-shows">
+          {t.apart.steps.map((s) => (
+            <li key={s.id} className="ag-show">
+              <h3 className="ag-h3">{s.title}</h3>
+              <p className="muted">{s.body}</p>
+            </li>
+          ))}
+        </ul>
+        {t.apart.examples.map((e) => (
+          <div key={e.id} className="cl-block ag-sub">
+            <h3 className="ag-h3">{e.title}</h3>
+            <pre className="cl-code" tabIndex={0}>
+              <code>{e.code}</code>
+            </pre>
+          </div>
+        ))}
       </section>
 
       <section className="wrap cl-block ag-section" id="gaps" aria-labelledby="tm-gaps" data-testid="threat-gaps">

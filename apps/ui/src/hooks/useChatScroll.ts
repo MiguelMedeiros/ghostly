@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { reducedMotion } from "../lib/motion";
 import { JUMP_EVENT, jumpGlides } from "../lib/replies";
 import type { RowWindow } from "./useRowWindow";
+import { modalOpen } from "./useAppCommands";
 
 /** A message row of the timeline, in order: its id (the row's `data-message-id`) and whether I sent it. */
 export interface ScrollRow {
@@ -73,7 +74,7 @@ const rowById = (list: HTMLElement, id: string) => {
   return row && shown(list, row);
 };
 const editable = (target: EventTarget | null) =>
-  target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
+  target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), dialog, [role='dialog'], [role='menu']");
 
 /**
  * The chat timeline's scrolling, as WhatsApp does it. At the bottom, a new message keeps the view there. Scrolled up,
@@ -92,8 +93,8 @@ const editable = (target: EventTarget | null) =>
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
  * at its bottom. When the message it was left on is not among its first rows, it opens at its bottom and goes back on
- * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field)
- * jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
+ * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field, and
+ * with no modal dialog open) jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
  */
 export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean; window?: RowWindow }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
@@ -153,7 +154,12 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    */
   const away = useRef(false);
 
-  /** The first row not wholly above the view, and where it is. Rows are in order, so it is a binary search. */
+  /**
+   * The first row that starts in the view, and where it is. Not the one the view's top edge cuts: that one is mostly
+   * above, maybe still at a typical height (content-visibility lays it out only near the view), and held by its top,
+   * its real height would move every row read. Only a row taller than the view, with none starting in it, is held.
+   * Rows are in order, so it is a binary search.
+   */
   const capture = useCallback((el: HTMLElement) => {
     const all = rowsOf(el);
     const top = el.getBoundingClientRect().top;
@@ -163,6 +169,12 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       if (shown(el, all[mid]).getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    // Rows folded into the cut one's fold share its box: on to the first that starts in the view.
+    for (let i = found + 1; found >= 0 && shown(el, all[found]).getBoundingClientRect().top < top && i < all.length; i++) {
+      const start = shown(el, all[i]).getBoundingClientRect().top;
+      if (start >= top + el.clientHeight) break;
+      if (start >= top) found = i;
     }
     anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: shown(el, all[found]).getBoundingClientRect().top - top, height: el.clientHeight };
   }, []);
@@ -440,7 +452,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
   useEffect(() => {
     if (!keys) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || editable(e.target)) return;
+      // Not behind a modal dialog (the focus in it, or dropped to the page): the key is the dialog's, the chat stays put.
+      if (e.defaultPrevented || editable(e.target) || modalOpen()) return;
       const end = e.key === "End" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       const down = e.key === "ArrowDown" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
       if (!end && !down) return;

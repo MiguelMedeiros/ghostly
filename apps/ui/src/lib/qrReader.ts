@@ -51,13 +51,20 @@ export function qrCamera(): Promise<MediaStream> {
  * Reads the playing video's frames while `live()`, one at a time with 160 ms between them, handing each QR found to
  * `found`, which says whether to stop. A frame is decoded in a worker: on the page each one held the app for tens of
  * milliseconds, hundreds in low light. Where no worker starts or its script does not load, on the page. Ends `decode`
- * with the scan; rejects with `QrReaderNotLoaded` when the page's decoder had to load and did not.
+ * with the scan; rejects with `QrReaderNotLoaded` when the page's decoder had to load and did not, and with an error
+ * once the camera ended under it (Android closes it a few seconds after the app goes to Home): the video keeps showing
+ * its last frame, which no QR will come into.
  */
 export async function scanQrFrames(element: HTMLVideoElement, decode: QrFrameReader, live: () => boolean, found: (data: string) => boolean): Promise<void> {
   const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { willReadFrequently: true })!;
+  const ended = () => {
+    const tracks = (element.srcObject as MediaStream | null)?.getVideoTracks?.() ?? [];
+    return tracks.length > 0 && tracks.every((track) => track.readyState === "ended");
+  };
   try {
     await decode.ready;
     while (live()) {
+      if (ended()) throw new Error("The camera ended");
       if (element.readyState >= 2 && element.videoWidth) {
         const scale = Math.min(1, 960 / element.videoWidth);
         canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);

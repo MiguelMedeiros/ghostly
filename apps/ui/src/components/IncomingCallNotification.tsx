@@ -78,8 +78,9 @@ export function IncomingCallNotification({
               {initial(peerName)}
             </span>
           </div>
-          <div>
-            <p id={nameId} dir="auto" className="text-text-primary text-lg font-medium">{peerName}</p>
+          {/* A long name with no space in it (a contact's name takes 30 characters) breaks anywhere, inside the card. */}
+          <div className="max-w-full">
+            <p id={nameId} dir="auto" className="text-text-primary text-lg font-medium [overflow-wrap:anywhere]">{peerName}</p>
             <p id={kindId} className="text-text-muted text-sm">
               {hasVideo ? t("calls.incomingVideo") : t("calls.incomingAudio")}
             </p>
