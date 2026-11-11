@@ -13,7 +13,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 /** `pin`, and the stream's `chat.pinned` / `group.pinned`. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" }, ...fields }) as unknown as LinkView;
 const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
-  members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
+  members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }, { key: "anakey", role: "admin", me: false, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 
 /** `out.pin`: the number of my pin the contact has not confirmed; a 1:1 pin made takes the next one. */
 function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon") {
