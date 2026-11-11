@@ -132,26 +132,28 @@ export function Settings() {
   const canWake = !!pushPlatform();
   const wakeOn = useWakeOn();
   const [wakeBusy, setWakeBusy] = useState(false);
-  const [wakeError, setWakeError] = useState("");
+  // A refusal is kept as it came and written at render: a change of Language further up the page does not redraw this.
+  const [wakeError, setWakeError] = useState<{ cause: unknown; noPush?: boolean } | null>(null);
   // A browser with no push service (Chromium without Google Play services: GrapheneOS's Vanadium): found once and kept
   // for the browser (lib/wakePush.ts `noPushService`), so the switch reads as unavailable with why, until Try again.
   const wakeNoPush = useNoPushService() && !wakeOn;
   const wakeHintId = useId();
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
-    setWakeError("");
+    setWakeError(null);
     try { await setWake(on); } catch (e) {
       // No push service: kept for the browser, the row says so itself for as long as it is and wake-ups are off (a line
       // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
-      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError({ cause: e, noPush: true }); } else setWakeError({ cause: e });
     } finally { setWakeBusy(false); }
   };
+  const wakeErrorLine = wakeError && (wakeError.noPush ? t("pwa.wakeNoPushService") : problemLine(wakeError.cause, t));
   // Online notices ride on the same subscription: the switch shows while one is shared, on by default.
   const wakeOnline = useWakeOnline();
-  const [wakeOnlineError, setWakeOnlineError] = useState("");
+  const [wakeOnlineError, setWakeOnlineError] = useState<{ cause: unknown } | null>(null);
   const changeWakeOnline = async (on: boolean) => {
-    setWakeOnlineError("");
-    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError(problemLine(e, t)); }
+    setWakeOnlineError(null);
+    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError({ cause: e }); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
@@ -701,7 +703,7 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
+            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeErrorLine || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             {wakeNoPush && <Button data-testid="settings-wake-retry" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} busy={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
@@ -709,7 +711,7 @@ export function Settings() {
         )}
         {canWake && wakeOnline.shared && (
           <Row label={t("pwa.wakeOnline")} testId="settings-wake-online-row" info={t("pwa.wakeOnlineInfo")}
-            hint={<span role="status">{wakeOnlineError || t("pwa.wakeOnlineHint")}</span>}>
+            hint={<span role="status">{wakeOnlineError ? problemLine(wakeOnlineError.cause, t) : t("pwa.wakeOnlineHint")}</span>}>
             <Switch testId="settings-wake-online" label={t("pwa.wakeOnline")} checked={wakeOnline.on} onChange={(on) => void changeWakeOnline(on)} />
           </Row>
         )}

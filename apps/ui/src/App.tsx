@@ -42,22 +42,6 @@ import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
 
-/** The browser's status bar follows the header of whichever theme is active. */
-function useThemeColor() {
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (!meta) return;
-    const sync = () => {
-      const color = getComputedStyle(document.documentElement).getPropertyValue("--theme-panel-header").trim();
-      if (color) meta.setAttribute("content", color);
-    };
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true });
-    return () => observer.disconnect();
-  }, []);
-}
-
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
  * call. Chats live here rather than in the router because leaving the address
@@ -208,7 +192,6 @@ export function App() {
   const { settings } = useSettings();
   const { pathname } = useLocation();
   useViewportHeight();
-  useThemeColor();
   // A file dropped outside a chat never opens in place of the app; a chat takes its own drops.
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();

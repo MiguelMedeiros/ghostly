@@ -1,11 +1,12 @@
 import { act, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
 import { ConnectionHistory, TransportLine } from "../../components/TransportTimeline";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { formatListTime } from "../../lib/chatList";
+import { agoIn } from "../../lib/relativeTime";
 import { clockTime, formatAt } from "../../lib/time";
 import type { ChatMessage } from "../../lib/types";
 import { linkView } from "../fakeEngine";
@@ -76,5 +77,23 @@ describe("in Arabic", () => {
     expect(formatAt(AT, { timeStyle: "medium" }, "ja")).toBe(new Intl.DateTimeFormat("ja", { timeStyle: "medium" }).format(AT));
     expect(formatAt(AT, options)).toBe(new Date(AT).toLocaleString([], options));
     expect(formatAt(Number.NaN, options, "ar")).toBe("Invalid Date");
+  });
+});
+
+describe("in English on a Portuguese device", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("an age past a month is an English date, not the device's", () => {
+    const toLocaleDateString = Date.prototype.toLocaleDateString;
+    vi.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (this: Date, locales, options) {
+      return toLocaleDateString.call(this, locales ?? "pt-BR", options);
+    });
+    const at = AT / 1000, day = 86_400, ago = agoIn("en");
+    const english = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(AT);
+    expect(english).not.toBe(new Date(AT).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }));
+    expect(ago(at, at + 60 * day)).toBe(english);
+    expect(ago(at, at + 5 * day)).toBe("5 d ago");
+    expect(ago(at, at + 30)).toBe("just now");
+    expect(agoIn("en")).toBe(ago);
   });
 });

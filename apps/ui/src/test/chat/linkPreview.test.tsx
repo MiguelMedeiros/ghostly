@@ -206,6 +206,19 @@ describe("a location card", () => {
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
   });
 
+  it("is not drawn for a place the text names only inside a spoiler: its coordinates would say what the spoiler hides", () => {
+    for (const text of ["meet me at ||geo:48.8584,2.2945||", "||meet at https://www.google.com/maps/@48.8584,2.2945,15z tonight||",
+      "> the place: ||geo:48.8584,2.2945||", "- *||https://www.openstreetmap.org/#map=15/48.8584/2.2945||*", "[||guess||](https://www.google.com/maps/@48.8584,2.2945,15z)"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+      expect(screen.queryByTestId("location-card"), text).toBeNull();
+      expect(document.body, text).not.toHaveTextContent("48.85840");
+      view.unmount();
+    }
+    // The same place outside the spoiler too: the bubble shows it, so its card tells nothing hidden.
+    renderApp(<MessageBubble message={{ id: "m14", text: "geo:48.8584,2.2945 or is it ||geo:48.8584,2.2945||", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+  });
+
   const torre = "meet me at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)";
 
   it("moves the focus to the map when Show map is used from the keyboard", async () => {

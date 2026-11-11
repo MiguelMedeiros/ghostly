@@ -226,37 +226,58 @@ const find = (bytes: Uint8Array, from: number, text: string) => {
  * `head` ends before that is known and more is coming (`done` false).
  */
 export function viewerGuardOffset(head: Uint8Array, done: boolean): number | null {
+  return guardOffsetFrom(head, done, { from: 0, seen: 0 });
+}
+
+/**
+ * Where `guardOffsetFrom` stopped in a head too short to tell: everything before `from` is settled (whole comments,
+ * blank space), and the close of what starts there was looked for up to `seen`. A head read a chunk at a time goes on
+ * from there, so a page sent a byte at a time costs as little as one sent whole.
+ */
+interface GuardLook { from: number; seen: number }
+
+/** Too short to tell: what starts at `from` is looked at again with more, its close from about `seen` on. */
+function wait(look: GuardLook, from: number, seen: number): null {
+  look.from = from;
+  look.seen = seen;
+  return null;
+}
+
+/** `viewerGuardOffset` going on from `look`, which it moves along when the head is too short to tell. */
+function guardOffsetFrom(head: Uint8Array, done: boolean, look: GuardLook): number | null {
   // A part of a byte order mark: before it, the guard would leave the page with none (and windows-1252 for UTF-8).
-  if (!done && head.length < 3 && at(head, 0, "ï»¿".slice(0, head.length))) return null;
-  let offset = at(head, 0, "ï»¿") ? 3 : 0;
+  if (look.from === 0 && !done && head.length < 3 && at(head, 0, "ï»¿".slice(0, head.length))) return null;
+  let offset = look.from === 0 && at(head, 0, "ï»¿") ? 3 : look.from;
+  // Its close was looked for up to `seen`: again from a little before, in case it was cut in two there.
+  const after = (start: number) => (offset === look.from ? Math.max(start, look.seen - 3) : start);
   for (;;) {
     while (offset < head.length && [0x09, 0x0a, 0x0c, 0x0d, 0x20].includes(head[offset])) offset++;
-    if (offset >= head.length) return done ? offset : null;
+    if (offset >= head.length) return done ? offset : wait(look, offset, head.length);
     let end: number;
     if (at(head, offset, "<!--")) {
       // `<!-->` and `<!--->` end at once.
       if (at(head, offset + 4, ">")) end = offset + 5;
       else if (at(head, offset + 4, "->")) end = offset + 6;
       else {
-        const ends = ["-->", "--!>"].map((close) => [find(head, offset + 4, close), close.length]).filter(([index]) => index >= 0).sort(([a], [b]) => a - b);
+        const ends = ["-->", "--!>"].map((close) => [find(head, after(offset + 4), close), close.length]).filter(([index]) => index >= 0).sort(([a], [b]) => a - b);
         end = ends.length ? ends[0][0] + ends[0][1] : -1;
       }
     } else if (at(head, offset, "<!doctype", true)) {
-      const close = find(head, offset, ">");
+      const close = find(head, after(offset), ">");
       if (close >= 0) return close + 1;
       end = -1;
     } else if (at(head, offset, "<!") || at(head, offset, "<?")) {
-      const close = find(head, offset, ">");
+      const close = find(head, after(offset), ">");
       end = close >= 0 ? close + 1 : -1;
     } else if (offset === head.length - 1 && head[offset] === 0x3c) {
       // A lone `<`: a doctype or a comment may start there.
-      if (!done) return null;
+      if (!done) return wait(look, offset, head.length);
       return offset;
     } else {
       return offset;
     }
     // Unfinished: more is needed, or, at the end of the page, the guard goes before it.
-    if (end < 0) return done ? offset : null;
+    if (end < 0) return done ? offset : wait(look, offset, head.length);
     offset = end;
   }
 }
@@ -298,14 +319,26 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   if (!html || encoded) return noScripts();
 
   const iterator = body[Symbol.asyncIterator]();
-  let head: Uint8Array = new Uint8Array(0);
+  // The head grows into room that doubles, and is looked at from where the last look stopped: a page sent in many
+  // small chunks is read once, not once per chunk.
+  let room = new Uint8Array(0);
+  let head: Uint8Array = room;
   let done = false;
   let offset: number | null = null;
+  const look: GuardLook = { from: 0, seen: 0 };
   while (offset === null) {
     const next = await iterator.next();
     if (next.done) done = true;
-    else head = concatBytes(head, next.value);
-    offset = viewerGuardOffset(head, done || head.length >= LOOK_BYTES);
+    else {
+      if (head.length + next.value.length > room.length) {
+        const more = new Uint8Array(Math.max(room.length * 2, head.length + next.value.length));
+        more.set(head);
+        room = more;
+      }
+      room.set(next.value, head.length);
+      head = room.subarray(0, head.length + next.value.length);
+    }
+    offset = guardOffsetFrom(head, done || head.length >= LOOK_BYTES, look);
   }
   const rest: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: () => iterator };
   const resumed = async function* (first: Uint8Array) {
