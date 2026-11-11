@@ -1116,7 +1116,8 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
   try {
     if ((await Promise.race([dial, late])) !== "late") return;
   } catch (error) {
-    if (asCliError(error).code !== "timeout") throw error;
+    // A DHT only learned while it dialled (the contact's, read from the DHT up to 30 s later) is said as before the dial.
+    if (asCliError(error).code !== "timeout") { dhtOnly(findChat(state(ctx).links, link.id)); throw error; }
   } finally { clearTimeout(timer); }
   const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
   throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${ctx.mode === "one-shot"
