@@ -75,6 +75,8 @@ export const WEBSITE_INPUTS = [
   "packages/cli/README.md",
   // llms.test.mjs checks the install line against the CLI's package name.
   "packages/cli/package.json",
+  // llms.test.mjs checks that the security model's events and press fields are the ones `listen --turns` emits.
+  "packages/cli/src/listen.ts",
   // llms.test.mjs checks that llms.txt's Android line follows the Release workflow's ANDROID_FROM.
   ".github/workflows/release.yml",
   // Quoted on /developers: sync-references.mjs's excerpt().
