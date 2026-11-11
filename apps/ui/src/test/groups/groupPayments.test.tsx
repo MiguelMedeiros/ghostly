@@ -1,4 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { GroupMemberView, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -52,6 +53,28 @@ describe("GroupPaymentComposer: whom first", () => {
         }
       }
     } finally { viewport(1024, 768); }
+  });
+
+  it("Escape closes the members' sheet and is spent there: a notice behind it that also answers Escape stays", async () => {
+    fakeEngine.setState({ groups: [group()], edges, wallet: everyWallet() });
+    let closed = 0;
+    function Opened() {
+      const [open, setOpen] = useState(true);
+      return open ? <GroupPaymentComposer group={group()} onClose={() => { closed++; setOpen(false); }} /> : null;
+    }
+    // As the app's top notice decides (Root.tsx): once the key has gone everywhere, one nobody spent is its own.
+    const spent: boolean[] = [];
+    const listen = (e: KeyboardEvent) => { if (e.key === "Escape") setTimeout(() => spent.push(e.defaultPrevented)); };
+    window.addEventListener("keydown", listen);
+    try {
+      const { user } = renderApp(<Opened />);
+      act(() => screen.getAllByTestId("group-pay-recipient")[0].focus());
+      await user.keyboard("{Escape}");
+      await act(() => new Promise(resolve => setTimeout(resolve, 10)));
+      expect(screen.queryByTestId("group-pay-recipients")).toBeNull();
+      expect(closed).toBe(1);
+      expect(spent).toEqual([true]);
+    } finally { window.removeEventListener("keydown", listen); }
   });
 
   it("lists the other members; one who is away or whose app takes no payments says why and cannot be chosen", () => {
