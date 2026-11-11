@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
-import { BRIDGE_PORT } from "../../../../web/src/svc/protocol";
+import { BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 
@@ -64,6 +64,25 @@ describe("the bridge's frame of the contact's app", () => {
       const scripts = [...document.head.querySelectorAll("script")].map((script) => script.textContent);
       expect(scripts[0], String(relayOnly)).toBe(CLIPBOARD_GUARD_SCRIPT);
     }
+  });
+
+  it("tells the app's page when the browser refuses it the services worker, so it says why in the profile's words", async () => {
+    // Firefox blocking third-party cookies: the services host is a site of its own, its worker a third party's.
+    const dom = (window as unknown as { happyDOM?: { setURL(url: string): void; settings: { disableIframePageLoading: boolean } } }).happyDOM!;
+    dom.settings.disableIframePageLoading = true;
+    dom.setURL(`https://${LABEL}.svc.ghostly.example/_ghostly-svc/bridge.html`);
+    const parent = { postMessage: vi.fn() };
+    vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+    vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+    vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
+    const refusal = Object.assign(new Error("The operation is insecure."), { name: "SecurityError" });
+    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async () => { throw refusal; }, ready: Promise.resolve({}) });
+    Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
+    await import("../../../../web/src/svc/bridge");
+    window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [new MessageChannel().port1] }));
+    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: BRIDGE_REFUSED, reason: "blocked" }, APP_ORIGIN));
+    expect(document.querySelector("iframe")).toBeNull();
   });
 
   it("does not show a page it cannot read, nor take a frame's word for which page is in it", async () => {
