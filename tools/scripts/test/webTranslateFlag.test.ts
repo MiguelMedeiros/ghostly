@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveConfig } from "vite";
+import { build, resolveConfig } from "vite";
 import { expect, it } from "vitest";
 import { checkTranslateFlag, translateGuard } from "../../../apps/web/translateFlag";
 import type { AppsTestBuild } from "../../../apps/web/appsTestFlag";
@@ -76,6 +76,31 @@ it("the guard reads the env the build compiles in, a .env file included", async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** The files a build makes of the language detector's module (apps/ui/src/lib/translateDetector.ts), with or without the switch. */
+async function detectorFiles(translate: "" | "1"): Promise<string[]> {
+  const dir = mkdtempSync(join(tmpdir(), "ghostly-detector-"));
+  const saved = process.env.VITE_TRANSLATE;
+  process.env.VITE_TRANSLATE = translate;
+  try {
+    const result = await build({
+      root: dir, envDir: dir, configFile: false, logLevel: "silent",
+      // Its exports kept, as the app's modules that call them do.
+      build: { write: false, rollupOptions: { input: join(ROOT, "apps/ui/src/lib/translateDetector.ts"), preserveEntrySignatures: "strict" } },
+    });
+    return (Array.isArray(result) ? result : [result]).flatMap((output) => ("output" in output ? output.output.map((file) => file.fileName) : []));
+  } finally {
+    if (saved === undefined) delete process.env.VITE_TRANSLATE; else process.env.VITE_TRANSLATE = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+it("a build without it carries no language detector, not even its worker's 2 MB file no page asks for", async () => {
+  const without = await detectorFiles("");
+  expect(without.filter((name) => /translateDetector\.worker|langdetect|tinyld/.test(name))).toEqual([]);
+  // The control: a Desktop build with translation has the worker.
+  expect((await detectorFiles("1")).filter((name) => /translateDetector\.worker/.test(name))).toHaveLength(1);
+}, 60_000);
 
 it("every client's build runs the guard, as that client", () => {
   for (const [config, build] of [["apps/web/vite.config.ts", "web"], ["apps/ui/vite.config.ts", "desktop"], ["apps/extension/vite.config.ts", "extension"]]) {

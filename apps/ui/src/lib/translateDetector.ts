@@ -52,9 +52,11 @@ export function loadDetector(): Promise<DetectLanguages | null> {
   // Read as written, so a build without translation carries no copy of the dictionary for the page.
   if (import.meta.env.VITE_TRANSLATE !== "1") return Promise.resolve(null);
   if (!loaded) {
-    let worker: Worker | null = null;
-    try { worker = new Worker(new URL("./translateDetector.worker.ts", import.meta.url), { type: "module" }); } catch { /* detected on the page */ }
-    loaded = worker ? Promise.resolve(inWorker(worker)) : onPage();
+    loaded = import("./translateDetectorStart").then(({ startDetectorWorker }) => {
+      let worker: Worker | null = null;
+      try { worker = startDetectorWorker(); } catch { /* detected on the page */ }
+      return worker ? inWorker(worker) : onPage();
+    });
     // A page's copy that did not load is tried again with the next one who asks.
     loaded.catch(() => { loaded = undefined; });
   }
