@@ -23,8 +23,9 @@ interface Guard { details(): string; clean(text: string): string }
 const guard = () => (window as unknown as { __ghostlyBoot: Guard }).__ghostlyBoot;
 const panel = () => document.getElementById("boot-fallback");
 
-function start({ agent = NEW_ANDROID, language = "en-US", languages = [language], loaded = true, root = "" }: { agent?: string; language?: string; languages?: string[]; loaded?: boolean; root?: string } = {}) {
+function start({ agent = NEW_ANDROID, language = "en-US", languages = [language], loaded = true, root = "", online = true as boolean | undefined, place = undefined as object | undefined }: { agent?: string; language?: string; languages?: string[]; loaded?: boolean; root?: string; online?: boolean | undefined; place?: object } = {}) {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(online as boolean);
   vi.spyOn(navigator, "language", "get").mockReturnValue(language);
   vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
   vi.spyOn(document, "readyState", "get").mockReturnValue(loaded ? "complete" : "loading");
@@ -32,7 +33,8 @@ function start({ agent = NEW_ANDROID, language = "en-US", languages = [language]
   // The guard listens for as long as the page lives: a test takes its listeners away with the page.
   const listen = window.addEventListener.bind(window);
   const spy = vi.spyOn(window, "addEventListener").mockImplementation((...args: Parameters<typeof window.addEventListener>) => { listening.push(args); listen(...args); });
-  new Function(SOURCE)();
+  // jsdom's `location` cannot be spied on: a case that watches the reload hands the guard its own.
+  new Function("location", SOURCE)(place ?? window.location);
   spy.mockRestore();
 }
 const listening: Parameters<typeof window.addEventListener>[] = [];
@@ -223,6 +225,92 @@ describe("the boot guard", () => {
     vi.advanceTimersByTime(1500);
     expect(panel()).toHaveAttribute("lang", "en");
     expect(panel()).toHaveTextContent("Ghostly could not start");
+  });
+
+  it("says the device is offline, in its language, where the browser says it has no network: not the browser's fault", () => {
+    // Opened offline after the browser dropped the cached files: the bundle cannot load.
+    const notLoaded = () => {
+      const script = document.createElement("script");
+      script.src = "https://app.example/assets/main-abc.js";
+      document.body.appendChild(script);
+      script.dispatchEvent(new Event("error"));
+      vi.advanceTimersByTime(1500);
+    };
+    start({ online: false, agent: OLD_IPHONE });
+    notLoaded();
+    expect(panel()).toHaveAttribute("data-reason", "error");
+    expect(panel()).toHaveTextContent("Ghostly could not start");
+    expect(panel()).toHaveTextContent("This device is offline.");
+    expect(panel()).toHaveTextContent("Connect and reload.");
+    expect(panel()).not.toHaveTextContent("This browser may be too old");
+    expect(panel()).not.toHaveTextContent("Update your browser");
+    // No "update iOS" either: the update is not what helps.
+    expect(panel()!.querySelector('[data-testid="boot-fallback-hint"]')).toBeNull();
+    expect([...panel()!.querySelectorAll("button")].map((button) => button.textContent)).toContain("Reload");
+    draw(); vi.advanceTimersByTime(1000);
+
+    start({ online: false, language: "pt-BR" });
+    notLoaded();
+    expect(panel()).toHaveTextContent("Este dispositivo está offline.");
+    expect(panel()).toHaveTextContent("Conecte-se e recarregue.");
+    expect(panel()).not.toHaveTextContent("Atualize o navegador");
+    draw(); vi.advanceTimersByTime(1000);
+
+    start({ online: false, language: "ar-EG" });
+    notLoaded();
+    expect(panel()).toHaveAttribute("dir", "rtl");
+    expect(panel()).toHaveTextContent("هذا الجهاز غير متصل بالإنترنت.");
+    expect(panel()).toHaveTextContent("اتصل بالإنترنت ثم أعد التحميل.");
+    draw(); vi.advanceTimersByTime(1000);
+
+    // A start that is only slow says so too.
+    start({ online: false, language: "ja-JP", loaded: false });
+    window.dispatchEvent(new Event("load"));
+    vi.advanceTimersByTime(6100);
+    expect(panel()).toHaveAttribute("data-reason", "timeout");
+    expect(panel()).toHaveTextContent("このデバイスはオフラインです。");
+    expect(panel()).not.toHaveTextContent("ブラウザを更新するか");
+  });
+
+  it("keeps blaming the browser where the network is there, or the browser does not say", () => {
+    for (const online of [true, undefined]) {
+      start({ online });
+      fail("x");
+      vi.advanceTimersByTime(1500);
+      expect(panel(), String(online)).toHaveTextContent("Update your browser, or open Ghostly in another one.");
+      expect(panel(), String(online)).not.toHaveTextContent("This device is offline.");
+      draw(); vi.advanceTimersByTime(1000);
+    }
+  });
+
+  it("reloads by itself once the network is back, only while it says the device is offline", () => {
+    const reload = vi.fn();
+    const place = { origin: "https://app.example", pathname: "/", reload };
+    start({ online: false, place });
+    fail("script did not load: main-abc.js");
+    vi.advanceTimersByTime(1500);
+    expect(panel()).toHaveTextContent("This device is offline.");
+    window.dispatchEvent(new Event("online"));
+    window.dispatchEvent(new Event("online"));
+    expect(reload).toHaveBeenCalledTimes(1);
+    draw(); vi.advanceTimersByTime(1000);
+
+    // The app drew meanwhile: nothing to reload.
+    reload.mockClear();
+    start({ online: false, place });
+    fail("x");
+    vi.advanceTimersByTime(1500);
+    draw(); vi.advanceTimersByTime(600);
+    expect(panel()).toBeNull();
+    window.dispatchEvent(new Event("online"));
+    expect(reload).not.toHaveBeenCalled();
+
+    // The browser lines: the network was not the problem, and the page waits for the person.
+    start({ place });
+    fail("x");
+    vi.advanceTimersByTime(1500);
+    window.dispatchEvent(new Event("online"));
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("draws a first paint from the page alone: \"Starting Ghostly…\" as a status in #root, no inline script, styles the web's policy allows", () => {
