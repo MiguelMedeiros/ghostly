@@ -159,6 +159,8 @@
     "askAgain": "Ask your contact to send it again.",
     "askGroupAgain": "Ask the group for it again later.",
     "askedTooOften": "Your contact asked for this file too many times",
+    "audioMetadata": "This audio cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded",
+    "audioMetadataNext": "Save a copy in an audio editor, or export it again from the app that made it, and send that.",
     "cancelledHere": "You cancelled it.",
     "cancelledThere": "Your contact cancelled it.",
     "cannotDecodeRecording": "This device cannot decode the recording",
