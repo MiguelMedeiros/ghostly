@@ -36,6 +36,7 @@
     "stopped": "Fermo"
   },
   "window": {
+    "blocked": "Questo browser blocca ciò che serve a {{app}} per aprirsi qui: lo spazio di archiviazione per un sito dentro un altro. Consentilo per questo sito, oppure apri {{app}} nell’app desktop di Ghostly o nell’estensione.",
     "busy": "{{app}} sta caricando troppe pagine insieme sulla macchina del tuo contatto. Riprova tra poco.",
     "callOn": "C'è una chiamata in corso. Chiudila per aprire {{app}}.",
     "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
@@ -46,6 +47,7 @@
     "owner": "App di {{contact}}, in esecuzione sul suo computer. Non è Ghostly: non digitare mai qui le tue parole di recupero o le password.",
     "retry": "Riprova",
     "tooSlow": "{{app}} non ha risposto in tempo sul computer del tuo contatto. Riprova tra un momento.",
+    "unguarded": "Questa pagina di {{app}} non può essere mostrata qui: impedisce alle protezioni di Ghostly di funzionare al suo interno. Chiedi al tuo contatto di controllare.",
     "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online.",
     "unshared": "{{app}} non è più condiviso con te."
   },

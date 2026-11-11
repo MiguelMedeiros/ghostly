@@ -5,7 +5,7 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost, type BridgeRefusal } from "./protocol";
 import { clearSite, dropSharedCookies } from "./clearSite";
 import { VIEWER_GUARD_SCRIPT } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
@@ -57,6 +57,12 @@ function say(text: string): void {
   document.body.textContent = text;
 }
 
+/** Shows no app, and tells the app's page why: it says so in the profile's words (`BRIDGE_REFUSED`). */
+function refuse(reason: BridgeRefusal, text: string): void {
+  say(text);
+  window.parent.postMessage({ type: BRIDGE_REFUSED, reason }, __SERVICES_APP_ORIGIN__);
+}
+
 /** This page's own copy of the clipboard guard, inline (its policy allows it by its hash, `bridgeHtml`). */
 function guardHere(script: string): void {
   const guard = document.createElement("script");
@@ -78,7 +84,7 @@ function start(): void {
   document.addEventListener("load", (event) => {
     if (!app || event.target !== app || guardedPage(app)) return;
     app = null;
-    say("This page of the app cannot be shown here.");
+    refuse("unguarded", "This page of the app cannot be shown here.");
   }, true);
   // The app's page reaches this window (same origin): its `execCommand`, and a frame it would put here, are guarded too.
   guardHere(CLIPBOARD_GUARD_SCRIPT);
@@ -120,7 +126,7 @@ function start(): void {
         frame.src = "/";
         app = frame;
         document.body.replaceChildren(frame);
-      }, () => say("This browser cannot open the app here."));
+      }, () => refuse("blocked", "This browser cannot open the app here."));
   });
   window.parent.postMessage({ type: BRIDGE_READY }, __SERVICES_APP_ORIGIN__);
 }

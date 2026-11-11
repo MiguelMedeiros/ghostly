@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
@@ -30,10 +30,11 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline. `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the
- * view's name and the line under the app's name.
+ * while the contact is offline. `blocked` and `unguarded`: the view's notice when the bridge shows no app
+ * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
+ * name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -331,12 +332,20 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   notice.append(said, retry);
   view.append(bar, notice, frame);
   const src = `${origin}${BRIDGE_PAGE}`;
-  /** The notice while the contact is offline; once back, the app again, loaded anew (its last page may be stale). */
+  /** Why the bridge shows no app (`BRIDGE_REFUSED`), in the profile's words: said until Try again. */
+  let refused: string | null = null;
+  /** What the notice says now: null while the app is on screen. */
+  let shown: string | null = null;
+  /**
+   * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
+   * (its last page may be stale).
+   */
   const present = () => {
-    const offline = options.presence?.offline() ?? false;
-    if (offline === !notice.hidden) return;
-    if (offline) {
-      said.textContent = options.words.offline;
+    const text = options.presence?.offline() ? options.words.offline : refused;
+    if (text === shown) return;
+    shown = text;
+    if (text !== null) {
+      said.textContent = text;
       notice.hidden = false;
       notice.style.display = "flex";
       frame.style.display = "none";
@@ -348,13 +357,20 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       frame.src = src;
     }
   };
-  retry.addEventListener("click", present);
+  retry.addEventListener("click", () => { refused = null; present(); });
 
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
   let bridge = new AbortController();
   const onMessage = (event: MessageEvent) => {
-    if (event.source !== frame.contentWindow || event.origin !== origin || (event.data as { type?: unknown } | null)?.type !== BRIDGE_READY) return;
+    if (event.source !== frame.contentWindow || event.origin !== origin) return;
+    const message = event.data as { type?: unknown; reason?: unknown } | null;
+    if (message?.type === BRIDGE_REFUSED) {
+      refused = message.reason === "blocked" ? options.words.blocked : options.words.unguarded;
+      present();
+      return;
+    }
+    if (message?.type !== BRIDGE_READY) return;
     // A new bridge (the frame loaded again): a new channel, and the old one's requests end.
     for (const old of ports) old.close();
     ports.clear();

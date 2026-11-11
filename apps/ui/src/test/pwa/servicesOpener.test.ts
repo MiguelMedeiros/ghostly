@@ -3,7 +3,7 @@ import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from ".
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -110,7 +110,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -477,6 +477,50 @@ describe("a contact's app shown over the app", () => {
       stop();
       delete (navigator as { userActivation?: unknown }).userActivation;
     }
+  });
+
+  it("says why in the person's words when the bridge shows no app (the browser refused it its worker), until Try again loads it anew", async () => {
+    // Firefox blocking third-party cookies refuses the bridge its services worker: the services host is a site of its own.
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const first = frame.src;
+    const origin = new URL(first).origin;
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const refused = (reason: string, from: { origin: string; source: unknown } = { origin, source: inFrame }) =>
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_REFUSED, reason }, origin: from.origin, source: from.source as Window }));
+    // Only the bridge in the view's frame is heard.
+    refused("blocked", { origin: "https://other.example", source: inFrame });
+    refused("blocked", { origin, source: window });
+    expect(notice.hidden).toBe(true);
+    refused("blocked");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.style.display).toBe("none");
+    // The contact's presence changing leaves it said, and loads nothing.
+    frame.src = "about:blank";
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    // Offline goes first, and back online it is said again.
+    offline = true;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
+    offline = false;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.src).toBe("about:blank");
+    view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!.click();
+    expect(notice.hidden).toBe(true);
+    expect(frame.style.display).toBe("");
+    expect(frame.src, "the bridge is loaded anew").toBe(first);
+    // A page of the app the bridge would not show.
+    refused("unguarded");
+    expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
   });
 
   it("opens on the notice when the contact is already offline", async () => {
