@@ -581,6 +581,7 @@ describe("with the apps flag on", () => {
     shown = preview({ install: "new", asks: all, manifest });
     await user.click(screen.getByTestId("app-install-confirm"));
     expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(screen.getByTestId("app-install-error").firstElementChild).toHaveClass("text-danger-ink");
     expect(onInstalled).not.toHaveBeenCalled();
     expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
