@@ -942,6 +942,29 @@ const TIMER_MAX_MS = 2 ** 31 - 1
 
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
 
+/**
+ * The GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables in `env` that are none of `known`, sorted, each with the known
+ * name at most 3 edits away when there is one (`GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)`): a misspelt name was the
+ * default without a word, often the less safe one. Not a refusal: one env file may serve both relays.
+ */
+function ignoredSettings (env, known) {
+  return Object.keys(env).filter(name => /^GHOSTLY_(RELAY|HYPERDHT)_/.test(name) && !known.includes(name)).sort().map(name => {
+    const [closest] = known.map(other => ({ other, edits: editDistance(name, other) })).sort((a, b) => a.edits - b.edits)
+    return closest && closest.edits <= 3 ? `${name} (${closest.other}?)` : name
+  })
+}
+
+/** Levenshtein distance: the fewest characters to add, drop or change to turn `a` into `b`. */
+function editDistance (a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    row = next
+  }
+  return row[b.length]
+}
+
 /** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
 export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
 
@@ -955,7 +978,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
  * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes.
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes. `ignored`
+ * names the other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
   const limits = {}
@@ -979,6 +1003,10 @@ export function readSettings (env) {
     proxies,
     cloudflare,
     limits,
+    ignored: ignoredSettings(env, [
+      ...Object.keys(DEFAULT_LIMITS).map(limitVariable), 'GHOSTLY_HYPERDHT_BOOTSTRAP', 'GHOSTLY_HYPERDHT_TESTNET',
+      'GHOSTLY_RELAY_ORIGINS', 'GHOSTLY_RELAY_CLOUDFLARE', 'GHOSTLY_RELAY_PROXIES',
+    ]),
   }
 }
 

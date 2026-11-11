@@ -17,16 +17,49 @@ const SERVICES = resolve(import.meta.dirname, "../../../infra/services");
 
 describe("the relays' settings", () => {
   it("are the defaults when left out, and taken as given when of their kind", () => {
-    expect(pushSettings({})).toEqual({ port: 49480, host: "0.0.0.0", origins: [], proxies: 0 });
+    expect(pushSettings({})).toEqual({ port: 49480, host: "0.0.0.0", origins: [], proxies: 0, ignored: [] });
     expect(pushSettings({ PORT: "8443", GHOSTLY_RELAY_PROXIES: "1", GHOSTLY_RELAY_ORIGINS: "https://a.example, https://b.example" }))
-      .toEqual({ port: 8443, host: "127.0.0.1", origins: ["https://a.example", "https://b.example"], proxies: 1 });
+      .toEqual({ port: 8443, host: "127.0.0.1", origins: ["https://a.example", "https://b.example"], proxies: 1, ignored: [] });
     expect(pushSettings({ GHOSTLY_RELAY_PROXIES: "1", HOST: "0.0.0.0" }).host).toBe("0.0.0.0");
-    expect(hyperdhtSettings({})).toEqual({ port: 49443, host: "0.0.0.0", bootstrap: [], testnet: undefined, origins: [], proxies: 0, cloudflare: false, limits: {} });
+    expect(hyperdhtSettings({})).toEqual({ port: 49443, host: "0.0.0.0", bootstrap: [], testnet: undefined, origins: [], proxies: 0, cloudflare: false, limits: {}, ignored: [] });
     expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_CLIENTS_PER_ADDRESS: "64", GHOSTLY_RELAY_IDLE_MS: "60000", GHOSTLY_HYPERDHT_TESTNET: "3" }))
       .toMatchObject({ cloudflare: true, testnet: 3, limits: { clientsPerAddress: 64, idleMs: 60_000 } });
     expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "0" }).cloudflare).toBe(false);
     expect(Object.keys(DEFAULT_LIMITS)).toContain("clientsPerAddress");
   });
+
+  // A misspelt name was a quiet default, the less safe one: any origin, every client counted as the proxy.
+  it("name each GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variable they do not read, with the closest one they do", () => {
+    const env = {
+      GHOSTLY_RELAY_ORIGIN: "https://app.example", GHOSTLY_RELAY_PROXY: "1", GHOSTLY_RELAY_CLIENT_PER_ADDRESS: "2",
+      GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PER_MINUTE: "5", GHOSTLY_HYPERDHT_BOOTSTRAPS: "127.0.0.1:1", GHOSTLY_OTHER: "x", PORTS: "1",
+    };
+    expect(pushSettings(env)).toMatchObject({ origins: [], proxies: 0 });
+    expect(pushSettings(env).ignored).toEqual([
+      "GHOSTLY_HYPERDHT_BOOTSTRAPS", "GHOSTLY_RELAY_CLIENT_PER_ADDRESS", "GHOSTLY_RELAY_CLOUDFLARE",
+      "GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)", "GHOSTLY_RELAY_PER_MINUTE", "GHOSTLY_RELAY_PROXY (GHOSTLY_RELAY_PROXIES?)",
+    ]);
+    const { GHOSTLY_RELAY_CLOUDFLARE: _, ...hyperdhtEnv } = env;
+    expect(hyperdhtSettings(hyperdhtEnv)).toMatchObject({ origins: [], proxies: 0, bootstrap: [], limits: {} });
+    expect(hyperdhtSettings(hyperdhtEnv).ignored).toEqual([
+      "GHOSTLY_HYPERDHT_BOOTSTRAPS (GHOSTLY_HYPERDHT_BOOTSTRAP?)", "GHOSTLY_RELAY_CLIENT_PER_ADDRESS (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS?)",
+      "GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)", "GHOSTLY_RELAY_PER_MINUTE", "GHOSTLY_RELAY_PROXY (GHOSTLY_RELAY_PROXIES?)",
+    ]);
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_CLIENTS: "8", GHOSTLY_HYPERDHT_TESTNET: "3" }).ignored).toEqual([]);
+  });
+
+  it.each([
+    ["push-relay", { GHOSTLY_RELAY_ORIGIN: "https://app.example", GHOSTLY_RELAY_PROXY: "1" },
+      /^\S+ GHOSTLY_RELAY_ORIGIN \(GHOSTLY_RELAY_ORIGINS\?\), GHOSTLY_RELAY_PROXY \(GHOSTLY_RELAY_PROXIES\?\) are not settings of this relay; ignored$/],
+    ["hyperdht-relay", { GHOSTLY_RELAY_ORIGIN: "https://app.example", GHOSTLY_HYPERDHT_TESTNET: "3" },
+      /^\S+ GHOSTLY_RELAY_ORIGIN \(GHOSTLY_RELAY_ORIGINS\?\) is not a setting of this relay; ignored$/],
+  ])("%s starts, and says which variables it ignored", async (service, settings, line) => {
+    const others = Object.entries(process.env).filter(([name]) => !/^GHOSTLY_(RELAY|HYPERDHT)_/.test(name));
+    const env = { ...Object.fromEntries(others), HOST: "127.0.0.1", PORT: String(await freePort()), ...settings };
+    const lines = await linesUntilStart(service, env);
+    expect(lines.filter((text) => text.includes(" setting"))).toEqual([expect.stringMatching(line)]);
+    expect(lines.at(-1)).toMatch(/ any origin$/);
+  }, 30_000);
 
   // Behind a proxy or Cloudflare, a client that reaches the port past it could write the header it is counted by.
   it.each([
@@ -203,18 +236,22 @@ const freePort = () => new Promise<number>((done) => {
   });
 });
 
-/** The relay's first line on stdout, then SIGTERM. */
-function startLine(service: string, env: Record<string, string | undefined>): Promise<string> {
+/** The relay's start line on stdout, then SIGTERM. */
+const startLine = async (service: string, env: Record<string, string | undefined>) => (await linesUntilStart(service, env)).at(-1);
+
+/** The relay's lines on stdout up to its start line, then SIGTERM. */
+function linesUntilStart(service: string, env: Record<string, string | undefined>): Promise<string[]> {
   const child = spawn(process.execPath, ["server.mjs"], { cwd: resolve(SERVICES, service), env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
-  return new Promise<string>((done, fail) => {
+  return new Promise<string[]>((done, fail) => {
     const timer = setTimeout(() => fail(new Error(`no start line: ${err}`)), 25_000);
     child.stderr.on("data", (chunk) => { err += chunk; });
     child.stdout.on("data", (chunk) => {
       out += chunk;
-      const line = out.split("\n").slice(0, -1).find((text) => text.includes(" relay on port "));
-      if (line) { clearTimeout(timer); done(line); }
+      const lines = out.split("\n").slice(0, -1);
+      const start = lines.findIndex((text) => text.includes(" relay on port "));
+      if (start >= 0) { clearTimeout(timer); done(lines.slice(0, start + 1)); }
     });
     child.once("exit", (code) => { clearTimeout(timer); fail(new Error(`exited ${code}: ${err}`)); });
   }).finally(() => { child.kill("SIGTERM"); });
