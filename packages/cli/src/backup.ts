@@ -32,11 +32,13 @@ type BackupRecord =
   | { t: "end"; files: number; bytes: number };
 
 /**
- * The profile's settings kept beside its store, which name its chats and their contacts' keys: auto-join (`groups.json`)
- * and auto-answer (`calls.json`). Each travels as a `setting` record (an older CLI skips it); a backup without them
- * restores with both off.
+ * The profile's settings kept beside its store, which name its chats and their contacts' keys: auto-join (`groups.json`),
+ * auto-answer (`calls.json`) and the chats held off their direct link (`holds.json`, `chat disconnect --hold`: the
+ * store has such a chat on DHT only, and only this file says it comes back; the restored daemon ends a hold whose time
+ * passed meanwhile at its start). Each travels as a `setting` record (an older CLI skips it); a backup without them
+ * restores with auto-join and auto-answer off and no hold.
  */
-const SETTINGS = ["groups.json", "calls.json"];
+const SETTINGS = ["groups.json", "calls.json", "holds.json"];
 
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
@@ -84,6 +86,13 @@ export const BACKUP_METHODS: Record<string, Method> = {
     // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
     // any ghostly restores, this one or an older one.
     const store = join(paths.db, `backup-store-${process.pid}.bin`);
+    // The settings before the store: a hold that ends in between is then in the backup with its chat already back on
+    // its live link (the restored daemon ends it, nothing more), never the chat on DHT only with no hold to end.
+    const settings: { name: string; text: string }[] = [];
+    for (const name of SETTINGS) {
+      const text = await readFile(join(paths.dir, name), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+      if (text !== null) settings.push({ name, text });
+    }
     await ctx.runtime.store.exportSnapshot(store);
     const light = bool(params, "light");
     const all = await Promise.all((await walk(paths.files)).map(async (name) => ({ name, size: (await stat(join(paths.files, name))).size })));
@@ -109,10 +118,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
         await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
         await copyIn(writer, join(paths.files, file.name), file.size);
       }
-      for (const name of SETTINGS) {
-        const text = await readFile(join(paths.dir, name), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-        if (text !== null) await put({ t: "setting", name, text });
-      }
+      for (const { name, text } of settings) await put({ t: "setting", name, text });
       await put({ t: "end", files: files.length, bytes });
       const written = await writer.finish();
       await handle.sync();

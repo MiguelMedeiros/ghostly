@@ -82,7 +82,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
-| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings travel with it |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
 
 Only one process opens a profile at a time.
 
