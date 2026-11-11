@@ -176,7 +176,9 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failure: 
     {on && (
       <div role="meter" aria-label={t("settings.media.level")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)}
         data-testid="settings-microphone-level" className="w-20 h-2 rounded-full bg-surface-alt overflow-hidden">
-        <div className="h-full bg-accent transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
+        {/* Each reading drawn as it comes: a transition to it laid out and painted the page's frames between readings,
+            most of the meter's cost on the Linux Desktop. */}
+        <div className="h-full bg-accent" style={{ width: `${Math.round(level * 100)}%` }} />
       </div>
     )}
     <Button data-testid="settings-microphone-test" aria-pressed={on} onClick={() => setOn(!on)}>
