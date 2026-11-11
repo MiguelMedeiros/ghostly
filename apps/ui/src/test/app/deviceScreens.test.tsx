@@ -290,6 +290,30 @@ describe("Profile, Devices", () => {
     expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
   });
 
+  it("a move under way: neither Add a device nor a new device secret is offered, which the engine refuses as busy, until the move is cancelled", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "connecting", bytes: 0, total: 0 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const running = await screen.findByTestId("handoff-running");
+    // Pressed, Add a device would ask for the lock password and only then say "Something else is changing your devices".
+    const add = screen.getByTestId("device-add-open"), secret = screen.getByTestId("device-secret-new");
+    expect(add).toHaveAttribute("aria-disabled", "true");
+    expect(secret).toHaveAttribute("aria-disabled", "true");
+    await user.click(add);
+    await user.click(secret);
+    expect(screen.queryByTestId("device-add")).toBeNull();
+    expect(engine.callsTo("deviceNewSecret")).toHaveLength(0);
+    // Off, not disabled: the keyboard focus stays on it (a move the other device starts would otherwise drop it).
+    expect(secret).toHaveFocus();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    expect(add).not.toHaveAttribute("aria-disabled");
+    await user.click(add);
+    expect(await screen.findByTestId("device-add")).toBeInTheDocument();
+  });
+
   it("on a standby the section shows no move: its screen does", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
