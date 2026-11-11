@@ -75,7 +75,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 const SETTABLE_KINDS = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
-  autoDownloads: "boolean", serveFiles: "boolean",
+  autoDownloads: "boolean", serveFiles: "boolean", daemonPresence: "boolean",
 } as const satisfies Partial<Record<keyof Settings, "strings" | "string" | "boolean" | "ice">>;
 export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = SETTABLE_KINDS;
 
@@ -88,6 +88,7 @@ type Settable = keyof typeof SETTABLE_KINDS;
 const SETTING_DEFAULTS: { [K in Settable as undefined extends Settings[K] ? K : never]-?: () => NonNullable<Settings[K]> } = {
   irohRelays: () => [...DEFAULT_IROH_RELAYS], hyperdhtRelay: () => DEFAULT_HYPERDHT_RELAY,
   publicProfiles: () => true, shareProfile: () => true, sendTyping: () => true, autoDownloads: () => true, serveFiles: () => true,
+  daemonPresence: () => false,
 };
 
 /**

@@ -1487,6 +1487,11 @@ export interface Settings {
    */
   sharePresence?: boolean;
   /**
+   * Whether a headless daemon running this profile (the CLI's `settings set daemonPresence true`) says it is active
+   * while it runs, as a page does on input. Absent means no: kept only while on. The apps never read it.
+   */
+  daemonPresence?: boolean;
+  /**
    * The status this profile set (availability, emoji, text, until when), said to every paired contact whose app offers
    * `status/1`. Set and cleared through `setOwnStatus`/`clearOwnStatus`, never a settings patch; this device's own.
    */

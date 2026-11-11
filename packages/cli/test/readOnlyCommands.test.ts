@@ -67,7 +67,7 @@ describe("which one-shots open the profile offline", () => {
   });
 
   it("sets this device's own settings offline, and those the contacts or the relays see online", () => {
-    expect([...LOCAL_SETTINGS].sort()).toEqual(["autoDownloads", "sendTyping", "serveFiles"]);
+    expect([...LOCAL_SETTINGS].sort()).toEqual(["autoDownloads", "daemonPresence", "sendTyping", "serveFiles"]);
     for (const key of ["nick", "shareProfile", "online", "relays", "irohRelays", "hyperdhtRelay", "iceServers", "publicProfiles"]) {
       expect(LOCAL_SETTINGS.has(key), key).toBe(false);
     }
