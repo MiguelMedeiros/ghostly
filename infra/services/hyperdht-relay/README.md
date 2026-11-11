@@ -79,7 +79,9 @@ Other settings:
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
 start with one line that names it; leave a setting out for its default. The start line says how clients are counted,
-each limit set away from its default, and which origins it serves (`any origin` when none is set).
+each limit set away from its default, and which origins it serves (`any origin` when none is set). Before it, a line
+names each `GHOSTLY_RELAY_*` or `GHOSTLY_HYPERDHT_*` variable the relay does not read, with the closest name it does
+(`GHOSTLY_RELAY_PROXY (GHOSTLY_RELAY_PROXIES?) is not a setting of this relay; ignored`).
 
 ## Running it
 
