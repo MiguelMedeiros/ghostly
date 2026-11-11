@@ -47,7 +47,7 @@ import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
-import { keepSentOriginal } from "../lib/sentOriginals";
+import { forgetSentOriginal, keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -474,9 +474,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (waiting) {
       if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
+      forgetSentOriginal(sessionId, messageId);
       return;
     }
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
     if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
   });
 
@@ -534,6 +536,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
   });
 
   // Saved messages: kept on this device, never sent; the Saved view lists them.
