@@ -1,6 +1,9 @@
-import { canonicalUrl, linksIn } from "@ghostly/core";
+import { canonicalUrl, linksIn, type LinkPreview } from "@ghostly/core";
+import { parseMessage } from "./blocks";
 import { findEntities } from "./entities";
+import { linkEnd } from "./links";
 import { findLocation } from "./location";
+import type { Block, Segment } from "./types";
 
 /**
  * What a page says about itself, read by the sender's app for a link preview (WISP 401 § Link previews): Open
@@ -139,12 +142,14 @@ const IMAGE_LINK = /\.(gif|png|jpe?g|webp|svg|avif)(\?\S*)?$/i;
 /**
  * The link of a text a preview would be made for: the first http(s) link that is not a picture (those show
  * themselves), a place (the location card draws those, and asks nothing) or a Ghostly invite or group link (their
- * card comes from the code, and the page says nothing more), on a public host. Null when none.
+ * card comes from the code, and the page says nothing more), on a public host, and not one a spoiler hides (its card
+ * would say what the spoiler covers). Null when none.
  */
 export function previewableLink(text: string): string | null {
+  const hidden = spoiledLinks(text);
   for (const link of linksIn(text)) {
     const canonical = canonicalUrl(link);
-    if (!canonical) continue;
+    if (!canonical || hidden(link)) continue;
     const url = new URL(canonical);
     if (IMAGE_LINK.test(url.pathname) || isLocalHost(url.hostname) || findLocation(link) || findEntities(link).length) continue;
     // A link still being typed ("https://exam") has no dot in its host yet, or a one-letter top-level name.
@@ -152,4 +157,41 @@ export function previewableLink(text: string): string | null {
     return link;
   }
   return null;
+}
+
+/**
+ * Whether a link of `text` (as `linksIn` reads it) shows only inside a spoiler, or as a link whose words hold one: the
+ * bubble keeps it covered, so no card may say where it goes. A link the text shows outside a spoiler as well is not.
+ */
+function spoiledLinks(text: string): (link: string) => boolean {
+  if (!text.includes("||")) return () => false;
+  const shown = new Set<string>(), hidden = new Set<string>();
+  const walk = (segments: Segment[], covered: boolean) => {
+    for (const segment of segments) {
+      if (segment.type === "span") walk(segment.children, covered || segment.style === "spoiler");
+      else if (segment.type === "atom" && (segment.kind === "link" || segment.kind === "md-link")) {
+        const { url, label } = segment.data as { url: string; label?: Segment[] };
+        (covered || (label && hasSpoiler(label)) ? hidden : shown).add(url);
+      }
+    }
+  };
+  const block = (b: Block): void => {
+    if (b.type === "paragraph" || b.type === "heading") walk(b.segments, false);
+    else if (b.type === "quote") b.blocks.forEach(block);
+    else if (b.type === "list") for (const item of b.items) { walk(item.segments, false); item.children.forEach(block); }
+  };
+  parseMessage(text).forEach(block);
+  // `linksIn` keeps a spoiler's closing "||" on its link; the bubble's link ends before it.
+  return (link) => { const url = linkEnd(link); return hidden.has(url) && !shown.has(url); };
+}
+
+const hasSpoiler = (segments: Segment[]): boolean =>
+  segments.some((s) => s.type === "span" && (s.style === "spoiler" || hasSpoiler(s.children)));
+
+/** A received preview, unless its link shows only inside a spoiler (an older app makes one for it). */
+export function shownPreview(text: string, preview: LinkPreview | undefined): LinkPreview | undefined {
+  if (!preview) return undefined;
+  const hidden = spoiledLinks(text);
+  const links = linksIn(text).filter((link) => canonicalUrl(link) === preview.u);
+  return links.length && links.every(hidden) ? undefined : preview;
 }
