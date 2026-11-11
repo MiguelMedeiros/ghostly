@@ -175,6 +175,30 @@ export const taggedWebm = () => {
   return Buffer.concat([head, ebml([0x18, 0x53, 0x80, 0x67], [seekHead(tagsAt), info, tracks, cluster, tags], true)]);
 };
 
+/** Xiph lacing, as Matroska keeps a Vorbis or Theora track's headers in its CodecPrivate: their count less one, each size but the last's, them. */
+const xiphLaced = (packets: Buffer[]) => Buffer.concat([Buffer.from([packets.length - 1]),
+  ...packets.slice(0, -1).map((p) => Buffer.from([...Array<number>(Math.floor(p.length / 255)).fill(255), p.length % 255])), ...packets]);
+/** Each codec's CodecPrivate with comments that say where: Vorbis's and Theora's headers Xiph-laced, FLAC's metadata blocks (a Vorbis comment, a picture). */
+export const CODEC_PRIVATES = {
+  A_VORBIS: () => xiphLaced([Buffer.concat([latin("\x01vorbis"), Buffer.alloc(23, 1)]), Buffer.concat([latin("\x03vorbis"), vorbisComment(true), Buffer.alloc(300, 0x41)]),
+    Buffer.concat([latin("\x05vorbis"), Buffer.alloc(300, 2)])]),
+  V_THEORA: () => xiphLaced([Buffer.concat([latin("\x80theora"), Buffer.alloc(35, 1)]), Buffer.concat([latin("\x81theora"), vorbisComment(false)]), Buffer.concat([latin("\x82theora"), Buffer.alloc(200, 2)])]),
+  A_FLAC: () => Buffer.concat([latin("fLaC"), flacBlock(0, false, Buffer.alloc(34, 3)), flacBlock(4, false, vorbisComment(false)),
+    flacBlock(6, true, Buffer.concat([u32be(3), u32be(9), latin("image/png"), u32be(PLACE.length), latin(PLACE), Buffer.alloc(20)]))]),
+} as const;
+/**
+ * A Matroska file whose one track is `codec` with `codecPrivate` (a muxer copies an Ogg's or a FLAC's headers there,
+ * comments and all), its CodecID after its CodecPrivate when `privateFirst`.
+ */
+export const xiphWebm = (codec: keyof typeof CODEC_PRIVATES, codecPrivate: Buffer = CODEC_PRIVATES[codec](), privateFirst = false) => {
+  const head = ebml([0x1a, 0x45, 0xdf, 0xa3], [str([0x42, 0x82], "matroska")]);
+  const info = ebml([0x15, 0x49, 0xa9, 0x66], [ebml([0x2a, 0xd7, 0xb1], [Buffer.from([0x0f, 0x42, 0x40])])]);
+  const id = str([0x86], codec), cp = ebml([0x63, 0xa2], [codecPrivate]);
+  const tracks = ebml([0x16, 0x54, 0xae, 0x6b], [ebml([0xae], [ebml([0xd7], [Buffer.from([1])]), ...(privateFirst ? [cp, id] : [id, cp])])]);
+  const cluster = ebml([0x1f, 0x43, 0xb6, 0x75], [ebml([0xe7], [Buffer.from([0])]), ebml([0xa3], [WEBM_BLOCK])]);
+  return Buffer.concat([head, ebml([0x18, 0x53, 0x80, 0x67], [info, tracks, cluster])]);
+};
+
 /** An M4A: a movie with a sound track alone (`soun`), a `©xyz` in its `udta`. */
 export const taggedM4a = () => {
   const head = box("ftyp", latin("M4A \0\0\0\0M4A isom"));

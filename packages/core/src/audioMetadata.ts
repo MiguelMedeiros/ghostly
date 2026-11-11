@@ -18,7 +18,8 @@
  *   its date and originator, iXML, XMP).
  * - WebM and Matroska, audio or video: `Tags`, `Attachments`, `Chapters`, the title, the date, the file names and each
  *   track's name become `Void` elements (and the SeekHead's entries for them); the muxer's and the writing app's names
- *   are zeroed. Clusters, cues and track settings are kept as they are.
+ *   are zeroed. A Vorbis, Theora or FLAC track's CodecPrivate (its Ogg headers or its FLAC metadata blocks) has its
+ *   comments emptied as an Ogg's or a FLAC's. Clusters, cues and other track settings are kept as they are.
  *
  * Fail-closed: a file that is one of these by its bytes and whose tags cannot be removed (truncated, malformed) is
  * refused with `NO_AUDIO_METADATA`, never sent as it was. Any other file goes as it is (other audio formats too).
@@ -363,7 +364,9 @@ const CLUSTER_CHILDREN = new Set([0xe7, 0x5854, 0xa7, 0xab, 0xa3, 0xa0, 0xaf, VO
 /** What Info keeps: the timing, the segment's IDs; the muxer's and writing app's names, zeroed. Any other (a title, a date, file names) becomes Void. */
 const INFO_KEEPS = new Set([0x2ad7b1, 0x4489, 0x73a4, 0x4444, 0x3cb923, 0x3eb923, 0x6924]);
 const INFO_ZEROED = new Set([0x4d80, 0x5741]);
-const TRACK_ENTRY = 0xae, TRACK_NAME = 0x536e, SEEK = 0x4dbb, SEEK_ID = 0x53ab;
+const TRACK_ENTRY = 0xae, TRACK_NAME = 0x536e, CODEC_ID = 0x86, CODEC_PRIVATE = 0x63a2, SEEK = 0x4dbb, SEEK_ID = 0x53ab;
+/** The codecs whose CodecPrivate is their Ogg headers Xiph-laced: the second a comment header, its magic, and whether a framing bit follows its comments. */
+const XIPH_PRIVATE = new Map<string, [string, boolean]>([["A_VORBIS", ["\x03vorbis", true]], ["V_THEORA", ["\x81theora", false]]]);
 
 interface Element { id: number; start: number; body: number; end: number; unknown: boolean }
 
@@ -424,11 +427,48 @@ function childrenOf(b: Uint8Array, parent: Element): Element[] {
 }
 
 /**
- * A top-level element of a segment read whole and changed in it: Info without its title, date and file names (its
- * muxer's and writing app's names zeroed), Tracks without their names, a SeekHead without the entries for what
- * became Void. A CRC-32 in them, wrong once they changed, becomes Void too.
+ * A track's CodecPrivate (`b`, changed in it) by its codec: a Vorbis or Theora track's headers (their count less one,
+ * each size but the last's in Xiph lacing, them) with a comment header that has no comment, its sizes kept; a FLAC
+ * track's `fLaC` and metadata blocks as a FLAC's, any byte after the last zeroed. Another codec's is kept as it is.
  */
-function stripTopLevel(b: Uint8Array): void {
+async function noPrivateTags(b: Uint8Array, codec: string): Promise<void> {
+  const xiph = XIPH_PRIVATE.get(codec);
+  if (xiph) {
+    check(b.length >= 1 && b[0] === 2);
+    let at = 1;
+    const sizes: number[] = [];
+    while (sizes.length < 2) {
+      let size = 0;
+      for (let byte = 255; byte === 255; size += byte) {
+        check(at < b.length);
+        byte = b[at++]!;
+      }
+      sizes.push(size);
+    }
+    const start = at + sizes[0]!, end = start + sizes[1]!;
+    check(end <= b.length);
+    b.set(noComments(b.subarray(start, end), ...xiph), start);
+  } else if (codec === "A_FLAC") {
+    check(b.length >= 4 && text(b, 0, 4) === "fLaC");
+    const patches: VideoPatch[] = [];
+    const end = await flac(async (offset, length) => {
+      check(offset >= 0 && length >= 0 && offset + length <= b.length);
+      return b.subarray(offset, offset + length);
+    }, b.length, 0, patches);
+    for (const patch of patches) {
+      if (patch.bytes) b.set(patch.bytes, patch.start);
+      else b.fill(0, patch.start, patch.end);
+    }
+    b.fill(0, end);
+  }
+}
+
+/**
+ * A top-level element of a segment read whole and changed in it: Info without its title, date and file names (its
+ * muxer's and writing app's names zeroed), Tracks without their names and the comments in their CodecPrivate, a
+ * SeekHead without the entries for what became Void. A CRC-32 in them, wrong once they changed, becomes Void too.
+ */
+async function stripTopLevel(b: Uint8Array): Promise<void> {
   const top = element(b, 0, b.length);
   check(!top.unknown && top.end === b.length);
   for (const child of childrenOf(b, top)) {
@@ -437,7 +477,14 @@ function stripTopLevel(b: Uint8Array): void {
       if (INFO_ZEROED.has(child.id)) b.fill(0, child.body, child.end);
       else if (!INFO_KEEPS.has(child.id) && child.id !== VOID) voidIn(b, child);
     } else if (top.id === TRACKS && child.id === TRACK_ENTRY) {
-      for (const part of childrenOf(b, child)) if (part.id === TRACK_NAME || part.id === CRC32) voidIn(b, part);
+      const parts = childrenOf(b, child), ids = parts.filter((part) => part.id === CODEC_ID);
+      // A CodecID null-padded is the same; two would leave which one a player reads unknown.
+      check(ids.length <= 1);
+      const codec = ids[0] ? text(b, ids[0].body, ids[0].end - ids[0].body).replace(/\0+$/, "") : "";
+      for (const part of parts) {
+        if (part.id === TRACK_NAME || part.id === CRC32) voidIn(b, part);
+        else if (part.id === CODEC_PRIVATE) await noPrivateTags(b.subarray(part.body, part.end), codec);
+      }
     } else if (top.id === SEEK_HEAD && child.id === SEEK) {
       const target = childrenOf(b, child).find((part) => part.id === SEEK_ID);
       let id = 0;
@@ -486,7 +533,7 @@ async function matroska(source: VideoSource, read: Read, patches: VideoPatch[]):
       check(!el.unknown && el.end <= top.end);
       if (el.id === INFO || el.id === TRACKS || el.id === SEEK_HEAD) {
         const bytes = (await read(el.start, el.end - el.start)).slice();
-        stripTopLevel(bytes);
+        await stripTopLevel(bytes);
         patches.push({ start: el.start, end: el.end, bytes });
       } else if (el.id === VOID) {
         if (el.end > el.body) patches.push({ start: el.body, end: el.end });
