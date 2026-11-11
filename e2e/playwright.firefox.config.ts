@@ -1,9 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * The web app in Firefox, for the one spec whose answer depends on each engine: the mini-app sandbox
- * (apps-sandbox.spec.ts, WISP 1200). The main suite's fixtures are written for Chromium, and CI installs Chromium only,
- * so it runs locally:
+ * The web app in Firefox, for the specs whose answer depends on each engine: the mini-app sandbox
+ * (apps-sandbox.spec.ts, WISP 1200), and a contact's shared app opened on the web (services-web-open.spec.ts). The main
+ * suite's fixtures are written for Chromium, and CI installs Chromium only, so it runs locally:
  *
  *   npx playwright install firefox
  *   E2E_WEB_PORT=50310 npx playwright test -c e2e/playwright.firefox.config.ts
@@ -13,8 +13,10 @@ const deployed = process.env.E2E_WEB_URL;
 
 export default defineConfig({
   testDir: "./web",
-  testMatch: ["apps-sandbox.spec.ts", "apps-chess.spec.ts"],
+  testMatch: ["apps-sandbox.spec.ts", "apps-chess.spec.ts", "services-web-open.spec.ts"],
   outputDir: "../test-results/firefox",
+  // The headless CLI the services specs' bot runs, built once before the workers start, as in the main suite.
+  globalSetup: "./support/headlessBuild.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -40,6 +42,7 @@ export default defineConfig({
         url: `http://localhost:${port}`,
         reuseExistingServer: !process.env.CI,
         timeout: 5 * 60_000,
-        env: { VITE_APPS_TEST: "1" },
+        // A contact's shared app opens on `<label>.localhost`, as in the main suite (e2e/playwright.config.ts).
+        env: { VITE_APPS_TEST: "1", VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
 });

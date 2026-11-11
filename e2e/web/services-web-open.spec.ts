@@ -12,7 +12,7 @@ import { choose } from "../support/select";
  * the chat's data link to the bot's machine.
  *
  * Needs a build made with a services host: the suite's own sets one (`VITE_SERVICES_HOST`, e2e/playwright.config.ts),
- * `http://*.localhost:<port>`, which Chromium resolves to this machine.
+ * `http://*.localhost:<port>`, which Chromium and Firefox resolve to this machine (Firefox: e2e/playwright.firefox.config.ts).
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
@@ -33,7 +33,8 @@ async function demoApp(local: number): Promise<{ server: Server; port: number; s
         response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><p id="local">…</p><p id="worker">…</p><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
-        response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
+        // A refused window.open: null in Chromium, an InvalidAccessError in Firefox (a sandbox without allow-popups).
+        response.end(`document.getElementById("popup").textContent = (() => { try { return window.open("/popup") ? "opened" : "refused"; } catch (e) { return "refused"; } })();
           new Worker("/worker.js").onmessage = (event) => { document.getElementById("worker").textContent = event.data; };
           fetch("http://127.0.0.1:${local}/local", { mode: "no-cors" }).then(() => "reached", () => "refused").then((said) => { document.getElementById("local").textContent = said; });
           fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
@@ -59,7 +60,7 @@ async function demoApp(local: number): Promise<{ server: Server; port: number; s
 
 test("a person on the web opens the web app a bot shares, on an origin of its own, over the chat's link", {
   tag: ["@feature:services.web-open", "@feature:headless.web-interop", "@feature:services.http"],
-}, async ({ peer, relay }, info) => {
+}, async ({ peer, relay, browserName }, info) => {
   const url = await relay.listen();
   const localSeen: string[] = [];
   const local = createServer((request, response) => { localSeen.push(request.url ?? ""); response.end("ok"); });
@@ -141,18 +142,21 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
 
     // An iPhone on its side (Chromium plays its safe area): ✕, the name and the app clear of the notch on either side
     // and of the home indicator. The app cannot keep clear of them itself: `env(safe-area-inset-*)` is 0 in its frame.
-    // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom.
-    const viewport = person.page.viewportSize()!;
-    await person.page.setViewportSize({ width: 667, height: 375 });
-    const cdp = await person.page.context().newCDPSession(person.page);
-    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 47, bottom: 21, left: 47 } });
-    const outside = () => view.evaluate((v) => [v.querySelector("[data-testid=service-view-close]")!, v.querySelector("[data-testid=service-view-frame]")!, v.querySelector("span")!]
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.left < 47 || r.right > innerWidth - 47 || r.bottom > innerHeight - 21)
-      .map((r) => `${Math.round(r.left)}..${Math.round(r.right)} x ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerWidth}x${innerHeight}`));
-    await expect.poll(outside).toEqual([]);
-    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 0, bottom: 0, left: 0 } });
-    await person.page.setViewportSize(viewport);
+    // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom. Through CDP: not in Firefox
+    // (e2e/playwright.firefox.config.ts).
+    if (browserName === "chromium") {
+      const viewport = person.page.viewportSize()!;
+      await person.page.setViewportSize({ width: 667, height: 375 });
+      const cdp = await person.page.context().newCDPSession(person.page);
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 47, bottom: 21, left: 47 } });
+      const outside = () => view.evaluate((v) => [v.querySelector("[data-testid=service-view-close]")!, v.querySelector("[data-testid=service-view-frame]")!, v.querySelector("span")!]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.left < 47 || r.right > innerWidth - 47 || r.bottom > innerHeight - 21)
+        .map((r) => `${Math.round(r.left)}..${Math.round(r.right)} x ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerWidth}x${innerHeight}`));
+      await expect.poll(outside).toEqual([]);
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 0, bottom: 0, left: 0 } });
+      await person.page.setViewportSize(viewport);
+    }
 
     // Closed: gone, the chat is where it was, and the focus back on Open, not on the page's body.
     const chat = person.page.url();
