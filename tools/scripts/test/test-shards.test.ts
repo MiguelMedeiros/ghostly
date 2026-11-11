@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALONE, packages, split } from "../test-shards.mjs";
+import { ALONE, WORKERS, packages, split } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -9,11 +9,20 @@ describe("the packages shards", () => {
     expect(ALONE).toContain("packages/cli/test/twoPeers.test.ts");
   });
 
-  it("give a file that runs alone a shard nothing else joins, and the rest heaviest first to the least loaded", () => {
+  it("run a file that runs alone first on a shard of its own, and the rest heaviest first to the least loaded", () => {
     const seconds = { a1: 100, a2: 50, b1: 120, c1: 30, long: 200 };
     const shards = split([unit("a", ["a1", "a2"]), unit("b", ["b1"]), unit("c", ["c1"]), unit("long", ["long"], true)], seconds, 3);
     expect(shards.map((s) => s.units.map((u) => u.id))).toEqual([["long"], ["a"], ["b", "c"]]);
-    expect(shards.map((s) => s.load)).toEqual([200, 150, 150]);
+    expect(shards.map((s) => s.load)).toEqual([200 * WORKERS, 150, 150]);
+  });
+
+  it("run other units after a file that runs alone, so its shard does not idle", () => {
+    // Before, the long file's shard ran it only while the other ran a, b and c (210). Alone, long holds its runner
+    // as long as 120 s of files that share it.
+    const seconds = { a1: 120, b1: 60, c1: 30, long: 120 / WORKERS };
+    const shards = split([unit("a", ["a1"]), unit("b", ["b1"]), unit("c", ["c1"]), unit("long", ["long"], true)], seconds, 2);
+    expect(shards.map((s) => s.units.map((u) => u.id))).toEqual([["long", "b"], ["a", "c"]]);
+    expect(shards.map((s) => s.load)).toEqual([180, 150]);
   });
 
   it("count a file with no recorded time as a typical one, and split the same way every time", () => {
@@ -46,7 +55,8 @@ describe("the packages shards", () => {
     expect(shards[0].units.map((u) => [u.id, u.files, u.whole])).toEqual([["big", ["b1", "b2"], true], ["c", ["c1"], undefined]]);
   });
 
-  it("need more shards than files that run alone", () => {
-    expect(() => split([unit("long", ["long"], true), unit("a", ["a1"])], {}, 1)).toThrow(/more than 1 shards/);
+  it("need a shard for each file that runs alone", () => {
+    expect(() => split([unit("long", ["long"], true), unit("other", ["other"], true)], {}, 1)).toThrow(/at least 2 shards/);
+    expect(split([unit("long", ["long"], true), unit("a", ["a1"])], {}, 1)[0].units.map((u) => u.id)).toEqual(["long", "a"]);
   });
 });
