@@ -881,3 +881,53 @@ describe("a phone back after minutes asleep to a CLI daemon, over WebRTC alone",
     expect(after.reads(0, 420_000) - before.reads(0, 420_000)).toBeLessThanOrEqual(14);
   }, 240_000);
 });
+
+/**
+ * Automatic, both apps with `upgrade/1`: after a restart the chat is live over Iroh through its relay and moves to WebRTC
+ * about a second later, when queued texts flush and people type. Each side swaps when its own new session is ready, so
+ * for a moment the contact still sends on the session this side just replaced. That session stopped at the swap and
+ * dropped what came on it: a text or two each way and a receipt or two, sent within 100 ms of the move, were lost.
+ */
+describe("texts sent each way while Automatic moves the session from Iroh to WebRTC", () => {
+  it.each([
+    { restarted: "lower", how: "graceful" }, { restarted: "higher", how: "graceful" },
+    { restarted: "lower", how: "crash" }, { restarted: "higher", how: "crash" },
+  ] as const)("the app with the $restarted key back ($how): every text arrives, and its receipt within 2 s", async ({ restarted, how }) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const got = { goes: new Set<string>(), stays: new Set<string>() }, receipts = { goes: new Set<string>(), stays: new Set<string>() };
+    const moves: string[] = [];
+    const events = (who: "goes" | "stays") => ({ events: {
+      onMessage: async (message: { id?: string }) => { if (message.id) got[who].add(message.id); },
+      onMessageReceipt: async (id: string) => { receipts[who].add(id); },
+      onTransportSwitched: (from?: string, to?: string) => { moves.push(`${who} ${from}->${to}`); },
+    } });
+    let goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("goes"));
+    const stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("stays"));
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, goes, how);
+    await run(RESTART_AFTER_MS);
+    moves.length = 0;
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", goes.dhtState, true, undefined, false, up, events("goes"));
+    const before = channelOf(stays);
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== before, 60_000)).toBeLessThan(Infinity);
+    // From the moment it is live (on Iroh), one text each way every 50 ms for 8 s: the move falls in the middle.
+    const sent = { goes: [] as string[], stays: [] as string[] };
+    for (let n = 0; n < 160; n++) {
+      for (const [who, app] of [["goes", goes], ["stays", stays]] as const) {
+        const id = `${who}${String(n).padStart(4, "0")}`.padEnd(22, "x");
+        expect(await app.link.sendMessage(`text ${n}`, Date.now(), id)).toBeNull();
+        sent[who].push(id);
+      }
+      await vi.advanceTimersByTimeAsync(50); await yieldToLoop();
+    }
+    await run(2_000);
+    expect(moves.sort(), "the session moved on both sides while the texts went").toEqual(["goes iroh/1->webrtc/1", "stays iroh/1->webrtc/1"]);
+    // Before: 1 or 2 texts each way never arrived, and 1 or 2 that did never had their receipt.
+    expect({ goes: sent.goes.filter(id => !got.stays.has(id)), stays: sent.stays.filter(id => !got.goes.has(id)) }, "texts lost").toEqual({ goes: [], stays: [] });
+    expect({ goes: sent.goes.filter(id => !receipts.goes.has(id)), stays: sent.stays.filter(id => !receipts.stays.has(id)) }, "receipts missing").toEqual({ goes: [], stays: [] });
+  }, 240_000);
+});
