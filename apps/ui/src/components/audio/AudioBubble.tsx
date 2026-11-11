@@ -295,7 +295,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p dir="auto" className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
+          <p dir="auto" className="chat-text-audio-name leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"
@@ -310,7 +310,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             className="block w-full h-3 my-0.5 accent-accent cursor-pointer disabled:cursor-default disabled:opacity-50"
           />
           {/* At least a line high; the status wraps (cut with …, it lost its end: how far the file is, its size). */}
-          <div className="flex items-center gap-1.5 min-h-[18px] text-[11px] text-text-primary/65" data-testid="audio-meta">
+          <div className="flex items-center gap-1.5 min-h-[18px] chat-text-media-meta text-text-primary/65" data-testid="audio-meta">
             {active && <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />}
             <span className="tabular-nums shrink-0 whitespace-nowrap" data-testid="audio-time">
               {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size, t)}
@@ -338,7 +338,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
           </div>
           {typeof transfer.room === "number" && (
-            <p className={`text-[11px] m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
+            <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
             </p>
           )}
@@ -353,10 +353,10 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="audio-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
-        <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
+        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
-            <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
+            <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer">{t("chat.message.download")}</button>
           )}
         </p>
       )}
