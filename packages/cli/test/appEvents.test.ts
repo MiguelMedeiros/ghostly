@@ -1,11 +1,22 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { reportAppFrames } from "../src/appEvents";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events
+
+/** Reads of a profile's `apps.json`, counted. */
+const reads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("node:fs", async (original) => {
+  const real = await original<typeof import("node:fs")>();
+  const readFileSync = ((path: unknown, ...rest: unknown[]) => {
+    if (String(path).endsWith("apps.json")) reads.count++;
+    return (real.readFileSync as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof real.readFileSync;
+  return { ...real, default: { ...real, readFileSync }, readFileSync };
+});
 
 /**
  * The frames of a contact's app, as events of the stream (WISP 1200 § A bot on the other side): only for an app the
@@ -22,7 +33,7 @@ const CHESS = `${KEY}/chess`, POLL = `${KEY}/poll`;
 /** A stand-in for the engine's `appId`: an id per chat and reference, and no id for a chat that is not paired. */
 const node = { appId: ({ linkId, ref }: { linkId: string; ref: string }) => { if (linkId === "unpaired") throw new Error("This chat is not paired yet"); return { app: `id:${linkId}:${ref.split("/")[1]}` }; } };
 
-async function setup(journal: string, served: string[]) {
+async function setup(journal: string, served: string[], ids: { appId(params: { linkId: string; ref: string }): { app: string } } = node) {
   const profile = mkdtempSync(join(tmpdir(), "ghostly-app-events-profile-"));
   const serve = (refs: string[]) => writeFileSync(join(profile, "apps.json"), JSON.stringify(refs.map((ref) => ({ ref }))));
   serve(served);
@@ -30,10 +41,10 @@ async function setup(journal: string, served: string[]) {
   await hub.open();
   const events: GhostlyEvent[] = [];
   hub.onEvent((e) => events.push(e));
-  reportAppFrames(hub, node, profile);
+  reportAppFrames(hub, ids, profile);
   const frame = (linkId: string, event: Record<string, unknown>) => hub.sink.post({ kind: "app-frame", linkId, event } as never);
   const seen = () => events.map(({ type, chat, app, version, data, offline }) => ({ type, chat, app, ...(version !== undefined && { version }), ...(data !== undefined && { data }), ...(offline !== undefined && { offline }) }));
-  return { hub, events, frame, seen, serve };
+  return { hub, events, frame, seen, serve, profile };
 }
 
 describe("app events", () => {
@@ -104,5 +115,60 @@ describe("app events", () => {
       { type: "app.opened", chat: "c1", app: CHESS, version: "2.3.0" },
       { type: "app.opened", chat: "c1", app: POLL, version: "1.0.0" },
     ]);
+  });
+
+  describe("a contact repeating opens", () => {
+    /** Served apps by name, and the engine's stand-in counting the chat app ids it derives (each a hash and an HMAC). */
+    const NAMES = ["a", "b", "c", "d", "e"];
+    async function counted(journal: string) {
+      let derived = 0;
+      const ids = { appId: (params: { linkId: string; ref: string }) => { derived++; return node.appId(params); } };
+      const setupDone = await setup(journal, NAMES.map((n) => `${KEY}/${n}`), ids);
+      reads.count = 0;
+      return { ...setupDone, derived: () => derived };
+    }
+
+    it("reads the served apps and derives their ids once, not at every repeated open", async () => {
+      const { events, frame, derived } = await counted("repeat.jsonl");
+      // 800 opens: each served app and an app not served here, again and again at the same version.
+      for (let i = 0; i < 800; i++) frame("c1", { app: `id:c1:${[...NAMES, "unserved"][i % 6]}`, o: "open", v: "1.0.0" });
+      expect(derived()).toBe(NAMES.length);
+      expect(reads.count).toBe(1);
+      // Every open of a served app is still reported.
+      expect(events.filter((e) => e.type === "app.opened")).toHaveLength(800 - Math.ceil((800 - 5) / 6));
+      // Another chat learns its own ids, once too.
+      for (let i = 0; i < 10; i++) frame("c2", { app: "id:c2:a", o: "open", v: "1.0.0" });
+      expect(derived()).toBe(2 * NAMES.length);
+      expect(reads.count).toBe(2);
+    });
+
+    it("learns again once apps.json changed: an app served since is taken from its next open", async () => {
+      const { frame, seen, serve, profile, derived } = await counted("reserved.jsonl");
+      frame("c1", { app: "id:c1:a", o: "open", v: "1.0.0" });
+      frame("c1", { app: "id:c1:poll", o: "open", v: "1.0.0" });
+      expect(derived()).toBe(NAMES.length);
+      // Another process (a one-shot `app serve`) writes the file: the daemon learns it at the next open.
+      serve([...NAMES.map((n) => `${KEY}/${n}`), POLL]);
+      utimesSync(join(profile, "apps.json"), new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+      frame("c1", { app: "id:c1:poll", o: "open", v: "1.0.0" });
+      frame("c1", { app: "id:c1:poll", o: "open", v: "1.0.0" });
+      expect(derived()).toBe(NAMES.length + NAMES.length + 1);
+      expect(reads.count).toBe(2);
+      expect(seen()).toEqual([
+        { type: "app.opened", chat: "c1", app: `${KEY}/a`, version: "1.0.0" },
+        { type: "app.opened", chat: "c1", app: POLL, version: "1.0.0" },
+        { type: "app.opened", chat: "c1", app: POLL, version: "1.0.0" },
+      ]);
+    });
+
+    it("learns again when an open names another version than the one it learned", async () => {
+      const { frame, derived } = await counted("version.jsonl");
+      for (let i = 0; i < 3; i++) frame("c1", { app: "id:c1:a", o: "open", v: "1.0.0" });
+      expect(derived()).toBe(NAMES.length);
+      frame("c1", { app: "id:c1:a", o: "open", v: "1.1.0" });
+      frame("c1", { app: "id:c1:a", o: "open", v: "1.1.0" });
+      expect(derived()).toBe(2 * NAMES.length);
+      expect(reads.count).toBe(2);
+    });
   });
 });
