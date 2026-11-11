@@ -32,6 +32,8 @@ interface UpdateContextValue {
   /** 0 to 1 while an install that reports progress runs. */
   progress: number;
   error: string | null;
+  /** What failed with `error`: a check (the update found before, if any, still stands) or the install of one. */
+  failed: "check" | "install" | null;
   lastCheckedAt: number | null;
   /** Whether the user put this version aside. Settings still shows it. */
   dismissed: boolean;
@@ -65,6 +67,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [stage, setStage] = useState<"idle" | "checking" | "installing">("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<"check" | "install" | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(readDismissed);
   // A check in flight must not be started again by the interval or a tab coming back.
@@ -84,12 +87,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       do {
         goneWhileChecking.current = false;
         setError(null);
+        setFailed(null);
         try {
           setUpdate(await updatePlatform.check());
           lastCheckedRef.current = Date.now();
           setLastCheckedAt(lastCheckedRef.current);
         } catch (e) {
           setError(errorText(e, tRef.current));
+          setFailed("check");
         }
       } while (goneWhileChecking.current);
     } finally {
@@ -103,11 +108,13 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setStage("installing");
     setProgress(0);
     setError(null);
+    setFailed(null);
     try {
       // On the way out: this either reloads the page or restarts the app.
       await updatePlatform.install(update, setProgress);
     } catch (e) {
       setError(errorText(e, tRef.current));
+      setFailed("install");
       setStage("idle");
     }
   }, [update]);
@@ -168,6 +175,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         stage,
         progress,
         error,
+        failed,
         lastCheckedAt,
         dismissed: !!update && identify(update) === dismissedVersion,
         downloadUrl: update?.downloadUrl ?? updatePlatform?.downloadUrl ?? "",
