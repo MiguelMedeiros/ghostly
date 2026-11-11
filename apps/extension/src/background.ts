@@ -190,8 +190,11 @@ async function showApp(route?: string): Promise<void> {
 async function openNotification(id: string): Promise<void> {
   void chrome.notifications.clear(id).catch(() => {});
   const key = `notice:${id}`;
-  const chat: unknown = (await chrome.storage.session.get(key))[key];
-  await chrome.storage.session.remove(key);
+  const chat = await inNoticeOrder(async () => {
+    const kept: unknown = (await chrome.storage.session.get(key))[key];
+    await chrome.storage.session.remove(key);
+    return kept;
+  });
   const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
   if (owned === true) return;
   await ensureEngine().catch(() => {});
@@ -211,7 +214,11 @@ function chatRoute(chat: string): string | undefined {
  * profile now in use, goes too: its "New messages in" is read once it is open, as the pages' `clearPeek` does where a
  * notice can be taken back by its chat (useProfilePeek.ts).
  */
-async function clearNotices(next?: string): Promise<void> {
+function clearNotices(next?: string): Promise<void> {
+  return inNoticeOrder(() => clearNoticesNow(next));
+}
+
+async function clearNoticesNow(next?: string): Promise<void> {
   const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
   const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
   const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
@@ -221,10 +228,29 @@ async function clearNotices(next?: string): Promise<void> {
 }
 
 /**
- * A notification the peer asked for, of a message no tab heard (attentionNotices.ts), with its chat kept as a page keeps
- * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab.
+ * The worker's reads and writes of the `notice:<id>` keys, one after another: each reads the keys, then writes, and two
+ * running at once would both read before either wrote (a burst's messages, asked for in the same moment, each made a
+ * notification of its own). Session storage stays what says which notification is a chat's: this order lives only as long
+ * as the worker, and the next worker reads the keys afresh.
  */
-async function showNotice(body: string, chat?: string): Promise<void> {
+let noticeWork: Promise<unknown> = Promise.resolve();
+
+function inNoticeOrder<T>(task: () => Promise<T>): Promise<T> {
+  const run = noticeWork.catch(() => {}).then(task);
+  noticeWork = run;
+  return run;
+}
+
+/**
+ * A notification the peer asked for, of a message no tab heard (attentionNotices.ts), with its chat kept as a page keeps
+ * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab,
+ * also when the burst's messages are asked for at once.
+ */
+function showNotice(body: string, chat?: string): Promise<void> {
+  return inNoticeOrder(() => showNoticeNow(body, chat));
+}
+
+async function showNoticeNow(body: string, chat?: string): Promise<void> {
   if (!chrome.notifications) return;
   const kept = chat ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
   const id = Object.keys(kept).find((key) => key.startsWith("notice:") && kept[key] === chat)?.slice("notice:".length) ?? crypto.randomUUID();
