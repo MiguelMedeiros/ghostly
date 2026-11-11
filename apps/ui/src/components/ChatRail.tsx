@@ -51,7 +51,7 @@ export function RailAction({ testId, label, title = label, accent, active, count
 }) {
   return (
     <button type="button" data-testid={testId} onClick={onClick} title={title} aria-label={label} aria-current={active ? "page" : undefined}
-      className="group flex h-12 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      className="current-mark group relative flex h-12 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       <span className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${accent ? "bg-accent text-panel-header group-hover:bg-accent-hover"
         : active ? "bg-surface-hover text-text-primary" : "text-text-secondary group-hover:bg-surface-hover group-hover:text-text-primary"}`}>
         {children}
@@ -67,9 +67,10 @@ function RailItem({ testId, id, name, label, active, onOpen, mark, children }: {
 }) {
   return (
     <button type="button" data-testid={testId} data-chat={id} onClick={onOpen} title={name} aria-label={label} aria-current={active ? "page" : undefined}
-      className="group relative flex h-14 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-      {/* The open chat: a bar at the list's edge, as the row's own colour says it in the list. */}
-      {active && <span aria-hidden="true" data-testid="chat-rail-active" className="absolute inset-y-2 start-0 w-1 rounded-e-full bg-accent" />}
+      className="current-mark group relative flex h-14 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      {/* The open chat: a bar at the list's edge, as the row's own colour says it in the list. Forced colors would fill it
+          with the page's colour, over the same bar in Highlight (`current-mark`, index.css): gone there. */}
+      {active && <span aria-hidden="true" data-testid="chat-rail-active" className="absolute inset-y-2 start-0 w-1 rounded-e-full bg-accent forced-colors:hidden" />}
       <span className={`relative flex shrink-0 items-center justify-center rounded-full transition-colors ${active ? "bg-surface-alt ring-2 ring-accent" : "bg-surface-hover group-hover:ring-2 group-hover:ring-text-primary/15"}`} style={{ width: AVATAR, height: AVATAR }}>
         {children}
         {mark && <span className="absolute -top-1 -end-1 z-10 flex">{mark}</span>}
