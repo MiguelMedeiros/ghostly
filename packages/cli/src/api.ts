@@ -47,15 +47,25 @@ function checkTextSize(text: string): void {
 
 /**
  * The engine's state as `engine getState` prints it without `--show-secret`: the settings' credentials, a group's
- * entry link (anyone who reads it can join) and a pending chat's invite code (whoever reads it can take the chat)
- * are `<hidden>`.
+ * entry link and the link of another group kept under its id (anyone who reads one can join), a pending chat's
+ * invite code (whoever reads it can take the chat) and this side's wake-up tokens are `<hidden>`.
  */
-export function hideStateSecrets<T extends { settings: Settings; groups?: { entryLink?: string }[]; links?: { inviteCode?: string }[] }>(state: T) {
+export function hideStateSecrets<T extends {
+  settings: Settings;
+  groups?: { entryLink?: string; others?: unknown[]; wakeTokens?: string[] }[];
+  links?: { inviteCode?: string; wakeToken?: string }[];
+}>(state: T) {
+  const hideOther = (o: unknown) => (o && typeof o === "object" && "link" in o ? { ...o, link: "<hidden>" } : o);
   return {
     ...state,
     settings: redactSettings(state.settings),
-    ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}),
-    ...(state.links ? { links: state.links.map((l) => (l.inviteCode ? { ...l, inviteCode: "<hidden>" } : l)) } : {}),
+    ...(state.groups ? { groups: state.groups.map((g) => ({ ...g,
+      ...(g.entryLink ? { entryLink: "<hidden>" } : {}),
+      ...(g.others ? { others: g.others.map(hideOther) } : {}),
+      ...(g.wakeTokens ? { wakeTokens: g.wakeTokens.map(() => "<hidden>") } : {}) })) } : {}),
+    ...(state.links ? { links: state.links.map((l) => ({ ...l,
+      ...(l.inviteCode ? { inviteCode: "<hidden>" } : {}),
+      ...(l.wakeToken ? { wakeToken: "<hidden>" } : {}) })) } : {}),
   };
 }
 
