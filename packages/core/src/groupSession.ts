@@ -322,6 +322,11 @@ export interface GroupSessionHooks {
  */
 const ANSWER_WINDOW_MS = 5_000;
 /**
+ * How long a name an edge took away can still come back when I am taken out of the group (`nameKept`): the commit
+ * that removed me comes over the admin's kept edge right after it opens, within the minute that edge stays open.
+ */
+const UNNAMED_KEPT_MS = 60_000;
+/**
  * One member's messages (or edits) taken: its whole log handed back at once twice over (`AUTHOR_BURST`: an edge opening
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
@@ -562,6 +567,12 @@ export class GroupSession {
    * said it (`heardName`). In memory only; the records held start it.
    */
   private readonly nickAt = new Map<string, number>();
+  /**
+   * Member → the name an edge's empty one took away a moment ago (`setNick`), and when. The admin that removed me while
+   * I was away says no name on the edge it kept to tell me, as its app opens it, and the commit that removes me comes
+   * right after on that edge: that name comes back for the history I keep (`nameKept`). In memory only.
+   */
+  private readonly unnamed = new Map<string, { nick: string; at: number }>();
   /** The version of my name record last said to every member (`sayName`). In memory only: said again once per start. */
   private nameSaid: number | undefined;
   /** New name records taken per member, a few a minute (`GROUP_LIMITS.namesPerMember`). In memory only. */
@@ -1162,6 +1173,17 @@ export class GroupSession {
     this.state.relayEdits = [];
     this.state.alone = [];
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear();
+    this.nameKept();
+  }
+
+  /**
+   * Out of the group: a name an edge took away a moment before comes back, as the history I keep still shows it. The
+   * edge the admin kept to tell me I was removed says no name as it opens, just before the commit that removed me.
+   */
+  private nameKept(): void {
+    const now = this.now();
+    for (const [key, { nick, at }] of this.unnamed) if (now - at <= UNNAMED_KEPT_MS && !this.state.nicks[key]) this.state.nicks[key] = nick;
+    this.unnamed.clear();
   }
 
   /**
@@ -1576,10 +1598,15 @@ export class GroupSession {
   setNick(key: string, nick: string | undefined): Promise<void> {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
+      // Out of the group, an edge's empty name drops nothing: one kept to tell me I was removed says no name to someone
+      // out of the roster, and the history I keep is still theirs.
+      if (!clean && this.state.status !== "active") return;
       // Said now on an edge: a message written before it no longer names the member (`heardName`).
       this.nickAt.set(key, this.now());
-      if ((this.state.nicks[key] ?? undefined) === clean) return;
+      const was = this.state.nicks[key];
+      if ((was ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
+      if (!clean && was) this.unnamed.set(key, { nick: was, at: this.now() }); else this.unnamed.delete(key);
       // Another member's name comes over its edge as often as it likes: saved within the wait, as a message's change.
       if (key === this.myKey) await this.persist(); else this.persistSoon();
       this.hooks.changed();
