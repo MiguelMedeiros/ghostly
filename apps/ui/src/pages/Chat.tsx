@@ -91,6 +91,7 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
+import { copySecret } from "../lib/shareLink";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
@@ -648,16 +649,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     window.dispatchEvent(new Event("session-updated"));
   };
 
+  // The invite is a secret: copied marked, as the invite card's Copy. A refused copy shows the link (the invite's QR
+  // dialog) to copy by hand, never copied unmarked.
   const handleCopyCode = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copySecret(text);
     } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+      setShowInviteQr(true);
+      return;
     }
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 2000);
