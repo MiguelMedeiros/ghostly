@@ -941,6 +941,18 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-keep-stopped")).toBeInTheDocument();
   });
 
+  it("a revocation's reason is said, as its publisher's text isolated from the line around it", async () => {
+    // Untrusted text: a right-to-left reason or one with its own direction marks must not reorder the line's words.
+    const reason = "‮مفتاح مسرّب";
+    const { unmount } = renderApp(<InstalledAppDialog app={installed({ run: { status: "revoked", reason } })} onClose={() => {}} onOpen={() => {}} />);
+    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩`);
+    unmount();
+    fakeEngine.on("appPreview", () => preview({ run: { status: "revoked", reason: "Leaked key" } }));
+    renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩");
+    expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+  });
+
   it("the card of a removed app says so when Open is refused, and Run anyway opens it in that chat", async () => {
     // The card read the list before the store's removal: Open is refused, and the list read again says so.
     let run: InstalledAppView["run"] = { status: "ok" };

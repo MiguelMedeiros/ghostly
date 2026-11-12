@@ -52,9 +52,13 @@ function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: Bu
  */
 type BuiltIn = "carried" | "installed";
 
-/** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
+/**
+ * Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. The publisher's reason
+ * (one line of at most 200 characters, signed, read by appStatements) is its own text: isolated, so its direction or
+ * marks cannot reorder the words around it.
+ */
 function runLine(run: AppRunStatus, t: Translate): ReactNode {
-  if (run.status === "revoked") return t("apps.install.revoked");
+  if (run.status === "revoked") return run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked");
   // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
   if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
