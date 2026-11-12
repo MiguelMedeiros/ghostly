@@ -66,7 +66,8 @@
     "node-datachannel": "^0.33.4",
     "nostr-tools": "2.25.2",
     "opus-decoder": "0.7.12",
-    "opusscript": "0.1.1"
+    "opusscript": "0.1.1",
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@ghostly/browser": "*",
