@@ -490,7 +490,8 @@ export class CallManager {
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
       await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
-      await this.end(call, "failed", true, false);
+      // Its call.incoming went out: call.ended does too, for the program (or hook) waiting on that call.
+      await this.end(call, "failed", true);
       throw error;
     } finally {
       // Unused (the call ended first): closed. Nothing once its connection is the call's.
