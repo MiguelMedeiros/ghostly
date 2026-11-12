@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "كلمة المرور غير صحيحة",
   "language": "اللغة",
+  "languageNeedsUpdate": "تحتاج {{language}} إلى الإصدار الجديد من Ghostly.",
   "languageNotLoaded": "تعذّر تحميل {{language}}. تحقق من اتصالك.",
   "languageRetry": "حاول مجددًا",
   "license": "الترخيص",
