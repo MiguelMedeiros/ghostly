@@ -222,6 +222,10 @@ describe("app publish", () => {
     const store = vectorKey(keys, "store", "Ghostly store key (WISP 1200).\n");
     expect(error(await ghostly(["app", "publish", dir, "--key", store]), "refused", 1).message).toContain("a store key never signs an app");
     expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    // Revoking signs a revocation, not an app: the refusal names what the command signs.
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    expect(error(await ghostly(["app", "revoke", dir, "--key", store, "--up-to", "1"]), "refused", 1).message).toContain("a store key never signs an app or its revocations");
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
   }, 60_000);
 
   it("never bundles a private key: a --key inside the folder is refused before it is made, and any key file found there", async () => {
@@ -299,6 +303,11 @@ describe("app publish", () => {
     const repeated = error(await ghostly(["app", "publish", twice, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
     expect(repeated.details).toEqual({ reason: "not-json", detail: "\"title\" is written twice" });
     expect(existsSync(join(twice, "app.ghostlyapp"))).toBe(false);
+    // A field missing from the source names the file, not a missing --key; the JSON detail stays the field.
+    const { kind: _kind, ...kindless } = manifest;
+    const missing = error(await ghostly(["app", "publish", appFolder(kindless as typeof manifest, files), "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+    expect(missing.message).toContain("(missing-key: kind in ghostly-app.json)");
+    expect(missing.details).toEqual({ reason: "missing-key", detail: "kind" });
     // Dot files stay out of the bundle, and say so.
     const dotted = appFolder(manifest, files);
     writeFileSync(join(dotted, ".DS_Store"), "x");
@@ -417,7 +426,8 @@ describe("app revoke", () => {
     const key = vectorKey(tmp(), "publisher");
     for (let i = 0; i < 3; i++) ok(await ghostly(["app", "publish", dir, "--key", key]));
     // A typo, 30 for 3: clients keep a revocation for good, so versions 4 to 30 would be stopped before they exist.
-    const typo = error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30"]), "usage", 2);
+    // --force lifts it, so it asks for a confirmation (exit 5), as a --reason that looks like a secret does.
+    const typo = error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30"]), "confirm", 5);
     expect(typo.message).toContain("--up-to 3");
     expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
     // Meant (versions published from another folder went past this bundle): --force writes it.
