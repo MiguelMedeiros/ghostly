@@ -211,6 +211,13 @@ describe("Settings, Network: push relay", () => {
     expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
   });
 
+  it("a relay at its limit (429) is said to be busy, not to answer as no push relay", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 429, text: "Too many" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay was turned away: it was at its limit (HTTP 429). It wakes contacts again once it has room.The relay said: “Too many”");
+  });
+
   it("pt: says it in the app's language, the relay's words as it gave them", () => {
     fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
     renderApp(<NetworkSettings />, { language: "pt" });
