@@ -31,6 +31,9 @@ test("forced colors draw a message's bubble with an edge, on a plain wallpaper a
   await expect(mine).toBeVisible();
   // No animation between two reads: a bubble read while it still grows in is not where it stays.
   await alice.page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+  // The first pairing's scene sits above the messages and goes 1.8 s after the chat went live (CELEBRATE_MS). Going
+  // between the first box and the last, it moved the bubble up by its height, which is the scene, not forced colors.
+  await expect(alice.page.getByTestId("pairing-scene")).toHaveCount(0);
 
   // Normal colours: the bubble is its background, with its tail, on the patterned wallpaper; no edge.
   const before = await drawn(mine);
