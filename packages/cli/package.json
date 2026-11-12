@@ -22,7 +22,8 @@
     "examples",
     "skills",
     "README.md",
-    "SKILL.md"
+    "SKILL.md",
+    "npm-shrinkwrap.json"
   ],
   "engines": {
     "node": ">=22.12"
