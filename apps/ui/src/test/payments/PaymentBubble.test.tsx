@@ -145,6 +145,32 @@ describe("what the bubble says", () => {
     expect(screen.getByTestId("payment-rail")).toHaveTextContent(/^Bitcoin on-chain$/);
   });
 
+  // The contact has paid: what is left is this wallet's check with its provider, server, chain or federation.
+  it.each([
+    ["Ark", { target: target({ method: "arkade", network: "mutinynet" }) }],
+    ["Bark", { target: target({ method: "bark", network: "signet", address: "tark1bark" }) }],
+    ["Spark", { target: target({ method: "spark", network: "regtest", address: "sparkrt1payee" }) }],
+    ["USDT", { amount: 1_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) }],
+    ["Fedimint", { federation: "fed1test", network: "testnet" as const }],
+  ] as const)("says a %s payment received and still being checked is checked here, not waited on from the contact", (_, patch) => {
+    show({ kind: "payment", direction: "in", state: "pending", ...patch });
+    expect(status()).toHaveTextContent(/^Checking the payment…$/);
+  });
+
+  it.each([
+    ["pt", "Verificando o pagamento…"],
+    ["ar", "جارٍ التحقق من الدفعة…"],
+  ] as const)("says a received payment being checked in %s “%s”", (language, said) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(TEST_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "in", state: "pending", target: target({ method: "arkade", network: "mutinynet" }) }) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language });
+    expect(status()).toHaveTextContent(said);
+  });
+
+  it("still says my own ecash the contact has not taken waits for the contact", () => {
+    show({ kind: "payment", direction: "out", state: "pending", federation: "fed1test", network: "testnet" });
+    expect(status()).toHaveTextContent(/^Waiting for your contact…$/);
+  });
+
   it("adds why a payment failed", () => {
     show({ kind: "payment", direction: "in", state: "failed", error: "Mint unreachable" });
     expect(status()).toHaveTextContent("Failed · Mint unreachable");

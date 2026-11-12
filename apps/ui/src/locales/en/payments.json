@@ -62,6 +62,7 @@
     "preparing": "Preparing…",
     "review": "Review payment",
     "state": {
+      "checking": "Checking the payment…",
       "closed": "Closed",
       "lightningPending": "Lightning payment pending…",
       "payment": {
