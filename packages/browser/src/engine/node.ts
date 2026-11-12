@@ -10293,11 +10293,11 @@ export class GhostlyNode implements EngineImplementation {
     const chat = message.linkId, id = message.id;
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted. So does one deleted
     // while it is being stored: a removal that came meanwhile (live, while this came from the hold or the DHT) found
-    // no row to take and was confirmed, so it never comes again.
-    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id);
+    // no row to take and was confirmed, so it never comes again. A member's message its author deleted for everyone,
+    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone.
+    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
+    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id));
     if (!kept()) return false;
-    // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
-    if (message.linkId.startsWith("group:") && this.groups.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
