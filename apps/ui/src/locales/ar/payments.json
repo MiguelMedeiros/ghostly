@@ -62,6 +62,7 @@
     "preparing": "جارٍ التحضير…",
     "review": "مراجعة الدفع",
     "state": {
+      "checking": "جارٍ التحقق من الدفعة…",
       "closed": "مغلق",
       "lightningPending": "دفعة Lightning قيد المعالجة…",
       "payment": {

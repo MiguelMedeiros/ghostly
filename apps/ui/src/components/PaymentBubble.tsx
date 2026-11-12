@@ -217,7 +217,9 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
         data-testid="payment-state"
       >
         {expired ? `${t("payments.bubble.state.request.expired")} · ${t(outgoing ? "payments.bubble.expiredNext.mine" : "payments.bubble.expiredNext.theirs")}`
-          : payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
+          : payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation")
+          // One the contact sent: their part is done, what is left is this wallet's own check of it.
+          : payment.kind === "payment" && payment.state === "pending" && !outgoing ? t("payments.bubble.state.checking") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
         {payment.error && payment.state !== "settled" && !expired ? ` · ${problemLine(payment.error, t)}` : ""}
       </p>
 
