@@ -341,7 +341,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // are not read out (MessageAnnouncer). Not what a notice of its own says: No answer, the no-path note, a media problem.
   const [callEndSaid, setCallEndSaid] = useState("");
   const callEnd = useRef({ t, notice: false });
-  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || !!webrtc.mediaProblem };
+  // The camera's own notice (a video call that went on as a voice call) is not why the call ended: its end is said.
+  const cameraOff = webrtc.mediaProblemOf === "camera" && (webrtc.mediaProblem === "denied" || webrtc.mediaProblem === "unavailable");
+  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || (!!webrtc.mediaProblem && !cameraOff) };
   useEffect(() => {
     if (!callEndSaid) return;
     const timer = setTimeout(() => setCallEndSaid(""), CALL_END_SAID_MS);
