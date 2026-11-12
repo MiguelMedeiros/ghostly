@@ -65,6 +65,7 @@
     "damaged": "I suoi file su questo dispositivo sono danneggiati. Scarica di nuovo i suoi file.",
     "equivocation": "Questo link contiene un'altra copia di una versione che hai. Ghostly ha tenuto la tua.",
     "expired": "Ci è voluto troppo. Controlla di nuovo l'app.",
+    "filesNotFound": "Impossibile recuperare i suoi file: nessuno dei link da cui proviene ha ora questa versione, o nessuno ha risposto. Riprova più tardi.",
     "githubLink": "Questa pagina di GitHub non è un'app. Incolla il link del repository o quello del file dell'app.",
     "host": "Le app arrivano solo da GitHub (raw.githubusercontent.com) o da jsDelivr a un commit.",
     "hostProblem": "Il server ha avuto un problema (errore {{status}}). Riprova più tardi.",
