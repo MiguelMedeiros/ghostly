@@ -402,7 +402,9 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment. A non-zero exit, or a death by a
   signal (`--exec was killed by SIGKILL on event N`), is said on stderr and the cursor moves past the event. With
   `--print`, the command's stdout goes to listen's stderr: stdout is the JSON events only.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A bridge not
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A URL with
+  the bridge's token goes in `GHOSTLY_WEBHOOK` instead: `ps` shows a running listen's arguments to every account on the
+  machine, not its environment. A bridge not
   answering (connection refused, timeout, 5xx, 408, 429) holds the stream: the event is tried again, up to a minute
   apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
   as not taken.

@@ -175,14 +175,17 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   };
 }
 
-/** Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). */
-export function checkWebhook(url: string): URL {
+/**
+ * Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). `from` names where
+ * the URL came from; what is not a URL is not repeated: a bridge's token is in it.
+ */
+export function checkWebhook(url: string, from = "--webhook"): URL {
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }
+  try { parsed = new URL(url); } catch { throw new CliError("usage", `${from} is not a URL`); }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new CliError("usage", "The webhook must be http:// or https://");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new CliError("usage", "The webhook must be on this machine (127.0.0.1, localhost or [::1])");
   // fetch refuses a URL with credentials: every event was held as "not answering" for good, the password on stderr.
-  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query");
+  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query, the URL in GHOSTLY_WEBHOOK");
   return parsed;
 }
 

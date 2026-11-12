@@ -534,7 +534,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     from: o("list", "Only this chat's events (id, a label given here or the contact's key; again for more)"),
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
     exec: o("string", "Run this command per event, the event as JSON on stdin"),
-    webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
+    webhook: o("string", "POST each event to this URL (else GHOSTLY_WEBHOOK, which ps does not show)"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
@@ -1227,13 +1227,23 @@ async function listenCommand(argv: string[]): Promise<void> {
   // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
   const blank = (value: unknown) => typeof value === "string" && value.trim() === "";
   if (blank(parsed.options.webhook)) throw new CliError("usage", "--webhook needs a URL");
+  // GHOSTLY_WEBHOOK: the URL out of `ps`, where a long-running listen's arguments (a bridge's token in the URL) are
+  // every local account's to read. Read once, here; no hook or other child gets it (SECRET_ENV).
+  const envWebhook = process.env.GHOSTLY_WEBHOOK;
+  delete process.env.GHOSTLY_WEBHOOK;
+  if (envWebhook !== undefined && parsed.options.webhook !== undefined) throw new CliError("usage", "A webhook is set in GHOSTLY_WEBHOOK and --webhook was given: choose one");
+  if (blank(envWebhook)) throw new CliError("usage", "GHOSTLY_WEBHOOK is empty: it holds the webhook's URL");
+  const webhook = (parsed.options.webhook as string | undefined) ?? envWebhook;
   if (blank(parsed.options.exec)) throw new CliError("usage", "--exec needs a command");
   if (parsed.options.cursor === "") throw new CliError("usage", "--cursor needs a file");
   if ((parsed.options.from as string[] | undefined)?.some(blank)) throw new CliError("usage", "--from needs a chat or a contact key");
   if ((parsed.options.group as string[] | undefined)?.some(blank)) throw new CliError("usage", "--group needs a group");
   const g = globals(parsed);
   pretty = false; // one event per line
-  if (parsed.options.webhook !== undefined) checkWebhook(String(parsed.options.webhook));
+  if (webhook !== undefined) {
+    const url = checkWebhook(webhook, envWebhook !== undefined ? "GHOSTLY_WEBHOOK" : "--webhook");
+    if (envWebhook === undefined && (url.search || url.pathname !== "/")) process.stderr.write("ghostly: --webhook's URL shows in ps to every account on this machine while listen runs, a token in it too: give it in GHOSTLY_WEBHOOK instead\n");
+  }
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
@@ -1259,11 +1269,11 @@ async function listenCommand(argv: string[]): Promise<void> {
       types, turns,
       translate: translator?.event,
       exec: parsed.options.exec as string | undefined,
-      webhook: parsed.options.webhook as string | undefined,
+      webhook,
       cursor,
       cursorFailed,
       // With a hook, events go to the hook; --print shows them too.
-      print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
+      print: parsed.options.print === true || (!parsed.options.exec && !webhook),
       write: (line) => process.stdout.write(line + "\n"),
       drained: () => new Promise<void>((resolve) => {
         const done = () => { process.stdout.off("drain", done); process.stdout.off("close", done); resolve(); };
