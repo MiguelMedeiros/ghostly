@@ -62,6 +62,7 @@
     "preparing": "Préparation…",
     "review": "Vérifier le paiement",
     "state": {
+      "checking": "Vérification du paiement…",
       "closed": "Clos",
       "lightningPending": "Paiement Lightning en attente…",
       "payment": {

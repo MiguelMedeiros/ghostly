@@ -62,6 +62,7 @@
     "preparing": "準備中…",
     "review": "支払いを確認",
     "state": {
+      "checking": "支払いを確認しています…",
       "closed": "終了",
       "lightningPending": "Lightning の支払いを処理中…",
       "payment": {
