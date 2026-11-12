@@ -162,7 +162,8 @@ export function MessageLinkCards({ text, preview: sent }: { text: string; previe
   return (
     <div data-testid="message-link-cards">
       {preview && <LinkPreviewCard preview={preview} />}
-      {place && <LocationCard place={place} />}
+      {/* By its point: Show map (and a map that failed) was for that place, and a contact's edit to another one asks again. */}
+      {place && <LocationCard key={`${place.lat},${place.lon}`} place={place} />}
     </div>
   );
 }
