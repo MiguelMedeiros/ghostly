@@ -655,6 +655,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // An OpenPGP key of a kind or size the Add dialog refuses.
   ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
   ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
+  ["This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", `${BROWSER}/proofs/openpgp.ts`, "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -799,6 +800,13 @@ describe("errors in the app's language", () => {
     }
     const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
     expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
+  });
+
+  it.each(LANGUAGES)("a key keys.openpgp.org serves without its user IDs says why it cannot be checked and what to do in %s", (language) => {
+    const t = translators[language];
+    const raw = "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.pgpNoUserIds"), next: t("errors.proof.pgpNoUserIdsNext") });
+    expect(problemText(new Error(raw), t, "proof").title).not.toBe(t("errors.proof.checkFailed"));
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
