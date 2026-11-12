@@ -70,6 +70,31 @@ describe("the event stream", () => {
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
   });
 
+  it("gives a delivery a message comes back to an id of its own, also after a restart (a listener dedupes on it)", async () => {
+    const first = await hub("again.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    const deliver = (h: EventHub, delivery: StoredMessage["delivery"]) => h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", delivery })] });
+    // The contact's daemon went away before its receipt: the text goes again, and fails twice before it is delivered.
+    for (const delivery of ["sending", "sent", "queued", "sending", "sent", "failed", "sending"] as const) deliver(first.h, delivery);
+    // The seen set is written behind the events, and read again by the next run's hub: it goes on counting from it.
+    const later = await hub("again.jsonl");
+    later.h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "me_1", { sender: "me", delivery: "sending" })]]]));
+    for (const delivery of ["failed", "sending", "delivered"] as const) deliver(later.h, delivery);
+    const ids = [...first.events, ...later.events].map((e) => e.id);
+    expect(ids).toEqual([
+      "message.sent:c1:me_1",
+      "message.delivery:c1:me_1:sent",
+      "message.delivery:c1:me_1:queued",
+      "message.delivery:c1:me_1:sending:3",
+      "message.delivery:c1:me_1:sent:4",
+      "message.delivery:c1:me_1:failed",
+      "message.delivery:c1:me_1:sending:6",
+      "message.delivery:c1:me_1:failed:7",
+      "message.delivery:c1:me_1:sending:8",
+      "message.delivery:c1:me_1:delivered",
+    ]);
+  });
+
   it("names the contact on a 1:1 message, so an agent turn carries their name (the engine keeps it on the chat)", async () => {
     const { h, events } = await hub("names.jsonl");
     h.baseline(state([link("c1", { peerNick: "Alice", label: "owner" } as never)]), new Map([["c1", []]]));

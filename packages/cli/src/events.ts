@@ -820,7 +820,11 @@ export class EventHub {
         if (timeIn(note!) === undefined) { const noted = noteOf(state, at); known.set(message.id, noted); changes.push([message.id, noted]); }
         continue;
       }
-      const noted = noteOf(state, at);
+      const [delivery] = splitState(state), [was] = before === undefined ? [undefined] : splitState(before);
+      const passed = passesIn(note, was), moved = !group && message.sender === "me" && was !== undefined && delivery !== was;
+      const again = moved && (passed.been & deliveryBit(delivery)) !== 0;
+      const passes = moved ? { count: passed.count + 1, been: passed.been | deliveryBit(delivery) } : passed;
+      const noted = noteOf(state, at, passes);
       known.set(message.id, noted);
       changes.push([message.id, noted]);
       if (quiet) continue;
@@ -853,12 +857,12 @@ export class EventHub {
         const [, edits] = splitState(state), [, edited] = splitState(before);
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json() });
       } else {
-        const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
+        const [, edits] = splitState(state), [, edited] = splitState(before);
         // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number. The engine's
         // own edit that sends a question's buttons again (WISP 406 · Message Buttons) is none: same text, nobody's edit.
         if (edits > edited && !(message.sender === "me" && message.edit?.restore)) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json() });
-        if (message.sender === "me" && delivery !== was)
-          this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
+        if (moved)
+          this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}${again ? `:${passes.count}` : ""}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
     }
     const gone: string[] = [];
@@ -969,9 +973,26 @@ const UNDERWAY = "files:";
 
 /**
  * A note: what the seen set keeps of a message (or a reaction's number), then `@` and the time of its last activity in
- * base 36 (`received+p#e2@mg3k1x2a`), by which `sweep` drops it. A note from before has no time.
+ * base 36 (`received+p#e2@mg3k1x2a`), by which `sweep` drops it. A note from before has no time. A message of mine whose
+ * delivery changed ends with its passes (`sent@mg3k1x2a!4.b`): `!`, how many changes, `.` and the deliveries it was in.
  */
-const noteOf = (state: string, at: number): string => `${state}@${Math.max(0, Math.floor(at)).toString(36)}`;
+const noteOf = (state: string, at: number, passes?: Passes): string =>
+  `${state}@${Math.max(0, Math.floor(at)).toString(36)}${passes?.count ? `!${passes.count}.${passes.been.toString(36)}` : ""}`;
+/**
+ * A message's delivery changes (`count`) and the deliveries it was in (`been`, a bit per `DELIVERIES`). A delivery it
+ * comes back to (sent again after its contact went away before the receipt; failed again after a retry) is reported
+ * with its count in its id: with the id of its first time, a listener that dedupes on it dropped it, and held the
+ * message as still on its way.
+ */
+interface Passes { count: number; been: number }
+const DELIVERIES = ["sending", "sent", "queued", "waiting", "held", "delivered", "failed"];
+const deliveryBit = (delivery: string) => { const at = DELIVERIES.indexOf(delivery); return 1 << (at === -1 ? DELIVERIES.length : at); };
+function passesIn(note: string | undefined, delivery: string | undefined): Passes {
+  const mark = note?.lastIndexOf("!") ?? -1;
+  if (mark === -1) return { count: 0, been: delivery === undefined ? 0 : deliveryBit(delivery) };
+  const [count, been] = note!.slice(mark + 1).split(".");
+  return { count: Number(count) || 0, been: parseInt(been ?? "", 36) || 0 };
+}
 function stateIn(note: string): string {
   const at = note.lastIndexOf("@");
   return at === -1 ? note : note.slice(0, at);
