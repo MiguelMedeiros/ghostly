@@ -1028,9 +1028,10 @@ export class GhostLink {
   /**
    * The WebRTC offer this side's dial made last, with fallback allowed: what a transport that comes up meanwhile joins.
    * `resume`: the dial that made it is this side back after an absence, over WebRTC (`resuming`); `woke`: the absence
-   * was the app's in the background, not a restart (`resumeAfterAbsence`).
+   * was the app's in the background, not a restart (`resumeAfterAbsence`). `knockMissed`: the dial that made it followed a
+   * resume's knock that found nothing (`resumeKnockMissed`).
    */
-  private offered?: { epoch: number; at: number; resume?: boolean; woke?: boolean };
+  private offered?: { epoch: number; at: number; resume?: boolean; woke?: boolean; knockMissed?: boolean };
   /**
    * The WebRTC offer this side's dial made last, fallback allowed or not: one made before the contact's record was read
    * races once it is (`raceStandingOffer`).
@@ -1152,6 +1153,8 @@ export class GhostLink {
   private resumeWaitUntil = 0;
   /** The contact's other native transports were knocked on while this resume waited (`knockWhileResuming`). */
   private resumeKnocked = false;
+  /** The resume's knock found nothing (`knock`): the next dial is still the resume's, made whatever the key. */
+  private resumeKnockMissed = false;
   /** What the last live session ran on, kept after it ended: a wake resumes on it (`resumeAfterAbsence`). */
   private lastLiveOn: PairedTransport | undefined;
   /** `resuming` is a wake's, not a restart's. */
@@ -2419,9 +2422,15 @@ export class GhostLink {
    * holds the old session and would notice only when its liveness gives up (a minute); a dial reaches it now and takes
    * over (`attachReplacement`). Once only, and a knock that does not connect counts as no failure: the contact may
    * simply be away. Two dials crossing are settled by key order (see `registerEndpoint`).
+   *
+   * A resume's knock that does not connect leaves its dial whatever the key to the next one (`resumeKnockMissed`), whose
+   * offer knocks on the contact's other transports (`knockMissed`): a contact holding the old session over HyperDHT
+   * announces no listener (endpoint.mjs), so the knock finds nothing, and the higher key waited for the contact to
+   * notice (14.5-15.2 s between two CLI daemons, against 0.8-1.6 s with the lower key; under 5 s now).
    */
   private async knock(transport: NativeTransport): Promise<void> {
-    if (this.resuming === transport) { this.resuming = undefined; this.resumingWoke = false; }
+    const resume = this.resuming === transport;
+    if (resume) { this.resuming = undefined; this.resumingWoke = false; }
     const endpoint = this.endpoints.get(transport), descriptor = this.peerDescriptors[transport];
     if (!endpoint || !descriptor || this.channel || this.dialing || this.stopped || this.streamBlocked || this.keyStopped) return;
     if (!this.transportOffer().includes(transport)) return;
@@ -2435,6 +2444,7 @@ export class GhostLink {
       this.attach(channel, binding);
     } catch (error) {
       traceLink(this.myPubKeyZ32, "knock-failed", { transport, error: error instanceof Error ? error.message : String(error) });
+      if (resume && epoch === this.connectionEpoch) this.resumeKnockMissed = true;
     } finally {
       if (this.knocking === knocking) this.knocking = null;
       if (epoch === this.connectionEpoch) { this.dialing = false; this.settleCrossed(); }
@@ -2580,6 +2590,8 @@ export class GhostLink {
     if (this.streamBlocked || this.dialing || this.channel) return;
     if (!this.options.params.profile) { await this.dataLink.connect(); return; }
     this.dialing = true;
+    const knockMissed = this.resumeKnockMissed;
+    this.resumeKnockMissed = false;
     const epoch = this.connectionEpoch;
     this.attempt = { side: "dialled", failed: [] };
     this.options.events?.onPairingState?.({ status: "connecting" });
@@ -2628,7 +2640,7 @@ export class GhostLink {
           // stands as it was made, its time and whether it resumes with it, or the knock and the race would go by the second.
           const standing = this.offerOut && this.offered?.epoch === epoch ? this.offered : undefined;
           const offeredAt = standing?.at ?? Date.now();
-          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }) } : undefined;
+          this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }), ...(knockMissed && { knockMissed }) } : undefined;
           this.offerMade = { epoch, at: offeredAt };
           const gate = this.dialGate;
           this.dialGate = undefined;
@@ -2804,7 +2816,7 @@ export class GhostLink {
     // transports ranked after WebRTC are knocked on as it goes out rather than `RACE_DIRECT_MS` later: the first live
     // wins, as in the race. A knock that does not connect counts as no failure, and its transport keeps its place in it.
     // Looked at once the dial that made the offer is over: a transport that joins while it still gathers comes here first.
-    if (this.offered?.resume && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
+    if ((this.offered?.resume || this.offered?.knockMissed) && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
   }
   /**
@@ -2871,16 +2883,20 @@ export class GhostLink {
   private contactQuiet(ms = EXPECT_PEER_MS): boolean {
     return Date.now() - presenceSeenAt(this.session.peerPresence) >= ms;
   }
-  /** The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`). */
+  /**
+   * The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`).
+   * So are those of the dial after a resume's knock that found nothing (`knockMissed`), relayed ones too, whatever the
+   * contact's newest packet: it holds the old session and reads offers at a live chat's pace.
+   */
   private maybeKnockEarly(epoch: number): void {
-    const next = this.afterRtc;
-    if (!this.offered?.resume || this.offered.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
+    const next = this.afterRtc, missed = !!this.offered?.knockMissed;
+    if (!(this.offered?.resume || missed) || this.offered?.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
     // After a wake, whatever the contact's newest packet: a contact that just ended an attempt of its own, its offer
     // unanswered while this app slept, published a moment ago and still reads at its slow pace (30 s in the background).
-    if (this.dialing || this.channel || this.stopped || !this.offerOut || !(this.offered.woke || this.contactQuiet())) return;
+    if (this.dialing || this.channel || this.stopped || !this.offerOut || !(missed || this.offered.woke || this.contactQuiet())) return;
     // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
     // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
-    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
+    const relayed = missed || this.upgradesFromRelay() ? [] : this.relayedTransports;
     const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
     if (!direct.length) return;
     this.knockedEarly = epoch;
@@ -2924,6 +2940,10 @@ export class GhostLink {
     if (rest.includes(transport)) return;
     this.afterRtc = { epoch: offered.epoch, rest: [...rest, transport] };
     traceLink(this.myPubKeyZ32, "race-join", { transport });
+    // The offer of a resume whose knock found nothing (the contact holds the old session, its HyperDHT listener
+    // unannounced): it reads offers at a live chat's pace, and a transport up now, relayed or not, reaches it at once,
+    // as the resume's knock would have. Before, the higher key's Iroh waited for the race, and the contact noticed first.
+    if (offered.knockMissed && this.canDial(transport)) void this.knockEarly(offered.epoch, [transport]);
     if (!this.racing) this.scheduleRace(offered.epoch, offered.at);
   }
   /** WebRTC could not start an attempt here: it goes last in the dial order for `RTC_UNSTARTED_MS`, while another transport remains. */
@@ -3030,7 +3050,7 @@ export class GhostLink {
   private awaitsContactDial(): boolean {
     const pairing = this.firstPairing();
     const role = pairing ? this.options.pairingProgress?.role : undefined;
-    return !role && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc();
+    return !role && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.resumeKnockMissed && !this.dialsPastRtc();
   }
 
   /** A transport of the attempt under way did not connect. */
@@ -4508,6 +4528,7 @@ export class GhostLink {
           // (the contact reloaded, or came back) is dialled again as soon as the contact is seen.
           this.autoConnectFailures = 0;
           this.lastAutoConnectAt = 0;
+          this.resumeKnockMissed = false;
           traceLink(this.myPubKeyZ32, "paired-ready");
           this.attempt = null;
           if (this.lastAttempt) { this.lastAttempt = undefined; this.options.events?.onLiveAttempt?.(undefined); }
