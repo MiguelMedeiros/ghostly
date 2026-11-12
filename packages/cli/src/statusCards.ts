@@ -20,7 +20,8 @@ type Kind = StatusCard["kind"];
 type Target = { id: string; linkId: string; group: boolean };
 
 /** Per card (its message): when its last update went, what waits to go next, and how to send it now. */
-interface Pace { last: number; next?: Record<string, unknown>; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void>; flush?: () => void }
+/** `text`: the newest waiting update's `--text`, which goes with `next`. */
+interface Pace { last: number; next?: Record<string, unknown>; text?: string; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void>; flush?: () => void }
 const paces = new WeakMap<ApiContext, Map<string, Pace>>();
 
 function paceOf(ctx: ApiContext, key: string): Pace {
@@ -294,13 +295,15 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   if (due > 0 && ctx.mode === "daemon") {
     // Merged into what goes next; the first update in the gap sets the timer, the later ones only change what it sends.
     pace.next = card as unknown as Record<string, unknown>;
+    // Its text too: the first update's went with the merged card, a "done" card under "Working: 10%".
+    pace.text = text;
     queued = true;
     if (!pace.timer) pace.flushed = new Promise<void>((resolve) => {
       const send = () => {
-        const next = pace.next;
+        const next = pace.next, nextText = pace.text ?? "";
         clearTimeout(pace.timer);
-        pace.timer = undefined; pace.next = undefined; pace.flush = undefined; pace.last = Date.now();
-        void (next ? editCard(ctx, target, message.id, next as unknown as StatusCard, text) : Promise.resolve()).catch(() => {}).finally(resolve);
+        pace.timer = undefined; pace.next = undefined; pace.text = undefined; pace.flush = undefined; pace.last = Date.now();
+        void (next ? editCard(ctx, target, message.id, next as unknown as StatusCard, nextText) : Promise.resolve()).catch(() => {}).finally(resolve);
       };
       pace.flush = send;
       pace.timer = setTimeout(send, due);
