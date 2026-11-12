@@ -58,6 +58,22 @@ describe("a publisher's ghostly-revoke.json", () => {
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
   }, 60_000);
 
+  it("a file whose kept list was dropped is read again by its verdict, with no signature checked", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const list = [await revocation(v1.ref, [v1.digest]), await signAppRevocation({ ghostlyRevoke: 1, app: `${keyOf(PUBLISHER)}/other`, upTo: 1 }, PUBLISHER)];
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes(list));
+    await store.checkUpdates();
+    (store as unknown as { revocationFiles: Map<string, unknown> }).revocationFiles.clear();
+    verifies.mockClear();
+    await store.checkUpdates();
+    expect(verifies).toHaveBeenCalledTimes(0);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+  });
+
   it("one entry that does not verify still refuses the whole file, even one naming another app", async () => {
     const v1 = await bundle();
     net.put(BUNDLE_URL, v1.bytes);
@@ -69,9 +85,13 @@ describe("a publisher's ghostly-revoke.json", () => {
     net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest]), forged]));
     await store.checkUpdates();
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "ok" });
+    verifies.mockClear();
+    await store.checkUpdates();
+    expect(verifies, "refused once: not verified again").toHaveBeenCalledTimes(0);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "ok" });
   });
 
-  it("the checked files kept are bounded by their bytes: nine large files of one app are not all held", async () => {
+  it("nine large files of one app, more than the bytes kept, are verified once: not again at the next check, and not held", async () => {
     // The file beside the install URL and one beside each of the 8 sources a manifest may name.
     const sources = Array.from({ length: 8 }, (_, i) => `https://raw.githubusercontent.com/ana/chess-mirror-${i}/HEAD/app.ghostlyapp`);
     const v1 = await bundle({ sources });
@@ -80,12 +100,13 @@ describe("a publisher's ghostly-revoke.json", () => {
     await store.preview({ url: BUNDLE_URL });
     await store.install({ digest: v1.digest, grant: ["chat"] });
     // Revocations as long as one gets (64 digests, a 200-character reason), of other apps: about 1.9 MiB a file, each
-    // file its own bytes. Their signatures are not this test's matter, so every entry counts as verified.
-    const { signature } = await revocation(v1.ref, [v1.digest]);
+    // file its own bytes; the first file also revokes the installed version. Their signatures are not this test's
+    // matter, so every entry counts as verified.
+    const own = await revocation(v1.ref, [v1.digest]);
     const digests = Array.from({ length: 64 }, (_, i) => toBase64Url(sha256(utf8Encode(`digest ${i}`))));
-    const entry = (file: number, i: number): SignedAppRevocation => ({ statement: { ghostlyRevoke: 1, app: `${keyOf(PUBLISHER)}/other-${file}-${i}`, digests, reason: "r".repeat(200) }, signature });
+    const entry = (file: number, i: number): SignedAppRevocation => ({ statement: { ghostlyRevoke: 1, app: `${keyOf(PUBLISHER)}/other-${file}-${i}`, digests, reason: "r".repeat(200) }, signature: own.signature });
     const files = [REPO, ...sources.map((s) => s.replace("/app.ghostlyapp", ""))].map((folder, file) => {
-      const bytes = canonicalJsonBytes(Array.from({ length: 560 }, (_, i) => entry(file, i)));
+      const bytes = canonicalJsonBytes([...(file === 0 ? [own] : []), ...Array.from({ length: 560 }, (_, i) => entry(file, i))]);
       net.put(`${folder}/ghostly-revoke.json`, bytes);
       return bytes.length;
     });
@@ -95,11 +116,19 @@ describe("a publisher's ghostly-revoke.json", () => {
     verifies.mockImplementation((value) => ({ ok: true, revocation: value as SignedAppRevocation }));
     try {
       await store.checkUpdates();
-      expect(verifies).toHaveBeenCalledTimes(9 * 560);
-      // What stays in memory after the check, as JSON: at most one file's limit, and still most of what was read.
-      const kept = JSON.stringify([...(store as unknown as { revocationFiles: Map<string, unknown> }).revocationFiles.values()]).length;
+      expect(verifies).toHaveBeenCalledTimes(9 * 560 + 1);
+      expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+      // What stays in memory after the check, as JSON: at most one file's limit.
+      const held = store as unknown as { revocationFiles: Map<string, unknown>; revocationVerdicts?: Map<string, unknown> };
+      const kept = JSON.stringify([...held.revocationFiles.entries(), ...(held.revocationVerdicts?.entries() ?? [])]).length;
       expect(kept).toBeLessThanOrEqual(APP_FETCH_LIMITS.revocationsBytes + 1024);
-      expect(kept).toBeGreaterThan(all - 2 * files[0]!);
+
+      // The same bytes at the next checks: no entry is verified again.
+      verifies.mockClear();
+      await store.checkUpdates();
+      await store.checkUpdates();
+      expect(verifies).toHaveBeenCalledTimes(0);
+      expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     } finally {
       verifies.mockImplementation(actual.readAppRevocation);
     }
