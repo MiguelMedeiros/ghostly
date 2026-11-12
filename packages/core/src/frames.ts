@@ -39,6 +39,12 @@ export const LIMITS = {
    */
   maxClientWaiting: 64,
   maxClientWaitingBodyBytes: 64 * 1024 * 1024,
+  /**
+   * Response-body bytes a client holds for one response before whatever reads it took them. Past it the response is
+   * reset: its reader stalled. Four times what a host keeps buffered on the link (`sendHighWaterMark`), so a reader
+   * that keeps up never reaches it.
+   */
+  maxUnreadResponseBytes: 4 * 1024 * 1024,
   maxChatMessageBytes: 16 * 1024,
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */
