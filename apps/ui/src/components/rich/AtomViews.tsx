@@ -71,8 +71,9 @@ export function MdLinkView({ atom, marks }: { atom: Atom<"md-link", MdLinkData>;
   try { title = `${new URL(url).hostname}\n${shown}`; } catch { /* the parser only takes addresses a URL parser reads */ }
   const inAddress = !!marks && matchRanges(url, marks.term).length > 0;
   if (showUrl) {
+    // Its address's own matches, the first ones the message may still mark (thousands in one long address).
     const inShown = marks ? matchRanges(shown, marks.term) : [];
-    const ranges: [number, number][] = inShown.length || !marks ? inShown
+    const ranges: [number, number][] = !marks ? [] : inShown.length ? marks.spend(inShown)
       : inAddress || holds(marks, labelText(label).length) ? [[0, shown.length]] : [];
     return <a data-testid="rich-md-link" data-shows="url" {...externalLinkProps(url)} title={title} dir="ltr" className="text-link underline hover:decoration-2 inline-block max-w-full [overflow-wrap:anywhere]"><Marked text={shown} start={0} ranges={ranges} /></a>;
   }
