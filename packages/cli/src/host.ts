@@ -87,7 +87,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
       else histories.set(id, await whole(id));
     }
-    hub.baseline(now, histories, { newest, whole });
+    hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
     // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
     await hub.ended((id) => fileStore.get(id));
     announceJoins(hub, node);
