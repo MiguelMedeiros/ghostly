@@ -204,7 +204,9 @@ const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
  * the accept refused, every turn of the door for as long as the admin was away.
  */
 function admissionsHeld(s: CommunitySession): boolean {
-  if (s.isAdmin) return false;
+  return !s.isAdmin && membersAtBound(s);
+}
+function membersAtBound(s: CommunitySession): boolean {
   const admin = s.admin, chain = s.state.chain;
   let n = 0;
   for (let i = chain.length - 1; i >= 0; i--) {
@@ -213,6 +215,16 @@ function admissionsHeld(s: CommunitySession): boolean {
     if (c.k === "add") n++;
   }
   return n >= COMMUNITY_LIMITS.memberAdmissions;
+}
+/**
+ * Whether the admin's app is wanted at the door: the members signed all the admissions in a row they may, and only the
+ * admin lets the next person in. Only hubs answer knocks, and an admin's app that is no hub (the role was handed to
+ * it, or it stepped down when idle) let nobody in while it was open: whoever opened the link waited for good, nobody
+ * told (bug hunt, 2026-11-12: the role handed to a member at 40 members, then 50 opening the link: 32 let in, 18
+ * knocking 20 minutes later). It is one more hub until it lets someone in, which opens the members' door again.
+ */
+function adminAtDoor(s: CommunitySession): boolean {
+  return s.isAdmin && s.adminWork && !!s.entryKey && !!s.state.entry.seedB64 && membersAtBound(s);
 }
 const RELAYED_KEPT = 4096;
 /**
@@ -1071,7 +1083,8 @@ export class Communities {
         return now - live.cutOffSince < CUT_OFF_STEP_UP_MS;
       };
       // On an app with a budget of connections (a Mac), only with room for a member beside the other hubs.
-      const want = () => settled() && !cutOff() && (shouldBeHub(me, this.hubs(live), now) || (!!live.forceHub && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))
+      // And the admin's app while the members' admissions wait for it (`adminAtDoor`): only hubs answer knocks.
+      const want = () => settled() && !cutOff() && (shouldBeHub(me, this.hubs(live), now) || ((!!live.forceHub || adminAtDoor(s)) && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))
         && this.capacity(groupId, live, now) > 0;
       if (want()) {
         // With no hub at all there is nobody to agree with: at once (another member doing the same is one
@@ -1095,7 +1108,8 @@ export class Communities {
       const load = this.hubLoad(groupId, live, now);
       if (load > 0) live.emptySince = now;
       // Stay listed; step down when idle and others can carry the group, in two steps (see `canStepDown`).
-      const idle = now - live.emptySince > this.timings.idleHubMs && now - live.hubSince > this.timings.idleHubMs;
+      // Not the admin's while the members' admissions wait for it: it would step up again at once.
+      const idle = now - live.emptySince > this.timings.idleHubMs && now - live.hubSince > this.timings.idleHubMs && !adminAtDoor(s);
       if (live.leaving) {
         // Out of the beacon since `leaving`, still a hub. On the next reading: the hub I count on is still listed, so I
         // am a member now; it is not (it was stepping down too, counting on me), or someone asked for me meanwhile, so
