@@ -67,6 +67,15 @@ export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => {
 };
 
 /**
+ * An answer's `note` on a group write in a private group with nobody else in it (`nobodyElseIn`): `what` reaches nobody.
+ * Only `group send` said it: a reaction, edit, pin, removal, forward, button update or card there answered `sent:
+ * false` at once with nothing more. Nothing in any other group.
+ */
+export const reachesNobody = (ctx: ApiContext, groupId: string, what: string): { note?: string } => nobodyElseIn(ctx, groupId)
+  ? { note: `Nobody else is in this group: nobody gets ${what}, not even someone who joins later` }
+  : {};
+
+/**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
  * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no

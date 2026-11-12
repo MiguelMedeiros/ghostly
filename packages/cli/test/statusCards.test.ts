@@ -505,6 +505,20 @@ describe("task update", () => {
     expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 } })).toMatchObject({ group: "g1", task: "t1", edits: 1 });
     expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
   });
+
+  // The fake's group has nobody but me: a card and its update answered `edges: 0` at once and said nothing more.
+  it("says nobody gets a group's card or its update when nobody else is in the group", async () => {
+    const { ctx, node } = fake("one-shot");
+    node.groupTaken.mockReturnValue(0);
+    const nobody = (what: string) => `Nobody else is in this group: nobody gets ${what}, not even someone who joins later`;
+    expect(await callApi(ctx, "task.send", { chat: "g1", card: { id: "t1", title: "Fix" }, wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this card") });
+    vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
+    expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 }, wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this update") });
+    vi.useRealTimers();
+    const state = node.getState();
+    node.getState = () => ({ ...state, groups: [group({ members: [...state.groups[0]!.members, { key: "anakey", role: "member", me: false, online: true, missing: 0 }] })] });
+    expect(await callApi(ctx, "task.send", { chat: "g1", card: { id: "t2", title: "Fix" } })).not.toHaveProperty("note");
+  });
 });
 
 describe("a card's update in a long chat", () => {
