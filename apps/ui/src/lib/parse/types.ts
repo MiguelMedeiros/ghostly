@@ -67,6 +67,13 @@ export interface Detector<K extends string = string, D = unknown> {
    */
   pattern: RegExp;
   /**
+   * Where a match can start, when `pattern` reads far past that (a link's `\S+` runs to the next space): every match
+   * of `pattern` begins with one of `lead`. The tokenizer looks for the lead first, and runs `pattern` only where its
+   * match would be the next atom, so text another atom takes (a markdown link around a URL) is never read to its end
+   * again for each one.
+   */
+  lead?: RegExp;
+  /**
    * The match as an atom, or null to leave it as text. `end` (absolute, at most the match's end) shortens it,
    * the way a link leaves its trailing full stop out.
    */
