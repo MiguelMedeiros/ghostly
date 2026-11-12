@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
@@ -368,7 +368,16 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
-const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+/** `path` with its symlinks followed, as far as it exists (the rest, not made yet, kept as written). */
+function realPath(path: string): string {
+  try { return realpathSync(path); } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realPath(parent), basename(path));
+  }
+}
+/** {@link isUnder} as written or through a symlink: another name for the folder (or for the file) is the same place. */
+const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(realPath(dir), realPath(path));
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
@@ -576,7 +585,7 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
  * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
  * store is another `--out`), or when a `ghostly-store.json` or `.sig` there does not read as a signed index. The key is
- * made only when neither is there.
+ * made only when neither is there, and never read or made inside the output folder, which is published.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = userPath(indexArg);
@@ -589,6 +598,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
+  // The folder is published (a repository served raw): a store key there signs any index for every client of the store.
+  if (isInside(outDir, keyPath)) {
+    throw refused(`${keyPath} is inside ${outDir}, which is published: keep the store key outside the store's folder (and its repository)`, { reason: "private-key" });
+  }
 
   // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
   const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);

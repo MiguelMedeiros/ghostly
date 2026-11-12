@@ -638,6 +638,37 @@ describe("store sign", () => {
     expect(signed).toMatchObject({ sequence: JSON.parse(vector.index).sequence, previous: null, keyCreated: false });
   }, 60_000);
 
+  it("never makes or reads a --key inside the folder it signs into, which is published, a symlinked name for it too", async () => {
+    const dir = tmp();
+    const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown>;
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    const out = tmp();
+    const alias = join(tmp(), "alias");
+    symlinkSync(out, alias);
+    for (const [key, more] of [
+      [join(dir, "store.key"), []],
+      [join(dir, "keys", "store.pem"), []],
+      [join(dir, ".store.key"), []],
+      [join(out, "store.key"), ["--out", out]],
+      [join(alias, "store.key"), ["--out", out]],
+      [join(out, "store.key"), ["--out", alias]],
+    ] as [string, string[]][]) {
+      const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", key, ...more]), "refused", 1) as { message: string; details?: { reason?: string } };
+      expect(refusal.details?.reason).toBe("private-key");
+      expect(refusal.message).toContain("outside the store's folder");
+      expect(existsSync(key)).toBe(false);
+    }
+    expect(existsSync(join(dir, "ghostly-store.json"))).toBe(false);
+    expect(existsSync(join(out, "ghostly-store.json"))).toBe(false);
+    // A key already there is refused too, and left as it is.
+    const held = vectorKey(out, "store");
+    expect((error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", held, "--out", out]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("private-key");
+    expect(existsSync(join(out, "ghostly-store.json"))).toBe(false);
+    // Beside the index but outside --out: the index's folder is not published.
+    ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", join(dir, "store.key"), "--out", join(tmp(), "site")]));
+    expect(existsSync(join(dir, "store.key"))).toBe(true);
+  }, 60_000);
+
   it("refuses a lower sequence, the same one with other content, another key and a publisher key", async () => {
     const dir = tmp();
     const keys = tmp();
