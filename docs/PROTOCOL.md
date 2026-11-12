@@ -364,7 +364,7 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 | 400 | `bad-path` | path did not resolve inside the target |
 | 404 | `unknown-service` | id not shared (anymore) |
 | 405 | `method-not-allowed` | |
-| 408 | `request-timeout` | request body stalled for 30 s |
+| 408 | `request-timeout` | request body brought less than 16 KiB in 30 s without ending (stalled or trickling) |
 | 413 | `request-too-large` | request body above 8 MiB |
 | 502 | `unreachable`, `redirect-blocked` | local service down, or it redirected off the target |
 | 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it), or more than 128 MiB of its request bodies held at once (a body counts from its first chunk until the local service has answered it) |
@@ -379,7 +379,7 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 5. Requests are made without the host user's cookies or HTTP credentials, so a peer never inherits the session the host has with its own application.
 6. Redirects never leave the target for the client. A redirect whose `Location` is on the target origin and under its base path is handed to the client with that `Location` made relative; any other is answered with 502 `redirect-blocked` and its `Location` is not disclosed. Off-target `Location`/`Content-Location` headers on other responses are dropped. A Desktop host never follows redirects. A browser host has to (its fetch hides where a manual redirect goes) and checks where it ended afterwards, so an open redirect in the shared application can still make the host send one request elsewhere on the machine, whose response is discarded.
 7. From responses, hop-by-hop headers, `Content-Encoding`, `Content-Length`, HSTS, `Alt-Svc` are removed (the body is forwarded decoded), and `Domain` is stripped from `Set-Cookie`.
-8. Limits: 8 MiB request bodies, 32 concurrent requests and 128 MiB of request bodies held per peer, 60 s for the local service to answer, 30 s body idle time. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
+8. Limits: 8 MiB request bodies, 32 concurrent requests and 128 MiB of request bodies held per peer, 60 s for the local service to answer, a request body must bring 16 KiB every 30 s until it ends. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
 
 ### 6.5 Private groups (`group-mesh/1`)
 

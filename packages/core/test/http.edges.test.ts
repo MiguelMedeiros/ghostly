@@ -284,8 +284,8 @@ describe("HttpHost", () => {
     const t = host(localFetch);
     t.host.handleRequest(req({ m: "PUT", b: true }));
     vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs - 1);
-    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: Uint8Array.of(1) });
-    vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs - 1);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle) });
+    vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs);
     expect(t.controls()).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(errorOf(t.controls())).toEqual([408, "request-timeout"]);
@@ -334,6 +334,36 @@ describe("HttpHost", () => {
     expect(errorOf(t.controls(), 104)).toBeUndefined();
     expect(fetches).toHaveLength(2);
     t.host.closeAll();
+  });
+
+  it("gives up on a request body that trickles, but not on one that keeps its pace for many windows", async () => {
+    vi.useFakeTimers();
+    const localFetch = vi.fn<LocalFetch>(async () => ok());
+    const t = host(localFetch);
+    const window = LIMITS.bodyIdleTimeoutMs;
+
+    t.host.handleRequest(req({ id: 1, m: "POST", b: true }));
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle - 1) });
+    vi.advanceTimersByTime(window - 1);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: Uint8Array.of(1) });
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(window - 1);
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle) });
+    }
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: true, payload: new Uint8Array(0) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(localFetch).toHaveBeenCalledOnce();
+    expect(localFetch.mock.calls[0][0].body).toHaveLength(5 * LIMITS.minRequestBodyBytesPerIdle);
+
+    t.host.handleRequest(req({ id: 2, m: "POST", b: true }));
+    vi.advanceTimersByTime(window - 1000);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 2, end: false, payload: Uint8Array.of(1) });
+    vi.advanceTimersByTime(999);
+    expect(errorOf(t.controls(), 2)).toBeUndefined();
+    vi.advanceTimersByTime(1);
+    expect(errorOf(t.controls(), 2)).toEqual([408, "request-timeout"]);
+    expect(t.host.activeRequests).toBe(0);
+    expect(localFetch).toHaveBeenCalledOnce();
   });
 
   it("answers 504 when the local service does not answer in time", async () => {
