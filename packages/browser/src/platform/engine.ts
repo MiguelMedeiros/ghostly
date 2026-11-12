@@ -496,14 +496,17 @@ function keptState(posted: PostedState, before: EngineState | null): EngineState
   } as EngineState;
 }
 
-/** The chats and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
-function keptViews<S extends Pick<EngineState, "links" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
+/** The chats, group edges and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
+function keptViews<S extends Pick<EngineState, "links" | "edges" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
   const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined): T[] => {
     if (!ids) return list;
     const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
     return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
   };
-  return { ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups) };
+  return {
+    ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups),
+    ...(state.edges && { edges: back(state.edges, views.edges, before?.edges) }),
+  };
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */
