@@ -260,7 +260,7 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   expect(card!.y).toBeGreaterThanOrEqual(0);
 });
 
-test("on a 320 px phone the title and validity of an ID card's back are whole in every language, mine and the contact's", { tag: ["@feature:proofs.composer", "@feature:proofs.contact", "@feature:app.i18n", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("on a 320 px phone the title and validity of an ID card's back are whole in every language, mine and the contact's", { tag: ["@feature:proofs.composer", "@feature:proofs.deck", "@feature:app.i18n", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const phone = { mobile: true, viewport: { width: 320, height: 640 } };
   const [alice, bob] = await Promise.all([peer("cid-narrow-alice", phone), peer("cid-narrow-bob", phone)]);
   await injectNostrSigner(alice);
