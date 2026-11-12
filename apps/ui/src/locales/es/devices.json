@@ -257,6 +257,12 @@
       "offline": "Conéctate para cambiar tus dispositivos."
     },
     "go": "Quitar",
+    "home": {
+      "bark": "Una salida o un envío aún abiertos allí no se pueden terminar aquí.",
+      "fedimint": "Aquí se recupera desde su federación; esa recuperación aún no está probada.",
+      "line": "{{wallet}} vive en {{device}}. Después de quitarlo, se abre aquí.",
+      "usdt": "Los envíos quedan desactivados aquí hasta que confirmes su última transacción en la cadena."
+    },
     "lost": "Perdido o robado",
     "removing": "Quitando…",
     "text": "Ya no podrá tomar este perfil.",
@@ -355,6 +361,12 @@
       "first": "Un perfil vacío ocupa su lugar aquí.",
       "go": "Quitar",
       "hint": "Sus chats, claves y billeteras se borran de este dispositivo. Tus otros dispositivos conservan el perfil.",
+      "home": {
+        "bark": "Una salida o un envío aún abiertos aquí no se pueden terminar sin ello.",
+        "fedimint": "Tus otros dispositivos la recuperan desde su federación; esa recuperación aún no está probada.",
+        "line": "{{wallet}} vive en este dispositivo. Lo que guarda aquí no está en tus otros dispositivos.",
+        "usdt": "Tus otros dispositivos no pueden enviar desde ella hasta que confirmes su última transacción en la cadena."
+      },
       "removing": "Quitando…",
       "title": "¿Quitar {{name}} de este dispositivo?"
     },

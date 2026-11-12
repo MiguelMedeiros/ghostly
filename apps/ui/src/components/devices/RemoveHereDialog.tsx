@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { useI18n } from "../../contexts/I18nContext";
-import { removeProfileHere } from "../../lib/profileData";
+import { type HomeWallet, removeProfileHere, walletsAtHomeHere } from "../../lib/profileData";
 import { activeProfileId, baseProfileName, currentProfile } from "../../lib/profiles";
 import { DeviceDialog, dangerButton, field } from "./DeviceDialog";
+import { HomeWallets } from "./HomeWallets";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 
@@ -21,6 +22,8 @@ export function RemoveHereDialog({ onClose }: { onClose(): void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const ready = typed.trim() === name;
+  // The wallets at home on this device (WISP 06 § Wallets that stay home): what each keeps here is on no other device.
+  const homes = useWalletsAtHomeHere(id);
   const submit = async () => {
     setBusy(true); setError(null);
     try {
@@ -39,6 +42,7 @@ export function RemoveHereDialog({ onClose }: { onClose(): void }) {
     <DeviceDialog title={t("devices.standby.removeHere.title", { name })} onClose={onClose} testId="device-remove-here">
       <p className="text-text-secondary">{t("devices.standby.removeHere.hint")}</p>
       {!id && <p className="text-text-secondary">{t("devices.standby.removeHere.first")}</p>}
+      <HomeWallets wallets={homes} testId="device-remove-here-homes" />
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}>
         <label className="block space-y-1">
           <span className="text-text-secondary">{t("devices.standby.removeHere.confirm", { name })}</span>
@@ -53,4 +57,15 @@ export function RemoveHereDialog({ onClose }: { onClose(): void }) {
       </form>
     </DeviceDialog>
   );
+}
+
+/** The wallets of profile `id` at home on this device, read once the dialog opens; none until then, or on a failed read. */
+function useWalletsAtHomeHere(id: string): HomeWallet[] {
+  const [homes, setHomes] = useState<HomeWallet[]>([]);
+  useEffect(() => {
+    let live = true;
+    void walletsAtHomeHere(id).then((found) => { if (live) setHomes(found); }, () => {});
+    return () => { live = false; };
+  }, [id]);
+  return homes;
 }

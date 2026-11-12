@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { getBrowserHost } from "@ghostly/browser/host";
 import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
-import type { WalletView } from "@ghostly/browser/shared/types";
+import type { WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
 import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
 import { englishT } from "../locales/translate";
 import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
@@ -425,4 +425,12 @@ export function lostWalletLines(wallet: WalletView | undefined): { cashu: boolea
     }
   }
   return { cashu: types.has("cashu"), phrase, remote };
+}
+
+/**
+ * The wallets at home on the device whose signing key is `key` (WISP 06 § Wallets that stay home): Remove <device>
+ * names them, since removing that device clears their home and they open on this one instead.
+ */
+export function walletsAtHomeOn(wallet: WalletView | undefined, key: string): WalletInstanceView[] {
+  return (wallet?.wallets ?? []).filter((w) => !!key && w.home?.key === key);
 }

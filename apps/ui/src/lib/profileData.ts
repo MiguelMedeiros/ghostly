@@ -1,4 +1,4 @@
-import { identityFromSeedB64 } from "@ghostly/core";
+import { WALLET_NETWORKS, identityFromSeedB64, type WalletNetwork } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { forgetServicesOf, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { runsEngine } from "@ghostly/browser/devices/state";
@@ -166,6 +166,63 @@ async function walletStorage(dbName: string): Promise<WalletStorage> {
       }
     });
     return found;
+  } finally { db.close(); }
+}
+
+/** A wallet at home on this device (WISP 06 § Wallets that stay home): its kind and its network. */
+export interface HomeWallet { type: "arkade" | "bark" | "spark" | "usdt" | "fedimint" | "bitcoin" | "lightning"; network: WalletNetwork }
+
+/** Where each wallet's record is (`walletHomes.ts` `homeRow`): the settings key of each kind, by network. */
+const HOME_ROWS: [RegExp, HomeWallet["type"]][] = [
+  [/^arkWallet-mode-(\w+)$/, "arkade"], [/^barkWallet-mode-(\w+)$/, "bark"], [/^sparkWallet-mode-(\w+)$/, "spark"], [/^usdtWallet-mode-(\w+)$/, "usdt"],
+  [/^fedimintWallet-(\w+)$/, "fedimint"], [/^onchainSource-(\w+)$/, "bitcoin"],
+];
+const homeKey = (value: unknown): string | undefined => {
+  const key = (value as { home?: { key?: unknown } } | null)?.home?.key;
+  return typeof key === "string" ? key : undefined;
+};
+
+/**
+ * The wallets whose home mark names the device `own` (its signing key), read from a profile's settings rows: each
+ * record's mark, and each Lightning card's in its network's list.
+ */
+export function walletsAtHome(own: string, rows: readonly (readonly [IDBValidKey, unknown])[]): HomeWallet[] {
+  const found: HomeWallet[] = [];
+  for (const [key, value] of rows) {
+    if (typeof key !== "string") continue;
+    const cards = /^lightningCards-(\w+)$/.exec(key);
+    if (cards && (WALLET_NETWORKS as readonly string[]).includes(cards[1])) {
+      const list = (value as { cards?: unknown } | null)?.cards;
+      for (const card of Array.isArray(list) ? list as unknown[] : []) {
+        if (homeKey(card) === own) found.push({ type: "lightning", network: cards[1] as WalletNetwork });
+      }
+      continue;
+    }
+    for (const [pattern, type] of HOME_ROWS) {
+      const network = pattern.exec(key)?.[1];
+      if (network && (WALLET_NETWORKS as readonly string[]).includes(network) && homeKey(value) === own) found.push({ type, network: network as WalletNetwork });
+    }
+  }
+  return found;
+}
+
+/**
+ * The wallets of profile `id` whose home is this device, as its frozen copy names them: their own storage (a Bark
+ * database, a Fedimint client file) is only here, and Remove this profile here deletes it. None when the profile's
+ * device record names no slot of this device's own, or the copy is not here.
+ */
+export async function walletsAtHomeHere(id: string): Promise<HomeWallet[]> {
+  const dbName = databaseOf(id);
+  const record = await readDeviceRecord(dbName).catch(() => null);
+  const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+  if (!own) return [];
+  const db = await openExisting(dbName);
+  if (!db) return [];
+  try {
+    if (!db.objectStoreNames.contains("settings")) return [];
+    const store = db.transaction("settings", "readonly").objectStore("settings");
+    const [keys, values] = await Promise.all([request(store.getAllKeys()), request(store.getAll())]);
+    return walletsAtHome(own, keys.map((key, i) => [key, values[i]] as const));
   } finally { db.close(); }
 }
 

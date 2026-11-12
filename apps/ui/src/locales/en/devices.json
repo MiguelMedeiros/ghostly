@@ -257,6 +257,12 @@
       "offline": "Go online to change your devices."
     },
     "go": "Remove",
+    "home": {
+      "bark": "An exit or a send still open there can't be finished here.",
+      "fedimint": "Here it is recovered from its federation; that recovery is still untested.",
+      "line": "{{wallet}} lives on {{device}}. After removal it opens here instead.",
+      "usdt": "Sending stays off here until you confirm its last transaction on chain."
+    },
     "lost": "Lost or stolen",
     "removing": "Removing…",
     "text": "It can no longer take this profile.",
@@ -355,6 +361,12 @@
       "first": "An empty profile takes its place here.",
       "go": "Remove",
       "hint": "Its chats, keys and wallets go from this device. Your other devices keep the profile.",
+      "home": {
+        "bark": "An exit or a send still open here can't be finished without it.",
+        "fedimint": "Your other devices recover it from its federation; that recovery is still untested.",
+        "line": "{{wallet}} lives on this device. What it keeps here is not on your other devices.",
+        "usdt": "Your other devices can't send from it until you confirm its last transaction on chain."
+      },
       "removing": "Removing…",
       "title": "Remove {{name}} from this device?"
     },
