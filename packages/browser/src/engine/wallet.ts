@@ -967,7 +967,21 @@ export class CashuWallet {
     if(!this.getKnownMints().includes(mint))throw new Error("Select a configured mint");
     return this.locked(mint,async()=>{
       const wallet=await this.wallet(mint);
-      const preview=await wallet.ops.send(amount,asProofLike(await this.proofsAt(mint))).includeFees(true).prepare();
+      const proofs=await this.proofsAt(mint);
+      const prepare=(sats:number)=>wallet.ops.send(sats,asProofLike(proofs)).includeFees(true).prepare();
+      const preview=await prepare(amount).catch(async(error:unknown)=>{
+        // Coins that cannot cover the amount and its fees are refused in cashu-ts' own English words: said as a send
+        // says it instead, with how much fits. Its coins are not split's, so `roomAt` would claim more than fits here.
+        if(!/^Not enough funds available/.test(error instanceof Error?error.message:""))throw error;
+        const fits=(sats:number)=>prepare(sats).then(()=>true,()=>false);
+        let low=0,high=Math.min(amount,total(proofs)-wallet.getFeesForProofs(asProofLike(proofs)).toNumber())-1;
+        while(low<high){
+          const middle=Math.ceil((low+high)/2);
+          if(await fits(middle))low=middle;
+          else high=middle-1;
+        }
+        throw low>0?engineError("notEnoughForFee",{amount:low}):engineError("notEnoughSats");
+      });
       return {fee:await reviewedCashuFee(preview),prepared:{mint,swap:(await loadCashu()).serializeSwapPreview(preview)}};
     });
   }
