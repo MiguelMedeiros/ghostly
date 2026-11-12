@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
@@ -100,21 +100,52 @@ export class CookieJar {
 }
 
 /**
- * What one opened app (its jar) may have waiting in this page at once, requests and their bodies' bytes: past either, a
- * request is refused at once, so the app cannot make the page that runs the peer hold unbounded memory.
+ * What one opened app (its jar) may have in this page at once: requests sent on the link, more waiting their turn
+ * (a page asks for all its images and modules together, 100 at once in Chromium), and the bytes of their bodies and
+ * headers. Past the waiting ones or the bytes, a request is refused at once, so the app cannot make the page that runs
+ * the peer hold unbounded memory.
  */
 export const MAX_PENDING_REQUESTS = 32;
+export const MAX_WAITING_REQUESTS = 256;
 export const MAX_PENDING_BODY_BYTES = 32 * 1024 * 1024;
-const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number }>();
+const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number; waiting: (() => void)[] }>();
 
-/** Takes room for one request of the app's: how to give it back, or null with none left. */
-function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
-  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0 };
-  if (pending.count >= MAX_PENDING_REQUESTS || pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
-  pending.count++;
-  pending.bytes += bytes;
+/**
+ * Takes room for one request of the app's, at once or when one sent before it ends: how to give it back, or null with
+ * no room left, or once `signal` aborts while it waits (it leaves its turn).
+ */
+async function holdRoom(jar: CookieJar, bytes: number, signal: AbortSignal): Promise<(() => void) | null> {
+  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0, waiting: [] };
   pendingOf.set(jar, pending);
-  return () => { pending.count--; pending.bytes -= bytes; };
+  if (pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
+  if (pending.count < MAX_PENDING_REQUESTS) pending.count++;
+  else if (pending.waiting.length >= MAX_WAITING_REQUESTS || signal.aborted) return null;
+  else {
+    pending.bytes += bytes;
+    // Its turn comes with the place of one that ended (`count` stays), or never once the page lets go of it.
+    const turn = await new Promise<boolean>((resolve) => {
+      const go = () => { signal.removeEventListener("abort", leave); resolve(true); };
+      const leave = () => { pending.waiting.splice(pending.waiting.indexOf(go), 1); resolve(false); };
+      pending.waiting.push(go);
+      signal.addEventListener("abort", leave, { once: true });
+    });
+    pending.bytes -= bytes;
+    if (!turn) return null;
+  }
+  pending.bytes += bytes;
+  return () => {
+    pending.bytes -= bytes;
+    const next = pending.waiting.shift();
+    if (next) next();
+    else pending.count--;
+  };
+}
+
+/** What a request holds in this page while it waits or goes: its body and its headers. */
+function heldBytes(request: ServiceRequestMessage): number {
+  let bytes = request.body?.byteLength ?? 0;
+  for (const [name, value] of request.headers) bytes += name.length + value.length;
+  return bytes;
 }
 
 /**
@@ -149,12 +180,6 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     port.close();
     return;
   }
-  const release = holdRoom(jar, request.body?.byteLength ?? 0);
-  if (!release) {
-    post({ type: "error", status: 503, text: words.failed });
-    port.close();
-    return;
-  }
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
   const pageGone = () => stop.abort();
@@ -166,7 +191,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     post({ type: "error", status: 504, text: words.tooSlow });
     stop.abort();
   }, ANSWER_BY_MS);
+  let release: (() => void) | null = null;
   try {
+    // Its turn on the link, after the app's requests sent before it: none past the room this page keeps for them.
+    release = await holdRoom(jar, heldBytes(request), stop.signal);
+    if (!release) {
+      post({ type: "error", status: 503, text: words.failed });
+      return;
+    }
     const cookie = jar.header();
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
@@ -205,7 +237,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
-    release();
+    release?.();
     clearTimeout(late);
     view?.removeEventListener("abort", pageGone);
     port.close();
