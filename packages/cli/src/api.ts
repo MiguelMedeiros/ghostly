@@ -1153,12 +1153,36 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
     if ((await Promise.race([dial, late])) !== "late") return;
   } catch (error) {
     // A DHT only learned while it dialled (the contact's, read from the DHT up to 30 s later) is said as before the dial.
-    if (asCliError(error).code !== "timeout") { dhtOnly(findChat(state(ctx).links, link.id)); throw error; }
+    if (asCliError(error).code !== "timeout") {
+      dhtOnly(findChat(state(ctx).links, link.id));
+      const away = contactAway(error);
+      if (away) throw new CliError("unavailable", `${away}. ${connectNext(ctx, link)}`, { chat: link.id, reason: (error as Error).message });
+      throw error;
+    }
   } finally { clearTimeout(timer); }
+  throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${connectNext(ctx, link)}`, { chat: link.id });
+}
+
+/** What happens after a `chat connect` the contact did not answer: the daemon dials again by itself, a one-shot does not. */
+function connectNext(ctx: ApiContext, link: LinkView): string {
   const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
-  throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${ctx.mode === "one-shot"
+  return ctx.mode === "one-shot"
     ? "Try again later, or keep this profile online with `ghostly daemon --detach`: it reconnects by itself"
-    : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`}`, { chat: link.id });
+    : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`;
+}
+
+/**
+ * A dial that ended because the contact's app is not there: the link's own "Could not connect to the peer", or
+ * HyperDHT's errors as the app's errorText says them (closed, or asleep or frozen). They answered as they came, without
+ * the next step; HyperDHT's as `engine`, "PEER_NOT_FOUND: Peer not found", as if this side had failed.
+ */
+function contactAway(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : "";
+  const reason = /^Could not connect to the peer(?:: ([\s\S]*))?$/.exec(message);
+  const native = reason ? reason[1] ?? "" : message;
+  if (/^PEER_NOT_FOUND: /.test(native)) return "Your contact's app isn't reachable on HyperDHT: it may be closed";
+  if (/^(?:PEER_CONNECTION_FAILED|BAD_HOLEPUNCH_REPLY|HOLEPUNCH_[A-Z_]+): /.test(native)) return "Your contact's app isn't answering on HyperDHT: it may be asleep or frozen";
+  return reason ? "The contact did not answer" : undefined;
 }
 
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
