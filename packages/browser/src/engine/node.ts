@@ -1147,6 +1147,8 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the snapshot `stateTimer` waits for is due (`emitState`). */
+  private stateDue = 0;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
   /**
    * The reviews whose outcome is still open (submitted, unknown), by id: what the payment poll asks about, so that it
@@ -1885,7 +1887,7 @@ export class GhostlyNode implements EngineImplementation {
     placeAbove: (linkId, id) => this.placeAbove(linkId, id),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
-    emit: () => this.emitState(),
+    emit: delayMs => this.emitState(delayMs),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : frame.t === COMMUNITY_PIN_FRAME ? this.receiveGroupPin(groupId, sender, readPin(frame))
@@ -10458,11 +10460,19 @@ export class GhostlyNode implements EngineImplementation {
     return { files: true, payments: Object.values(methods).some(Boolean), methods, calls: false, services: false };
   }
 
-  /** State changes arrive in bursts; the UI gets one snapshot per tick. */
+  /**
+   * State changes arrive in bursts; the UI gets one snapshot per tick. `delayMs`: how long this change may wait. One
+   * that may not wait as long as the snapshot already due (a new file behind another's progress) brings it forward.
+   */
   private emitState(delayMs = 50): void {
     // Another device took the turn (WISP 06): the pages show the standby screen, and hear nothing more of this engine.
     if (this.gatedOut) return;
-    if (this.stateTimer) return;
+    const due = Date.now() + delayMs;
+    if (this.stateTimer) {
+      if (due >= this.stateDue) return;
+      clearTimeout(this.stateTimer);
+    }
+    this.stateDue = due;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
       // Asked for just before another device's turn stopped this engine: the pages keep the standby screen.
