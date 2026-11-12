@@ -96,7 +96,7 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
  * and checked again if it still runs.
  */
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
-/** URLs the update check remembers it read whole and refused (`Apps.refusedReads`). */
+/** URLs the engine remembers it read whole and refused (`Apps.refusedReads`). */
 const REFUSED_READS_KEPT = 256;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
@@ -713,10 +713,10 @@ export class Apps {
    */
   private readonly listingMisses = new Map<string, string>();
   /**
-   * URLs whose whole read the update check refused (a file hash that does not hold, a bad signature, too large, another
-   * version under a number held), with the digest their peek showed then: the same peek there is not read whole again
-   * at every check, for an hour (a fixed upload of the same version keeps its manifest). At most `REFUSED_READS_KEPT`,
-   * the oldest going first.
+   * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
+   * signature, too large, another version under a number held), with the digest their peek showed then: the same peek
+   * there is not read whole again at every check or Open, for an hour (a fixed upload of the same version keeps its
+   * manifest). At most `REFUSED_READS_KEPT`, the oldest going first.
    */
   private readonly refusedReads = new Map<string, { digest: string; at: number }>();
 
@@ -771,6 +771,15 @@ export class Apps {
   private checkedWithin(at: number | undefined, ms: number): boolean {
     const age = at === undefined ? -1 : this.now() - at;
     return age >= 0 && age < ms;
+  }
+  /** `url`'s whole read was refused within the hour while its peek showed `digest`: not downloaded again (`refusedReads`). */
+  private readRefused(url: string, digest: string): boolean {
+    const refused = this.refusedReads.get(url);
+    return refused?.digest === digest && this.checkedWithin(refused.at, APP_CHECK_TIMINGS.freshMs);
+  }
+  /** Keeps a failed whole read of `url` refused for what its peek showed; a read that brought no bundle (the host down) is not kept. */
+  private refuseFailedRead(url: string, digest: string, error: unknown): void {
+    if (!(error instanceof AppFetchError) || error.code === "too-large") this.refuseRead(url, digest);
   }
 
   // ---------- life ----------
@@ -2063,11 +2072,10 @@ export class Apps {
       if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
       // A URL whose whole read was refused for this very peek is not downloaded again (up to 16 MiB at every Apps page
       // visit); a read that brought no bundle (the host down) is tried again at the next check.
-      const refused = this.refusedReads.get(url);
-      if (holds && refused?.digest === holds.digest && this.checkedWithin(refused.at, APP_CHECK_TIMINGS.freshMs)) continue;
+      if (holds && this.readRefused(url, holds.digest)) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch (error) {
-        if (holds && (!(error instanceof AppFetchError) || error.code === "too-large")) this.refuseRead(url, holds.digest);
+        if (holds) this.refuseFailedRead(url, holds.digest, error);
         continue;
       }
       const { bundle, bytes } = fetched;
@@ -2178,8 +2186,11 @@ export class Apps {
       // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
       // HEAD) is not read whole only to be skipped, at every open and every check.
       try { if ((await this.peekAt(url))?.digest !== app.digest) continue; } catch { continue; }
+      // Nor, as at the update check, one whose whole read was refused for this very digest (each check and each Open
+      // asks for missing files).
+      if (this.readRefused(url, app.digest)) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
-      try { fetched = await this.fetchBundle(url); } catch { continue; }
+      try { fetched = await this.fetchBundle(url); } catch (error) { this.refuseFailedRead(url, app.digest, error); continue; }
       if (fetched.bundle.digest !== app.digest) continue;
       return this.filesBack(app, fetched.bytes, stores);
     }
