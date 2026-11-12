@@ -1,11 +1,12 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
 import { PaymentBubble } from "../../components/PaymentBubble";
 import { paymentLine, storedPaymentLine } from "../../components/paymentWords";
 import { loadLocale, translatorFor } from "../../locales";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
+import { servicesPlatform } from "../../lib/platform";
 import { renderApp } from "../render";
 import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose, listOf, readOption } from "../select";
@@ -726,6 +727,22 @@ describe("an expired request", () => {
     fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": { ...receipt, state: "failed" } } });
     renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
     expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
+  // Every bubble reads the engine's state anew on each change (up to 20 a second while a file moves): looking through
+  // every payment for one on its way before the deadline, when it changes nothing, took ~9 ms per state for 30 open
+  // requests in a wallet of 2,000 payments.
+  it("does not look for the contact's payment of a request you sent before its deadline", () => {
+    const onItsWay = vi.spyOn(servicesPlatform!.wallet!, "paymentOnItsWay");
+    try {
+      const open = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() + 60 * 60_000 });
+      show({ kind: "request", direction: "out", target: open });
+      expect(status()).toHaveTextContent("Waiting for payment");
+      for (let i = 0; i < 10; i++) act(() => fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView({ kind: "request", direction: "out", target: open }) } }));
+      expect(onItsWay).not.toHaveBeenCalled();
+    } finally {
+      onItsWay.mockRestore();
+    }
   });
 
   it("says it in the app's language", () => {
