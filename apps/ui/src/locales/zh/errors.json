@@ -586,6 +586,8 @@
     "pgpExponentNext": "请使用 GnuPG 生成的密钥（指数 65537）。",
     "pgpKeyKind": "Ghostly 不接受 {{kind}} 密钥",
     "pgpKeyKindNext": "请使用 Ed25519、ECDSA（P-256、P-384、P-521、brainpool）或 2048 到 {{max}} 位的 RSA。",
+    "pgpKeyVersion": "Ghostly 不接受 OpenPGP v{{version}} 密钥",
+    "pgpKeyVersionNext": "请使用 v4 密钥（gpg 生成的 Ed25519 密钥）或 v6 密钥。",
     "pgpNoUserIds": "keys.openpgp.org 分享的此密钥没有用户 ID，因此无法验证",
     "pgpNoUserIdsNext": "请在那里确认一个电子邮件地址，或粘贴你的公钥（gpg --armor --export）。",
     "privateAddress": "{{domain}} 指向私有网络地址",
