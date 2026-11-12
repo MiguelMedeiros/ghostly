@@ -257,6 +257,12 @@ function GroupLinkIntake() {
   const [problem, setProblem] = useState<Problem | null>(null);
   /** The groups this intake is joining, until the engine answers: links that come together count each other. */
   const joining = useRef(new Set<string>());
+  /**
+   * Bumped each time the other intake takes a link, and what it was when the held link came: a refusal that comes later
+   * (a join still on its way, or held until the unlock) belongs to a link that no longer answers for itself.
+   */
+  const otherLinks = useRef(0);
+  const codeAfter = useRef(0);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -265,25 +271,27 @@ function GroupLinkIntake() {
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
-    else { setProblem(null); setCode(link); }
+    else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
     linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
-  useOtherLink("group", useCallback(() => setProblem(null), []));
+  useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
+    const after = codeAfter.current;
+    const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
     const groups = engine.state?.groups ?? [];
     const id = linkGroupId(code);
     if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
       && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
-      setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+      refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       return;
     }
     if (id) joining.current.add(id);
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
+      .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
       .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, isLocked, hasUnlocked, groupsLoaded]);
