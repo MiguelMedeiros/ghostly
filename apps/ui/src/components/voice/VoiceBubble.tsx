@@ -526,7 +526,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
             onKeyDown={onWaveKey}
           />
           {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place. */}
-          <div className="flex items-center gap-1 mt-1 min-h-[18px] chat-text-media-meta text-text-primary/65" data-testid="voice-meta">
+          <div className="flex items-center gap-1 mt-1 min-h-[18px] chat-text-media-meta text-text-primary/75" data-testid="voice-meta">
             {active ? (
               <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />
             ) : (
