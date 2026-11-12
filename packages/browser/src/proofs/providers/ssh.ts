@@ -18,10 +18,14 @@ import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type S
 export interface SshEvidence { signature: string }
 
 const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+/** The line `ssh-keygen -l -f key.pub` prints: bits, fingerprint, comment, type ("256 SHA256:… me@laptop (ED25519)"). */
+const KEYGEN_LIST_LINE = /^\d+ (SHA256:[A-Za-z0-9+/]{43}) .* \([A-Z0-9-]+\)$/;
 
 function normalizeKeySubject(input: string): string {
   const value = input.trim();
   if (FINGERPRINT.test(value)) return value;
+  const listed = KEYGEN_LIST_LINE.exec(value);
+  if (listed) return listed[1];
   try { return parseSshPublicKey(value).fingerprint; }
   catch (e) {
     // Say why a real key is refused (a DSA key, a small RSA key); anything else gets the instruction.

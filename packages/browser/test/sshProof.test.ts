@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { identityStatement, newIdentityBinding, parseSshPublicKey, type IdentityStatement } from "@ghostly/core";
 import type { ExternalToolSigner, IdentityFetch, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -66,6 +67,14 @@ describe("SSH identity proofs", () => {
   it("takes a .pub line or a fingerprint as the subject", () => {
     expect(ssh.subject.normalize(`  ${mine.publicKey} me@laptop \n`)).toBe(fingerprint);
     expect(ssh.subject.normalize(fingerprint)).toBe(fingerprint);
+    // What `ssh-keygen -l -f key.pub` prints, "256 SHA256:… me@laptop (ED25519)", pasted as is.
+    for (const key of [mine, other, rsa]) {
+      const listed = execFileSync("ssh-keygen", ["-l", "-f", "-"], { input: `${key.publicKey} me and my laptop\n` }).toString();
+      expect(listed).toMatch(/^\d+ SHA256:\S{43} me and my laptop \((ED25519|ECDSA|RSA)\)\n$/);
+      expect(ssh.subject.normalize(listed)).toBe(parseSshPublicKey(key.publicKey).fingerprint);
+    }
+    const md5 = execFileSync("ssh-keygen", ["-l", "-E", "md5", "-f", "-"], { input: mine.publicKey }).toString();
+    expect(() => ssh.subject.normalize(md5)).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("-----BEGIN OPENSSH PRIVATE KEY-----")).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("ssh-dss AAAAB3NzaC1kc3MAAAA=")).toThrow(/Unsupported SSH key type "ssh-dss"/);
     expect(ssh.subject.short!(fingerprint)).toMatch(/^SHA256:.{8}….{4}$/);
