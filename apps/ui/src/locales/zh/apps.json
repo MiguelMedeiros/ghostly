@@ -89,7 +89,9 @@
     "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。",
     "storeKey": "该商店由另一把密钥签名。",
     "tooLarge": "太大了。",
-    "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
+    "unlistedVersion": "这个链接里是该商店尚未列出的版本。",
+    "updateFilesGone": "这个更新的文件已不在了。Ghostly 会在下次检查时重新获取。",
+    "updateUnlisted": "这个商店已不再列出这个更新。Ghostly 会在下次检查时查看它现在列出的版本。"
   },
   "files": {
     "allow": "允许",

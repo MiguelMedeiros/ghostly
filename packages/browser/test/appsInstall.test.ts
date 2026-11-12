@@ -1008,6 +1008,9 @@ describe("an app installed from a store updates only to the version that store l
     await store.refreshStores();
     await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^unlisted/);
     expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+    // It no longer waits: an Update offered for it again would fail the same way at every press.
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^no-update/);
 
     // The next check drops 3 and installs 2, which adds no permission.
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
