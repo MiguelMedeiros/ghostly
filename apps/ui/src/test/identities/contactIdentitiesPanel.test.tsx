@@ -235,6 +235,17 @@ describe("ContactIdentitiesPanel", () => {
         expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
       });
 
+      it("a name the account set for itself, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Microsoft; name set on the account, not checked by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Microsoft; nome definido na conta, não verificado por Microsoft");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|checked/);
+      });
+
+      it("a name the account set for itself, beside an email the provider checked, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email verified by Google; name set on the account, not checked by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ تحققت Google من البريد الإلكتروني؛ الاسم مضبوط في الحساب، لم تتحقق منه Google");
+      });
+
       it("any other source as written", async () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
