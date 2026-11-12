@@ -222,7 +222,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
-  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`, and `history --before`
+  or `--after` for the messages around it).
 - **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
   `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
