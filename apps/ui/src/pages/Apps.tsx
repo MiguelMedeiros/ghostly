@@ -15,6 +15,7 @@ import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
+import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
 import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -120,7 +121,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       {asking && (
         <div role="group" aria-labelledby={questionId} data-testid="built-in-app-remove-question" className="basis-full space-y-2"
           onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.builtIn.removeTitle", { title: app.title })}</p>
+          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.builtIn.removeTitle", { title: NAME }), app.title)}</p>
           <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
@@ -250,7 +251,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         {asking && (
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.store.removeTitle", { name: storeName })}</p>
+            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             <p className="text-xs text-text-secondary">
               {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
             </p>

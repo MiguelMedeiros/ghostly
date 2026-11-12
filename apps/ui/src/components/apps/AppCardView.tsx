@@ -6,7 +6,7 @@ import { servicesPlatform } from "../../lib/platform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { NAME, aroundName } from "./aroundName";
+import { NAME, aroundName, withName } from "./aroundName";
 import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/apps/installed";
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
@@ -102,7 +102,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
+            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
         {app?.run.status === "removed" &&<Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
