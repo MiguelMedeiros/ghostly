@@ -146,6 +146,8 @@ function assertRsaSizes(key: OpenPGP.PublicKey): void {
 const ALLOWED_HASHES = new Set([8, 9, 10, 11, 12, 14]); // SHA-256, -384, -512, -224, SHA3-256, SHA3-512
 
 export class PgpProofError extends Error { override name = 'PgpProofError'; }
+/** A copy of a v4 key without user IDs: what keys.openpgp.org serves until its owner confirms an email there. */
+export const PGP_NO_USER_IDS = 'This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.';
 
 /** Armored blocks in pasted text; more BEGIN lines than any real paste has are refused before the regex scans. */
 function armorBlocks(text: string): RegExpExecArray[] {
@@ -201,6 +203,8 @@ async function explainInvalidKey(key: OpenPGP.PublicKey, keyId: OpenPGP.KeyID | 
   const past = when === 'signing' ? ' when it signed' : '';
   if (await key.isRevoked(undefined, undefined, at, cfg as OpenPGP.Config).catch(() => false))
     throw new PgpProofError(`This key has been revoked${past}. A revoked key proves nothing.`);
+  // A v4 key's expiry and flags are in its user IDs' self-signatures: a copy without them cannot be checked.
+  if (key.keyPacket.version === 4 && !key.users.length) throw new PgpProofError(PGP_NO_USER_IDS);
   try { await key.verifyPrimaryKey(at, undefined, cfg as OpenPGP.Config); }
   catch (e) {
     const expiry = await key.getExpirationTime(undefined, cfg as OpenPGP.Config).catch(() => null);
@@ -516,7 +520,10 @@ export async function fetchKeyFromKeyserver(query: string, options: { signal?: A
  * keyserver checked. That is the keyserver's check, and says nothing about a name.
  */
 export async function keyserverVerifiedEmails(keyserverArmored: string, fingerprint: string, options: { now?: number } = {}): Promise<string[]> {
-  const info = await readPgpPublicKey(keyserverArmored, options);
+  let info: PgpKeyInfo;
+  // No user IDs in its copy: the keyserver confirmed no email (a revocation it holds is still said, above that).
+  try { info = await readPgpPublicKey(keyserverArmored, options); }
+  catch (e) { if (e instanceof PgpProofError && e.message === PGP_NO_USER_IDS) return []; throw e; }
   if (info.fingerprint !== fingerprint.toUpperCase()) throw new PgpProofError('keys.openpgp.org returned a different key.');
   const emails = info.userIds.map(u => /<([^<>\s]+@[^<>\s]+)>\s*$/.exec(u)?.[1] ?? (/^[^<>\s]+@[^<>\s]+$/.test(u) ? u : undefined));
   return [...new Set(emails.filter((e): e is string => !!e).map(e => e.toLowerCase()))];
