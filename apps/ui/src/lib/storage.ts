@@ -74,10 +74,17 @@ export function keyOwner(): (key: string) => boolean {
   const spaces = otherSpaces();
   return (key) => key.startsWith("ghostly_") && ownsUnprefixed(key, spaces);
 }
-/** The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. */
-const DEVICE_KEYS = new Set(["ghostly_keep_awake", "ghostly_stay_connected"]);
-// Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, and
-// its backups and moves carried them (bug hunt, 2026-11-11).
+/**
+ * The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. Every
+ * profile here reads them: Keep awake, Stay connected, the call's small window (CallOverlay: its choice, its place and
+ * size, the self view's) and the update notice dismissed (UpdateContext).
+ */
+const DEVICE_KEYS = new Set([
+  "ghostly_keep_awake", "ghostly_stay_connected",
+  "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed",
+]);
+// Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, taking
+// it back dropped them with its old copy's keys, and its backups and moves carried them (bug hunt, 2026-11-11).
 const ownsUnprefixed = (key: string, spaces = otherSpaces()) => {
   const rest = key.slice("ghostly_".length);
   return !DEVICE_KEYS.has(key) && !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
