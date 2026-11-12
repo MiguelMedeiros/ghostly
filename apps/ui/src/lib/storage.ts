@@ -66,11 +66,18 @@ export function ownsKey(key: string): boolean {
   return !!_profile || ownsUnprefixed(key);
 }
 const ownsUnprefixed = (key: string) => {
+  if (OWN_PROFILE_SHAPED.has(key)) return true;
   const rest = key.slice("ghostly_".length);
   return !PROFILE_KEY.test(rest) && !otherSpaces().some((ns) => rest.startsWith(`${ns}_`));
 };
 /** The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. */
 const DEVICE_KEYS = new Set(["ghostly_keep_awake", "ghostly_stay_connected"]);
+/**
+ * The first profile's own keys whose suffix starts as another profile's id would (10 letters or digits and `_`):
+ * Identities' news seen (`identities_seen`). Clear all data of the first profile left it, with its links' and proofs'
+ * ids, and its backups and moves left it out (bug hunt, 2026-11-12).
+ */
+const OWN_PROFILE_SHAPED = new Set(["ghostly_identities_seen"]);
 /**
  * Whether a key is the first profile's own in its original namespace (`ghostly_` with no other profile's id or space
  * after it), whichever profile or space this page runs as: one a handoff installed elsewhere leaves them behind.
