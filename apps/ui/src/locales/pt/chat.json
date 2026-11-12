@@ -314,7 +314,7 @@
   "online": "online",
   "options": "Opções",
   "payments": {
-    "needLive": "Pagamentos precisam de uma conexão direta",
+    "needLive": "Enviar precisa do seu contato online: ecash nunca fica esperando numa fila. Um pedido pode esperar até o contato voltar.",
     "noWallet": "Seu contato ainda não tem carteira",
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
