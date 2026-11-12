@@ -224,6 +224,8 @@ const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is 
 
 /** A one-shot's typing without `--for` (it opens the profile offline, `offlineCall`): said on no live session. */
 const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
+// A stop takes no --for, so only the daemon half holds.
+const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`)";
 
 // ---------- methods ----------
 
@@ -465,7 +467,7 @@ const METHODS: Record<string, Method> = {
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
+      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
   /**
@@ -877,7 +879,7 @@ const METHODS: Record<string, Method> = {
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
+      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
   async "group.leave"(ctx, params) {
