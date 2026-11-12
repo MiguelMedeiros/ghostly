@@ -59,15 +59,17 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   // names finds room when 32 others wait (`GroupAutoJoin.autoJoins`).
   let groupAuto: GroupAutoJoin | undefined;
   const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
+  // Online notices only from a daemon that says presence (`DaemonPresence.saysOnline`); a one-shot never says it.
+  let presence: DaemonPresence | undefined;
+  const onlineNotices = (): boolean => !!presence?.saysOnline();
   try {
-    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, onlineNotices, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();
     throw error;
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
-  let presence: DaemonPresence | undefined;
   try {
     await hub.open();
     const node = runtime.server.node;
