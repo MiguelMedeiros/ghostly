@@ -335,6 +335,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
         if (trees) { trees.complete(this._rollbackLog, ++seq); written(seq); }
       } else {
         const ops = pending.get(this._rollbackLog);
+        // Nothing journaled, yet its trees' layer may be open: a put a unique index refused, written and undone. Left
+        // open, it stays this transaction's, and every later write to the store would throw.
+        if (!ops?.length) trees?.abort(this._rollbackLog);
         if (ops?.length) entry = ++seq;
         const appended = ops?.length ? append(ops, this.durability === "relaxed", entry, this._rollbackLog) : null;
         if (appended && appended !== "unsynced") return refuse(this, appended.error, event);
