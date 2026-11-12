@@ -109,7 +109,7 @@ export class EventHub {
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
   private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
-  /** Chats and groups whose history the baseline did not read whole, and how to read it: until a file event needs it. */
+  /** Chats and groups whose history the baseline did not read whole, and how to read their file rows: until a file event needs them. */
   private unread = new Map<string, (chat: string) => Promise<readonly StoredMessage[]>>();
   /**
    * Whether the seen set notes mentions (`+m`): false on a set written before it did, whose mentions were reported with
@@ -201,12 +201,13 @@ export class EventHub {
    * missing from the seen set are news (they came while no process derived events, a crash), except on a first
    * run, which only learns the history that was already there.
    */
-  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; whole: (chat: string) => Promise<readonly StoredMessage[]> }): void {
+  baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; files: (chat: string) => Promise<readonly StoredMessage[]> }): void {
     this.stateChanged(state);
     for (const [chat, messages] of histories) this.messages(chat, messages);
     // `rest.newest`: chats and groups in step (`inStep`), only their newest messages read. Nothing in them is news;
-    // a file of an older message is looked up when an event needs it (`rest.whole` reads the history then).
-    for (const [chat, messages] of rest?.newest ?? []) { this.messages(chat, messages, []); this.unread.set(chat, rest!.whole); }
+    // a file of an older message is looked up when an event needs it (`rest.files` reads the history's file rows then:
+    // the whole history, read for a contact's first file of each run, was the read the newest spare a start).
+    for (const [chat, messages] of rest?.newest ?? []) { this.messages(chat, messages, []); this.unread.set(chat, rest!.files); }
     this.baselined = true;
     this.firstRun = false;
     // The set's own marks, in one write: it notes mentions, and (every history having been read whole while it did not)
@@ -737,7 +738,7 @@ export class EventHub {
     const timer = setTimeout(() => this.flushFile(fileId, null), FILE_MESSAGE_WAIT_MS);
     timer.unref?.();
     this.pendingFiles.set(fileId, { timer, emits: [emit] });
-    // A file of a message older than the ones the baseline read: the history is read now, once, for all its files.
+    // A file of a message older than the ones the baseline read: the history's file rows are read now, once, for all its files.
     const read = chat === null ? undefined : this.unread.get(chat);
     if (!read) return;
     this.unread.delete(chat!);
