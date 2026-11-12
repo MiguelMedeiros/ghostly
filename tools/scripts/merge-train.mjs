@@ -1223,7 +1223,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   /**
    * The next pull request, alone: merged at once when its head holds the base's tip and is green, else rebased onto
-   * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run).
+   * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run). So does CI
+   * "none": nothing runs on a head at the tip whose own run was cancelled (a batch it boarded closed without it), and
+   * none would start there. Not for one whose runs cannot count (`refused`): a fresh commit's would not count either.
    */
   const goAlone = async (p, { retried = false, rerun = false, past = null } = {}) => {
     const tip = await gh.branchSha(base);
@@ -1236,7 +1238,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
       return (await board([p])) ?? false;
     }
-    const built = await git.rebase(base, p, { force: rerun });
+    const built = await git.rebase(base, p, { force: rerun || (p.ci === "none" && !refused(p)) });
     if (built.dropped === "conflict" && past) return pastConflict(p);
     if (built.dropped === "conflict") {
       // A rebase replays the branch's own commits and skips its merges, so a conflict the author resolved in a merge of
