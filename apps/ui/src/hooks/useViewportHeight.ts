@@ -53,6 +53,10 @@ export function useViewportHeight() {
     const viewport = window.visualViewport;
     if (!viewport) return;
 
+    // No keyboard comes up over a page on a machine with no touch screen (a computer): a window made shorter there is
+    // the whole height, whatever has the focus. A narrow Desktop window on Linux, made shorter with the message field
+    // focused, lost its tab bar until the window was resized again.
+    const touch = navigator.maxTouchPoints > 0;
     let width = viewport.width;
     // The tallest visible height seen at each width: turned back to a width, the keyboard is measured against the
     // whole height seen there, not the one it left.
@@ -94,7 +98,7 @@ export function useViewportHeight() {
       if (viewport.height > carried) carried = 0;
       // No keyboard comes up with nothing to type into: a window made shorter (split screen, a quarter of the
       // screen, devtools docked) is the whole height there now, or the phone tab bar stayed hidden under 768px.
-      const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
+      const whole = !touch || (!mayType && event?.type === "resize") ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
       tallest.set(width, whole);
       const measured = Math.max(window.innerHeight - viewport.height, whole - viewport.height);
       let covered = measured;

@@ -33,8 +33,11 @@ beforeEach(() => {
   inner = 874;
   Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
   Object.defineProperty(window, "innerHeight", { configurable: true, get: () => inner });
+  // A phone or a tablet: a touch screen, where a keyboard comes up over the page.
+  vi.spyOn(navigator, "maxTouchPoints", "get").mockReturnValue(5);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   Reflect.deleteProperty(window, "visualViewport");
   Reflect.deleteProperty(window, "innerHeight");
   delete document.documentElement.dataset.keyboard;
@@ -174,6 +177,27 @@ describe("the app's height and the keyboard", () => {
       resize(437, 437);
       expect(keyboard()).toBe("false");
       resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("with no touch screen, a window made shorter while a field has the focus is not a keyboard (a narrow Desktop window)", () => {
+    vi.spyOn(navigator, "maxTouchPoints", "get").mockReturnValue(0);
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(574, 574);
+      expect(appHeight()).toBe("574px");
+      expect(keyboard()).toBe("false");
+      // The field loses the focus (Back to the list): the tab bar is not left behind a keyboard that never came.
+      act(() => field.blur());
+      expect(keyboard()).toBe("false");
+      act(() => field.focus());
+      resize(874, 874);
+      resize(437, 437);
       expect(keyboard()).toBe("false");
     } finally {
       field.remove();
