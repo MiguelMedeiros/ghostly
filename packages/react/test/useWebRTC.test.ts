@@ -1271,6 +1271,28 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblemOf).toBe("camera");
   });
 
+  it("the note that the camera is off goes once the camera comes on in the call", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+    devices.userMedia[1].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    expect(call.result.current.mediaProblem).toBe("unavailable");
+
+    // The camera plugged in (or the app holding it closed), well within the note's time: Camera turns it on.
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[2].grant();
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
   it.each([
     ["NotAllowedError", "denied"],
     ["SecurityError", "denied"],
