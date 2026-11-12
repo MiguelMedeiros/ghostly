@@ -2360,8 +2360,12 @@ export class Apps {
       if (!old) return;
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
-      // Uninstalled since the row was read, as in `storageSet`: its rows are gone, and the count written here would stay
-      // with the old usage for a reinstall.
+      // The chat deleted or the app uninstalled since the row was read, as in `storageSet`: its rows are gone, and the
+      // count written here would stay for the same chat joined again, or a reinstall.
+      if (where !== APP_SCOPE_ALONE && !this.host.isChat(where)) {
+        this.usage.delete(`${app.ref}\0${where}`);
+        fail("bad-scope", "Not a chat of this profile");
+      }
       if (this.uninstalls.get(app.ref) !== uninstalls) {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("not-installed", "This app is not installed");
