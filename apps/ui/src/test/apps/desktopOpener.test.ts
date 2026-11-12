@@ -3,7 +3,7 @@ import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
-import { stopTakenDown } from "../../lib/apps/open";
+import { stopAppsIn, stopTakenDown } from "../../lib/apps/open";
 import type { AppEntry } from "../../lib/platform";
 import { engineState, linkView } from "../fakeEngine";
 
@@ -73,6 +73,19 @@ describe("opening an app on Desktop", () => {
     stopTakenDown([{ ref: `${REF}-other`, digest: "d", run: { status: "ok" } }]);
     expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1", "app-2"]);
     expect(stops).toEqual(["stopped", "stopped"]);
+  });
+
+  it("closes an app's window when its chat is deleted, and not the same app's in another chat or alone", async () => {
+    const { calls, open, stops } = setup();
+    await open(REF, LINK);
+    await open(REF, "link-2");
+    await open(REF, null);
+    stopAppsIn(LINK);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    expect(stops).toEqual(["stopped"]);
+    // Opened again in that chat: a new window, not the closed one brought to the front.
+    await open(REF, LINK);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(4);
   });
 
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {
