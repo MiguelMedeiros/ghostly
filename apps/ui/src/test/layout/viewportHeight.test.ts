@@ -180,6 +180,55 @@ describe("the app's height and the keyboard", () => {
     }
   });
 
+  it("a window made shorter while a field has the focus is the whole height once the field loses it (a laptop)", () => {
+    vi.useFakeTimers();
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("input"));
+    try {
+      act(() => field.focus());
+      // Docked devtools, a tiled window under it: a laptop's field keeps the focus and no keyboard comes up.
+      resize(574, 574);
+      act(() => field.blur());
+      // Nothing else resizes: once a keyboard would have gone, the height is the whole one.
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(appHeight()).toBe("574px");
+      expect(keyboard()).toBe("false");
+      // And a keyboard over it later is measured against it.
+      act(() => field.focus());
+      resize(300, 300);
+      expect(keyboard()).toBe("true");
+    } finally {
+      field.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it("from one field to another with the keyboard up, the keyboard stays up", () => {
+    vi.useFakeTimers();
+    renderHook(() => useViewportHeight());
+    const first = document.body.appendChild(document.createElement("input"));
+    const second = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => first.focus());
+      resize(471, 471);
+      act(() => second.focus());
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(keyboard()).toBe("true");
+      // The keyboard goes as the field loses the focus.
+      act(() => second.blur());
+      resize(874, 874);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(keyboard()).toBe("false");
+      act(() => first.focus());
+      resize(471, 471);
+      expect(keyboard()).toBe("true");
+    } finally {
+      first.remove();
+      second.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("a browser toolbar that slides away is not a keyboard", () => {
     renderHook(() => useViewportHeight());
     resize(800, 800);

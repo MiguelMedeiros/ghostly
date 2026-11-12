@@ -7,6 +7,8 @@ const KEYBOARD = 120;
 const SHORTCUT_BAR = 24;
 /** When the visible height is measured again after the page shows (ms), past what iOS may still report then. */
 const RESETTLE_MS = [100, 400, 1000];
+/** When the height is taken as the whole one after the field loses the focus (ms): a keyboard has gone down by then. */
+const BLURRED_MS = 1000;
 
 /** A field the keyboard types into: a hardware keyboard shows iOS's shortcut bar over the page for it. */
 const typedInto = (element: Element | null): element is HTMLElement =>
@@ -67,6 +69,8 @@ export function useViewportHeight() {
     let carried = 0;
     let visible = viewport.height;
     let written = "";
+    // The measure once a field has lost the focus (BLURRED_MS).
+    let blurred = 0;
     const write = (element: Element) => (element as HTMLElement).style.setProperty("--app-height", written);
     // A sheet, a dialog or a toast that opens later gets the height too, the keyboard up included.
     const appeared = new MutationObserver((records) => {
@@ -94,7 +98,12 @@ export function useViewportHeight() {
       if (viewport.height > carried) carried = 0;
       // No keyboard comes up with nothing to type into: a window made shorter (split screen, a quarter of the
       // screen, devtools docked) is the whole height there now, or the phone tab bar stayed hidden under 768px.
-      const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
+      // Made shorter while a field had the focus (a laptop), it is once the field has lost it a while with no resize:
+      // a keyboard goes down with the focus, while the focus moving on to another field leaves it up.
+      if (mayType || event?.type === "focusout") clearTimeout(blurred);
+      if (!mayType && event?.type === "focusout") blurred = window.setTimeout(() => update(new Event("blurred")), BLURRED_MS);
+      const settled = event?.type === "resize" || (event?.type === "blurred" && document.visibilityState !== "hidden");
+      const whole = !mayType && settled ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
       tallest.set(width, whole);
       const measured = Math.max(window.innerHeight - viewport.height, whole - viewport.height);
       let covered = measured;
@@ -146,6 +155,7 @@ export function useViewportHeight() {
     return () => {
       appeared.disconnect();
       settling.forEach(clearTimeout);
+      clearTimeout(blurred);
       viewport.removeEventListener("resize", update);
       viewport.removeEventListener("scroll", update);
       document.removeEventListener("focusin", update);
