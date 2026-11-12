@@ -289,6 +289,8 @@
     "payWithFee": "Paga {{amount}} + commissione fino a {{fee}}",
     "paying": "Pagamento…",
     "paysThrough": "Si paga tramite {{domain}}",
+    "pending": "Pagamento in sospeso…",
+    "pendingAtCard": "Pagamento in sospeso presso {{card}}…",
     "pendingAtMint": "Pagamento in sospeso presso il mint…",
     "qrTooLong": "Troppo lungo per un codice QR: copialo invece.",
     "redeem": "Riscatta",
