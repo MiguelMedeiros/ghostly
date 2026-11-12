@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { oneChatOnly } from "../src/main";
+import { oneChatOnly, readsNoHistory } from "../src/main";
 import { ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.one-shot
 
@@ -104,5 +104,11 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     expect(oneChatOnly("usage.send", { chat: "Sala" })).toBe(true);
     expect(oneChatOnly("group.send", { group: "Sala", chat: "carol" })).toBe(false);
     expect(oneChatOnly("chat.list", {})).toBe(false);
+  });
+
+  it("leaves every chat unstarted, its history unread, for a read that needs none", () => {
+    for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list"]) expect(readsNoHistory(method), method).toBe(true);
+    // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
+    for (const method of ["chat.history", "file.list", "payment.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
   });
 });
