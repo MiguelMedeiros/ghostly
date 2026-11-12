@@ -1178,6 +1178,31 @@ describe("deleting many of my group messages for everyone", () => {
     ]);
   });
 
+  // A copy from a catch-up or a hub while its author's removal comes live: the removal finds no row to take, so the
+  // row written after it stayed, deleted text and all (the 1:1 chat's `kept` checked its own deleted ids only).
+  it("a member's removal that comes while its message is being stored still takes it", async () => {
+    const bob = createIdentity().pubKeyZ32, g = `arriving-${crypto.randomUUID()}`, chat = `group:${g}`, id = `${bob}:1:1`;
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { isRemoved(groupId: string, id: string): boolean };
+      storeMessage(m: StoredMessage): Promise<unknown>;
+      resolveReply(m: StoredMessage): Promise<StoredMessage>;
+      forgetGroupMessage(chat: string, id: string): Promise<void>;
+    };
+    let removed = false;
+    vi.spyOn(inner.groups, "isRemoved").mockImplementation((group, at) => removed && group === g && at === id);
+    const resolveReply = inner.resolveReply.bind(node);
+    // The removal runs while the store looks for a reply's original, after the store's own check of removed ids.
+    inner.resolveReply = async message => {
+      removed = true;
+      await inner.forgetGroupMessage(chat, id);
+      return resolveReply(message);
+    };
+    await inner.storeMessage({ linkId: chat, id, text: "deleted for everyone", sender: "peer", member: bob, timestamp: 1, via: "datalink" });
+    expect((await db.getMessages(chat)).map(m => m.text)).not.toContain("deleted for everyone");
+  });
+
   it("a member's removals of ids never here, or said again, read the group for their quotes once a while, not once each", async () => {
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `sweeps-${crypto.randomUUID()}`, chat = `group:${g}`;
     const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
