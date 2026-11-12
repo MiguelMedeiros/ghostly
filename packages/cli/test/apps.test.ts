@@ -148,6 +148,39 @@ describe("app publish", () => {
     expect(result.stderr).toContain(`new publisher key written to ${key}; back it up`);
   }, 60_000);
 
+  it("writes no key file for a refused publish or store sign, so the run that passes says to back up the key it made", async () => {
+    const { manifest, files } = chess();
+    const keys = tmp();
+    // A source without kind, then a private key left in the folder: refused after the key step, and no key file.
+    const { kind: _kind, ...kindless } = manifest;
+    const dir = appFolder(kindless as AppManifest, files);
+    const key = join(keys, "publisher.key");
+    expect((error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("missing-key");
+    expect(existsSync(key)).toBe(false);
+    writeFileSync(join(dir, "ghostly-app.json"), readFileSync(join(appFolder(manifest, files), "ghostly-app.json")));
+    writeFileSync(join(dir, "old.pem"), readFileSync(vectorKey(tmp(), "publisher")));
+    expect((error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("private-key");
+    expect(existsSync(key)).toBe(false);
+    rmSync(join(dir, "old.pem"));
+    const published = await ghostly(["app", "publish", dir, "--key", key]);
+    expect(ok(published).keyCreated).toBe(true);
+    expect(published.stderr).toContain(`new publisher key written to ${key}; back it up`);
+    expect(ok(await ghostly(["app", "verify", join(dir, "app.ghostlyapp")]))).toMatchObject({ valid: true });
+
+    // An index a client refuses (no ghostlyStore): no store key file; the fixed index makes and names it.
+    const { key: _key, ghostlyStore: _g, ...index } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
+    const store = join(keys, "store.key");
+    const indexPath = join(tmp(), "index.json");
+    writeFileSync(indexPath, JSON.stringify(index));
+    error(await ghostly(["store", "sign", indexPath, "--key", store]), "refused", 1);
+    expect(existsSync(store)).toBe(false);
+    writeFileSync(indexPath, JSON.stringify({ ...index, ghostlyStore: 1 }));
+    const signed = await ghostly(["store", "sign", indexPath, "--key", store]);
+    expect(ok(signed).keyCreated).toBe(true);
+    expect(signed.stderr).toContain(`new store key written to ${store}; back it up`);
+    expect(readFileSync(store, "utf8")).toMatch(/^Ghostly store key/);
+  }, 60_000);
+
   it("refuses a key file others may read, and a store key", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
