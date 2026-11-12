@@ -144,6 +144,14 @@ describe("group administration", () => {
     const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
     expect(findMember(named, KEY).key).toBe(KEY);
     expect(findMember(named, OTHER).key).toBe(OTHER);
+    // A key with a line break, a space, an invisible character or capitals left on it is still that key; one no other
+    // member has is no member, never the one calling itself that.
+    const alone = { ...named, members: named.members.filter((m) => m.key !== KEY) } as GroupView;
+    for (const ref of [`${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(findMember(named, ref).key).toBe(KEY);
+      expect(() => findMember(alone, ref)).toThrow(expect.objectContaining({ code: "not_found" }));
+    }
+    expect(() => findMember(alone, KEY)).toThrow(expect.objectContaining({ code: "not_found" }));
     // A prefix and a name still stand side by side: two members is an error, never a guess.
     const prefixed = { name: "G", members: [{ key: "anaq77", nick: "Bo", me: false }, { key: "zzzz11", nick: "Ana", me: false }] } as unknown as GroupView;
     expect(() => findMember(prefixed, "ana")).toThrow(/more than one/);

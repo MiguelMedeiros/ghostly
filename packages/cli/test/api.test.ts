@@ -196,6 +196,20 @@ describe("chats", () => {
     expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
     expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+    // What a script or a paste leaves on a key (a line break, a space, an invisible character, capitals) keeps it a key.
+    for (const ref of [`${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(findChat([mallory, alice], ref).id).toBe("chatAlice");
+      expect(() => findChat([mallory], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+  });
+
+  it("a contact's key with no chat is no group either, whatever a group's admin named it", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+    const named = { id: "g".repeat(22), name: KEY, members: [], status: "joined" } as unknown as GroupView;
+    for (const ref of [KEY, `${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(() => findChatOrGroup([], [named], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+    expect(findChatOrGroup([], [named], `group:${KEY}`)).toEqual({ group: named });
   });
 
   it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
