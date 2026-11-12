@@ -36,7 +36,7 @@ export const STORE_SIG_FILE = "ghostly-store.sig";
 // Every signature the publisher tools check (bundles, revocation lists, store indexes) goes through Node's Ed25519 first.
 setAppSignatureFastPath(nativeEd25519);
 
-/** How long `app verify` waits for a URL, and how many redirects it follows (each checked as the first). */
+/** How long `app verify` waits for a URL, its redirects included, and how many redirects it follows (each checked as the first). */
 const FETCH_TIMEOUT_MS = 60_000;
 const MAX_REDIRECTS = 5;
 
@@ -121,6 +121,9 @@ function readBundleFile(path: string): Uint8Array {
  * 16 MiB.
  */
 async function fetchBundle(url: string): Promise<Uint8Array> {
+  // One wait for the URL, its redirects and its body together: a host that redirects just before a wait runs out
+  // never earns another.
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   let at = url;
   for (let hop = 0; ; hop++) {
     if (!isAppUrl(at)) {
@@ -130,7 +133,7 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
     }
     let response: Response;
     try {
-      response = await fetch(at, { redirect: "manual", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      response = await fetch(at, { redirect: "manual", signal });
     } catch (error) {
       if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
       throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
