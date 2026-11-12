@@ -343,6 +343,13 @@ const APP_IN_FLIGHT = 64 * 1024;
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 
 /**
+ * Texts a contact's link takes: a burst per short window (a reconnect flushes every queued text at once) and a total
+ * per hour, both well above what a person or a bot sends. The rest go unconfirmed and come again (the sender's outbox
+ * resends with backoff), so a catch-up only slows.
+ */
+export const MESSAGE_RECEIVE_LIMITS = { burst: 200, burstWindowMs: 10_000, hourly: 1_800, hourWindowMs: 3_600_000 } as const;
+
+/**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
  * with it: the text matters, the card does not. A reply (`r`, WISP 401 § Replies) is a few hundred bytes at most
  * and always goes, and so does a forwarded message's hop count (`fw`, WISP 401 § Forwards) and a status card (`sc`,
@@ -954,6 +961,11 @@ export class GhostLink {
   private readonly pinsReceived = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
+  /** Text frames the contact may send per window (`MESSAGE_RECEIVE_LIMITS`); the rest go unconfirmed and come again. */
+  private readonly messagesReceived = [
+    new RateWindow(MESSAGE_RECEIVE_LIMITS.burst, MESSAGE_RECEIVE_LIMITS.burstWindowMs),
+    new RateWindow(MESSAGE_RECEIVE_LIMITS.hourly, MESSAGE_RECEIVE_LIMITS.hourWindowMs),
+  ];
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
@@ -1924,6 +1936,10 @@ export class GhostLink {
   private answerOn(channel: FrameChannel): FrameChannel | null {
     const live = this.channel;
     return live && (live === channel || this.retiring.has(channel)) && this.isDataLinkOpen ? live : null;
+  }
+  /** Counts one text the contact sent; false (and not counted) when either of `messagesReceived` is full. */
+  private takeMessage(): boolean {
+    return this.messagesReceived.every(window => window.wait() === 0) && this.messagesReceived.every(window => window.take());
   }
   /**
    * The WebRTC session a switch moved off is still retiring (`SWITCH_RETIRE_MS`): its data link is open, and a new offer
@@ -4759,6 +4775,8 @@ export class GhostLink {
             return;
           }
           if (!frame || typeof frame.id !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(frame.id)) return;
+          // Counted before it is read; one past the window is not confirmed, so the contact's app sends it again.
+          if (frame.t === "paired-message" && !this.takeMessage()) return;
           if (frame.t === "paired-message" && typeof frame.m === "string" &&
             utf8Encode(frame.m).length <= LIMITS.maxChatMessageBytes &&
             typeof frame.ts === "number" && Number.isSafeInteger(frame.ts) && frame.ts > 0) {
@@ -5227,6 +5245,7 @@ export class GhostLink {
         break;
       }
       case "m":
+        if (!this.takeMessage()) break;
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
       case "call":
