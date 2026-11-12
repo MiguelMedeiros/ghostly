@@ -626,6 +626,37 @@ describe("listen with an allowlist and --turns", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "c1", message: turnRef("c1", "gone") })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("a turn's id older than the newest page reads the whole history once, not on every command that names it", async () => {
+    const history = Array.from({ length: 5000 }, (_, i) => ({ id: `peer_m${i}`, sender: "peer", text: `m${i}`, timestamp: i }));
+    const node = {
+      getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [], settings: {}, transport: {} }),
+      messagePage: vi.fn(async () => ({ messages: history.slice(-200), more: true })),
+      getMessages: vi.fn(async () => history),
+      getMessage: vi.fn(async (_linkId: string, id: string) => history.find((m) => m.id === id)),
+      sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })),
+      react: vi.fn(async ({ messageId }: { messageId: string }) => ({ error: history.some((m) => m.id === messageId) ? null : "That message is not in this chat" })),
+      pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const old = turnRef("c1", "peer_m10"), gone = turnRef("c1", "gone");
+
+    // A message deleted for everyone before the agent answered: its turn names none, every time, from one read.
+    for (let i = 0; i < 3; i++) await expect(callApi(ctx, "chat.react", { chat: "c1", message: gone, emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: expect.stringContaining(gone) });
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
+    // An old turn answered with a reaction, a reply and a pin: one read finds it for all three.
+    await callApi(ctx, "chat.react", { chat: "c1", message: old, emoji: "👍" });
+    await callApi(ctx, "chat.send", { chat: "c1", text: "yes", reply: old });
+    await callApi(ctx, "chat.pin", { chat: "c1", message: old });
+    expect(node.react).toHaveBeenLastCalledWith({ linkId: "c1", messageId: "peer_m10", emoji: "👍" });
+    expect(node.sendMessage).toHaveBeenLastCalledWith({ linkId: "c1", text: "yes", replyTo: "peer_m10" });
+    expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "c1", messageId: "peer_m10", remove: false });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+    // Once its message is deleted, the turn's id names none again, and the refusal names the turn's id, not the stored one.
+    history.splice(10, 1);
+    await expect(callApi(ctx, "chat.react", { chat: "c1", message: old, emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: expect.stringContaining(old) });
+    expect(node.getMessages).toHaveBeenCalledTimes(2);
+  });
+
   it("a cursor in a folder that is not there, or that takes no file, is refused before anything starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     // Nothing to check without one; a folder that is there takes it, and the check leaves nothing behind.
