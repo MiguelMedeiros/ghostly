@@ -68,13 +68,16 @@ export async function serviceLabel(tag: string, peerPubKeyZ32: string, serviceId
 /**
  * The cookies one opened app set, kept in this page for as long as it is open. A service worker neither sees a
  * request's cookies nor may set one, so the app's `Set-Cookie`s are taken here and sent back with its requests, as a
- * browser would for that origin (by name; never another app's). The app's own script cannot read them.
+ * browser would for that origin (by name and path, while they last; never another app's). The app's own script cannot
+ * read them.
  */
 export class CookieJar {
-  private readonly cookies = new Map<string, string>();
+  /** By name and path, as a browser keeps them: `sid` at `/` and `sid` at `/admin` are two cookies. */
+  private readonly cookies = new Map<string, { name: string; value: string; path: string; until: number }>();
   static readonly MAX = 64;
 
-  take(setCookie: string): void {
+  /** `requestPath`: the path the answer that set it is for, whose directory is the cookie's path when it names none. */
+  take(setCookie: string, requestPath = "/"): void {
     const [pair, ...attributes] = setCookie.split(";");
     const at = pair?.indexOf("=") ?? -1;
     const name = at > 0 ? pair!.slice(0, at).trim() : "";
@@ -83,20 +86,51 @@ export class CookieJar {
     // As RFC 6265 §5.3 reads them: the last of each that parses counts, and a Max-Age wins over an Expires.
     let maxAge: number | undefined;
     let expires: number | undefined;
+    let path = defaultCookiePath(requestPath);
     for (const a of attributes) {
-      const [key, v = ""] = a.split("=").map((s) => s.trim());
-      if (/^max-age$/i.test(key ?? "") && /^-?\d+$/.test(v)) maxAge = Number(v);
-      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+      const eq = a.indexOf("=");
+      const key = (eq < 0 ? a : a.slice(0, eq)).trim();
+      const v = eq < 0 ? "" : a.slice(eq + 1).trim();
+      if (/^max-age$/i.test(key) && /^-?\d+$/.test(v)) maxAge = Number(v);
+      if (/^expires$/i.test(key)) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+      if (/^path$/i.test(key)) path = v.startsWith("/") ? v : defaultCookiePath(requestPath);
     }
-    const gone = maxAge !== undefined ? maxAge <= 0 : expires !== undefined && expires <= Date.now();
-    if (gone) { this.cookies.delete(name); return; }
-    if (!this.cookies.has(name) && this.cookies.size >= CookieJar.MAX) return;
-    this.cookies.set(name, value);
+    const now = Date.now();
+    const until = maxAge !== undefined ? now + maxAge * 1000 : expires ?? Infinity;
+    const key = `${path}\n${name}`;
+    if (until <= now) { this.cookies.delete(key); return; }
+    if (!this.cookies.has(key) && this.cookies.size >= CookieJar.MAX) return;
+    this.cookies.set(key, { name, value, path, until });
   }
 
-  header(): string | null {
-    return this.cookies.size ? [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ") : null;
+  /**
+   * The `Cookie` header for a request to `path`: the cookies whose path it is under and that have not run out, the
+   * longer paths first (RFC 6265 §5.4).
+   */
+  header(path = "/"): string | null {
+    const now = Date.now();
+    const sent: { name: string; value: string; path: string }[] = [];
+    for (const [key, cookie] of this.cookies) {
+      if (cookie.until <= now) this.cookies.delete(key);
+      else if (pathMatches(path, cookie.path)) sent.push(cookie);
+    }
+    // A stable sort: cookies of one path length go in the order they were first set.
+    sent.sort((a, b) => b.path.length - a.path.length);
+    return sent.length ? sent.map(({ name, value }) => `${name}=${value}`).join("; ") : null;
   }
+}
+
+/** A cookie's path when its `Set-Cookie` names none: the request path's directory (RFC 6265 §5.1.4). */
+function defaultCookiePath(requestPath: string): string {
+  const path = requestPath.split("?")[0]!;
+  const last = path.lastIndexOf("/");
+  return path.startsWith("/") && last > 0 ? path.slice(0, last) : "/";
+}
+
+/** Whether a request to `path` carries a cookie of `cookiePath`: that path, or one under it (RFC 6265 §5.1.4). */
+function pathMatches(path: string, cookiePath: string): boolean {
+  if (path === cookiePath) return true;
+  return path.startsWith(cookiePath) && (cookiePath.endsWith("/") || path[cookiePath.length] === "/");
 }
 
 /**
@@ -199,7 +233,8 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       post({ type: "error", status: 503, text: words.failed });
       return;
     }
-    const cookie = jar.header();
+    const path = request.path.split("?")[0]!;
+    const cookie = jar.header(path);
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
     const answer = await send({ method: request.method, path: request.path, headers, body: request.body ? new Uint8Array(request.body) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
@@ -211,7 +246,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     let out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
-      if (name.toLowerCase() === "set-cookie") jar.take(value);
+      if (name.toLowerCase() === "set-cookie") jar.take(value, path);
       else out.push([name, value]);
     }
     // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
