@@ -1992,7 +1992,7 @@ export class Apps {
       // A URL whose whole read was refused for this very peek is not downloaded again (up to 16 MiB at every Apps page
       // visit); a read that brought no bundle (the host down) is tried again at the next check.
       const refused = this.refusedReads.get(url);
-      if (holds && refused?.digest === holds.digest && this.now() - refused.at < APP_CHECK_TIMINGS.freshMs) continue;
+      if (holds && refused?.digest === holds.digest && this.checkedWithin(refused.at, APP_CHECK_TIMINGS.freshMs)) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch (error) {
         if (holds && (!(error instanceof AppFetchError) || error.code === "too-large")) {

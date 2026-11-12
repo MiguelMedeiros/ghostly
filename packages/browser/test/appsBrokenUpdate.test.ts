@@ -56,6 +56,22 @@ describe("an update whose whole read is refused", () => {
     expect(whole(SOURCE)).toBe(3);
   });
 
+  // The clock went back since (it ran ahead, and was set right): a refusal dated ahead of it is not recent, as the
+  // stores' and the apps' own marks are not (`checkedWithin`). It was kept until the clock caught up, days later.
+  it("is read again once an hour went by after the clock was set back, not only once it caught up", async () => {
+    const { net, store, whole } = await setup();
+    const v2 = await bundle({ sequence: 2, sources: [SOURCE] });
+    net.put(SOURCE, broken(v2.bytes));
+    const ahead = 2 * 24 * 60 * 60 * 1000;
+    now = NOW_MS + ahead;
+    expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(whole(SOURCE)).toBe(1);
+    net.put(SOURCE, v2.bytes);
+    now = NOW_MS + 2 * APP_CHECK_TIMINGS.freshMs;
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect(whole(SOURCE)).toBe(2);
+  });
+
   it("at the URLs of a store's listing is read whole once from each", async () => {
     const { net, store, whole } = await setup();
     const v99 = await bundle({ sequence: 99, sources: [SOURCE], data: new Uint8Array(64 * 1024) });
