@@ -595,6 +595,24 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answer that cannot go out ends the call that rang with call.ended (failed), as the program waiting on it expects", async () => {
+    const { a, b } = pairOfManagers();
+    // The chat's connection goes as the answer is sent: the engine refuses it.
+    const engine = (b.calls as unknown as { host: { engine: CallEngine } }).host.engine;
+    const setCallSignal = engine.setCallSignal;
+    engine.setCallSignal = async (input) => {
+      if (input.signal?.includes('"t":"a"')) throw new Error("Calls need a live connection");
+      return setCallSignal(input);
+    };
+    await a.calls.start("chat-ab", {});
+    const incoming = await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
+    expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ call: incoming.call, reason: "failed" });
+    expect(b.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("an unanswered call is missed on one side, declined on the other, and busy chats refuse a second", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
