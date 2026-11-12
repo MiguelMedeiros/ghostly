@@ -35,6 +35,10 @@
       "amountMismatch": "La facture ne correspond pas au montant demandé",
       "feeAbove": "Les frais Lightning (jusqu'à {{fee}} {{unit}}) dépassent votre maximum"
     },
+    "expiredNext": {
+      "mine": "redemandez avec une nouvelle demande",
+      "theirs": "demandez une nouvelle demande à votre contact"
+    },
     "externalNote": {
       "ark": "Payable depuis n'importe quel portefeuille Ark. Le portefeuille de votre contact le marque payé dès qu'il voit l'argent.",
       "bitcoin": "Payable depuis n'importe quel portefeuille Bitcoin. Le portefeuille de votre contact le marque payé dès qu'il voit l'argent, après une confirmation.",
@@ -67,6 +71,7 @@
         "settled": "Reçu"
       },
       "request": {
+        "expired": "Expirée",
         "failed": "Échec",
         "pending": "En attente du paiement",
         "settled": "Payé"
