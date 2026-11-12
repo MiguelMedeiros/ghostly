@@ -4866,6 +4866,11 @@ export class GhostlyNode implements EngineImplementation {
     return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);
   }
 
+  /** The messages of a 1:1 chat whose removal of mine is still on its way to the contact, by id (`removeMessage`). */
+  removalsPending({ linkId }: { linkId: string }): string[] {
+    return (this.links.get(linkId)?.stored.removals ?? []).map(r => r.id);
+  }
+
   /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
   private readonly deletionWrites = new Map<string, { patch: Partial<StoredLink>; relaxed: boolean; done: Promise<void> }>();
   /** The last such write of each chat, which the next one follows. */
