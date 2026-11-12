@@ -151,6 +151,13 @@ const CLOSE_WAIT_MS = 5_000;
 const EXPORT_PAGE = 256;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
 const RELAXED_SYNC_MS = 1_000;
+/**
+ * How long the trees' layers wait for the ones after them before they go to SQLite, all in one SQLite transaction. One
+ * per journal entry (a message's send, each of its delivery steps, its read) rewrote the pages each touched: ~80 KB of
+ * rows.db's WAL per message, and a checkpoint on the daemon's thread (30-150 ms) every ~50 messages. The journal holds
+ * them meanwhile, and reads find them in their layers.
+ */
+const APPLY_MS = 250;
 const BLOB = "__ghostlyBlob";
 const RANGE = "__ghostlyRange";
 const PROBE = "__ghostly_storage_probe__";
@@ -219,6 +226,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let unsynced: (() => void)[] = [];
   /** The syncs running off the thread, one after another, until no `complete` waits for one. */
   let syncing: Promise<void> | null = null;
+  /** The last journal entry whose layers wait for `applying` to take them to SQLite. */
+  let applyUpTo = 0;
+  let applying: ReturnType<typeof setTimeout> | null = null;
   /** The journal holds a chat's ratchet state, and with the next one it holds a key already used. */
   let holdsRatchet = false;
   /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
@@ -403,12 +413,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   }
 
   /**
-   * The journal has entry `entry`: the trees' layers up to it go to SQLite. One that fails stays in memory, where reads
-   * find it, and goes with the next entry, or before the next snapshot (which fails without it).
+   * The journal has entry `entry`: the trees' layers up to it go to SQLite within `APPLY_MS`, with the entries written
+   * meanwhile. One that fails stays in memory, where reads find it, and goes with the next entry, or before the next
+   * snapshot (which fails without it). A process that dies first replays them from the journal.
    */
   function written(entry: number) {
     if (!trees || !writing) return;
-    try { trees.apply(entry); } catch (error) { failed(error); }
+    applyUpTo = Math.max(applyUpTo, entry);
+    applying ??= setTimeout(applyNow, APPLY_MS).unref();
+  }
+
+  function applyNow() {
+    if (applying) { clearTimeout(applying); applying = null; }
+    if (!trees || !writing) return;
+    try { trees.apply(applyUpTo); } catch (error) { failed(error); }
   }
 
   /** Whether a store's records are in the trees already. */
@@ -680,6 +698,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (!writing) return;
       await settled();
       await enqueue(leave);
+      // rows.db up to date at close: the next start has nothing of the journal to put in it again.
+      applyNow();
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
       trees?.db.close();
