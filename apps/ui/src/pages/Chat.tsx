@@ -123,6 +123,7 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { TasksButton } from "../components/chat/TasksButton";
 import { cardEntries, goingCardCount } from "../lib/statusCards";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -1142,8 +1143,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
           is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
