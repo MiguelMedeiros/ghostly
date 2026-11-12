@@ -102,6 +102,12 @@ jobs:
         if: steps.version.outputs.published == 'false'
         run: npm run build -w @ghostlytools/cli
 
+      # npm installs a published package's npm-shrinkwrap.json as written, so a person gets the tree this lockfile
+      # resolved, the one CI tested (overrides included), instead of whatever the ranges resolve to that day.
+      - name: Pin the CLI's dependencies to the lockfile
+        if: steps.version.outputs.published == 'false'
+        run: node tools/scripts/cli-shrinkwrap.mjs
+
       - name: Pack the tarball
         if: steps.version.outputs.published == 'false'
         env:
@@ -187,6 +193,20 @@ jobs:
           done
           node_modules/.bin/ghostly --version | tee version.json
           node -e "process.exit(require('./version.json').version === process.env.VERSION ? 0 : 1)"
+          # Every package at the version its npm-shrinkwrap.json pins (another platform's optional ones are skipped).
+          cat > tree.cjs <<'EOF'
+          const { existsSync, readFileSync } = require("node:fs");
+          const cli = "node_modules/@ghostlytools/cli";
+          const { packages } = JSON.parse(readFileSync(`${cli}/npm-shrinkwrap.json`, "utf8"));
+          const wrong = Object.entries(packages).filter(([at]) => at).filter(([at, { version, optional }]) => {
+            const file = `${cli}/${at}/package.json`;
+            if (!existsSync(file)) return !optional;
+            return JSON.parse(readFileSync(file, "utf8")).version !== version;
+          });
+          for (const [at, { version }] of wrong) console.log(`::error::${at}: not installed at ${version}`);
+          process.exit(wrong.length ? 1 : 0);
+          EOF
+          node tree.cjs
           echo "@ghostlytools/cli@$VERSION: https://www.npmjs.com/package/@ghostlytools/cli/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"
 
   # The pull requests' gate again, on the tag, with no token: the tarball installs into the example adapter (contract
