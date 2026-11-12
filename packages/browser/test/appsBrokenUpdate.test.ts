@@ -66,6 +66,28 @@ describe("an update whose whole read is refused", () => {
     expect(MIRRORS.map(whole)).toEqual([1, 1, 1, 1]);
   });
 
+  it("another bundle under the installed number at each of two sources is read whole once from each, not at every check", async () => {
+    const net = new FakeNet();
+    now = NOW_MS;
+    const store = apps(net, { now: () => now });
+    const v1 = await bundle({ sources: [SOURCE, MIRRORS[0]!] });
+    net.put(BUNDLE_URL, v1.bytes);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const whole = (url: string) => net.fetch.mock.calls.filter(([at, init]) => String(at) === url && !((init?.headers ?? {}) as Record<string, string>).range).length;
+    // Its publisher rebuilt version 1 twice without raising the number: the mark took each in turn, both read whole.
+    net.put(SOURCE, (await bundle({ sources: [SOURCE, MIRRORS[0]!], entry: "<p>a second version 1" })).bytes);
+    net.put(MIRRORS[0]!, (await bundle({ sources: [SOURCE, MIRRORS[0]!], entry: "<p>a third version 1" })).bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("equivocation");
+    const marked = (await store.list())[0]!.equivocation;
+    for (let visit = 0; visit < 3; visit++) {
+      now += 60_000;
+      expect((await store.checkUpdates())[0]!.outcome).toBe("equivocation");
+    }
+    expect([whole(SOURCE), whole(MIRRORS[0]!)]).toEqual([1, 1]);
+    expect((await store.list())[0]!.equivocation, "the mark is not rewritten").toEqual(marked);
+  });
+
   it("is read again after a failed read that brought no bundle (the host down)", async () => {
     const { net, store, whole } = await setup();
     const v2 = await bundle({ sequence: 2, sources: [SOURCE] });
