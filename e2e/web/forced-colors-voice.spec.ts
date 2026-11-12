@@ -25,15 +25,26 @@ test.use({
   },
 });
 
-/** A part's background as drawn, and the background of what it sits on (the first opaque one around it). */
+/**
+ * A part's background as drawn (laid over what is behind it: forced colors keep a background's alpha, so the faded
+ * bars at 55% of the page's colour are the page's colour), and the background of what it sits on.
+ */
 const drawn = (part: Locator) => part.evaluate((node) => {
-  const opaque = (c: string) => c !== "transparent" && !/rgba\(.*, 0\)$/.test(c);
-  let around = "rgb(255, 255, 255)";
-  for (let n = node.parentElement; n; n = n.parentElement) {
-    const c = getComputedStyle(n).backgroundColor;
-    if (opaque(c)) { around = c; break; }
-  }
-  return { bg: getComputedStyle(node).backgroundColor, around };
+  type RGBA = [number, number, number, number];
+  const rgba = (c: string): RGBA => { const n = c.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0, 0]; return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1]; };
+  const over = (top: RGBA, under: RGBA): RGBA => {
+    const a = top[3] + under[3] * (1 - top[3]);
+    if (!a) return [0, 0, 0, 0];
+    const mix = (i: number) => (top[i] * top[3] + under[i] * under[3] * (1 - top[3])) / a;
+    return [mix(0), mix(1), mix(2), a];
+  };
+  const seen = (from: Element | null): RGBA => {
+    let c: RGBA = [0, 0, 0, 0];
+    for (let n = from; n && c[3] < 1; n = n.parentElement) c = over(c, rgba(getComputedStyle(n).backgroundColor));
+    return c[3] < 1 ? over(c, [255, 255, 255, 1]) : c;
+  };
+  const text = (c: RGBA) => `rgb(${c.slice(0, 3).map(Math.round).join(", ")})`;
+  return { bg: text(seen(node)), around: text(seen(node.parentElement)) };
 });
 
 /** Drawn, in a colour unlike what it sits on. */
