@@ -113,6 +113,30 @@ describe("the over-balance hint", () => {
   });
 });
 
+// With the contact away, Send stays off: ecash goes only over a live connection. Why was said only in Send's tooltip,
+// which a phone never shows, while the line under the amount still said "Send gives your contact ecash straight away".
+describe("Send off while the contact is away", () => {
+  const away = "Send needs your contact online: ecash never waits in a queue. A request can wait until they are back.";
+
+  it("says why under the amount, on a card that could Send, and leaves Request on", async () => {
+    rememberRail("peer", "cashu:mainnet");
+    const { user } = open(everyWallet({}), away);
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(screen.getByTestId("payment-amount"), "21");
+    expect(document.querySelector(".payment-back-hint")).toHaveTextContent(away);
+    expect(document.querySelector(".payment-back-hint")).not.toHaveTextContent(/straight away/);
+    expect(screen.getByTestId("payment-send")).toBeDisabled();
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+  });
+
+  it("leaves Lightning's own words, which can only Request in a chat anyway", async () => {
+    rememberRail("peer", "lightning:mainnet");
+    const { user } = open(everyWallet({}), away);
+    await user.click(screen.getByTestId("payment-use"));
+    expect(document.querySelector(".payment-back-hint")).toHaveTextContent(/tap Pay on their request/);
+  });
+});
+
 // A card that is not ready explains itself with its balance line ("Ark is connecting…"), but one with nothing set
 // up said "Cashu is 0 sats" (as if money were the problem) or "Bitcoin is no source". It says it is not set up.
 it("says a Cashu card without a mint has to be set up, not that it holds 0 sats", () => {

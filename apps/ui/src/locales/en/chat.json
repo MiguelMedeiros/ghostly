@@ -314,7 +314,7 @@
   "online": "online",
   "options": "Options",
   "payments": {
-    "needLive": "Payments need a live connection",
+    "needLive": "Send needs your contact online: ecash never waits in a queue. A request can wait until they are back.",
     "noWallet": "Your contact has no wallet yet",
     "off": "Off in this chat: turn a way on in Accept",
     "offOrOld": "Your contact has payments off in this chat, or needs an updated Ghostly"
