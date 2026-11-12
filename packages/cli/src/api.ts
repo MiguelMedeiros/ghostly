@@ -23,7 +23,7 @@ import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
-import { SERVICE_METHODS } from "./services";
+import { closeServicesOf, SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
@@ -671,6 +671,7 @@ const METHODS: Record<string, Method> = {
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
     await forgetHold(ctx, link.id);
+    await closeServicesOf(ctx, link.peerPubKeyZ32);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
