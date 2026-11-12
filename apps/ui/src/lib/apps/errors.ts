@@ -32,6 +32,8 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  // Get its files found no link holding the installed version (AppInstallDialog.tsx): nothing was fetched.
+  "files-not-found": "apps.errors.filesNotFound",
   // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
   damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",

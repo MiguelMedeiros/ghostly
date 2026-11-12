@@ -1041,6 +1041,22 @@ describe("with the apps flag on", () => {
     expect(await screen.findByTestId("app-open")).toBeInTheDocument();
   });
 
+  it("Get its files that finds no copy says so on the screen, and offline says offline", async () => {
+    fakeEngine.on("appList", () => [installed({ view: "full", run: { status: "needs-files" } })]).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appFetchFiles", () => ({ status: "needs-files" as const }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByRole("button", { name: detailsOf("Chess") }));
+    await user.click(await screen.findByTestId("app-fetch-files"));
+    expect(await screen.findByTestId("app-details-error")).toHaveTextContent("Couldn't get its files: none of the links it came from has this version now");
+    expect(screen.getByTestId("app-fetch-files")).toBeInTheDocument();
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      await user.click(screen.getByTestId("app-fetch-files"));
+      await waitFor(() => expect(screen.getByTestId("app-details-error")).toHaveTextContent("You are offline."));
+    } finally { online.mockRestore(); }
+    expect(fakeEngine.callsTo("appFetchFiles")).toHaveLength(2);
+  });
+
   it("lists installed apps and stores; uninstall offers an export first", async () => {
     fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Ghostly", kind: "curated" }] })])
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
