@@ -834,7 +834,7 @@ describe("chats", () => {
   // Auto-answer from the chats named kept the removed one: it read as on and could answer nobody.
   it("remove takes the chat out of auto-answer's chats", async () => {
     const { ctx, node } = fake();
-    Object.assign(node, { removeLink: vi.fn(async () => undefined) });
+    Object.assign(node, { removeLink: vi.fn(async () => undefined), removalsPending: () => [] });
     expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
     expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
