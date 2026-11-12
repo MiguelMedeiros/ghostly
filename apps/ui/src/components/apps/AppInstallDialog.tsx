@@ -199,6 +199,14 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
   );
 }
 
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
+
+/** An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same. */
+function sameScreen(a: AppPreview, b: AppPreview): boolean {
+  return a.digest === b.digest && a.install === b.install && a.run.status === b.run.status && a.unknownPublisher === b.unknownPublisher
+    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions);
+}
+
 /**
  * The install screen for an app to fetch (a pasted URL, a store's listing, a chat card): fetched and checked when it
  * opens, which is when the person pressed Install or chose it, and stored only on Install.
@@ -240,29 +248,48 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   const [stale, setStale] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
-  const recheck = async () => {
+  // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
+  const rereadFor = useRef<"asks" | "expired">("asks");
+  const recheck = async (): Promise<AppPreview | null> => {
     try {
       const again = await engine.call("appPreview", source);
+      const was = preview;
       setPreview(again); setStale(false);
-      setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      if (rereadFor.current === "asks") setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      // Read again as it was: nothing new to look at, Install takes it. Another version, or other words: look at it first.
+      else if (was && sameScreen(was, again)) { setError(null); return again; }
+      else setError({ text: t("apps.errors.expired") });
+      return null;
     } catch (read) {
       // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
       setStale(true); setError(appErrorView(read, t));
+      return null;
     }
   };
+  const grant = (shown: AppPreview) =>
+    engine.call("appInstall", { stage: shown.stage, digest: shown.digest, grant: [...shown.manifest.permissions], asks: [...shown.asks] });
   const install = async () => {
     if (!preview || stale) return;
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { stage: preview.stage, digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
+      let app: InstalledAppView;
+      try { app = await grant(preview); } catch (e) {
+        // What this screen fetched is held 10 minutes, and 4 screens' worth (a phone left here, other screens since): read
+        // again, the same version asking the same installs as pressed. Else it showed "check it again" with no way to.
+        if (appErrorCode(e) !== "expired") throw e;
+        rereadFor.current = "expired";
+        const again = await recheck();
+        if (!again) return;
+        app = await grant(again);
+      }
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
     } catch (e) {
       // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
       // installed by the check): the screen shows what it asks now, and Install grants only that.
-      if (appErrorCode(e) === "permissions-changed") await recheck();
+      if (appErrorCode(e) === "permissions-changed") { rereadFor.current = "asks"; await recheck(); }
       else setError(appErrorView(e, t));
     } finally { setBusy(false); }
   };
