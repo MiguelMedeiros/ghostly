@@ -256,6 +256,11 @@ export function decodeWav(bytes: Uint8Array): Sound {
   return collector.sound();
 }
 
+/** The channels and rates a WAV's sound may have (ffmpeg's DSD at 705.6 kHz among them). */
+const WAV_MAX_CHANNELS = 255;
+const WAV_MIN_RATE = 1_000;
+const WAV_MAX_RATE = 768_000;
+
 /** The format of a WAV and where its samples are; null while its header is not all there. */
 function wavHeader(bytes: Uint8Array): { format: number; channels: number; sampleRate: number; bits: number; from: number; to: number } | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -275,6 +280,9 @@ function wavHeader(bytes: Uint8Array): { format: number; channels: number; sampl
       if (format === 0xfffe && size >= 26) { if (body + 26 > bytes.length) return null; format = view.getUint16(body + 24, true); }
     } else if (id === "data") {
       if (!channels || !sampleRate || !bits) throw new NotSound("a WAV without its format");
+      // What is read and kept goes with the channels and the rate: a header past any sound's takes no memory.
+      if (channels > WAV_MAX_CHANNELS || sampleRate < WAV_MIN_RATE || sampleRate > WAV_MAX_RATE)
+        throw new NotSound(`a WAV with ${channels} channel${channels === 1 ? "" : "s"} at ${sampleRate} Hz, which no sound has`);
       const to = size === 0 || size === 0xffffffff ? Infinity : body + size;
       return { format, channels, sampleRate, bits, from: body, to };
     }
