@@ -586,6 +586,8 @@
     "pgpExponentNext": "Usa una clave creada con GnuPG (exponente 65537).",
     "pgpKeyKind": "Ghostly no acepta claves {{kind}}",
     "pgpKeyKindNext": "Usa Ed25519, ECDSA (P-256, P-384, P-521, brainpool) o RSA de 2048 a {{max}} bits.",
+    "pgpNoUserIds": "keys.openpgp.org comparte esta clave sin sus ID de usuario, así que no se puede comprobar",
+    "pgpNoUserIdsNext": "Confirma un correo allí o pega tu clave pública (gpg --armor --export).",
     "privateAddress": "{{domain}} apunta a una dirección de red privada",
     "privateAddressNext": "Ghostly no contacta redes privadas: el dominio debe apuntar a un servidor web público.",
     "pubkyFileGone": "El archivo de la prueba no está en el homeserver",
