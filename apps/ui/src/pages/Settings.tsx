@@ -704,9 +704,11 @@ export function Settings() {
             </Row>
           );
         })}
+        {/* The extension's peer shows them with every Ghostly tab closed too (apps/extension/src/attentionNotices.ts). */}
         <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
           hint={<span role="status">{noticePermission === "denied" ? t(deniedHint[noticePlace()])
-            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced") : t("settings.noticesRunning")}</span>}>
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced")
+            : t(noticePlace() === "extension" ? "settings.noticesRunningExtension" : "settings.noticesRunning")}</span>}>
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}

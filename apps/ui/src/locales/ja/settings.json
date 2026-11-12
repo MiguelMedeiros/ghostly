@@ -118,6 +118,7 @@
   "noticesMisplaced": "許可するには Ghostly をアプリケーションに移動してください",
   "noticesOpenSettings": "設定を開く",
   "noticesRunning": "Ghostlyの起動中",
+  "noticesRunningExtension": "ブラウザの起動中（Ghostlyのタブがなくても）",
   "noticesUnavailable": "ここでは使えません",
   "notificationSounds": "サウンド",
   "notificationSoundsDescription": "メッセージ、通話、確定した支払い",
