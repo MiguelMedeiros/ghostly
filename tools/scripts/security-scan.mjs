@@ -11,7 +11,7 @@
  * is affected that is not accepted in .github/security-allowlist.json. Needs
  * no dependencies and no npm audit endpoint.
  *
- * It also exits 1 on an allowlist entry past its `until`, and on one that no
+ * It also exits 1 on an allowlist entry past its `until` (or with no YYYY-MM-DD `until`), and on one that no
  * advisory of this run matched (the package left every lockfile or moved past
  * the fix): left in place, it would accept a later downgrade without a word.
  * With --warn-unused, an unused entry is a warning only, so an advisory OSV
@@ -72,12 +72,21 @@ export function cargoPackages(lockfile) {
   return out;
 }
 
+/** A real calendar day written YYYY-MM-DD, the only `until` the scan compares (as text) with today. */
+const isDay = (until) => {
+  if (typeof until !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(until)) return false;
+  const time = Date.parse(`${until}T00:00:00Z`);
+  // Date.parse takes 2026-02-30 as March 2.
+  return !Number.isNaN(time) && new Date(time).toISOString().startsWith(until);
+};
+
 /**
  * Which advisories the allowlist accepts, and which of its entries no longer apply: `unused` matched none of this
- * run's findings, `expired` is past its `until` (and accepts nothing any more).
+ * run's findings, `expired` is past its `until` (and accepts nothing any more). An entry with no `until`, or one that
+ * is not a YYYY-MM-DD day ("31/12/2026" sorts after every "2026-…" day), counts as expired: it would never expire.
  */
 export function allowlistReport(allowlist, findings, today) {
-  const live = (a) => !a.until || a.until >= today;
+  const live = (a) => isDay(a.until) && a.until >= today;
   const names = (a, f) => a.id === f.id && a.package === f.name;
   return {
     accepted: (finding) => allowlist.some((a) => live(a) && names(a, finding)),
@@ -142,7 +151,10 @@ async function main() {
     // Annotations, so the entries to remove show on the run's page, not only in its log.
     const level = warnUnused ? "warning" : "error";
     for (const a of unused) console.log(`::${level} file=.github/security-allowlist.json::Unused allowlist entry: ${a.package} ${a.id} matched no advisory in any lockfile; remove it.`);
-    for (const a of expired) console.log(`::error file=.github/security-allowlist.json::Expired allowlist entry: ${a.package} ${a.id} (until ${a.until}); re-check it, then remove it or move its date.`);
+    for (const a of expired) {
+      const when = isDay(a.until) ? `until ${a.until}` : `"until" ${a.until === undefined ? "missing" : `${JSON.stringify(a.until)}, not a YYYY-MM-DD day`}`;
+      console.log(`::error file=.github/security-allowlist.json::Expired allowlist entry: ${a.package} ${a.id} (${when}); re-check it, then remove it or move its date.`);
+    }
   }
   process.exit(failing ? 1 : 0);
 }
