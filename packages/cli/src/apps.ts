@@ -96,12 +96,19 @@ function makeKey(kind: KeyKind): LoadedKey {
   return { signer, key: toZ32(signer.publicKey), created: true, pem: `${KEY_HEADER[kind]}\n${privateKey.export({ type: "pkcs8", format: "pem" }) as string}` };
 }
 
-/** Writes a key this run made: owner-only from the start, never over a file that is there. */
-function saveKey(path: string, key: LoadedKey): void {
-  if (!key.pem) return;
+/**
+ * Writes a key this run made (owner-only from the start, never over a file that is there), then what it signed: when
+ * that cannot be written (`--out` under a file, no room), the new key file goes again, as a refused run's never is.
+ */
+function saveKey(path: string, key: LoadedKey, writeSigned: () => void): void {
+  if (!key.pem) return writeSigned();
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = openSync(path, "wx", 0o600);
   try { writeSync(fd, key.pem); } finally { closeSync(fd); }
+  try { writeSigned(); } catch (error) {
+    rmSync(path, { force: true });
+    throw error;
+  }
 }
 
 /** What the person is told on stderr when a key was made: where, which, and to back it up. Never the key. */
@@ -456,9 +463,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
     throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
   }
-  saveKey(keyPath, key);
-  mkdirSync(dirname(out), { recursive: true });
-  writeWhole(out, bundle);
+  saveKey(keyPath, key, () => {
+    mkdirSync(dirname(out), { recursive: true });
+    writeWhole(out, bundle);
+  });
 
   return {
     ...described(read.bundle, bundle),
@@ -623,9 +631,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  saveKey(keyPath, key);
-  mkdirSync(outDir, { recursive: true });
-  writeWhole(indexOut, indexBytes);
+  // Once the index is there, its key stays: a run stopped before the signature is signed again by it (above).
+  saveKey(keyPath, key, () => {
+    mkdirSync(outDir, { recursive: true });
+    writeWhole(indexOut, indexBytes);
+  });
   writeWhole(sigOut, sigBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
