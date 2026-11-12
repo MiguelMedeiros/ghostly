@@ -44,15 +44,15 @@ function canonicalArmor(pasted: string): string {
   return `-----BEGIN SSH SIGNATURE-----\n${body.match(/.{1,70}/g)!.join("\n")}\n-----END SSH SIGNATURE-----\n`;
 }
 
-/** Exactly the statement; or with one trailing newline, which an editor adds when the statement is
- * saved to a file and signed there (the Windows route). Nothing else is accepted. */
+/** Exactly the statement; or with one trailing newline ("\r\n" on Windows), which an editor adds when the
+ * statement is saved to a file and signed there (the Windows route). Nothing else is accepted. */
 async function verifyStatementSignature(statement: IdentityStatement, evidence: SshEvidence): Promise<SshSignatureCheck> {
-  try { return await verifySshSignature(evidence.signature, statement.bytes); }
-  catch (e) {
-    if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e;
-    try { return await verifySshSignature(evidence.signature, utf8Encode(`${statement.text}\n`)); }
-    catch (again) { throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: again }); }
+  let last: unknown;
+  for (const bytes of [statement.bytes, utf8Encode(`${statement.text}\n`), utf8Encode(`${statement.text}\r\n`)]) {
+    try { return await verifySshSignature(evidence.signature, bytes); }
+    catch (e) { if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e; last = e; }
   }
+  throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: last });
 }
 
 const keyKind = (c: SshSignatureCheck) => c.securityKey
