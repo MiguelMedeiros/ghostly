@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
@@ -215,7 +215,16 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     return;
   }
   const stop = new AbortController();
-  port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  // What the app's frame read of the answer, as the worker says (`flow`), and the wait for it to read on.
+  let read = 0;
+  let readOn: (() => void) | null = null;
+  const wake = () => { readOn?.(); readOn = null; };
+  stop.signal.addEventListener("abort", wake);
+  port.onmessage = (event) => {
+    const said = event.data as { type?: unknown; bytes?: unknown } | null;
+    if (said?.type === "cancel") stop.abort();
+    else if (said?.type === "read" && typeof said.bytes === "number" && said.bytes > read) { read = said.bytes; wake(); }
+  };
   const pageGone = () => stop.abort();
   if (view?.aborted) stop.abort();
   else view?.addEventListener("abort", pageGone);
@@ -261,10 +270,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
       const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
+      sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
+      // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
     }
     post({ type: "end" });
   } catch (error) {
