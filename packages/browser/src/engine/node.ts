@@ -9110,7 +9110,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         onPeerAck: (ack) => {
           if (stored.profile) return;
-          if (ack === live.peerAck) return;
+          // Never back: the contact's record keeps an older ack than a text that reached it over the data link (sendMessage).
+          if (ack <= live.peerAck) return;
           live.peerAck = ack;
           this.emitState();
         },
