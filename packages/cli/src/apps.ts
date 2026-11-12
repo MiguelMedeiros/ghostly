@@ -7,7 +7,7 @@ import {
   readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
-import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
+import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
 import { jsonOut } from "./jsonOut";
@@ -140,7 +140,8 @@ function readBundleFile(path: string): Uint8Array {
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
- * 16 MiB.
+ * 16 MiB. A redirect stays on the URL's own host and port or goes to a host a client reads from (isAppFetchUrl): never
+ * a host or port of the server's choosing on this machine's network.
  */
 async function fetchBundle(url: string): Promise<Uint8Array> {
   let at = url;
@@ -149,6 +150,9 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
       throw new CliError(hop ? "refused" : "usage", hop
         ? `${url} redirects to ${at}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
         : `Not a URL a client reads: https only, at most ${APP_BUNDLE_LIMITS.url} characters, no user or password, and jsDelivr only as https://cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/<path>`);
+    }
+    if (hop && new URL(at).host !== new URL(url).host && !isAppFetchUrl(at)) {
+      throw new CliError("refused", `${url} redirects to ${at}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
     }
     let response: Response;
     try {
