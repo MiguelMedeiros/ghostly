@@ -2,6 +2,7 @@ import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileS
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { open as openFile, type FileHandle } from "node:fs/promises";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1418,6 +1419,48 @@ describe("messages kept in rows.db", () => {
     expect(await all(elsewhere.factory)).toEqual(before);
     const there = await db(elsewhere.factory);
     expect(await read(there.transaction("settings").objectStore("settings").get("mark"))).toBe("before");
+    there.close();
+    d.close();
+  });
+
+  it("a backup's export is serialized and written a page at a time, never whole, and restores as one snapshot", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    // An object held twice in one value, which v8 writes once and then as a reference to it: the copy reads the same.
+    const shared = { bytes: new Uint8Array([7, 7, 7]), list: [1, 2] };
+    await tx(d, ["messages", "settings"], (s) => {
+      for (let i = 0; i < 3000; i++) s.messages.put(i === 5 ? { ...message(i), a: shared, b: shared, c: new Map([["c", shared]]) } : message(i));
+      for (let i = 0; i < 3000; i++) s.settings.put({ i, text: `setting ${i} é漢`, ...(i % 1000 === 7 && { a: shared, b: [shared, shared.list] }) }, `k${i}`);
+    });
+    const before = await all(store.factory);
+    // The bytes handed to the export's file at once: each a buffer the export held whole.
+    const exported = join(folder(), "store.bin");
+    const handle = await openFile(join(folder(), "probe"), "w");
+    const file = Object.getPrototypeOf(handle) as FileHandle;
+    await handle.close();
+    const sizes: number[] = [];
+    const bytes = (data: unknown) => (Array.isArray(data) ? data.reduce((sum: number, part: Uint8Array) => sum + part.length, 0) : (data as Uint8Array).length);
+    const spies = (["write", "writev", "writeFile"] as const).map((method) => {
+      const original = file[method] as (...args: unknown[]) => unknown;
+      return vi.spyOn(file, method).mockImplementation(function (this: FileHandle, ...args: unknown[]) { sizes.push(bytes(args[0])); return original.apply(this, args); } as never);
+    });
+    try { await store.exportSnapshot(exported); } finally { for (const spy of spies) spy.mockRestore(); }
+    expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(statSync(exported).size);
+    // Built whole and serialized in one turn, the export held the store as objects and its serialized copy at once.
+    expect(Math.max(...sizes)).toBeLessThan(statSync(exported).size / 8);
+
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    expect(snapshotOf(copy).format).toBe(1);
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    expect(await all(elsewhere.factory)).toEqual(before);
+    const there = await db(elsewhere.factory);
+    expect(await read(there.transaction("messages").objectStore("messages").get(["chat-2", "m005"]))).toEqual({ ...message(5), a: shared, b: shared, c: new Map([["c", shared]]) });
+    expect(await read(there.transaction("settings").objectStore("settings").get("k2007"))).toEqual({ i: 2007, text: "setting 2007 é漢", a: shared, b: [shared, shared.list] });
+    expect(await read(there.transaction("settings").objectStore("settings").getAll())).toHaveLength(3000);
     there.close();
     d.close();
   });
