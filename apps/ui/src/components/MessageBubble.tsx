@@ -1360,7 +1360,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.paymentId ? (
           <div className="clearfix">
-            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} />
+            {/* Whom a payment of mine went to is the chat's contact; my own name is over mine in a group. */}
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} contact={(isMe ? contactName : own) || undefined} />
             {timestampEl}
           </div>
         ) : message.file?.voice ? (

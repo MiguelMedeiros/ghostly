@@ -38,7 +38,7 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
 }
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
-export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean }) {
+export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false, contact }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean; contact?: string }) {
   const { t } = useI18n();
   // Drawn again when the wallets, this payment or the chat's ways of paying change, not on every engine state.
   const wallet = useWalletPlatform();
@@ -210,7 +210,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
       </p>
       {payment.target && <p className="chat-text-card-line text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="chat-text-card-line text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
-      {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
+      {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} to={shownReview.method === "cashu" ? contact : undefined} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
       {payment.memo && <p className="chat-text-pay-memo m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
         className={`chat-text-pay-label m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}
