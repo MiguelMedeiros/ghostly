@@ -23,6 +23,7 @@ import {
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
 import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
+import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
@@ -481,6 +482,8 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
+    // An app still running in it (a Desktop app window) stops: the engine answers nothing more for this chat.
+    stopAppsIn(link.id);
     // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
