@@ -406,6 +406,12 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     setBusy(true); setPending(which); setError(null);
     try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
+  // No link it came from answered with its files (offline, the host down, each holding another version): the engine
+  // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
+  const fetchFiles = async () => {
+    const run = await engine.call("appFetchFiles", { ref: app.ref });
+    if (run.status === "needs-files") throw new Error(navigator.onLine === false ? "offline: You are offline" : "files-not-found: No link holds this version's files");
+  };
   // While Uninstall (or an Update) runs, the screen stays, as the install screen's: a Cancel then showed the app as
   // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
   const close = () => { if (!busy) onClose(); };
@@ -453,7 +459,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update
             ran it while its files were replaced, and the update's error then had no screen to show on. */}
         <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" disabled={busy} onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
-        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
+        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(fetchFiles, false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" disabled={busy} onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" disabled={busy} onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
         {canRun && <Button ref={open} variant="primary" data-testid="app-open" disabled={busy} onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}

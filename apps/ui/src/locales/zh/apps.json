@@ -65,6 +65,7 @@
     "damaged": "它在此设备上的文件已损坏。请重新获取文件。",
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
+    "filesNotFound": "无法获取它的文件：它来源的链接现在都没有这个版本，或者都没有响应。请稍后再试。",
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "hostProblem": "主机出了问题（错误 {{status}}）。请稍后再试。",
