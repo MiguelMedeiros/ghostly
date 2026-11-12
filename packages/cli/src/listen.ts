@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -83,7 +83,8 @@ export class Allowlist {
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
+    const key = contactKeyOf(ref);
+    if (key !== undefined) { keys.add(key); continue; }
     const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
     // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
     if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });

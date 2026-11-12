@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -21,6 +21,13 @@ import { groupJson } from "./views";
  */
 export function findMember(group: GroupView, ref: string, myName?: string, byKeyOnly = false) {
   const lower = ref.toLowerCase();
+  // A ref shaped as a key (a line break, a space or capitals left on it too) is only ever that key, never a name.
+  const asKey = contactKeyOf(ref);
+  if (asKey !== undefined) {
+    const member = group.members.find((m) => !m.me && m.key === asKey);
+    if (member) return member;
+    throw noMember(group, asKey, myName);
+  }
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
