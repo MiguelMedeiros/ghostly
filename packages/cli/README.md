@@ -333,7 +333,7 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled. A cursor
   file that holds no event number (empty, edited by hand) is refused at start (`bad_request`, naming the file): fix or
   remove it, or give `--since`.
-- Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
+- Types: `daemon.started`, `chat.created`, `chat.removed` (`peer`: the contact's key, once paired), `chat.renamed`, `chat.pairing` (`stage`: publishing,
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence; live only, as `group.typing.*`: never in the journal, so `--since` does not replay them), `chat.joined` (the contact's app
   announced itself, once; not a message: a later message of theirs in the same words is `message.received`), `chat.announced`, `message.received` (`message.nick`: the name the contact gave), `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the

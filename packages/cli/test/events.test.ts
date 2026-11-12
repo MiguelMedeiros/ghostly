@@ -68,6 +68,8 @@ describe("the event stream", () => {
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+    // The contact's key goes with the removal: `listen --from <key>` can no longer ask the daemon for a chat that is gone.
+    expect(events[8]).toMatchObject({ type: "chat.removed", chat: "c1", peer: "peerc1" });
   });
 
   it("gives a delivery a message comes back to an id of its own, also after a restart (a listener dedupes on it)", async () => {

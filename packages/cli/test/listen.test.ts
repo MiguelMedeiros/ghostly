@@ -507,6 +507,14 @@ describe("the allowlist", () => {
     expect(peerOf.mock.calls.filter(([chat]) => chat === "c1")).toHaveLength(1);
   });
 
+  it("a contact key passes its chat's removal by the key it carries: the chat is gone, so its lookup fails", async () => {
+    const list = new Allowlist(new Set(), new Set([KEY]), new Set(), async () => { throw new CliError("not_found", "No chat c1"); });
+    expect(await list.allows(other("chat.removed", { chat: "c1", peer: KEY }))).toBe(true);
+    expect(await list.allows(other("chat.removed", { chat: "c2", peer: OTHER_KEY }))).toBe(false);
+    // Only a removal's: no other event names the chat's contact by it.
+    expect(await list.allows(other("chat.renamed", { chat: "c3", peer: KEY }))).toBe(false);
+  });
+
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };

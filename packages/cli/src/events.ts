@@ -53,7 +53,7 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null; peer: string | null }
 interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }>; pin: PinView | null }
 
 /**
@@ -593,8 +593,10 @@ export class EventHub {
     }
     const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
     for (const id of removedChats) {
+      // The contact's key (`peer`) goes with it: `listen --from <key>` cannot ask the daemon for a chat that is gone.
+      const peer = this.chats.get(id)?.peer;
       this.chats.delete(id);
-      if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
+      if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id, ...(peer ? { peer } : {}) });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.
     const chatsGone = new Set(removedChats);
@@ -1051,6 +1053,7 @@ function chatShape(link: LinkView): ChatShape {
   return {
     stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
     typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null, pin: link.pin ?? null,
+    peer: view.peer || null,
   };
 }
 
