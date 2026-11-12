@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RUNNER_CSP } from "../../../../web/runnerPolicy";
-import { forgetAppsAvailable, useAppsState } from "../../lib/apps/flag";
+import { forgetAppsAvailable, RUNNER_RETRY_MS, useAppsState } from "../../lib/apps/flag";
 import { forgetRunnerCheck, runnerAvailable } from "../../lib/apps/runnerCheck";
 import { setAppOpener } from "../../lib/apps/open";
 import { fakeEngine } from "../fakeEngine";
@@ -54,6 +54,35 @@ it("shows Apps once the network is back, without a reload", async () => {
   online = true;
   await act(async () => { window.dispatchEvent(new Event("online")); });
   await waitFor(() => expect(result.current).toBe("on"));
+});
+
+// A server error is no answer either: Cloudflare's 502 while the origin restarts for a deploy, a 503 or a 429 carries no
+// policy of the runner's. It was kept as a no, so Apps stayed hidden until a reload, though the browser was online all along.
+it("asks the runner page again after a server error, and shows Apps once it answers", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    let status = 502;
+    online = true;
+    vi.mocked(globalThis.fetch).mockImplementation(async () => {
+      asked++;
+      return status === 200 ? new Response("<!doctype html>", { headers: { "content-security-policy": RUNNER_CSP } }) : new Response("Bad gateway", { status });
+    });
+    expect(await runnerAvailable("/app-frame.html")).toBe(false);
+    status = 200;
+    expect(await runnerAvailable("/app-frame.html")).toBe(true);
+    expect(asked).toBe(2);
+    forgetRunnerCheck();
+    status = 503;
+    const { result } = renderHook(() => useAppsState());
+    await waitFor(() => expect(asked).toBe(3));
+    await waitFor(() => expect(result.current).toBe("off"));
+    status = 200;
+    await act(async () => { await vi.advanceTimersByTimeAsync(RUNNER_RETRY_MS); });
+    await waitFor(() => expect(result.current).toBe("on"));
+    expect(asked).toBe(4);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("still hides Apps for good on a server that answers without the runner's policy", async () => {
