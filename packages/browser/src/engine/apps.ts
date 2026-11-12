@@ -72,11 +72,17 @@ const STORE_READ_PARALLEL = 4;
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
 /**
- * `ghostly-revoke.json` files whose result is kept, so an unchanged one is not checked again (the oldest dropped first):
- * at most this many, and of the ones whose list is held at most one file's limit of bytes in all. A publisher's file is
+ * `ghostly-revoke.json` files whose result for one app is kept, so an unchanged one is not read again (the oldest dropped
+ * first): at most this many, and of the lists held at most one file's limit of bytes in all. A publisher's file is
  * small; nine large ones beside one app's URLs, or one that changes at every check, would stay for the engine's life.
  */
 const REVOCATION_FILES_KEPT = { max: 64, bytes: APP_FETCH_LIMITS.revocationsBytes } as const;
+/**
+ * Verdicts of `ghostly-revoke.json` files (every entry verified, or the file refused), by the SHA-256 of their bytes:
+ * a file whose list was dropped from `REVOCATION_FILES_KEPT` is read again with no signature checked. About 64 bytes
+ * each; the oldest dropped first.
+ */
+const REVOCATION_VERDICTS_KEPT = 1024;
 /**
  * Revocations of store indexes whose signature was checked, kept by `appRevocationId` so an index that changes around
  * them does not have each checked again (the one read longest ago dropped first): four indexes' worth, about 1 MiB.
@@ -701,8 +707,10 @@ export class Apps {
    * commit): by store key, with that URL. The same bytes there again are not checked whole at every refresh.
    */
   private readonly behindReads = new Map<string, { url: string; index: AppStoreIndex; digest: string }>();
-  /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused, and the bytes the held list counts for. */
-  private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
+  /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes and the app read (`<digest> <ref>`): that app's revocations in it, and the bytes the list counts for. */
+  private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[]; bytes: number }>();
+  /** Whether every entry of a `ghostly-revoke.json` verified, by the SHA-256 of its bytes: at most `REVOCATION_VERDICTS_KEPT`. */
+  private readonly revocationVerdicts = new Map<string, boolean>();
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -1310,8 +1318,8 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
-        if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
+        const file = await this.readRevocationsFile(ref, await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
+        if (file) (out ??= []).push(...file);
       } catch { /* not published there, or not reachable now */ }
     }
     return out;
@@ -1319,12 +1327,21 @@ export class Apps {
 
   /**
    * `readAppRevocations` (one entry that does not verify refuses the file, null here), with a pause every few ms: the
-   * engine shares the page's thread, and each entry is a signature check. The same bytes are not checked again.
+   * engine shares the page's thread, and each entry is a signature check. Of the file, the revocations of `ref`. The
+   * same bytes are not checked again: their list for `ref` is kept while it fits, and their verdict longer, so a file
+   * read again is only parsed, with no signature checked.
    */
-  private async readRevocationsFile(bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
+  private async readRevocationsFile(ref: string, bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
     const id = toBase64Url(await sha256Paced(bytes));
-    const known = this.revocationFiles.get(id);
-    if (known !== undefined) return known.revocations;
+    const verdict = this.revocationVerdicts.get(id);
+    if (verdict === false) return null;
+    const key = `${id} ${ref}`;
+    const known = this.revocationFiles.get(key);
+    if (known !== undefined) {
+      this.revocationFiles.delete(key);
+      this.revocationFiles.set(key, known);
+      return known.revocations;
+    }
     const read = readCanonicalJson(bytes);
     let out: SignedAppRevocation[] | null = null;
     if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
@@ -1332,14 +1349,16 @@ export class Apps {
       const pause = pacer(REVOCATIONS_SLICE_MS);
       for (const entry of read.value) {
         await pause();
-        const one = readAppRevocation(entry);
+        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
         if (!one.ok) { out = null; break; }
-        out.push(one.revocation);
+        if (one.revocation.statement.app === ref) out.push(one.revocation);
       }
     }
-    this.revocationFiles.delete(id);
-    // A refused file keeps its verdict alone; a list counts as its file's bytes.
-    this.revocationFiles.set(id, { revocations: out, bytes: out ? bytes.length : 0 });
+    this.revocationVerdicts.delete(id);
+    this.revocationVerdicts.set(id, out !== null);
+    if (this.revocationVerdicts.size > REVOCATION_VERDICTS_KEPT) this.revocationVerdicts.delete(this.revocationVerdicts.keys().next().value!);
+    if (!out) return null;
+    this.revocationFiles.set(key, { revocations: out, bytes: out.length ? canonicalJsonBytes(out as unknown as JsonValue).length : 0 });
     let held = 0;
     for (const file of this.revocationFiles.values()) held += file.bytes;
     for (const [old, file] of this.revocationFiles) {
