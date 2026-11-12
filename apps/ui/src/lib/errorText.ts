@@ -699,6 +699,7 @@ const RULES: readonly Rule[] = [
   // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
   { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
   { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
+  { match: /^This is an OpenPGP v(?<version>\d) key, which Ghostly does not accept\. Use a v4 key \(gpg makes Ed25519 ones\) or a v6 key\.$/, key: "errors.proof.pgpKeyVersion", next: "errors.proof.pgpKeyVersionNext" },
   // A key from keys.openpgp.org that its owner has not confirmed an email for: served without the user IDs it is checked by.
   exact("This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", "errors.proof.pgpNoUserIds", "errors.proof.pgpNoUserIdsNext"),
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:

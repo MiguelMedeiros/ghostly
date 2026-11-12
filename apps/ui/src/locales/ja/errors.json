@@ -586,6 +586,8 @@
     "pgpExponentNext": "GnuPG で作った鍵（指数 65537）を使ってください。",
     "pgpKeyKind": "Ghostly は {{kind}} の鍵を受け付けません",
     "pgpKeyKindNext": "Ed25519、ECDSA（P-256、P-384、P-521、brainpool）、または 2048〜{{max}} ビットの RSA を使ってください。",
+    "pgpKeyVersion": "Ghostly は OpenPGP v{{version}} の鍵を受け付けません",
+    "pgpKeyVersionNext": "v4 の鍵（gpg が作る Ed25519 の鍵）か、v6 の鍵を使ってください。",
     "pgpNoUserIds": "keys.openpgp.org はこの鍵をユーザー ID なしで公開しているため、確認できません",
     "pgpNoUserIdsNext": "そこでメールアドレスを確認するか、公開鍵（gpg --armor --export）を貼り付けてください。",
     "privateAddress": "{{domain}} はプライベートネットワークのアドレスを指しています",
