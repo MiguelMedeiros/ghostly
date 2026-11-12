@@ -296,11 +296,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {moving && transfer.stage !== "asking" && (
         // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
         // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+        <div className="progress-track h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
           role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
           aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size, t) })}>
           <div
-            className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
+            className={`progress-fill h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
             style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}
           />
         </div>
