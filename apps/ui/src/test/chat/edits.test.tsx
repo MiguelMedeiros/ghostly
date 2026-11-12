@@ -143,6 +143,30 @@ describe("the composer while editing", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it("what is typed while an edit is being saved stays in the field after it, with the draft", async () => {
+    // A save that takes a while: the extension's peer starting again answers in about a second.
+    let done!: (error: string | null) => void;
+    const onSave = vi.fn(() => new Promise<string | null>(resolve => { done = resolve; }));
+    const { user } = renderApp(<Composer onSave={onSave} />);
+    await user.type(field(), "draft");
+    await user.click(screen.getByText("edit it"));
+    await user.clear(field());
+    await user.type(field(), "Done{Enter}");
+    expect(onSave).toHaveBeenCalledWith("Done", undefined);
+    // Typed on after the saved words, and a pasted text in place of them: both stay.
+    await user.type(field(), " next");
+    await act(async () => done(null));
+    expect(screen.queryByTestId("composer-edit")).not.toBeInTheDocument();
+    expect(field()).toHaveValue("draft next");
+
+    await user.clear(field());
+    await user.click(screen.getByText("edit it"));
+    await user.keyboard("{Enter}");
+    act(() => { fireEvent.change(field(), { target: { value: "pasted" } }); });
+    await act(async () => done(null));
+    expect(field()).toHaveValue("pasted");
+  });
+
   it("the field goes back to one line when an edit of a long text ends, saved or not", async () => {
     const long = mine({ text: "A long message\nover two lines" });
     const { user } = renderApp(<Composer onSave={async () => null} last={long} />);
