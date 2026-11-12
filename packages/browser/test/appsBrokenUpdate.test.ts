@@ -19,11 +19,11 @@ beforeEach(emptyProfile);
 
 describe("an update whose whole read is refused", () => {
   let now = NOW_MS;
-  const setup = async () => {
+  const setup = async (sources = [SOURCE]) => {
     now = NOW_MS;
     const net = new FakeNet();
     const store = apps(net, { now: () => now });
-    const v1 = await bundle({ sources: [SOURCE] });
+    const v1 = await bundle({ sources });
     net.put(BUNDLE_URL, v1.bytes);
     await store.preview({ url: BUNDLE_URL });
     await store.install({ digest: v1.digest, grant: ["chat"] });
@@ -64,6 +64,20 @@ describe("an update whose whole read is refused", () => {
     await store.addStore({ url: STORE_URL });
     for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
     expect(MIRRORS.map(whole)).toEqual([1, 1, 1, 1]);
+  });
+
+  it("under the waiting update's number is not read whole: it could not be taken", async () => {
+    const sources = [SOURCE, MIRRORS[0]!];
+    const { net, store, whole } = await setup(sources);
+    // The publisher's source serves 3, which asks for more and waits for the person; a mirror is still at 2.
+    const v2 = await bundle({ sequence: 2, sources, data: new Uint8Array(64 * 1024) });
+    const v3 = await bundle({ sequence: 3, sources, permissions: ["chat", "files"] });
+    net.put(SOURCE, v3.bytes);
+    net.put(MIRRORS[0]!, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(whole(MIRRORS[0]!), "never read whole").toBe(0);
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, pending: { sequence: 3 } });
   });
 
   it("is read again after a failed read that brought no bundle (the host down)", async () => {
