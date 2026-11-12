@@ -779,7 +779,10 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (!name) throw new CliError("usage", "Missing <name>: ghostly profile use <name>");
       noMoreThan(1, parsed.positionals, "profile use <name>");
       selectProfile(g.home, name);
-      print({ current: name });
+      // The profile the next commands run on, as `profile create --use` says it: GHOSTLY_PROFILE still picks another.
+      const current = currentProfile(g.home);
+      if (current !== name) process.stderr.write(`ghostly: GHOSTLY_PROFILE=${current} still picks the profile in this shell: unset it to use ${name}.\n`);
+      print({ current });
       return;
     }
     case "show":
