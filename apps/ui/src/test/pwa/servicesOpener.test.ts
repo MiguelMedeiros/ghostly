@@ -87,6 +87,37 @@ describe("the cookies one opened app keeps", () => {
     jar.take("a=; Max-Age=60; Max-Age=0");
     expect(jar.header()).toBe("b=3");
   });
+  it("go only to the paths each was set for, the longer path first, as a browser sends them", () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/", "/login");
+    jar.take("sid=admin; Path=/admin", "/admin/login");
+    // No path of its own: the directory of the address that set it.
+    jar.take("step=2", "/wizard/one?x=1");
+    expect(jar.header("/")).toBe("sid=root");
+    expect(jar.header("/admin/users")).toBe("sid=admin; sid=root");
+    expect(jar.header("/administrator")).toBe("sid=root");
+    expect(jar.header("/wizard/two")).toBe("step=2; sid=root");
+    // Gone at its own path only: the one at / stays.
+    jar.take("sid=; Path=/admin; Max-Age=0", "/admin/logout");
+    expect(jar.header("/admin")).toBe("sid=root");
+  });
+  it("stop going once their Max-Age or Expires has passed, while the app stays open", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-12T12:00:00Z"));
+      const jar = new CookieJar();
+      jar.take("flash=saved; Max-Age=5");
+      jar.take("csrf=t1; Expires=Thu, 12 Nov 2026 12:00:10 GMT");
+      jar.take("sid=abc");
+      expect(jar.header()).toBe("flash=saved; csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:06Z"));
+      expect(jar.header()).toBe("csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:11Z"));
+      expect(jar.header()).toBe("sid=abc");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("hold a bounded number of names", () => {
     const jar = new CookieJar();
     for (let i = 0; i < CookieJar.MAX + 10; i++) jar.take(`c${i}=1`);
@@ -128,6 +159,21 @@ describe("one request from the app, over the contact's link", () => {
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
+  });
+
+  it("sends each request the cookies of its own path, and keeps one an answer sets at that answer's path", async () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/");
+    jar.take("sid=admin; Path=/admin");
+    const cookies: (string | undefined)[] = [];
+    const send = async (request: ClientRequest) => {
+      cookies.push(request.headers?.find(([name]) => name === "cookie")?.[1]);
+      return answer(200, request.path.startsWith("/shop/") ? [["set-cookie", "cart=3"]] : [], []);
+    };
+    for (const path of ["/admin/users?page=2", "/shop/item", "/shop/cart", "/"]) {
+      await serve(recorder().port, { type: "request", method: "GET", path, headers: [], body: null }, send, jar, words);
+    }
+    expect(cookies).toEqual(["sid=admin; sid=root", "sid=root", "cart=3; sid=root", "sid=root"]);
   });
 
   it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
