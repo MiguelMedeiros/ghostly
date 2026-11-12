@@ -47,6 +47,11 @@ export const LIMITS = {
   maxStoredIncomingBytesPerPeer: 500 * 1024 * 1024,
   requestTimeoutMs: 60_000,
   bodyIdleTimeoutMs: 30_000,
+  /**
+   * What a request body must bring in each `bodyIdleTimeoutMs` (unless it ends) to count as moving: a peer that sends a
+   * few bytes at a time is let go like one that stalls.
+   */
+  minRequestBodyBytesPerIdle: 16 * 1024,
   /** Stop writing to the channel above this many buffered bytes. */
   sendHighWaterMark: 1024 * 1024,
   sendLowWaterMark: 256 * 1024,
