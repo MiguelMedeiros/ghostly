@@ -761,6 +761,34 @@ describe("the toolbar button", () => {
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
   });
 
+  it("opens one tab when pressed again before the first one opened, or as a first install opens it", async () => {
+    // Pressed twice while the peer starts (nothing shows yet), and once more as the install opens the app.
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.runtime.onInstalled, { reason: "install" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+  });
+
+  it("opens one tab on a double-click, though Chrome lists a new tab only once its page loads", async () => {
+    await send({ target: "background", type: "ensure-engine" });
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toHaveLength(1);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
+  });
+
   it("opens the app even when the peer does not start, so the page can say why", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
