@@ -423,6 +423,24 @@ describe("task update", () => {
     expect(rows("chat-one")[0]!.card).toMatchObject({ status: "done", progress: 100, step: "Engine" });
   });
 
+  it("an update merged into the next goes with the newest update's text, not the first's", async () => {
+    const { ctx, node } = fake("daemon");
+    vi.useFakeTimers();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 10 }, text: "Working: 10%" });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done", progress: 100 }, text: "Done!" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    // Before, the card said done and its text "Working: 10%" (what an app without cards and a notification show).
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
+    expect(node.editMessage.mock.calls[0]![0]).toMatchObject({ text: "Done!", card: { status: "done", progress: 100 } });
+    // One with no --text after one with it: the engine writes the text from the card, not the older words.
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Ship" }, text: "Shipping" });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Shipped" } });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    expect(node.editMessage).toHaveBeenCalledTimes(2);
+    expect(node.editMessage.mock.calls[1]![0]).toMatchObject({ text: "", card: { step: "Shipped" } });
+  });
+
   it("sends an update still waiting for its time when the daemon stops, and never calls it confirmed before it went", async () => {
     const { ctx, node, rows } = fake("daemon");
     vi.useFakeTimers();
