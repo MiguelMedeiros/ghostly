@@ -1,5 +1,5 @@
 import { Profiler } from "react";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -11,8 +11,8 @@ import { renderApp } from "../render";
 
 /*
  * A device on standby shows its screen for as long as the app is open: hours, days. What that screen asks its engine
- * on a timer (the handoff twice a second, the device set every 3 s) it asks only while someone can see it, and an
- * answer that says what the last one said draws nothing again.
+ * on a timer (the handoff and the device set every 3 s, the handoff twice a second while a move runs) it asks only while
+ * someone can see it, and an answer that says what the last one said draws nothing again.
  */
 
 const DESKTOP = "D".repeat(43), PHONE = "P".repeat(43);
@@ -57,7 +57,7 @@ describe("the standby screen behind a hidden window", () => {
     expect(asked()).toEqual(before);
   });
 
-  it("asks once when it shows again, and goes on as before: the handoff twice a second, the device set every 3 s", async () => {
+  it("asks once when it shows again, and goes on as before: the handoff and the device set every 3 s", async () => {
     await standby();
     show(false);
     await pass(MINUTE);
@@ -66,7 +66,7 @@ describe("the standby screen behind a hidden window", () => {
     await pass(0);
     expect(asked()).toEqual({ handoff: before.handoff + 1, set: before.set + 1 });
     await pass(MINUTE);
-    expect(asked()).toEqual({ handoff: before.handoff + 1 + 120, set: before.set + 1 + 20 });
+    expect(asked()).toEqual({ handoff: before.handoff + 1 + 20, set: before.set + 1 + 20 });
   });
 
   it("shows what changed meanwhile as soon as it is back in front", async () => {
@@ -96,16 +96,48 @@ describe("the standby screen in front, with nothing new", () => {
     expect(draws).toBe(before);
   });
 
-  it("shows a handoff's progress within half a second", async () => {
+  it("with no move, asks for the handoff as often as for the device set: every 3 s, not twice a second", async () => {
+    await standby();
+    const before = asked();
+    await pass(MINUTE);
+    expect(asked()).toEqual({ handoff: before.handoff + 20, set: before.set + 20 });
+  });
+
+  it("shows a move the other device starts within 3 s, and its progress twice a second", async () => {
     let view: HandoffView | null = null;
     await standby(() => view);
     await pass(MINUTE);
     view = { role: "taker", device: "Phone", key: PHONE, step: "copying", bytes: 10, total: 100 };
-    await pass(500);
+    await pass(3_000);
     expect(screen.getByTestId("handoff-standby")).toHaveTextContent("Phone");
     const before = draws;
+    const asks = asked().handoff;
     view = { ...view, bytes: 60 };
     await pass(500);
+    expect(asked().handoff).toBe(asks + 1);
     expect(draws).toBeGreaterThan(before);
+    // Gone (cancelled on the other device): back to every 3 s.
+    view = null;
+    await pass(500);
+    const after = asked().handoff;
+    await pass(MINUTE);
+    expect(asked().handoff).toBe(after + 20);
+  });
+
+  it("shows the pull Use here started as soon as its dialog closes, not up to 3 s later", async () => {
+    let view: HandoffView | null = null;
+    fakeEngine.on("deviceHandoffPull", () => {
+      view = { role: "taker", device: "Phone", key: PHONE, step: "copying", bytes: 0, total: 100 };
+      return view;
+    });
+    await standby(() => view);
+    await pass(MINUTE);
+    act(() => { screen.getByTestId("handoff-use-here").click(); });
+    fireEvent.change(screen.getByTestId("handoff-password"), { target: { value: "hunter2" } });
+    act(() => { screen.getByTestId("handoff-start").click(); });
+    await pass(0);
+    expect(screen.queryByTestId("handoff-use-here-dialog")).toBeNull();
+    expect(screen.getByTestId("handoff-standby")).toHaveTextContent("Phone");
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
   });
 });

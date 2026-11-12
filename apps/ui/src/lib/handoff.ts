@@ -89,7 +89,7 @@ const readHandoff = () => engine.call("deviceHandoffView");
 /**
  * The handoff on this device, read twice a second while `on` and the page shows (`useShownPoll`). `noneEveryMs`: how
  * often while there is none, where none is what is mostly said (Profile's Devices section: a profile on one device, a
- * move never made); the first answer that has one goes back to twice a second.
+ * move never made; the standby screen, open for days); the first answer that has one goes back to twice a second.
  */
 export function useHandoffView(on = true, noneEveryMs = HANDOFF_EVERY_MS): HandoffView | null {
   const [none, setNone] = useState(true);

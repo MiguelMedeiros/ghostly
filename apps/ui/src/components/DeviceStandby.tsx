@@ -5,7 +5,7 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
-import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
+import { DEVICE_SET_EVERY_MS, listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { RemoveHereDialog } from "./devices/RemoveHereDialog";
@@ -157,8 +157,10 @@ function Actions({ children }: { children: ReactNode }) {
  */
 function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const { t } = useI18n();
-  const view = useHandoffView();
   const [asking, setAsking] = useState(false);
+  // No move (the screen open for hours, days): asked as often as the device set, not twice a second. Not read under Use
+  // here's dialog, and asked at once when it closes: a pull it started shows then, not up to 3 s later.
+  const view = useHandoffView(!asking, DEVICE_SET_EVERY_MS);
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   // Released, and the other device's word that it took the profile not heard yet: Use here stays (WISP 06 § What a standby
   // shows), and reads the turn first. That word can be lost, and this screen would otherwise wait for it for good.
