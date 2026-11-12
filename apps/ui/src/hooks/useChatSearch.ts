@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { isLetterKey } from "../lib/appCommands";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
@@ -68,7 +69,8 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   useEffect(() => {
     if (!active || locked) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.key.toLowerCase() !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      // F's key on a keyboard that types no Latin letter there too (Arabic, Russian): the browser's own Find opened.
+      if (e.defaultPrevented || !isLetterKey(e, "f") || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       // A dialog over the chat keeps its keys and its focus, as the app's other shortcuts leave it.
       if (modalOpen()) return;
       e.preventDefault();
