@@ -136,10 +136,12 @@ export const BACKUP_METHODS: Record<string, Method> = {
     const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
     const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
 
-    const partial = `${path}.partial-${process.pid}`;
+    // Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`, the second removed the
+    // first's half-written file as one left by a stopped backup, and the first gave the path the second's file.
+    const partial = `${path}.partial-${process.pid}-${randomBytes(6).toString("hex")}`;
     let out: FileHandle | null = null;
     try {
-      out = await openFile(partial);
+      out = await open(partial, "wx", 0o600);
       const handle = out;
       let writer: BackupWriter;
       try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
@@ -177,13 +179,6 @@ export const BACKUP_METHODS: Record<string, Method> = {
     }
   },
 };
-
-async function openFile(path: string): Promise<FileHandle> {
-  try { return await open(path, "wx", 0o600); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") { await rm(path, { force: true }); return open(path, "wx", 0o600); }
-    throw error;
-  }
-}
 
 /** A file on disk as a backup's source: read in ranges, never whole. A folder opens, and is refused as one here. */
 async function fileSource(path: string): Promise<BackupSource & { close(): Promise<void> }> {

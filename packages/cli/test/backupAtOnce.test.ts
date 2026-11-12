@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import type { ApiContext } from "../src/apiKit";
-import { BACKUP_METHODS } from "../src/backup";
+import { BACKUP_METHODS, backupFileProtection } from "../src/backup";
 import { home } from "./support/cli";
 
 // Two `profile backup` at once in one daemon (a cron job's and one typed by hand, a bot's two calls on the socket): each
@@ -41,4 +41,36 @@ it("two backups at once through one daemon each carry their own store, and leave
   expect(two).toHaveLength(1);
   expect(one).not.toEqual(two);
   expect(readdirSync(paths.db), "each removes its own store file when done").toEqual([]);
+});
+
+// Two at once to one --out: each wrote it through `<out>.partial-<pid>`, the same name in one daemon. The second took the
+// first's half-written file for one an earlier backup left and removed it, so the first gave its name to the second's
+// file and said it wrote a backup it had not (or failed with ENOENT when the second stopped first).
+it("two backups at once to one --out: the one that writes it gets its own backup there", async () => {
+  const dir = home("backup-same-out");
+  const paths = { dir, db: join(dir, "db"), files: join(dir, "files") };
+  mkdirSync(paths.db, { recursive: true });
+  mkdirSync(paths.files, { recursive: true });
+  // Many frames to copy, so the second opens its file while the first still writes.
+  await writeFile(join(paths.files, "big.bin"), Buffer.alloc(8 * 1024 * 1024, 7));
+  let calls = 0;
+  const store = {
+    async exportSnapshot(path: string) {
+      const n = ++calls;
+      await writeFile(path, `STORE-${n}-`.repeat(200), { mode: 0o600 });
+      if (n === 2) await new Promise((resolve) => setTimeout(resolve, 20));
+    },
+  };
+  const ctx = { runtime: { paths, store } } as unknown as ApiContext;
+  const out = join(dir, "same.ghostly-backup");
+  const results = await Promise.allSettled([
+    BACKUP_METHODS["profile.backup"](ctx, { path: out, noPassphrase: true }),
+    BACKUP_METHODS["profile.backup"](ctx, { path: out, passphrase: "correct horse battery staple" }),
+  ]);
+  const written = results.filter((result) => result.status === "fulfilled").map((result) => result.value as { protection: string });
+  expect(written).toHaveLength(1);
+  expect(results.find((result) => result.status === "rejected")).toMatchObject({ reason: { code: "refused" } });
+  // The file at --out is the backup its answer describes.
+  expect(await backupFileProtection(out)).toBe(written[0].protection);
+  expect(readdirSync(dir).filter((name) => name.includes(".partial")), "no half-written file left").toEqual([]);
 });
