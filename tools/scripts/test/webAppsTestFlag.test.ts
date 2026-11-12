@@ -63,6 +63,9 @@ it("Desktop takes it in a debug build only, the extension never", () => {
   expect(checkAppsTestFlag({ VITE_APPS_TEST: "", ...TAURI_RELEASE_ENV }, "desktop")).toBe(false);
   expect(() => checkAppsTestFlag({ VITE_APPS_TEST: "1" }, "extension")).toThrow(/extension build/);
   expect(checkAppsTestFlag({}, "extension")).toBe(false);
+  // The CLI bundles the engine (and its `testBuild`) and ships to npm, whatever Tauri's variables say.
+  expect(() => checkAppsTestFlag({ VITE_APPS_TEST: "1", TAURI_ENV_DEBUG: "true" }, "cli")).toThrow(/CLI build/);
+  expect(checkAppsTestFlag({}, "cli")).toBe(false);
   // The web app is never inside `tauri build`: Tauri's variables mean nothing to it.
   expect(checkAppsTestFlag({ VITE_APPS_TEST: "1", ...TAURI_RELEASE_ENV }, "web")).toBe(true);
 });
@@ -89,7 +92,7 @@ it("the guard reads the env the build compiles in, a .env file included", async 
 });
 
 it("every client's build runs the guard, as that client", () => {
-  for (const [config, build] of [["apps/web/vite.config.ts", "web"], ["apps/ui/vite.config.ts", "desktop"], ["apps/extension/vite.config.ts", "extension"]]) {
+  for (const [config, build] of [["apps/web/vite.config.ts", "web"], ["apps/ui/vite.config.ts", "desktop"], ["apps/extension/vite.config.ts", "extension"], ["packages/cli/vite.config.ts", "cli"]]) {
     expect(readFileSync(join(ROOT, config), "utf8"), config).toContain(`plugins: [appsTestGuard("${build}"), `);
   }
 });
