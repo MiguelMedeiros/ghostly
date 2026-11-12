@@ -496,6 +496,31 @@ describe("app verify <url>", () => {
     expect(seen).toEqual([url, "https://example.com/chess/ghostly-revoke.json", "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
   }, 60_000);
 
+  it("reads the ghostly-revoke.json files beside the URL and the sources together, not one after another", async () => {
+    const { manifest, files } = chess();
+    const sources = ["ana/chess-a", "ana/chess-b"].map((repo) => `https://raw.githubusercontent.com/${repo}/HEAD/app.ghostlyapp`);
+    const dir = appFolder({ ...manifest, sources }, files);
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    // Each file answers once all three are asked for, or after 2 s: read one after another, only one is ever waiting.
+    const waiting: (() => void)[] = [];
+    let most = 0;
+    vi.stubGlobal("fetch", async (at: string) => {
+      if (at === url) return new Response(stream([new Uint8Array(published)]), { status: 200 });
+      await new Promise<void>((answer) => {
+        const go = () => { waiting.splice(waiting.indexOf(go) >>> 0, 1); answer(); };
+        waiting.push(go);
+        most = Math.max(most, waiting.length);
+        if (waiting.length === 3) [...waiting].forEach((one) => one());
+        else setTimeout(() => { if (waiting.includes(go)) go(); }, 2_000);
+      });
+      return new Response("no", { status: 404 });
+    });
+    expect(await verifyApp(url)).toMatchObject({ valid: true });
+    expect(most).toBe(3);
+  }, 60_000);
+
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "not_found" });
