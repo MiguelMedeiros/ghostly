@@ -35,6 +35,10 @@
       "amountMismatch": "发票与请求的金额不符",
       "feeAbove": "Lightning 手续费（最多 {{fee}} {{unit}}）超出你的上限"
     },
+    "expiredNext": {
+      "mine": "请用新的请求重新发起",
+      "theirs": "请让联系人重新发送请求"
+    },
     "externalNote": {
       "ark": "可从任何 Ark 钱包支付。你的联系人的钱包看到款项后，会将其标为已付款。",
       "bitcoin": "可从任何 Bitcoin 钱包支付。你的联系人的钱包看到款项并经过一次确认后，会将其标为已付款。",
@@ -67,6 +71,7 @@
         "settled": "已收到"
       },
       "request": {
+        "expired": "已过期",
         "failed": "失败",
         "pending": "等待付款",
         "settled": "已付款"

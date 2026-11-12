@@ -35,6 +35,10 @@
       "amountMismatch": "The invoice does not match the requested amount",
       "feeAbove": "The Lightning fee (up to {{fee}} {{unit}}) is above your maximum"
     },
+    "expiredNext": {
+      "mine": "ask again with a new request",
+      "theirs": "ask your contact for a new request"
+    },
     "externalNote": {
       "ark": "Paid from any Ark wallet. Your contact's wallet marks it paid once it sees the money.",
       "bitcoin": "Paid from any Bitcoin wallet. Your contact's wallet marks it paid once it sees the money, after one confirmation.",
@@ -67,6 +71,7 @@
         "settled": "Received"
       },
       "request": {
+        "expired": "Expired",
         "failed": "Failed",
         "pending": "Waiting for payment",
         "settled": "Paid"
