@@ -42,6 +42,9 @@ describe("status set's line", () => {
     // Emoji count as one character each, invisible ones not at all.
     expect(line(`${"x".repeat(58)}👻👻`).text).toBe(`${"x".repeat(58)}👻👻`);
     expect(line(`${"x".repeat(60)}\u200b`).text).toBe("x".repeat(60));
+    // A text that fits is kept whole however much invisible padding it has: it was cut to 240 raw units first (48 kept).
+    const padded = Array.from({ length: 50 }, (_, i) => `${String.fromCharCode(97 + (i % 26))}\u200b\u200b\u200b\u200b`).join("");
+    expect(line(padded).text).toBe(padded.replaceAll("\u200b", ""));
     expect(usage("see", "https://example.com")).toBe("<text> is plain text: no link or markup");
     expect(usage("\u200b")).toBe("<text> needs a character that shows");
     expect(usage("hi", "--emoji", "ab")).toBe('--emoji takes one emoji, not "ab"');
