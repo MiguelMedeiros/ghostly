@@ -789,7 +789,7 @@ export class EventHub {
     let twinLines: ReadonlyMap<string, string> | undefined;
     const twins = () => twinLines ??= group
       ? groupPayTwins(messages, new Map(messages.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : []))), this.state?.payments ?? {},
-        this.state?.groups.find((g) => g.id === group)?.myKey)
+        this.state?.groups.find((g) => g.id === group))
       : new Map();
     for (const message of messages) {
       present.add(message.id);

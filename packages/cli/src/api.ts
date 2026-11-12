@@ -1204,7 +1204,7 @@ async function groupPayTwinsOf(ctx: ApiContext, group: GroupView, page: readonly
     const note = (await node(ctx).getMessage(`group:${group.id}`, groupPayLineId(id)))?.groupPay;
     if (note) notes.set(note.id, note);
   }
-  return groupPayTwins(rows, notes, payments, group.myKey);
+  return groupPayTwins(rows, notes, payments, group);
 }
 
 /** Past this many originals outside a page, its history is read once instead of row by row. */
