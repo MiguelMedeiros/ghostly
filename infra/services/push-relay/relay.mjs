@@ -259,8 +259,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // A refused page still gets its preflight and a readable 403 (it posts JSON, so the browser asks first): without
     // them its fetch fails as a CORS error and says nothing. The relay refuses the POST itself, forwarding nothing.
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
-    const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
+    const answer = (status, value, headers = {}) => { res.writeHead(status, { ...cors, ...headers, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
+    const refuse = (why, status, value, detail, headers) => { refusals.refuse(why, detail); answer(status, value, headers) }
     // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
     // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
     // someone. The operator has them in the log. A monitor's HEAD and its query string are read as the GET (Node
@@ -272,7 +272,9 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return }
-    if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
+    // Someone opening the relay's address in a browser (an operator checking it runs) reads what it is and what it
+    // takes, as on the HyperDHT relay; `Allow` as a 405 must carry it.
+    if (req.method !== 'POST') return refuse('method', 405, { error: 'Ghostly push relay: POST a push to it' }, undefined, { Allow: 'POST, OPTIONS' })
     // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
     if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
