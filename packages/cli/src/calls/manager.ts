@@ -712,7 +712,10 @@ export class CallManager {
     // stopping daemon waits for it, below).
     const closing = call.socket?.close();
     if (tell) {
-      const hangUp: CallSignal = tell === "unreachable" ? { t: "h", ts: this.stamp(call.chat), r: "u" } : { t: "h", ts: this.stamp(call.chat) };
+      // A call that failed before it ever connected says so too (`r: "u"`, WISP 601 "Couldn't connect"), as the apps do:
+      // a plain hang-up reaches a caller that still rings as a decline.
+      const unreachable = tell === "unreachable" || (reason === "failed" && call.connectedAt === null);
+      const hangUp: CallSignal = unreachable ? { t: "h", ts: this.stamp(call.chat), r: "u" } : { t: "h", ts: this.stamp(call.chat) };
       await this.send(call.chat, hangUp).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
