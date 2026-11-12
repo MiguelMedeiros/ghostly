@@ -507,6 +507,19 @@ describe("the allowlist", () => {
     expect(peerOf.mock.calls.filter(([chat]) => chat === "c1")).toHaveLength(1);
   });
 
+  it("a group's payment passes its group, whichever link it names; a chat's payment its chat", async () => {
+    const payment = (chat: string, group?: string) => other("payment.created", { chat, payment: { id: "p", chat, kind: "request", ...(group ? { group } : {}) } });
+    const groups = new Allowlist(new Set(), new Set(), new Set(["g1"]), async () => null);
+    expect(await groups.allows(payment("group:g1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("cpay:g1:m", "g1"))).toBe(true);
+    expect(await groups.allows(payment("c1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("group:g2", "g2"))).toBe(false);
+    expect(await groups.allows(payment("c1"))).toBe(false);
+    const chats = new Allowlist(new Set(["c1"]), new Set(), new Set(), async () => null);
+    expect(await chats.allows(payment("c1"))).toBe(true);
+    expect(await chats.allows(payment("c1", "g1"))).toBe(false);
+  });
+
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
