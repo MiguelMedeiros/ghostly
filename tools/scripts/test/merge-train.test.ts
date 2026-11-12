@@ -2217,6 +2217,30 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).not.toBe(head);
   });
 
+  it("pushes a fresh commit at once for one back from a closed batch at the tip, whose own CI the batch cancelled", async () => {
+    const repo = fakeRepo();
+    const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
+    repo.add(31, { ci: running }); // holds dev's tip
+    repo.drafts.set("h31", fastGreen);
+    repo.going.set("h31", [777]);
+    repo.add(32, { behind: true });
+    repo.add(33, { behind: true });
+    await repo.run({ now: at(0), maxWait: 0 });
+    expect(repo.members()).toEqual([31, 32, 33]);
+    expect(repo.cancelled).toEqual([777]);
+    // The batch closes without landing it (the others lost `queue`): #31 is back with its own run cancelled.
+    repo.runs.set("h31", [{ ...running[0], status: "completed", conclusion: "cancelled" }]);
+    for (const n of [32, 33]) repo.pulls.get(n)!.labels = [];
+    const r = await repo.run({ now: at(1), maxWait: 0 });
+    expect(r.inFlight).toBe(31);
+    // No run is going on h31 and none would start there: a new head starts one, without waiting CI_START_TIMEOUT.
+    expect(repo.pulls.get(31)!.sha).not.toBe("h31");
+    expect(repo.pushes).toEqual([`fix-31=${repo.pulls.get(31)!.sha}`]);
+    expect(repo.alone(31)?.sha).toBe(repo.pulls.get(31)!.sha);
+    repo.settle();
+    expect((await repo.run({ now: at(6), maxWait: 0 })).merged).toEqual([31]);
+  });
+
   it.each(["sibling", "events"])("takes a lone pull request whose runs never count out of flight (%s), so the line goes on", async (why) => {
     const repo = fakeRepo();
     const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
@@ -3405,6 +3429,14 @@ describe("a green pull request run that is not the pull request's own", () => {
     repo.earlier.delete("h21");
     expect((await repo.run()).merged).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
+  });
+
+  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too", async () => {
+    const repo = sharedHead();
+    repo.earlier.delete("h21");
+    repo.drafts.set("h21", fastGreen);
+    expect((await repo.run()).inFlight).toBe(21);
+    expect(repo.pushes).toEqual([]);
   });
 
   it("does not count a green pull request run from another branch on the same commit", async () => {
