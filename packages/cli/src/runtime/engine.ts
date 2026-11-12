@@ -2,12 +2,13 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
 import { joinLogLine } from "../joinLog";
+import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
@@ -19,6 +20,9 @@ import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
 import { watchWake } from "./wakeWatch";
+
+// Every chat's keys are derived again at each start, and a one-shot is a start: by Node's Ed25519, not noble's.
+setPublicKeyFastPath(nativePublicKey);
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
