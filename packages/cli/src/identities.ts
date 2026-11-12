@@ -96,12 +96,30 @@ function pruneDrafts(now = Date.now()) {
   for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
 
-async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+function canonical(p: IdentityProofProvider, subject: string): string {
   let normalized: string;
   try { normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject; } catch (error) {
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
+  return normalized;
+}
+
+/**
+ * An in-app signer's fields with the subject given where the usage line puts it: in the signer's field that is the
+ * subject (NIP-05's domain), or, for a signer that brings its own key, the subject that key must be. It was dropped.
+ */
+function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, values: Record<string, string>, subject: string | undefined) {
+  if (!subject) return { values };
+  const field = signer.kind === "in-app" ? signer.fields?.find((f) => f.kind !== "secret" && f.label === p.subject?.label) : undefined;
+  if (!field) return { values, expected: canonical(p, subject) };
+  const other = values[field.name];
+  if (other && other !== subject) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${subject} as <subject>, ${other} as --field ${field.name}; give one`);
+  return { values: { ...values, [field.name]: subject } };
+}
+
+async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+  const normalized = canonical(p, subject);
   const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
@@ -127,8 +145,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const p = provider(str(params, "provider", true));
     const signer = signerOf(p, str(params, "signer"));
     if (signer.kind === "in-app") {
-      const values = (params.fields ?? {}) as Record<string, string>;
-      if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const fields = (params.fields ?? {}) as Record<string, string>;
+      if (typeof fields !== "object" || Array.isArray(fields) || Object.values(fields).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const { values, expected } = withSubject(p, signer, fields, str(params, "subject"));
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
       const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
       const signal = AbortSignal.timeout(seconds * 1000);
@@ -141,7 +160,12 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
+        const subject = await session.subject();
+        if (expected !== undefined && subject !== expected) {
+          const shown = (key: string) => p.publicUri?.(key) ?? key;
+          throw new CliError("bad_request", `${signer.label} holds ${shown(subject)}, not ${shown(expected)}: nothing was signed`);
+        }
+        const { draftId, binding } = await begin(ctx, p, subject, params);
         try {
           return await node(ctx).completeIdentityProof({ draftId, evidence: await session.sign(identityStatement(binding)) });
         } catch (error) {
