@@ -247,6 +247,20 @@ describe("app publish", () => {
     expect(error(await ghostly(["store", "sign", folder, "--key", join(keys, "store.key")]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
     expect(existsSync(join(keys, "store.key"))).toBe(false);
   }, 60_000);
+
+  it("names a file that stands where an output folder goes, not Node's raw EEXIST as an engine error", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const file = join(tmp(), "a-file");
+    writeFileSync(file, "x");
+    const inTheWay = `${file} is a file, not a folder`;
+    expect(error(await ghostly(["app", "publish", dir, "--key", join(file, "new.key")]), "not_found", 3).message).toBe(inTheWay);
+    expect(error(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher"), "--out", join(file, "app.ghostlyapp")]), "not_found", 3).message).toBe(inTheWay);
+    const index = join(tmp(), "index.json");
+    const { key: _key, ...unsigned } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
+    writeFileSync(index, JSON.stringify(unsigned));
+    expect(error(await ghostly(["store", "sign", index, "--key", vectorKey(tmp(), "store"), "--out", file]), "not_found", 3).message).toBe(inTheWay);
+  }, 60_000);
 });
 
 describe("app publish --sequence", () => {
