@@ -23,6 +23,8 @@ describe("the review of a Cashu payment from the chat", () => {
   it.each([
     ["a 1:1 chat", { contactName: "Alice" }, "Alice"],
     ["a group", { nick: "Carol" }, "Carol"],
+    // A contact the chat has no name for is "your contact", as the payment sheet's review says.
+    ["a 1:1 chat with a contact with no name", { contactName: "" }, "your contact"],
   ])("names the contact as its destination in %s, not the request's id", async (_, props, name) => {
     const { user } = requestFrom(props);
     await user.click(screen.getByRole("button", { name: "Review payment" }));
