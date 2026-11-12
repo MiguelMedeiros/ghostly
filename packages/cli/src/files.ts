@@ -447,6 +447,11 @@ export const FILE_METHODS: Record<string, Method> = {
       if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
       if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
     }
+    // Paused by the contact: only their resume moves it. The engine takes these and does nothing, and it stays paused.
+    const view = state(ctx).transfers[fileId];
+    if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
+      throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
+    }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
