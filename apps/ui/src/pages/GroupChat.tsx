@@ -75,6 +75,7 @@ import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
 import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
@@ -895,8 +896,9 @@ export function GroupChat() {
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {!noTimeline && <ChatSearchBar search={search} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
