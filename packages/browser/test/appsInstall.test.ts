@@ -924,6 +924,23 @@ describe("an app installed from a store updates only to the version that store l
     expect(await pinnedTo()).toBeUndefined();
   });
 
+  // A listing URL peeked while the app was pinned held a newer version than the one listed: no miss for a pinned app.
+  // Once the pin goes, that newer version may be taken, as a new engine on the same profile takes it.
+  it("a listing URL skipped while the app was pinned is peeked again once its store is removed and added back", async () => {
+    const { store, v1 } = await fromStore();
+    const MIRROR = "https://raw.githubusercontent.com/mirror/chess/HEAD/app.ghostlyapp";
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const v3 = await bundle({ sequence: 3, sources: [HEAD] });
+    net.put(MIRROR, v3.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [MIRROR])] }));
+    expect((await store.checkUpdates())[0]!.outcome, "pinned: only the listed 2 is taken").toBe("none");
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    await store.addStore({ url: STORE_URL });
+    expect(await pinnedTo()).toBeUndefined();
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 3, digest: v3.digest, from: MIRROR });
+  });
+
   /** `removeStore` waits once it has read the installed apps, until `release` is called; `started` once it is reached. */
   function holdRemoveStore(store: object) {
     const engine = store as unknown as { installed: () => Promise<unknown> };

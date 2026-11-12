@@ -692,8 +692,9 @@ export class Apps {
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
-   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest>`): the same
-   * index listing the same is not peeked again at every check.
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
+   * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
+   * every check.
    */
   private readonly listingMisses = new Map<string, string>();
   /**
@@ -1920,7 +1921,10 @@ export class Apps {
       if (pinned !== undefined && s.key !== pinned) continue;
       const listing = s.index?.apps.find((a) => a.ref === app.ref);
       if (!listing || !newer(listing)) continue;
-      const seen = `${s.digest} ${listing.digest}`;
+      // What the miss was judged against: the pin decides whether only the listed digest is taken, and the versions held
+      // what is newer. Either changed (the store removed, the app installed again by link or at another version), the
+      // URL is peeked again.
+      const seen = `${s.digest} ${listing.digest} ${pinned ?? ""} ${app.digest} ${app.pending?.digest ?? ""}`;
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
         if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
