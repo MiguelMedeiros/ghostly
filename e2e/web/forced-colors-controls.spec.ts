@@ -240,6 +240,61 @@ test.describe("forced colors mark the place you are on", () => {
   });
 });
 
+/**
+ * The chat's composer: its field was edged by an inset shadow on its fill and the round Send / mic button by its fill
+ * alone, and forced colors drop both. An outline inside the field, a border on the button; nothing moves.
+ */
+test("forced colors keep the composer's field and its round Send / mic button edged, wide and on a phone", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+  await still(page);
+  const input = page.getByPlaceholder("Message…");
+  const field = page.locator(".composer-field");
+  const mic = page.getByTestId("voice-record");
+  const send = page.getByRole("button", { name: "Send message" });
+  /** The field's outline, read against the field's own background (it is drawn inside it). */
+  const edge = () => field.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { style: style.outlineStyle, width: parseFloat(style.outlineWidth), color: style.outlineColor, bg: style.backgroundColor };
+  });
+  // The field away from the focus: its ring is the focus's frame, not the one this is about.
+  const blur = () => input.evaluate((node) => (node as HTMLTextAreaElement).blur());
+  const sizes = async () => Promise.all([field, mic].map(async (el) => { const b = (await el.boundingBox())!; return { width: b.width, height: b.height }; }));
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    await page.setViewportSize(viewport);
+    await blur();
+    await expect(mic).toBeVisible();
+    expect((await look(mic)).border, `${viewport.width} px: the mic in normal colours`).toBe(0);
+    expect((await edge()).style, `${viewport.width} px: the field in normal colours`).toBe("none");
+    const normal = await sizes();
+
+    for (const colorScheme of ["dark", "light"] as const) {
+      const name = `${viewport.width} px, ${colorScheme}`;
+      await page.emulateMedia({ forcedColors: "active", colorScheme });
+      expect(await sizes(), `${name}: nothing moves`).toEqual(normal);
+      const frame = await edge();
+      expect.soft(frame.style, `${name}: the field's edge ${JSON.stringify(frame)}`).toBe("solid");
+      expect.soft(frame.width, `${name}: the field's edge`).toBeGreaterThanOrEqual(1);
+      expect.soft(frame.color, `${name}: the field's edge against the field`).not.toBe(frame.bg);
+      const round = await look(mic);
+      expect.soft(round.border, `${name}: the mic's border`).toBeGreaterThanOrEqual(1);
+      expect.soft(round.borderColor, `${name}: the mic's border against the composer`).not.toBe(round.around);
+
+      await input.fill("hi");
+      await blur();
+      const button = await look(send);
+      expect.soft(button.border, `${name}: Send's border`).toBeGreaterThanOrEqual(1);
+      expect.soft(button.borderColor, `${name}: Send's border against the composer`).not.toBe(button.around);
+      await page.screenshot({ path: test.info().outputPath(`forced-composer-${viewport.width}-${colorScheme}.png`) });
+      await input.fill("");
+      await blur();
+    }
+  }
+});
+
 /** A box's background and, if it has one, its `::after`'s, each laid over what is behind the box. */
 const drawn = (el: Locator, pseudo?: "::after"): Promise<{ bg: string; border: number; borderColor: string; around: string }> => el.evaluate((node, pseudo) => {
   type RGBA = [number, number, number, number];
