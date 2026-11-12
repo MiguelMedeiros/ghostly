@@ -57,6 +57,13 @@ interface UseWebRTCParams {
    */
   relayOnly?: boolean;
   /**
+   * Each request for the microphone or camera shows the system's own dialog for each device in it, whatever was
+   * answered before, and a request for both is refused whole when either is (the Android app's WebView). A video call
+   * then asks the microphone alone and the camera alone: one dialog each, and a refused microphone is never asked twice
+   * for one tap (Android's second "Don't allow" blocks it for good).
+   */
+  asksEachAlone?: boolean;
+  /**
    * How many candidates a signal carries: `PAIRED_CALL_CANDIDATES` on a chat session, whose frames have room for
    * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
    */
@@ -295,6 +302,7 @@ export function useWebRTC({
   media,
   iceServers,
   relayOnly,
+  asksEachAlone,
   maxCandidates,
   devices,
   chatId,
@@ -303,6 +311,8 @@ export function useWebRTC({
   iceServersRef.current = iceServers;
   const relayOnlyRef = useRef(relayOnly === true);
   relayOnlyRef.current = relayOnly === true;
+  const asksEachAloneRef = useRef(asksEachAlone === true);
+  asksEachAloneRef.current = asksEachAlone === true;
   const maxCandidatesRef = useRef(maxCandidates);
   maxCandidatesRef.current = maxCandidates;
   const onErrorRef = useRef(onError);
@@ -390,11 +400,32 @@ export function useWebRTC({
    * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
    * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
    * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
-   * the call, as before, and the note names it.
+   * the call, as before, and the note names it. Where each device is asked alone (`asksEachAlone`), the microphone is
+   * asked first and the camera after it, each once.
    */
   const captureForCall = useCallback(
     async (withVideo: boolean, cancelled: () => boolean): Promise<{ stream: MediaStream; cameraError?: unknown }> => {
       const audio = captureFrom("audio");
+      if (withVideo && asksEachAloneRef.current) {
+        let stream: MediaStream;
+        try {
+          stream = await mediaRef.current.getUserMedia({ audio, video: false });
+        } catch (error) {
+          setMediaProblemOf("mic");
+          throw error;
+        }
+        if (cancelled()) return { stream };
+        try {
+          const camera = await mediaRef.current.getUserMedia({ audio: false, video: captureFrom("video") });
+          camera.getVideoTracks().forEach((track) => stream.addTrack(track));
+          return { stream };
+        } catch (error) {
+          if (!cancelled() && mediaProblem(error)) return { stream, cameraError: error };
+          stream.getTracks().forEach((track) => track.stop());
+          setMediaProblemOf("both");
+          throw error;
+        }
+      }
       try {
         return { stream: await mediaRef.current.getUserMedia({ audio, video: withVideo && captureFrom("video") }) };
       } catch (error) {
