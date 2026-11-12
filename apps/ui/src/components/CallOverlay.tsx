@@ -150,7 +150,8 @@ export function CallOverlay({
   useTabTrap(box, !mini);
   // Back (Android's back gesture) takes it to the small window, as a phone's own call screen does: the chat under it
   // stays where it was. It went back under the call (a chat to the list), and the next Back left the app mid-call.
-  useBackCloses(() => setMini(true), !mini);
+  // This call alone: Back is no choice of window, and kept, every call after it opened small.
+  useBackCloses(() => setMiniState(true), !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
