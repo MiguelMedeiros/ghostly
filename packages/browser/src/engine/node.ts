@@ -2394,40 +2394,17 @@ export class GhostlyNode implements EngineImplementation {
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
-    for (let stored of links) {
+    for (const stored of links) {
       if (stored.group) continue;
       await this.settleHistory(stored.id);
-      const messages = await db.getMessages(stored.id);
-      stored = await this.settleJoinLine(stored, messages);
-      const storedFiles = await fileStore.listForLink(stored.id);
-      // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
-      // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
-      // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
-      // delivery wrote the record says "transferring" for good).
-      const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
-      // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
-      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
-        file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
-      // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
-      // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
-      const unreceipted = new Set(messages.flatMap(m => m.sender === "me" && m.file && m.delivery !== "delivered" ? [m.file.id] : []));
-      this.fileDesk.restore(stored.id, storedFiles, unreceipted);
-      const files = linkFilesFrom(stored.id, storedFiles, messages);
-      this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
-      // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
-      this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
-      // So are the cards due to go again: a session that opens reads no history for them when there are none.
-      this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
-      // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
-      this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
-      this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
-      // What the contact's clock was when the chat was last live: its first message of this run is read by it.
-      for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
-      const note = this.noteFromHistory(stored.id, messages);
-      if (note) this.reactionNotes.set(stored.id, note);
-      // The contact's reactions that waited for their message when the engine stopped wait again (or land, if it did).
-      if (stored.reactionsWaiting?.length) await this.reactions.restore(stored.id, stored.reactionsWaiting, messages);
-      if (stored.profile) await this.outboxFor(stored.id).recover(messages);
+      // A chat this run leaves unstarted reads its newest row alone: the rest of its history waits for the command to
+      // name it (`restoreDeferred`). Each read whole cost a one-shot 0.45 s and 80 MB per 50,000 messages in the profile.
+      if (this.deferredChats.has(stored.id)) {
+        this.links.set(stored.id, newLiveLink(stored, (await db.getMessagePage(stored.id, { limit: 1 })).messages[0]?.timestamp ?? 0));
+        this.chatRestores.set(stored.id, null);
+        continue;
+      }
+      await this.restoreChat(stored);
     }
     this.transfersRestored = true;
     // The chats are known now: ecash sent in one deleted before is offered back on the Wallet page.
@@ -2454,6 +2431,65 @@ export class GhostlyNode implements EngineImplementation {
     else if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
     // A restored copy whose turn was not read at the restore: read now, then every 30 seconds while limited.
     if (this.restoreCheck === "checking" && this.limitedMode) this.checkRestoredTurn(0);
+  }
+
+  /**
+   * The chats left unstarted at start (`deferChats`) whose history is not read yet: `null` until the command names one
+   * (`restoreDeferred`), then that read.
+   */
+  private readonly chatRestores = new Map<string, Promise<void> | null>();
+
+  /** A deferred chat's restore (`restoreChat`), read once, before it starts or a command reads it. */
+  private restoreDeferred(linkId: string): Promise<void> {
+    const restore = this.chatRestores.get(linkId);
+    if (restore !== null) return restore ?? Promise.resolve();
+    const live = this.links.get(linkId);
+    const restoring = live ? this.restoreChat(live.stored) : Promise.resolve();
+    this.chatRestores.set(linkId, restoring);
+    return restoring;
+  }
+
+  /**
+   * What a saved 1:1 chat knows from its history, read whole once: its newest message, its files and their transfers, what
+   * waits for it to be live, my edits on their way, when the contact was last heard, its latest reaction, and the
+   * outbox's rows.
+   */
+  private async restoreChat(stored: StoredLink): Promise<void> {
+    const messages = await db.getMessages(stored.id);
+    stored = await this.settleJoinLine(stored, messages);
+    const storedFiles = await fileStore.listForLink(stored.id);
+    // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
+    // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
+    // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
+    // delivery wrote the record says "transferring" for good).
+    const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
+    // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
+    for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
+      file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
+    // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
+    // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
+    const unreceipted = new Set(messages.flatMap(m => m.sender === "me" && m.file && m.delivery !== "delivered" ? [m.file.id] : []));
+    this.fileDesk.restore(stored.id, storedFiles, unreceipted);
+    const files = linkFilesFrom(stored.id, storedFiles, messages);
+    const newest = messages[messages.length - 1]?.timestamp ?? 0;
+    // A chat left unstarted at start keeps its live link: what this run did with it since stays.
+    const left = this.links.get(stored.id);
+    if (left) Object.assign(left, { stored, lastMessageAt: Math.max(left.lastMessageAt, newest), files });
+    else this.links.set(stored.id, newLiveLink(stored, newest, files));
+    // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
+    this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
+    // So are the cards due to go again: a session that opens reads no history for them when there are none.
+    this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
+    // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
+    this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
+    this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
+    // What the contact's clock was when the chat was last live: its first message of this run is read by it.
+    for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
+    const note = this.noteFromHistory(stored.id, messages);
+    if (note) this.reactionNotes.set(stored.id, note);
+    // The contact's reactions that waited for their message when the engine stopped wait again (or land, if it did).
+    if (stored.reactionsWaiting?.length) await this.reactions.restore(stored.id, stored.reactionsWaiting, messages);
+    if (stored.profile) await this.outboxFor(stored.id).recover(messages);
   }
 
   // -- a restored copy whose turn could not be read (WISP 06 § A backup restored where a device set exists) ----------
@@ -3250,7 +3286,7 @@ export class GhostlyNode implements EngineImplementation {
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
       // Joined again in a run that left the saved chats unstarted (`deferChats`): this one is the run's chat now.
-      if (this.deferredChats.delete(existing.stored.id) && this.networkOn) this.startLink(existing.stored.id);
+      await this.startDeferredChat(existing.stored.id);
       return { linkId: await this.existingLink(existing.stored.id) };
     }
     this.refuseOwnInvite(params);
@@ -8804,9 +8840,12 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * Starts a chat this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names, once the command has
-   * found it. Any other chat, or one already started, is left as it is.
+   * found it. Its history is read first (`restoreDeferred`), offline too: the command reads what it knows. Any other
+   * chat, or one already started, is left as it is.
    */
-  startDeferredChat(linkId: string): void {
+  async startDeferredChat(linkId: string): Promise<void> {
+    if (!this.deferredChats.has(linkId)) return;
+    await this.restoreDeferred(linkId);
     if (!this.deferredChats.delete(linkId)) return;
     if (this.networkOn && !this.shuttingDown) this.startLink(linkId);
   }
