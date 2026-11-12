@@ -180,13 +180,16 @@ function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
  * app's cache go (`incoming_share_done`): the page holds what it needs. Rust hands
  * a share over once, so one that waits when the page restarts (a profile switch, `carryIncomingShare`) is kept for the
  * next page in session storage, its tokens with it (the shelf lasts as long as the process); one not kept goes with
- * the page, its copies too.
+ * the page, its copies too. One share is kept, as the next page's picker shows one: the picker's, else the last sent
+ * to a chat; the others' copies go then.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
   /** Lets the copies of the share that waits in the picker go. */
   let letGo: (() => void) | null = null;
   /** Let the copies of each share not read yet go (in the picker, or sent to a chat): they go with the page, unless kept. */
   const withPage = new Set<() => void>();
+  /** Lets the copies of the share kept for the next page go: one later kept takes its place there. */
+  let carried: (() => void) | null = null;
   const receive = (shared: Shared) => {
     const taken = withinPasteTotal(shared.files);
     const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
@@ -234,6 +237,10 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
         if (clips.length && !held) return false;
         sessionStorage.setItem(CARRIED_SHARE_KEY, JSON.stringify(shared));
         withPage.delete(done);
+        // One share is kept (the next page's picker shows one): the one kept before it, sent to a chat, is in no page now.
+        const before = carried;
+        carried = done;
+        before?.();
         return true;
       },
       // Out of the picker, waiting for the chat's composer: a later share no longer lets these go under it.
