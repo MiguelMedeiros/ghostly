@@ -483,6 +483,29 @@ describe("shared services", () => {
     expect(node.getState().services[0]).toMatchObject({ requests: 1, sharedWith: [] });
   });
 
+  it("stopping, removing or unsharing a service takes it back from the requests already open", () => {
+    const { node } = engine();
+    const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });
+    const alice = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    node.setServiceShared({ serviceId, peerPubKeyZ32: bob, shared: true });
+    const open = () => [node["hostedService"](serviceId, alice)!.revoked!, node["hostedService"](serviceId, bob)!.revoked!];
+
+    let [a, b] = open();
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: false });
+    expect([a.aborted, b.aborted], "only the contact taken off the list").toEqual([true, false]);
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    [a, b] = open();
+    expect(a.aborted, "granted again: a new request is served").toBe(false);
+
+    node.setServiceEnabled({ serviceId, enabled: false });
+    expect([a.aborted, b.aborted]).toEqual([true, true]);
+    node.setServiceEnabled({ serviceId, enabled: true });
+    [a, b] = open();
+    node.removeService({ serviceId });
+    expect([a.aborted, b.aborted]).toEqual([true, true]);
+  });
+
   it("a contact's requests send one state a second with their count, not one each", async () => {
     const { node, events } = engine();
     const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });

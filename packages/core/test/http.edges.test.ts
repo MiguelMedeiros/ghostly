@@ -443,6 +443,61 @@ describe("HttpHost", () => {
     expect(t.chunks().some((c) => c.end)).toBe(false);
   });
 
+  it("resets the open requests of a service once it is taken back, and serves the others to their end", async () => {
+    const taken = new AbortController();
+    const shared = { atlas: { ...services.atlas, revoked: taken.signal }, other: { id: "other", target: services.atlas.target } };
+    const r = recorder();
+    const answers: (() => void)[] = [];
+    let next!: () => void;
+    const requests: LocalRequest[] = [];
+    const h = new HttpHost(r.channel, (id) => shared[id as keyof typeof shared], (request) => {
+      requests.push(request);
+      if (request.url.endsWith("/stream")) {
+        return Promise.resolve(ok((async function* () {
+          yield utf8Encode("one");
+          await new Promise<void>((resolve) => (next = resolve));
+          yield utf8Encode("two");
+        })()));
+      }
+      return new Promise((resolve) => answers.push(() => resolve(ok([utf8Encode("secret answer")]))));
+    });
+    h.handleRequest(req({ id: 1, p: "/slow" }));
+    h.handleRequest(req({ id: 3, p: "/stream" }));
+    h.handleRequest(req({ id: 5, s: "other", p: "/slow" }));
+    await vi.waitFor(() => expect(next).toBeTypeOf("function"));
+    taken.abort();
+    expect(requests.map((q) => q.signal.aborted)).toEqual([true, true, false]);
+    for (const answer of answers) answer();
+    next();
+    await flush();
+    expect(r.controls().filter((f) => !("id" in f) || f.id !== 5)).toEqual([
+      { t: "res", id: 3, st: 200, h: [], b: true },
+      { t: "rst", id: 1, d: "s", e: "The app is no longer shared with you." },
+      { t: "rst", id: 3, d: "s", e: "The app is no longer shared with you." },
+    ]);
+    expect(r.body(1)).toBe("");
+    expect(r.body(3)).toBe("one");
+    expect(r.chunks().filter((c) => c.end).map((c) => c.id)).toEqual([5]);
+    expect(r.body(5)).toBe("secret answer");
+    expect(h.activeRequests).toBe(0);
+    expect(h["revokedListeners"].size).toBe(0);
+  });
+
+  it("listens once to a service being taken back, and stops once its requests are done", async () => {
+    const taken = new AbortController();
+    const add = vi.spyOn(taken.signal, "addEventListener");
+    const remove = vi.spyOn(taken.signal, "removeEventListener");
+    const r = recorder();
+    const answers: (() => void)[] = [];
+    const h = new HttpHost(r.channel, () => ({ ...services.atlas, revoked: taken.signal }), () => new Promise((resolve) => answers.push(() => resolve(ok()))));
+    for (let id = 1; id < 2 * LIMITS.maxConcurrentRequestsPerPeer; id += 2) h.handleRequest(req({ id }));
+    expect(add).toHaveBeenCalledOnce();
+    for (const answer of answers) answer();
+    await flush();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(r.controls().filter((f) => f.t === "res")).toHaveLength(LIMITS.maxConcurrentRequestsPerPeer);
+  });
+
   it("hands a followed redirect back as 302 for GET and 303 for other methods", async () => {
     const t = host(async (request) => ok([utf8Encode("x")], { finalUrl: `http://localhost:3400/moved?from=${request.method}` }));
     t.host.handleRequest(req());

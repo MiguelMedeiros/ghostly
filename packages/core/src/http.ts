@@ -329,6 +329,12 @@ function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolea
 export interface HostedHttpService {
   id: string;
   target: LocalTarget;
+  /**
+   * Aborts once this peer may no longer reach the service (stopped, removed,
+   * or the contact taken off its list): the requests still open are reset, not
+   * answered.
+   */
+  revoked?: AbortSignal;
 }
 
 export interface LocalRequest {
@@ -380,6 +386,8 @@ export class HttpHost {
   private readonly live = new Set<HostStream>();
   /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
   private heldBodyBytes = 0;
+  /** One listener per `revoked` signal of the open streams, not one per stream: a page opens dozens at once. */
+  private readonly revokedListeners = new Map<AbortSignal, () => void>();
 
   constructor(
     private readonly channel: FrameChannel,
@@ -396,7 +404,7 @@ export class HttpHost {
 
     const method = frame.m.toUpperCase();
     const service = this.getService(frame.s);
-    if (!service) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
+    if (!service || service.revoked?.aborted) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
     if (!ALLOWED_METHODS.has(method)) return this.fail(frame.id, 405, "method-not-allowed", "Method not allowed.");
     if (this.live.size >= LIMITS.maxConcurrentRequestsPerPeer) {
       return this.fail(frame.id, 503, "busy", "Too many concurrent requests.");
@@ -416,6 +424,7 @@ export class HttpHost {
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
+    if (service.revoked) this.watchRevoked(service.revoked);
 
     if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
@@ -472,6 +481,31 @@ export class HttpHost {
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
     if (!stream.started) this.release(stream);
+    const revoked = stream.service.revoked;
+    const listener = revoked && this.revokedListeners.get(revoked);
+    if (listener && ![...this.streams.values()].some((s) => s.service.revoked === revoked)) {
+      revoked.removeEventListener("abort", listener);
+      this.revokedListeners.delete(revoked);
+    }
+  }
+
+  /** An answer still on its way would reach someone the app is no longer shared with: those streams are reset. */
+  private watchRevoked(revoked: AbortSignal): void {
+    if (this.revokedListeners.has(revoked)) return;
+    const listener = () => {
+      this.revokedListeners.delete(revoked);
+      for (const stream of [...this.streams.values()]) {
+        if (stream.service.revoked !== revoked) continue;
+        this.end(stream);
+        try {
+          this.channel.send(encodeControl({ t: "rst", id: stream.frame.id, d: "s", e: "The app is no longer shared with you." }));
+        } catch {
+          // channel already closed
+        }
+      }
+    };
+    this.revokedListeners.set(revoked, listener);
+    revoked.addEventListener("abort", listener, { once: true });
   }
 
   /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */

@@ -1114,6 +1114,8 @@ export class GhostlyNode implements EngineImplementation {
   /** `group-wake` frames read per edge, a handful a minute. */
   private readonly groupWakeReceived = new Map<string, RateWindow>();
   private readonly requestCounts = new Map<string, number>();
+  /** One per service and contact that was served: aborted once that contact may no longer reach it (`servicesChanged`). */
+  private readonly serviceGrants = new Map<string, { serviceId: string; peerPubKeyZ32: string; revoke: AbortController }>();
   /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
   private requestCountsTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly transfers = new Map<string, FileTransferView>();
@@ -8439,7 +8441,10 @@ export class GhostlyNode implements EngineImplementation {
       this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
       // A page loading its assets asks many times a second: one state a second carries the counts, not one per request.
       this.requestCountsTimer ??= setTimeout(() => { this.requestCountsTimer = undefined; this.emitState(); }, REQUEST_COUNTS_MS);
-      return { id, target };
+      const key = `${id} ${peerPubKeyZ32}`;
+      let grant = this.serviceGrants.get(key);
+      if (!grant) this.serviceGrants.set(key, grant = { serviceId: id, peerPubKeyZ32, revoke: new AbortController() });
+      return { id, target, revoked: grant.revoke.signal };
     } catch {
       return undefined;
     }
@@ -10362,6 +10367,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private servicesChanged(): void {
+    // Stopped, removed or unshared: the answers still on their way to that contact are not sent.
+    for (const [key, grant] of this.serviceGrants) {
+      const service = this.services.find((s) => s.id === grant.serviceId);
+      if (service && mayReach(service, grant.peerPubKeyZ32)) continue;
+      this.serviceGrants.delete(key);
+      grant.revoke.abort();
+    }
     for (const live of this.links.values()) void live.link?.refreshServices();
     this.emitState();
   }
