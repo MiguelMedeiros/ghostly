@@ -246,6 +246,18 @@ describe("updates", () => {
     return { store, v1, v2 };
   }
 
+  it("Update pressed again on the screen of the update another tab installed: that version is installed, nothing refused", async () => {
+    const { store, v1, v2 } = await waiting();
+    const update = () => store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["chat"] });
+    expect(await update()).toMatchObject({ sequence: 2, digest: v2.digest });
+    const again = await update();
+    expect(again).toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat"] });
+    expect(again.pending).toBeUndefined();
+    // Without the version its screen listed, or for another one, no update waits.
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^no-update/);
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 3, added: [] })).rejects.toThrow(/^no-update/);
+  });
+
   it.each([false, true])("Update and Uninstall at once, the update's files gone (Uninstall first: %s): the app stays uninstalled", async (first) => {
     const { store, v1, v2 } = await waiting();
     // A restored profile: the waiting update's files are not on this device.
