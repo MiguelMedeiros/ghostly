@@ -192,7 +192,7 @@
       "perProofTest": "{{fee}} sat de prueba por prueba (cerca de 1 sat de prueba por pago)"
     },
     "history": {
-      "fee": "comisión {{amount}}",
+      "fee": "comisión {{amount}} {{unit}}",
       "feesPaid": "Comisiones pagadas: {{amount}} {{unit}}",
       "movements": "{{count}} movimientos",
       "movementsOne": "1 movimiento",

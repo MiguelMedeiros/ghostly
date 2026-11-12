@@ -192,7 +192,7 @@
       "perProofTest": "プルーフごとに {{fee}} テスト sat（支払い 1 回あたり約 1 テスト sat）"
     },
     "history": {
-      "fee": "手数料 {{amount}}",
+      "fee": "手数料 {{amount}} {{unit}}",
       "feesPaid": "支払った手数料：{{amount}} {{unit}}",
       "movements": "{{count}} 件の取引",
       "movementsOne": "1 件の取引",

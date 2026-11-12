@@ -254,13 +254,13 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
       ) : pending ? (
         <span ref={target} tabIndex={-1} className="chat-text-card-line self-center text-text-primary/80 focus:outline-none" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
       ) : quote && confirming && over === undefined ? (
-        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
+        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit: satsIn(t, network), fee: formatAmount(quote.feeReserve, t.language), feeUnit: satsIn(t, network, quote.feeReserve) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         // Each step's own buttons (keyed): reused across steps, the Cancel pressed would come back as Copy, focused.
         <Fragment key="quote">
           {over !== undefined && <p className="text-danger-ink chat-text-card-line m-0 basis-full" data-testid="invoice-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit: satsIn(t, network) })}</p>}
           <button ref={target} className={button} disabled={over !== undefined} {...working(busy)} data-testid="invoice-confirm" onClick={() => { if (busy) return; if (network === "mainnet") setConfirming(true); else void pay(quote, false); }}>
-            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
+            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), unit: satsIn(t, network), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
           <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>
         </Fragment>

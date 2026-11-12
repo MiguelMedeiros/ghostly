@@ -208,7 +208,7 @@
       "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
-      "fee": "رسوم {{amount}}",
+      "fee": "رسوم {{amount}} {{unit}}",
       "feesPaid": "الرسوم المدفوعة: {{amount}} {{unit}}",
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",

@@ -192,7 +192,7 @@
       "perProofTest": "每个证明 {{fee}} 测试 sat（每笔付款约 1 测试 sat）"
     },
     "history": {
-      "fee": "手续费 {{amount}}",
+      "fee": "手续费 {{amount}} {{unit}}",
       "feesPaid": "已付手续费：{{amount}} {{unit}}",
       "movements": "{{count}} 笔记录",
       "movementsOne": "1 笔记录",
