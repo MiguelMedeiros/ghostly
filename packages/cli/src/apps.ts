@@ -7,6 +7,7 @@ import {
   readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
+import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
 import { jsonOut } from "./jsonOut";
@@ -223,7 +224,11 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
   const m = read.bundle.manifest;
   const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
-  const files = isUrl ? new Set([source, ...(m.sources ?? [])].flatMap(besideUrl)) : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
+  // The `sources` are the publisher's words: beside them only on the hosts a client reads from (isAppFetchUrl), never a
+  // host or port of the publisher's choosing on this machine's network.
+  const files = isUrl
+    ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
+    : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
   for (const file of files) {
     const revocation = appRevocationFor(version, await revocationsIn(file, isUrl));
     if (revocation) {
