@@ -54,6 +54,10 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    // The same app still running in that chat (hidden by Back) is only shown again: no entry read, no runner asked, so
+    // it comes back offline too.
+    const already = linkId && options?.again === undefined && appSlot(linkId) ? chatApp(linkId) : undefined;
+    if (linkId && already?.ref === ref && !already.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
