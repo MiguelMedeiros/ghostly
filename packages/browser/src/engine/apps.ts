@@ -1807,6 +1807,8 @@ export class Apps {
   async acceptUpdate({ ref, sequence, added: shown }: { ref: string; sequence?: number; added?: readonly string[] }): Promise<InstalledAppView> {
     if (shown !== undefined && !Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const installed = await this.installedOrFail(ref);
+    // The update its screen listed is the version installed now (Update pressed in another tab first): it is done.
+    if (!installed.pending && sequence !== undefined && installed.sequence === sequence) return this.view(installed, await this.stores());
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
     if (sequence !== undefined && pending.sequence !== sequence) fail("permissions-changed", `Another update waits now, which adds ${pending.added.length ? pending.added.join(", ") : "no permission"}; look at it again`);
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
