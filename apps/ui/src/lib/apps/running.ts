@@ -16,6 +16,7 @@ import type { AppTakedown } from "./open";
 import type { Translate } from "../../locales/translate";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { OpenAppOptions } from "./open";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 
 export interface ChatApp {
   ref: string;
@@ -27,6 +28,8 @@ export interface ChatApp {
   /** Where its manifest says it shows: `full` covers the whole chat, with Back to it, at every width. */
   view: "chat" | "full";
   running: RunningApp;
+  /** Opened with "Run anyway" (a version a store removed): Open again opens it the same way. */
+  runAnyway?: boolean;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
   /** It lets the contact's app read a file now (WISP 1200 § A read lane to the contact): the header says so. */
@@ -117,6 +120,15 @@ export function useChatAppCovers(linkId: string | undefined): boolean {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
+/**
+ * Whether the app in the chat `linkId` is shown over the chat now, the chat's own dialogs (+ → Apps) out of sight under
+ * it: over its whole width or a `full` one, and any on a phone.
+ */
+export function chatAppOver(linkId: string): boolean {
+  const app = apps.get(linkId);
+  return !!app?.shown && (app.wide || app.view === "full" || window.matchMedia(MOBILE_QUERY).matches);
+}
+
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */
 export function useAppSessions(): readonly string[] {
   return useSyncExternalStore(subscribe, () => sessions, () => sessions);
@@ -125,14 +137,15 @@ export function useAppSessions(): readonly string[] {
 /**
  * Opened from the Apps page in a chat the person picked (a `chat` app runs in a chat only): the chat takes it as it
  * shows, once its panel is there (Chat.tsx), and opens it as its own + → Apps would. One not taken within a minute (the
- * person went elsewhere) is dropped.
+ * person went elsewhere) is dropped. Its age is read on the monotonic clock (the map lives only as long as the page): a
+ * device clock set back never keeps a stale one, to open by itself the next time that chat shows.
  */
 export interface OpenRequest { app: InstalledAppView; options?: OpenAppOptions }
 const OPEN_REQUEST_MS = 60_000;
 const requests = new Map<string, OpenRequest & { at: number }>();
 
 export function requestOpenInChat(linkId: string, request: OpenRequest): void {
-  requests.set(linkId, { ...request, at: Date.now() });
+  requests.set(linkId, { ...request, at: performance.now() });
   changed();
 }
 
@@ -148,7 +161,7 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
   if (!request) return undefined;
   requests.delete(linkId);
   changed();
-  return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
+  return performance.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
 /**

@@ -41,7 +41,9 @@ const test = base.extend({
       const tapped = incoming.url === TAP_SCRIPT;
       // The script whole, to add to: not compressed.
       const headers = { ...incoming.headers, host: target.host, ...(tapped && { "accept-encoding": "identity" }) };
-      const upstream = request(new URL(tapped ? "/sw.js" : incoming.url!, target), { method: incoming.method, headers }, (response) => {
+      // Only the path and query asked for, always on the suite's server: a request line naming another host goes nowhere else.
+      const asked = new URL(incoming.url ?? "/", "http://localhost");
+      const upstream = request(target.origin + (tapped ? "/sw.js" : asked.pathname + asked.search), { method: incoming.method, headers }, (response) => {
         if (!tapped) { answer.writeHead(response.statusCode!, response.headers); response.pipe(answer); return; }
         const parts: Buffer[] = [];
         response.on("data", (part: Buffer) => parts.push(part));

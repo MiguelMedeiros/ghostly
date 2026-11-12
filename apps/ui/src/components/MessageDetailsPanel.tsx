@@ -7,6 +7,7 @@ import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { buildDetails, type DetailRow } from "../lib/messageDetails";
+import { copyMessageText } from "../lib/shareLink";
 import type { ChatMessage } from "../lib/types";
 import "./message-details.css";
 
@@ -63,7 +64,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
   const excerpt = message.file ? message.file.name : message.text.length > 90 ? `${message.text.slice(0, 90)}…` : message.text;
 
   const copyAll = () => {
-    void navigator.clipboard?.writeText(JSON.stringify(model.json, null, 2)).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); }).catch(() => {});
+    void copyMessageText(JSON.stringify(model.json, null, 2)).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); }).catch(() => {});
   };
 
   return createPortal(<>
@@ -71,7 +72,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="message-details-title" data-testid="message-details" data-side={phone ? "bottom" : "end"}
       data-loaded={view === undefined ? "no" : "yes"}
       className={`message-details-panel fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${
-        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "inset-y-0 end-0 w-[min(400px,100vw)] border-s"}`}>
+        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "end-panel inset-y-0 end-0 border-s"}`}>
       <div className="flex items-start gap-3 px-4 pt-3 pb-2 border-b border-border shrink-0">
         {phone && <div aria-hidden="true" className="absolute top-1.5 inset-x-0 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
         <div className="min-w-0 flex-1 pt-1">
@@ -121,7 +122,7 @@ function Row({ row, copyHint, copied }: { row: DetailRow; copyHint: string; copi
     <dd data-testid="message-details-row" data-label={row.label} data-value={row.copy ?? row.value} className="m-0 min-w-0 text-text-secondary text-start">
       {row.copy !== undefined
         ? <button type="button" data-testid="message-details-copy" title={copyHint} aria-label={`${copyHint}: ${row.label}`}
-            onClick={() => { void navigator.clipboard?.writeText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
+            onClick={() => { void copyMessageText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
             className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors min-h-6">{value}</button>
         : value}
     </dd>

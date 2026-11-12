@@ -4,13 +4,17 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { composingKey } from "../../hooks/useComposition";
 import { androidApp } from "../../lib/touchOnly";
+import { openAppSettings } from "../../desktop/androidCameraRefusal";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   switch (problem) {
-    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where.
-    case "denied": return mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
+    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where. The Android app
+    // has no browser: Android asks again, or (once it no longer asks) only its settings allow it.
+    case "denied": return androidApp() ? t("chat.voice.micDeniedAndroid")
+      : mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
     case "unavailable": return t("chat.voice.micUnavailable");
     case "unsupported": return t("chat.voice.micUnsupported");
   }
@@ -18,6 +22,18 @@ function microphoneText(t: Translate, problem: MicrophoneProblem): string {
 import { LiveWaveform, PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine } from "../../lib/problemText";
+
+/**
+ * Whether the browser will ask the person for the microphone before it answers: its question comes up over the page.
+ * The iPhone's web app asks again at each launch. False where the browser can't say.
+ */
+async function microphoneAsks(): Promise<boolean> {
+  try {
+    return (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state === "prompt";
+  } catch {
+    return false;
+  }
+}
 
 type Mode = "idle" | "hold" | "locked";
 type Phase = "starting" | "recording" | "paused" | "sending";
@@ -34,6 +50,11 @@ const CANCEL_PX = 110;
 const LOCK_PX = 80;
 const HINT_MS = 2500;
 const PREVIEW_BARS = 40;
+/**
+ * A held press whose microphone took this long to answer: a person answered the browser's question about it, not a
+ * microphone waking up. Used where the browser can't say beforehand that it will ask (no Permissions API for it).
+ */
+const ASKED_MS = 1500;
 /** Esc throws away a recording shorter than this at once; a longer one asks first. */
 const CONFIRM_MS = 3000;
 /** How long the bin shows after a slide throws a recording away. */
@@ -44,7 +65,8 @@ interface Props {
   /** Why a voice message cannot be sent in this chat now; pressing the mic says so. */
   unavailable?: string;
   disabled?: boolean;
-  onError(message: string): void;
+  /** `action`: a way out the line names (Android's settings for a refused microphone). */
+  onError(message: string, action?: { label: string; run: () => void }): void;
   /** Recording or not: the composer hides its pickers meanwhile. */
   onActiveChange?(active: boolean): void;
 }
@@ -111,6 +133,12 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const sendingRef = useRef(false);
   /** Send was asked for before the microphone answered: it sends once it does. */
   const pendingSendRef = useRef(false);
+  /**
+   * The browser is asking the person for the microphone of this hold. Its question takes the touch: on an iPhone the
+   * page never hears that touch end (no pointerup, no pointercancel), elsewhere it ends to answer. Either way the hold
+   * can't go on, so the recording goes on hands-free once allowed, sent with a tap.
+   */
+  const askingRef = useRef(false);
   /** Whether the recording was running when Esc asked "discard?", so Keep carries on. */
   const confirmResumeRef = useRef(false);
   const modeRef = useRef<Mode>("idle");
@@ -201,6 +229,14 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     }
   }, [cancel, reset, focusOutOfBar, stopPreview, showHint, onSend, onError, t]);
 
+  const lock = useCallback(() => {
+    gestureRef.current = null;
+    setDrag({ x: 0, y: 0 });
+    setModeBoth("locked");
+    setAnnounce(t("chat.voice.handsFree"));
+    buttonRef.current?.focus();
+  }, [t]);
+
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
     if (unavailable) { onError(unavailable); return; }
@@ -222,19 +258,30 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     };
     setModeBoth(next);
     setPhase("starting");
+    askingRef.current = false;
+    const pressedAt = performance.now();
+    if (next === "hold") void microphoneAsks().then((asks) => { if (asks && recorderRef.current === recorder) askingRef.current = true; });
     try {
       await recorder.start();
     } catch (error) {
       if (recorderRef.current === recorder) reset();
+      // Refused in the Android app: Android's own page for Ghostly, where a microphone it no longer asks for is allowed.
+      const settings = error instanceof MicrophoneError && error.problem === "denied" && androidApp()
+        ? { label: t("settings.noticesOpenSettings"), run: () => void openAppSettings() } : undefined;
       onError(error instanceof MicrophoneError && error.message === MICROPHONE_MESSAGES[error.problem] ? microphoneText(t, error.problem)
-        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"));
+        : error instanceof Error ? problemLine(error, t) : microphoneText(t, "unavailable"), settings);
       return;
     }
     if (recorderRef.current !== recorder) return;
+    const asked = askingRef.current || performance.now() - pressedAt >= ASKED_MS;
+    askingRef.current = false;
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
+    // Still held after the browser's question: the finger that answered it is not on the mic any more, whatever the page
+    // heard. It records hands-free, to send with a tap, rather than running on with nothing to let go of.
+    if (modeRef.current === "hold" && asked) lock();
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, t]);
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -331,10 +378,16 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
   // panels (Message details, the connection panel) are a `role="dialog"` box, not a `<dialog>`, and a menu (a message's
   // ⋮) is a group of buttons: Enter there presses its row. The bar's own "discard?" is an alertdialog in the bar, and its
-  // keys stay the bar's.
+  // keys stay the bar's. Nor the keys of an input method composing in a field (chat search in Japanese): its Enter
+  // picks a candidate and its Escape drops one.
   useEffect(() => {
     if (mode === "idle") return;
+    let composedAt: number | null = null;
+    const onCompositionEnd = (event: CompositionEvent) => { composedAt = event.timeStamp; };
     const onKey = (event: globalThis.KeyboardEvent) => {
+      const ended = composedAt;
+      composedAt = null;
+      if (composingKey(event, ended)) return;
       if (sendingRef.current || lockedRef.current) return;
       const dialog = event.target instanceof Element ? event.target.closest("dialog, [role=dialog], [role=alertdialog], [data-menu]") : null;
       if (dialog && !dialog.contains(buttonRef.current) && !barRef.current?.contains(dialog)) return;
@@ -345,17 +398,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       if (event.key === "Escape") { event.preventDefault(); askDiscard(); }
       else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked" && !keyboardOnBarButton(event.target)) { event.preventDefault(); void send(); }
     };
+    document.addEventListener("compositionend", onCompositionEnd, true);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("compositionend", onCompositionEnd, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [mode, askDiscard, keep, send]);
-
-  const lock = useCallback(() => {
-    gestureRef.current = null;
-    setDrag({ x: 0, y: 0 });
-    setModeBoth("locked");
-    setAnnounce(t("chat.voice.handsFree"));
-    buttonRef.current?.focus();
-  }, [t]);
 
   const bin = useCallback(() => {
     if (binTimer.current) clearTimeout(binTimer.current);
@@ -386,6 +435,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setDrag({ x: Math.min(0, x), y: Math.min(0, y) });
   };
 
+  /** A hold whose microphone has not answered yet because the browser asks the person for it (or took a person's time). */
+  const askedDuringHold = () => {
+    const recorder = recorderRef.current, gesture = gestureRef.current;
+    if (modeRef.current !== "hold" || !recorder || recorder.recording || recorder.paused || recorder.ended) return false;
+    return askingRef.current || (!!gesture && Date.now() - gesture.at >= ASKED_MS);
+  };
+
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     // Hands-free: the send button sends as the press ends on it, whether or not a click follows.
     if (modeRef.current === "locked") {
@@ -398,6 +454,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     const gesture = gestureRef.current;
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     suppressClickRef.current = true;
+    // Let go to answer the browser's question about the microphone: what it allows is recorded hands-free.
+    if (askedDuringHold()) return lock();
     gestureRef.current = null;
     const tap = Date.now() - gesture.at < TAP_MS;
     if (gesture.mouse) {
@@ -413,7 +471,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const onPointerCancel = () => {
     sendPressRef.current = null;
-    if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
+    // The browser's question about the microphone took the touch: the recording it allows goes on hands-free.
+    if (askedDuringHold()) lock();
+    else if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
   };
 
   const onClick = () => {
@@ -490,19 +550,19 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
               <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>
-              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
-              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
+              <button ref={keepRef} type="button" className="voice-text-button tap-target" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
+              <button type="button" className="voice-text-button voice-text-danger tap-target" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
             </div>
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button tap-target" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
               {paused && preview ? (
                 <>
-                  <button type="button" className="voice-icon-button" data-testid="voice-preview"
+                  <button type="button" className="voice-icon-button tap-target" data-testid="voice-preview"
                     aria-label={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} title={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} onClick={() => void togglePreview()}>
                     {preview.playing ? <PauseIcon /> : <PlayIcon />}
                   </button>
@@ -529,7 +589,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
                 </>
               )}
               {locked && (
-                <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
+                <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
                   disabled={phase === "starting" || sending || micEnded}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}

@@ -11,8 +11,10 @@ import {
   readImageMeta,
   NO_PICTURE_METADATA,
   NO_VIDEO_METADATA,
+  NO_AUDIO_METADATA,
   withoutPictureMetadata,
   withoutVideoMetadata,
+  withoutAudioMetadata,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -96,17 +98,19 @@ async function copying<T>(copy: Promise<T>): Promise<T> {
   }
 }
 /**
- * A file as it is sent: a picture or an MP4 or QuickTime video without its metadata (where it was taken or recorded,
- * the device, the time), under the name and type it was picked with, before its size is read and its digest computed.
- * One whose metadata cannot be removed is refused (`NO_PICTURE_METADATA`, `NO_VIDEO_METADATA`), never sent as it was.
+ * A file as it is sent: a picture, an MP4 or QuickTime video or an audio file without its metadata (where it was taken
+ * or recorded, the device, the time, an audio file's tags), under the name and type it was picked with, before its
+ * size is read and its digest computed. One whose metadata cannot be removed is refused (`NO_PICTURE_METADATA`,
+ * `NO_VIDEO_METADATA`, `NO_AUDIO_METADATA`), never sent as it was. A voice note recorded here goes as it is: the
+ * recorder writes no tags.
  */
 async function sendable(source: File): Promise<File> {
   let stripped: Blob | undefined;
   try {
     const mime = sanitizeMime(source.type);
-    stripped = await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime);
+    stripped = await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime) ?? await withoutAudioMetadata(source, mime);
   } catch (error) {
-    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw error;
+    if (error instanceof Error && [NO_PICTURE_METADATA, NO_VIDEO_METADATA, NO_AUDIO_METADATA].includes(error.message)) throw error;
     return copying(Promise.reject(error));
   }
   return stripped ? new File([stripped], source.name, { type: source.type, lastModified: source.lastModified }) : source;
@@ -303,6 +307,16 @@ export const servicesPlatform: ServicesPlatform | null = {
       if (await host.withLocalAccess(pattern, add)) return;
     }
     throw new Error("Ghostly needs your permission to reach that local address");
+  },
+  async localAccessNeeded(target) {
+    const host = getBrowserHost();
+    if (!host.localAccessAllowed) return false;
+    try { return !(await host.localAccessAllowed(parseLocalTarget(target).origin)); } catch { return false; }
+  },
+  async allowLocalAccess(target) {
+    const { origin } = parseLocalTarget(target);
+    // From the click, as when it was shared.
+    if (!(await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin))) throw new Error("Ghostly needs your permission to reach that local address");
   },
   async removeService(serviceId) {
     // Read before the call: the state after it may not have caught up yet.

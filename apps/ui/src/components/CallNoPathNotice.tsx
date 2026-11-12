@@ -1,4 +1,5 @@
 import type { IceServerSetting } from "@ghostly/browser/shared/types";
+import { useRef, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useI18n } from "../contexts/I18nContext";
@@ -16,9 +17,17 @@ export const CALLS_BLOCKED_GUIDE = `${APP_WEBSITE}/blob/main/docs/CALLS-BLOCKED.
  * was found: the app only sees that the call found no path. It stays until closed or the next call starts, under the chat's header.
  * With a TURN server already set (`iceServers`, the profile's), the call failed through it too: the note says to check
  * it (its address, its credential, which a restored backup leaves out) or that the contact may need one, not to add one.
+ * Closed with the focus in it, the note goes with its focused ×: the focus then goes to `returnFocus` (the chat's ⋮).
+ * Before, it fell to the page.
  */
-export function CallNoPathNotice({ iceServers, onClose }: { iceServers?: readonly IceServerSetting[]; onClose: () => void }) {
+export function CallNoPathNotice({ iceServers, onClose, returnFocus }: { iceServers?: readonly IceServerSetting[]; onClose: () => void; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
+  const note = useRef<HTMLDivElement>(null);
+  const close = () => {
+    const had = note.current?.contains(document.activeElement);
+    onClose();
+    if (had) returnFocus?.current?.focus({ preventScroll: true });
+  };
   const turnSet = (iceServers ?? []).some((server) => server.urls.split(/[\s,]+/).some((url) => /^turns?:/i.test(url)));
   const nav = useAppNavigation();
   // A 44 px tall hit area, as the ×'s, the look unchanged; 8 px to each side, so the two meet in the 16 px between them.
@@ -26,7 +35,7 @@ export function CallNoPathNotice({ iceServers, onClose }: { iceServers?: readonl
   // A line under the chat's header, as the offline one (OfflineBanner): it stays until closed, so it never sits over
   // the header's back button, calls and ⋮, as an overlay at the top did on a phone.
   return (
-    <div role="alert" data-testid="call-no-path"
+    <div ref={note} role="alert" data-testid="call-no-path"
       className="shrink-0 flex items-start gap-3 border-b border-border bg-surface px-4 py-2 text-sm text-text-primary">
       <div className="min-w-0">
         <span className="block font-medium">{t("calls.noPath")}</span>
@@ -37,7 +46,7 @@ export function CallNoPathNotice({ iceServers, onClose }: { iceServers?: readonl
           <a data-testid="call-no-path-guide" className={link} {...externalLinkProps(CALLS_BLOCKED_GUIDE)}>{t("calls.noPathGuide")}</a>
         </span>
       </div>
-      <button type="button" data-testid="call-no-path-close" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
+      <button type="button" data-testid="call-no-path-close" onClick={close} aria-label={t("common.close")} title={t("common.close")}
         className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-3 before:content-['']">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>

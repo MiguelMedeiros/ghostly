@@ -65,9 +65,11 @@
     "damaged": "Os arquivos dele neste dispositivo estão danificados. Baixe os arquivos de novo.",
     "equivocation": "Este link tem uma cópia diferente de uma versão que você tem. O Ghostly manteve a sua.",
     "expired": "Demorou demais. Verifique o app de novo.",
+    "filesNotFound": "Não deu para baixar os arquivos: nenhum dos links de onde ele veio tem esta versão agora, ou nenhum respondeu. Tente de novo mais tarde.",
     "githubLink": "Essa página do GitHub não é um app. Cole o link do repositório ou o link do arquivo do app.",
     "host": "Apps vêm só do GitHub (raw.githubusercontent.com) ou do jsDelivr em um commit.",
     "hostProblem": "O servidor teve um problema (erro {{status}}). Tente de novo mais tarde.",
+    "locked": "O perfil foi bloqueado antes de o app abrir. Abra-o de novo.",
     "needsFiles": "Os arquivos dele ainda não estão neste dispositivo.",
     "network": "Não foi possível acessar o servidor.",
     "notListed": "Esta loja não lista mais esse app.",
@@ -88,7 +90,9 @@
     "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede.",
     "storeKey": "Essa loja é assinada por outra chave.",
     "tooLarge": "Grande demais.",
-    "unlistedVersion": "O link tem uma versão que esta loja ainda não lista."
+    "unlistedVersion": "O link tem uma versão que esta loja ainda não lista.",
+    "updateFilesGone": "Os arquivos da atualização sumiram. O Ghostly os busca de novo na próxima verificação.",
+    "updateUnlisted": "Esta loja não lista mais esta atualização. O Ghostly vê o que ela lista na próxima verificação."
   },
   "files": {
     "allow": "Permitir",
@@ -157,6 +161,7 @@
     "title": "Abrir {{title}} em uma conversa"
   },
   "store": {
+    "clockLate": "A lista desta loja tem uma data à frente do relógio deste dispositivo. Confira a data e a hora deste dispositivo.",
     "count": "{{count}} apps",
     "count_one": "{{count}} app",
     "count_other": "{{count}} apps",
@@ -193,6 +198,7 @@
     "resumeSharing": "compartilhando um arquivo",
     "sharingWith": "compartilhando um arquivo com {{name}}",
     "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o publicador.",
+    "stoppedFocus": "{{title}} foi parado: insistia em tomar o teclado",
     "stoppedOffline": "{{title}} não pôde iniciar: você está offline. Abra de novo quando estiver conectado.",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o publicador revogou esta versão",

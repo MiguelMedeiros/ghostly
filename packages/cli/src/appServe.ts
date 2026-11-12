@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_PERMISSIONS, appCardUrl, appRef, isAppRef, isAppUrl, type AppPermission } from "@ghostly/core";
 import { list, str, type ApiContext, type Method } from "./apiKit";
@@ -40,10 +40,26 @@ export function servedApps(dir: string): ServedApp[] {
   } catch { return []; }
 }
 
+/** Writes of the list by this process: a stamp taken before one never matches one taken after, whatever the clock. */
+let writes = 0;
+
+/**
+ * What changes whenever `apps.json` does, for a reader that keeps what it learned from the list until then: this
+ * process's writes, and the file's inode, size and change times (a one-shot `app serve` writes it from another process).
+ * Cheaper than a read: no parse.
+ */
+export function servedStamp(dir: string): string {
+  try {
+    const s = statSync(servedFile(dir), { bigint: true });
+    return `${writes} ${s.ino} ${s.size} ${s.mtimeNs} ${s.ctimeNs}`;
+  } catch { return `${writes} none`; }
+}
+
 function writeServed(dir: string, apps: ServedApp[]): void {
   const file = servedFile(dir);
   writeFileSync(file + ".tmp", JSON.stringify(apps, null, 2) + "\n", { mode: 0o600 });
   renameSync(file + ".tmp", file);
+  writes++;
 }
 
 /** A served app by its reference or, when only one has it, its name. */

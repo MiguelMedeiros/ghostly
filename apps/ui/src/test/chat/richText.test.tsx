@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
@@ -44,7 +44,7 @@ describe("formatting", () => {
 
   it("leaves big emoji, pictures and money as they were", () => {
     const { container, unmount } = bubble("👻");
-    expect(container.querySelector(".text-\\[42px\\]")).toHaveTextContent("👻");
+    expect(container.querySelector(".chat-text-emoji")).toHaveTextContent("👻");
     unmount();
     bubble("https://media.giphy.com/media/abc123/200w");
     expect(screen.queryByTestId("message-text")).toBeNull();
@@ -69,6 +69,47 @@ describe("spoilers", () => {
     expect(screen.getByTestId("rich-spoiler")).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+  });
+
+  it.each([["Enter", "{Enter}"], ["Space", " "]])("keep the focus on the text they uncover (%s)", async (_, keys) => {
+    const { user } = bubble("the ending: ||the ghost was the narrator||");
+    await user.tab();
+    const spoiler = screen.getByTestId("rich-spoiler");
+    expect(spoiler).toHaveFocus();
+    await user.keyboard(keys);
+    expect(spoiler).toHaveAttribute("data-shown");
+    // The same node holds the focus (not the page's body), still focusable but out of the Tab order.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(spoiler);
+    expect(screen.getByTestId("rich-spoiler")).toBe(spoiler);
+    expect(spoiler).toHaveAttribute("tabindex", "-1");
+    expect(spoiler).not.toHaveAttribute("role");
+    expect(spoiler).toHaveTextContent("the ghost was the narrator");
+  });
+
+  it("take no focus when tapped while it is elsewhere", async () => {
+    bubble("||secret||");
+    const outside = document.body.appendChild(document.createElement("button"));
+    try {
+      outside.focus();
+      fireEvent.click(screen.getByTestId("rich-spoiler"));
+      expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
+  it("cover the new words of a contact's edit again, and stay shown when the edit leaves them as they were", async () => {
+    const draw = (text: string) => <MessageBubble message={message(text)} peerPubKey="peer" />;
+    const { user, rerender } = bubble("the answer is ||forty two||");
+    await user.click(screen.getByTestId("rich-spoiler"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // Only the words around it change: what was uncovered is still the same.
+    rerender(draw("the answer, as said, is ||forty two||"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // New words under it: covered, until tapped again.
+    rerender(draw("the answer, as said, is ||a new secret||"));
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.getByRole("button", { name: "Hidden text. Tap to show it" }).firstElementChild).toHaveAttribute("aria-hidden", "true");
   });
 
   it("keep a link inside unreachable until shown", async () => {

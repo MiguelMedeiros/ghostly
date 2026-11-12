@@ -1,6 +1,6 @@
 import { identityPicture, nostrPicture, type PictureAt } from "../shared/keptPictures";
 import { isRefusalId } from "../shared/refusals";
-import type { KeptPictures, PostedEvent } from "../shared/rpc";
+import type { KeptPictures, KeptViews, PostedEvent } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import type { EngineClientSink } from "./server";
 
@@ -27,11 +27,18 @@ function withoutDetails(message: StoredMessage): StoredMessage {
  * (`keptPictures`); a new one, or one back after a state without it, goes. The same for each public profile's picture
  * (up to 32 KB): this profile's verified identities' and Nostr keys', and each contact's.
  *
+ * So does each chat's, group edge's and group's view: the engine builds them all again for each state, about one contact
+ * typing too; a group's carries its whole member list, and a private group has an edge per member, each a whole chat
+ * view with its transport log. One this client was sent last as it is now (its pictures left out the same way) is left
+ * out, and the state names every chat's, edge's and group's id in order (`keptViews`): the page keeps the rest, and an
+ * id no longer there is a chat, edge or group gone.
+ *
  * A history's and a change's rows go without their details record (`withoutDetails`).
  */
 export function copyingSink(post: (message: PostedEvent) => void): EngineClientSink {
   let sent: Pick<EngineState, "payments" | "wallet"> | null = null;
   let pictures = new Map<string, string>();
+  let views = new Map<string, string>();
   return {
     post: (message) => {
       if (message.kind === "messages" || message.kind === "message-changes") return post({ ...message, messages: message.messages.map(withoutDetails) });
@@ -68,20 +75,54 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       };
       const ownKept = same("avatar", settings?.avatar);
       if (ownKept) kept.avatar = true;
+      const nowViews = new Map<string, string>();
+      const keptViews: KeptViews = {};
+      // The views in `list` this client was sent last as they are now, with the same pictures left out (`marks`): those
+      // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole.
+      const leaveOutSame = <T extends { id: string }>(list: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown): T[] => {
+        if (!list) return list;
+        const left = new Set<string>();
+        for (const view of list) {
+          const name = `${kind}:${view.id}`;
+          if (nowViews.has(name)) return list;
+          const key = `${JSON.stringify(marks(view.id)) ?? ""}\n${JSON.stringify(view)}`;
+          nowViews.set(name, key);
+          if (views.get(name) === key) left.add(view.id);
+        }
+        if (!left.size) return list;
+        keptViews[kind] = list.map((view) => view.id);
+        // The page keeps a view left out whole, its pictures with it.
+        if (kept[kind]) kept[kind] = kept[kind].filter((id) => !left.has(id));
+        if (kind === "links") for (const id of left) { delete kept.received?.[id]; delete kept.nostr?.[id]; }
+        return list.filter((view) => !left.has(view.id));
+      };
+      const postedLinks = leaveOut(links, "links", "peerAvatar")?.map(contactProfiles);
+      const postedEdges = edges && leaveOut(edges, "edges", "peerAvatar");
+      const postedGroups = leaveOut(groups, "groups", "picture");
+      const keptLinks = new Set(kept.links), keptEdges = new Set(kept.edges), keptGroups = new Set(kept.groups);
+      const sentLinks = leaveOutSame(postedLinks, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]]);
+      const sentEdges = postedEdges && leaveOutSame(postedEdges, "edges", (id) => keptEdges.has(id));
+      const sentGroups = leaveOutSame(postedGroups, "groups", (id) => keptGroups.has(id));
+      for (const list of ["links", "edges", "groups", "received", "nostr"] as const) {
+        const value = kept[list];
+        if (Array.isArray(value) ? !value.length : value && !Object.keys(value).length) delete kept[list];
+      }
       post({ kind: "state", state: {
         ...rest,
         ...(identityProofs && { identityProofs: leaveOutAt(identityProofs, "identityProofs", identityPicture, () => (kept.identityProofs ??= [])) }),
         ...(nostr && { nostr: { ...nostr, own: leaveOutAt(nostr.own, "nostrOwn", nostrPicture, () => (kept.nostrOwn ??= [])) } }),
         settings: ownKept ? (({ avatar: _, ...without }) => without)(settings) : settings,
-        links: leaveOut(links, "links", "peerAvatar")?.map(contactProfiles),
-        ...(edges && { edges: leaveOut(edges, "edges", "peerAvatar") }),
-        groups: leaveOut(groups, "groups", "picture"),
+        links: sentLinks,
+        ...(edges && { edges: sentEdges }),
+        groups: sentGroups,
         ...(sent && payments === sent.payments ? {} : { payments }),
         ...(sent && wallet === sent.wallet ? {} : { wallet }),
         ...(Object.keys(kept).length ? { keptPictures: kept } : {}),
+        ...(Object.keys(keptViews).length ? { keptViews } : {}),
       } });
       sent = { payments, wallet };
       pictures = now;
+      views = nowViews;
     },
   };
 }

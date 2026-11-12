@@ -12,8 +12,12 @@
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
     "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
+    "notSent": "你的消息“{{text}}”未发送",
+    "notSentCount": "{{count}} 条消息未发送",
     "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位",
-    "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位"
+    "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位",
+    "waiting": "你的消息“{{text}}”正在等待联系人上线",
+    "waitingCount": "{{count}} 条消息正在等待联系人上线"
   },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
@@ -310,17 +314,33 @@
   "online": "在线",
   "options": "选项",
   "payments": {
-    "needLive": "付款需要直连",
+    "needLive": "发送需要联系人在线：ecash 从不排队等待。请求可以等到对方回来。",
     "noWallet": "你的联系人还没有钱包",
     "off": "此聊天已关闭：在“接收”中开启一种方式",
     "offOrOld": "你的联系人在此聊天中关闭了付款，或需要更新 Ghostly"
   },
+  "pictureHiddenIp": "隐藏 IP 开启时不显示",
   "pinned": {
     "bar": "置顶消息",
     "info": "每个聊天只有一条置顶消息，所有成员可见。新的置顶会替换旧的。在社区中，只有管理员可以置顶。",
     "notHere": "不在此设备上",
     "pin": "置顶",
     "unpin": "取消置顶"
+  },
+  "presence": {
+    "availability": {
+      "away": "离开",
+      "busy": "忙碌",
+      "dnd": "请勿打扰"
+    },
+    "dot": {
+      "away": "在线，离开",
+      "busy": "在线，忙碌",
+      "dnd": "在线，请勿打扰",
+      "idle": "在线，空闲",
+      "online": "在线"
+    },
+    "status": "状态：{{status}}"
   },
   "preview": {
     "arkAddress": "Ark 地址",
@@ -494,6 +514,7 @@
     "limit": "语音消息最长 {{minutes}} 分钟",
     "message": "语音消息",
     "micDenied": "无法使用麦克风。请在浏览器或系统设置中允许。",
+    "micDeniedAndroid": "无法使用麦克风。请在 Android 询问时允许，或在 Android 设置中允许 Ghostly 使用麦克风。",
     "micUnavailable": "未找到麦克风。请连接一个，或关闭正在使用它的应用。",
     "micUnsupported": "此浏览器无法录制语音消息。",
     "pause": "暂停语音消息",

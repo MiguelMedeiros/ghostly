@@ -4,10 +4,10 @@
  * (`createBroker`), here in the Ghostly window, one per app window, so the API, its checks and its caps are the same:
  *
  * - The runner in the app window asks `app_broker`. Rust answers `start` itself (the entry it holds for that window),
- *   checks every other request (the caller's label, 64 KiB, 50 a second) and hands it here as `ghostly-app-request`
+ *   checks every other request (the caller's label, 66 KiB, 50 a second) and hands it here as `ghostly-app-request`
  *   with the window's label; the broker knows the app by that label, never by anything the app says.
  * - The broker's answers and events go back through `app_post`: an answer to the request waiting for it (the
- *   result of the app's `app_broker` call), an event into that window alone. A `file` answer names where the bytes lie
+ *   result of the app's `app_broker` call), an event into that window alone; bytes go raw (`app_post_bytes`). A `file` answer names where the bytes lie
  *   in Rust's file storage (`byReference`): Rust reads and checks them and hands them to the app window as they are,
  *   so a 16 MiB file is never base64 and JSON on this window's thread (32 ms each in Chromium).
  * - There is no frame load to count: the window loads once, and Rust refuses every navigation after it. The broker's
@@ -19,7 +19,6 @@
  * - A `files.pick` is taken only while the app's window has the focus (`app_focused`): its sheet raises the Ghostly window.
  *   So is the runner's `activity`: the person's taps and keys there count for the lock screen of the Ghostly window.
  */
-import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
 import { appInput, LOCKED, lockedSince, registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
@@ -28,7 +27,8 @@ import type { AppsPlatform, LinkedFilesHost } from "../platform";
 export const APP_REQUEST_EVENT = "ghostly-app-request";
 export const APP_CLOSED_EVENT = "ghostly-app-closed";
 
-type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+/** Tauri's `invoke`: JSON args, or raw bytes placed by headers. */
+type Invoke = <T>(command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => Promise<T>;
 type Listen = <T>(event: string, handler: (event: { payload: T }) => void) => Promise<unknown>;
 
 export interface DesktopOpenerOptions {
@@ -57,15 +57,17 @@ const defaultView: AppView = {
 };
 
 /**
- * A broker message as it travels to Rust: JSON, a file's bytes as base64 (`bytes`), which the runner turns back. A file
- * may be 16 MiB and is encoded on this window's thread: with core's encoder (the runtime's own, or a table), not `btoa`
- * over character codes, which took about 100 ms a MiB.
+ * A broker message on its way to the app window `label`, through Rust. An answer that is bytes (`files.read`,
+ * `remote.read`, a `file` not read by reference) goes raw (`app_post_bytes`, the window and request in its headers),
+ * and Rust makes the base64 the runner reads: here, an app reading 1 MiB slices at 16 MiB a second cost this window
+ * ~2 ms a MiB of base64 and a 1.4 MB JSON string per answer. Anything else is JSON (`app_post`).
  */
-export function forIpc(message: unknown): unknown {
-  if (!message || typeof message !== "object") return message;
-  const { value, ...rest } = message as { value?: unknown };
-  if (value instanceof ArrayBuffer) return { ...rest, bytes: toBase64(new Uint8Array(value)) };
-  return message;
+function postTo(invoke: Invoke, label: string, message: unknown): Promise<unknown> {
+  const { id, value } = (message ?? {}) as { id?: unknown; value?: unknown };
+  if (value instanceof ArrayBuffer && typeof id === "number") {
+    return invoke("app_post_bytes", new Uint8Array(value), { headers: { "x-label": label, "x-id": String(id) } });
+  }
+  return invoke("app_post", { label, message });
 }
 
 export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS, linkedFiles }: DesktopOpenerOptions): AppOpener {
@@ -130,12 +132,13 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     }
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
-    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
+    // Its chat deleted, its window closes too (`stopAppsIn`).
+    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, linkId, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },
       view,
-      post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
+      post: (message) => { void postTo(invoke, label, message).catch(() => { /* the window went */ }); },
       byReference: true,
       shown: () => invoke<boolean>("app_focused", { label }).catch(() => false),
       inUse: () => invoke<boolean>("app_focused", { label }).catch(() => false),

@@ -65,3 +65,43 @@ test("nothing is asked once the check is turned off", { tag: ["@feature:app.upda
   await expect(page.getByTestId("update-status")).toContainText("9.9.9");
   expect(asked).toBe(1);
 });
+
+test("Check now pressed from the keyboard keeps the focus, then hands it to Reload", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  const auto = page.getByRole("switch", { name: "Check for updates automatically" });
+  await auto.click();
+  await expect(auto).toHaveAttribute("aria-checked", "false");
+
+  // The server answers only when let go, so the check is seen while it runs.
+  let answer: () => void = () => {};
+  const answered = new Promise<void>((resolve) => { answer = resolve; });
+  await page.route("**/version.json", async (route) => {
+    await answered;
+    await route.fulfill({ contentType: "application/json", body: NEWER });
+  });
+
+  const check = page.getByRole("button", { name: "Check now" });
+  await check.focus();
+  await page.keyboard.press("Enter");
+  const busy = page.locator("button[aria-busy='true']", { hasText: "Checking" });
+  await expect(busy).toBeFocused();
+
+  answer();
+  await expect(page.getByTestId("update-status")).toContainText("9.9.9");
+  await expect(page.getByTestId("settings-page").getByRole("button", { name: "Reload" })).toBeFocused();
+});
+
+test("on a narrow phone the banner's lines wrap, the warning beside Reload never cut", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { mobile: true, viewport: { width: 320, height: 568 } });
+  await page.route("**/version.json", (route) => route.fulfill({ contentType: "application/json", body: NEWER }));
+  // In Portuguese the warning is the longest of the eight beside Reload at 320 px.
+  await page.evaluate(() => { const key = "ghostly_app_settings"; localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? "{}"), language: "pt" })); });
+  await page.reload();
+
+  const banner = page.getByTestId("update-banner");
+  await expect(banner).toContainText("Atualizar encerra suas chamadas e conexões.");
+  const cut = await banner.locator("p").evaluateAll((lines) => lines.filter((line) => line.scrollWidth > line.clientWidth).map((line) => line.textContent));
+  expect(cut).toEqual([]);
+  await expect(banner.getByRole("button", { name: "Recarregar" })).toBeInViewport();
+});

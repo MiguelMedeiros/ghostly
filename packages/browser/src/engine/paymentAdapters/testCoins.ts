@@ -7,8 +7,10 @@
 /** What one press asks a test mint for: small, fixed, worth nothing. */
 export const TEST_COINS_SATS = 10_000;
 
-/** A faucet's failure in words a person can act on: rate limited says to wait, anything else says what failed. */
+/** A faucet's failure in words a person can act on: rate limited says to wait, a failed mint to try later, anything else says what failed. */
 export function faucetError(error: unknown): Error {
+  // A test mint that failed already says so, naming it and what to do (CashuWallet.testCoins).
+  if ((error as { engineCode?: unknown } | null)?.engineCode === "mintFailedFaucet") return error as Error;
   const message = error instanceof Error ? error.message : String(error);
   const status = (error as { status?: number } | null)?.status;
   if (status === 429 || /\b429\b|rate.?limit|too many requests/i.test(message)) return new Error("Rate limited: the faucet is busy. Try again in a minute.");

@@ -288,8 +288,31 @@ describe("app revoke", () => {
     expect(existsSync(join(keys, "missing.pem"))).toBe(false);
     error(await ghostly(["app", "revoke", dir, "--key", key]), "usage", 2);
     error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--digest", first.digest as string]), "usage", 2);
-    expect((error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-revocation");
+    expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "usage", 2).message).toContain("--digest \"not-a-digest\"");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
+  }, 60_000);
+
+  it("refuses a bad --digest or --reason as a usage error naming the option, and signs no empty reason", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    const first = ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const digest = first.digest as string;
+    const revoke = async (...args: string[]) => error(await ghostly(["app", "revoke", dir, "--key", key, ...args]), "usage", 2).message;
+
+    expect(await revoke("--digest", "nope")).toBe("--digest \"nope\" is not a bundle digest (43 base64url characters, as app verify prints it)");
+    expect(await revoke("--digest", digest, "--digest", digest)).toBe(`--digest ${digest} is given twice`);
+    const many = Array.from({ length: 65 }, (_, i) => ["--digest", createHash("sha256").update(`version ${i}`).digest("base64url")]).flat();
+    expect(await revoke(...many)).toContain("--digest is given at most 64 times");
+    // Empty, blank, two lines or past 200 characters: never signed, never published.
+    expect(await revoke("--up-to", "1", "--reason", "")).toBe("--reason is one line of 1 to 200 characters, not \"\"");
+    expect(await revoke("--up-to", "1", "--reason", "   ")).toBe("--reason is one line of 1 to 200 characters, not \"   \"");
+    expect(await revoke("--up-to", "1", "--reason", "two\nlines")).toBe("--reason is one line of 1 to 200 characters, not \"two\\nlines\"");
+    expect(await revoke("--up-to", "1", "--reason", "x".repeat(600))).toBe("--reason is one line of 1 to 200 characters, not 600 characters");
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
+
+    // A reason of exactly 200 characters is still signed and published.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", digest, "--reason", "y".repeat(200)]))).toMatchObject({ digests: [digest], reason: "y".repeat(200), added: true, revocations: 1 });
   }, 60_000);
 
   it("refuses --up-to past the newest version unless --force, and publish never makes a version the list already stops", async () => {
@@ -431,6 +454,71 @@ describe("app verify <url>", () => {
     expect(seen).toEqual([url, "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
     revoked = false;
     expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
+  }, 60_000);
+
+  it("reads the ghostly-revoke.json beside each of the manifest's sources too, as a client does, each once", async () => {
+    const { manifest, files } = chess();
+    const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const dir = appFolder({ ...manifest, sources: [head, `${head}?again=1`] }, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--reason", "Leaked a test move list"]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const list = readFileSync(join(dir, "ghostly-revoke.json"));
+    // The store's URL is pinned to a commit made before the revocation: only the sources' HEAD has the list.
+    const pinned = "https://cdn.jsdelivr.net/gh/ana/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(url);
+      if (url === pinned) return new Response(stream([new Uint8Array(published)]), { status: 200 });
+      if (url === "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json") return new Response(stream([new Uint8Array(list)]), { status: 200 });
+      return new Response("no", { status: 404 });
+    });
+    await expect(verifyApp(pinned)).rejects.toMatchObject({
+      code: "refused", details: { reason: "revoked", detail: "Leaked a test move list", file: "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json" },
+    });
+    expect(seen).toEqual([pinned, pinned.replace("app.ghostlyapp", "ghostly-revoke.json"), "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+  }, 60_000);
+
+  it("reads beside the manifest's sources only on the hosts a client reads from, not a host or port the publisher names", async () => {
+    const { manifest, files } = chess();
+    const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const dir = appFolder({ ...manifest, sources: ["https://10.0.0.5:8443/x/app.ghostlyapp", "https://localhost/app.ghostlyapp", "https://raw.githubusercontent.com:8443/ana/chess/HEAD/app.ghostlyapp", head] }, files);
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const url = "https://example.com/chess/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (at: string) => {
+      seen.push(at);
+      return at === url ? new Response(stream([new Uint8Array(published)]), { status: 200 }) : new Response("no", { status: 404 });
+    });
+    expect(await verifyApp(url)).toMatchObject({ valid: true });
+    expect(seen).toEqual([url, "https://example.com/chess/ghostly-revoke.json", "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+  }, 60_000);
+
+  it("reads the ghostly-revoke.json files beside the URL and the sources together, not one after another", async () => {
+    const { manifest, files } = chess();
+    const sources = ["ana/chess-a", "ana/chess-b"].map((repo) => `https://raw.githubusercontent.com/${repo}/HEAD/app.ghostlyapp`);
+    const dir = appFolder({ ...manifest, sources }, files);
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    // Each file answers once all three are asked for, or after 2 s: read one after another, only one is ever waiting.
+    const waiting: (() => void)[] = [];
+    let most = 0;
+    vi.stubGlobal("fetch", async (at: string) => {
+      if (at === url) return new Response(stream([new Uint8Array(published)]), { status: 200 });
+      await new Promise<void>((answer) => {
+        const go = () => { waiting.splice(waiting.indexOf(go) >>> 0, 1); answer(); };
+        waiting.push(go);
+        most = Math.max(most, waiting.length);
+        if (waiting.length === 3) [...waiting].forEach((one) => one());
+        else setTimeout(() => { if (waiting.includes(go)) go(); }, 2_000);
+      });
+      return new Response("no", { status: 404 });
+    });
+    expect(await verifyApp(url)).toMatchObject({ valid: true });
+    expect(most).toBe(3);
   }, 60_000);
 
   it("says not found for a 404", async () => {

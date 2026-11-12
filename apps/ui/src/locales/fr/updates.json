@@ -9,6 +9,7 @@
   "downloading": "Téléchargement... {{percent}} %",
   "errorDetails": "Ce qu'a répondu le programme de mise à jour",
   "failed": "Impossible de rechercher les mises à jour",
+  "installFailed": "La mise à jour ne s'est pas installée. Réessayez.",
   "installing": "Mise à jour...",
   "lastChecked": "Dernière vérification à {{when}}",
   "later": "Plus tard",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, type Proof } from "@cashu/cashu-ts";
+import { Amount, HttpResponseError, NetworkError, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet } from "../src/engine/wallet";
 import { TEST_MINT } from "../src/shared/mints";
 import { faucetError } from "../src/engine/paymentAdapters/testCoins";
@@ -137,6 +137,19 @@ describe("Get test coins", () => {
     mint.createMintQuoteBolt11.mockRejectedValue(Object.assign(new Error("Too Many Requests"), { status: 429 }));
     const { wallet } = setup([TEST_MINT]);
     await expect(wallet.testCoins(10_000, "testnet")).rejects.toThrow("Too Many Requests");
+  });
+
+  it("a test mint that fails (a 500, a closed socket) is named, with the next step; its own words kept last", async () => {
+    const socket = "fetch failed (other side closed, UND_ERR_SOCKET) at https://testnut.cashu.space";
+    for (const [failure, said] of [[new HttpResponseError("internal error", 500), "internal error"], [new NetworkError(socket), socket]] as const) {
+      mint.createMintQuoteBolt11.mockRejectedValueOnce(failure);
+      const { wallet } = setup([TEST_MINT]);
+      const failed = await wallet.testCoins(10_000, "testnet").then(() => null, (error: unknown) => error);
+      const message = `testnut.cashu.space could not give test coins right now: try again later. The mint said: ${said}`;
+      expect(failed).toMatchObject({ engineCode: "mintFailedFaucet", message });
+      // As the faucet's failure, the same words: not "The faucet did not pay: internal error".
+      expect(faucetError(failed).message).toBe(message);
+    }
   });
 });
 

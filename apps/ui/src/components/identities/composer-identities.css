@@ -9,7 +9,8 @@
  box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}
 .id-card-back-band{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0;padding:7px 14px 7px 8px;
  background:linear-gradient(90deg,rgba(var(--card-rgb,36,211,194),.34),rgba(var(--card-rgb,36,211,194),.12));border-bottom:1px solid rgba(var(--card-rgb,36,211,194),.3)}
-.id-card-back-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.88)}
+/* Whole, on a second line where it must: a cut took "sees" and most of the contact's name off a 320 px phone. */
+.id-card-back-title{min-width:0;overflow-wrap:anywhere;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.88)}
 .id-card-back-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:12px 14px 6px}
 .id-card-back-sees{display:flex;align-items:center;gap:10px;min-width:0}
 .id-card-back-who{display:grid;min-width:0}
@@ -17,7 +18,8 @@
 .id-card-back-subject{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.02em;color:rgb(var(--card-rgb,36,211,194))}
 /* The whole of a long name (a domain), broken where it must: a cut would hide either its start or its end. */
 .id-card-back-subject-whole{overflow:visible;white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
-.id-card-back-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:rgba(255,255,255,.62)}
+/* Whole too: cut, it lost the date the proof is valid until. */
+.id-card-back-meta{overflow-wrap:anywhere;font-size:11px;color:rgba(255,255,255,.62)}
 /* Where a name came from, whole: its caveat is at its end ("…: not proof that the name or email is theirs"). */
 .id-card-back-meta-whole{overflow:visible;white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
 .id-card-back-state{margin:0;font-size:12px;line-height:1.35;color:rgba(255,255,255,.72)}

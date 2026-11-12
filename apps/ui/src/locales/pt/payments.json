@@ -35,6 +35,10 @@
       "amountMismatch": "A fatura não corresponde ao valor pedido",
       "feeAbove": "A taxa Lightning (até {{fee}} {{unit}}) passa do seu máximo"
     },
+    "expiredNext": {
+      "mine": "peça de novo com um novo pedido",
+      "theirs": "peça um novo pedido ao seu contato"
+    },
     "externalNote": {
       "ark": "Pago de qualquer carteira Ark. A carteira do seu contato marca como pago quando vê o dinheiro.",
       "bitcoin": "Pago de qualquer carteira Bitcoin. A carteira do seu contato marca como pago quando vê o dinheiro, após uma confirmação.",
@@ -58,6 +62,7 @@
     "preparing": "Preparando…",
     "review": "Revisar pagamento",
     "state": {
+      "checking": "Verificando o pagamento…",
       "closed": "Encerrado",
       "lightningPending": "Pagamento Lightning pendente…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "Recebido"
       },
       "request": {
+        "expired": "Expirado",
         "failed": "Falhou",
         "pending": "Aguardando pagamento",
         "settled": "Pago"

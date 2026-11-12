@@ -22,10 +22,16 @@ export const hostErrorShown = (headers: readonly (readonly [string, string])[], 
  * Read only: a profile with no settings yet is its first page's to set up, so English meanwhile.
  */
 async function shown(say: (t: Translate) => string): Promise<ShownError> {
+  const { language, t } = await profileWords();
+  return { text: say(t), lang: languageTag(language), dir: textDirection(language) };
+}
+
+/** The profile's language, and its words loaded (see `shown`). */
+export async function profileWords(): Promise<{ language: Language; t: Translate }> {
   let language: Language = "en";
   try {
     language = (JSON.parse(localStorage.getItem(`${getPrefix()}app_settings`) ?? "{}") as { language?: Language }).language ?? "en";
   } catch { /* unreadable: English */ }
   await loadLocale(language);
-  return { text: say(translatorFor(language)), lang: languageTag(language), dir: textDirection(language) };
+  return { language, t: translatorFor(language) };
 }

@@ -17,6 +17,7 @@
     "recent": "Recenti",
     "symbols": "Simboli"
   },
+  "chooseFiles": "Scegli i file",
   "closeCamera": "Chiudi fotocamera",
   "dhtTooLong": "Troppo lungo per la DHT ({{bytes}} di {{max}} byte). Accorcialo o connettiti dal vivo; la bozza resta.",
   "document": "Documento",
@@ -76,6 +77,7 @@
   "services": "Servizi condivisi",
   "servicesNeedApp": "Richiede l'estensione o l'app desktop di Ghostly",
   "servicesShared": "{{count}} condivisi in questa chat",
+  "shareWaitsForEdit": "Ciò che hai condiviso arriva quando questa modifica finisce.",
   "sharedTextFile": "Testo condiviso",
   "skinTone": "Tonalità della pelle",
   "takePhoto": "Scatta una foto",

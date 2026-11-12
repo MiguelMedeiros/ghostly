@@ -3,7 +3,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { playCue, useCueChat } from "../../lib/cues";
 import { parseMessage, type Block, type ListBlock, type MdLinkData, type Segment } from "../../lib/parse";
 import { markMentions, type MentionView } from "../../lib/parse/mentions";
-import { Highlight, Marked } from "../chat/ChatSearch";
+import { Marked } from "../chat/ChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
 import { CodeBlock } from "./CodeBlock";
 import { holdsInvisible, showInvisible } from "./invisible";
@@ -16,7 +16,8 @@ function Spoiler({ children }: { children: React.ReactNode }) {
   const [shown, setShown] = useState(false);
   const chat = useCueChat();
   const reveal = () => { setShown(true); playCue("spoiler", { chat }); };
-  if (shown) return <span data-testid="rich-spoiler" data-shown="" className="rich-spoiler-shown">{children}</span>;
+  // The same span, still focusable but out of the Tab order: one revealed from the keyboard keeps the focus on its text.
+  if (shown) return <span data-testid="rich-spoiler" data-shown="" tabIndex={-1} className="rich-spoiler-shown">{children}</span>;
   return (
     <span
       data-testid="rich-spoiler"
@@ -46,8 +47,22 @@ export const RICH_ELEMENT_BUDGET = 300;
 const COST = { plain: 1, item: 3, stop: 5 } as const;
 const costOf = (segment: Segment): number => (segment.type === "atom" || (segment.type === "span" && segment.style === "spoiler") ? COST.stop : COST.plain);
 
-/** What a message may still draw (`RICH_ELEMENT_BUDGET`), spent as it is drawn. */
-interface Budget { left: number }
+/**
+ * A chat search's marks one message may draw, its first matches; past them its words stay unmarked (the message is
+ * still found and jumped to). A common word in an agent's long answers marked hundreds per bubble, 60,000 on screen in
+ * a chat of 8 KiB messages, and each word typed took 380-500 ms of one long task to mark and unmark them.
+ */
+export const SEARCH_MARK_BUDGET = 100;
+
+/** What a message may still draw (`RICH_ELEMENT_BUDGET`, `SEARCH_MARK_BUDGET`), spent as it is drawn. */
+interface Budget { left: number; marks: number }
+
+/** The first of these matches the message may still mark, taken from its budget. */
+function spendMarks(ranges: [number, number][], budget: Budget): [number, number][] {
+  const kept = ranges.length > budget.marks ? ranges.slice(0, budget.marks) : ranges;
+  budget.marks -= kept.length;
+  return kept;
+}
 
 /** Masks a spoiler's text drawn as plain text past the budget: still hidden, at the length it had. */
 const masked = (text: string) => text.replace(/\S/gu, "▒");
@@ -77,7 +92,7 @@ const MARKS_ITSELF: ReadonlySet<string> = new Set(["link", "md-link"]);
  * reads, and how far its drawing got: "*hello* world" holds "hello world" across its formatting.
  */
 interface Marks { term: string; ranges: [number, number][]; at: number }
-const marksIn = (list: readonly Segment[], term?: string): Marks | undefined => (term ? { term, ranges: matchRanges(list.map(shown).join(""), term), at: 0 } : undefined);
+const marksIn = (list: readonly Segment[], budget: Budget, term?: string): Marks | undefined => (term ? { term, ranges: spendMarks(matchRanges(list.map(shown).join(""), term), budget), at: 0 } : undefined);
 
 /** A text segment's (or code's) words, with what falls in them of the run's matches marked. */
 function marked(text: string, marks: Marks | undefined, k?: string): React.ReactNode {
@@ -115,7 +130,8 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
         if (segment.style === "bold") out.push(<strong key={k} className="font-semibold">{inner}</strong>);
         else if (segment.style === "italic") out.push(<em key={k}>{inner}</em>);
         else if (segment.style === "strike") out.push(<s key={k}>{inner}</s>);
-        else out.push(<Spoiler key={k}>{inner}</Spoiler>);
+        // Keyed on its words too: a contact's edit that puts new words under one tapped open covers them again.
+        else out.push(<Spoiler key={`${k}:${shown(segment)}`}>{inner}</Spoiler>);
         break;
       }
       case "atom": {
@@ -158,7 +174,7 @@ function listView(list: ListBlock, sentAt: number | undefined, budget: Budget, k
       <li key={i} value={item.number} className="rich-li">
         <span aria-hidden={list.ordered ? undefined : true} className="rich-li-marker">{item.marker}</span>
         <span className="rich-li-body">
-          {segments(item.segments, sentAt, budget, `${k}.${i}.`, marksIn(item.segments, term))}
+          {segments(item.segments, sentAt, budget, `${k}.${i}.`, marksIn(item.segments, budget, term))}
           {item.children.map((child, j) => <React.Fragment key={j}>{listView(child, sentAt, budget, `${k}.${i}.c${j}`, term)}</React.Fragment>)}
         </span>
       </li>,
@@ -171,7 +187,7 @@ function listView(list: ListBlock, sentAt: number | undefined, budget: Budget, k
           {items}
         </Tag>
       )}
-      {rest !== undefined && <div data-testid="rich-rest" className="whitespace-pre-wrap">{term ? <Highlight text={rest} term={term} /> : rest}</div>}
+      {rest !== undefined && <div data-testid="rich-rest" className="whitespace-pre-wrap">{term ? <Marked text={rest} start={0} ranges={spendMarks(matchRanges(rest, term), budget)} /> : rest}</div>}
     </React.Fragment>
   );
 }
@@ -179,15 +195,15 @@ function listView(list: ListBlock, sentAt: number | undefined, budget: Budget, k
 function blockView(block: Block, sentAt: number | undefined, budget: Budget, k: string, term?: string): React.ReactNode {
   switch (block.type) {
     case "codeblock":
-      return <CodeBlock key={k} code={block.code} lang={block.lang} highlight={term} />;
+      return <CodeBlock key={k} code={block.code} lang={block.lang} marks={term ? spendMarks(matchRanges(block.code, term), budget) : undefined} />;
     case "paragraph":
-      return <React.Fragment key={k}>{segments(block.segments, sentAt, budget, `${k}.`, marksIn(block.segments, term))}</React.Fragment>;
+      return <React.Fragment key={k}>{segments(block.segments, sentAt, budget, `${k}.`, marksIn(block.segments, budget, term))}</React.Fragment>;
     case "list":
       return listView(block, sentAt, budget, k, term);
     case "quote":
       return <blockquote key={k} data-testid="rich-quote" className="rich-quote">{block.blocks.map((inner, i) => blockView(inner, sentAt, budget, `${k}.${i}`, term))}</blockquote>;
     case "heading":
-      return <div key={k} data-testid="rich-heading" data-level={block.level} className="rich-heading">{segments(block.segments, sentAt, budget, `${k}.`, marksIn(block.segments, term))}</div>;
+      return <div key={k} data-testid="rich-heading" data-level={block.level} className="rich-heading">{segments(block.segments, sentAt, budget, `${k}.`, marksIn(block.segments, budget, term))}</div>;
   }
 }
 
@@ -200,7 +216,7 @@ function blockView(block: Block, sentAt: number | undefined, budget: Budget, k: 
 export function RichText({ text, sentAt, className, testId, mentions, highlight }: { text: string; sentAt?: number; className?: string; testId?: string; mentions?: readonly MentionView[]; highlight?: string }) {
   // A group message's mentions: their places marked, for the `member-mention` detector (apps/ui/src/lib/parse/mentions.ts).
   const blocks = useMemo(() => mentions?.length ? parseMessage(markMentions(text, mentions), { sentAt, mentions }) : parseMessage(text, { sentAt }), [text, sentAt, mentions]);
-  const budget: Budget = { left: RICH_ELEMENT_BUDGET };
+  const budget: Budget = { left: RICH_ELEMENT_BUDGET, marks: SEARCH_MARK_BUDGET };
   const content = blocks.map((block, i) => blockView(block, sentAt, budget, String(i), highlight));
   return blocks.some((block) => block.type !== "paragraph")
     ? <div data-testid={testId} className={className}>{content}</div>

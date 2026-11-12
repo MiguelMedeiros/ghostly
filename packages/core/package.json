@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/core",
   "private": true,
-  "version": "1.10.2",
+  "version": "1.11.1",
   "type": "module",
   "description": "Shared Ghost protocol: identity, crypto, Pkarr records, services, WebRTC signaling and DataChannel framing",
   "main": "./src/index.ts",
@@ -27,9 +27,9 @@
     "sodium-javascript": "0.8.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "fast-check": "^4.10.2",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

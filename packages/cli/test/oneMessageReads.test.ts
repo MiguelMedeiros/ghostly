@@ -8,7 +8,8 @@ import { callApi, type ApiContext } from "../src/api";
  * or group (synchronous work on the daemon's one thread, about 120 ms at 10,000 messages).
  */
 const link = (id: string, label: string) => ({ id, label, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" } }) as unknown as LinkView;
-const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
+const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
+  members: [{ key: "mine", role: "admin", me: true, online: true }, { key: "anakey", role: "member", me: false, online: true }] } as unknown as GroupView;
 const row = (linkId: string, id: string, fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId, id, text: "t " + id, sender: "peer", timestamp: 1, via: "datalink", ...fields });
 
 function fake() {
@@ -19,7 +20,7 @@ function fake() {
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
-    deleteMessage: vi.fn(async () => {}),
+    deleteMessage: vi.fn(() => ({ everyone: false })),
     removeMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: null as string | null, ...(linkId.startsWith("group:") && { e: 1 }) })),
     removalPending: vi.fn(() => true),
     groupTaken: vi.fn(() => 0),
@@ -39,9 +40,16 @@ describe("delete", () => {
     const { ctx, node, whole } = fake();
     expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1" })).toEqual({ chat: "chat-one", messageId: "peer_1", deleted: "peer_1", everyone: false });
     expect(node.deleteMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "peer_1" });
-    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: "No message k:0:1 in this chat" });
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: 'No message "k:0:1" in this chat (ghostly chat history Alice)' });
     expect(node.deleteMessage).toHaveBeenCalledOnce();
     expect(whole()).toBe(0);
+  });
+
+  it("a waiting text of mine the outbox already handed to the link is deleted for everyone, and the answer says so", async () => {
+    const { ctx, node } = fake();
+    node.deleteMessage.mockReturnValueOnce({ everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 
   it("a group named without --everyone says it is a group and how its message is deleted, not \"No chat\"", async () => {
@@ -67,8 +75,8 @@ describe("message details", () => {
       expect(await callApi(ctx, "chat.details", { chat, message: "k:0:1" })).toEqual({ message: { id: "k:0:1" }, group: { id: "g1" } });
       expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1" });
     }
-    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this group" });
-    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
+    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this group (ghostly group history Crew)' });
+    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
     await expect(callApi(ctx, "chat.details", { chat: "Nobody", message: "x" })).rejects.toMatchObject({ code: "not_found" });
     const { COMMANDS } = await import("../src/commands");
     expect(COMMANDS["message details"]!.usage).toBe("message details <chat|group> <message>");
@@ -161,11 +169,30 @@ describe("forward", () => {
 
   it("one not there is not_found, before anything is forwarded; the secret guard reads the same rows", async () => {
     const { ctx, node } = fake();
-    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1", "nope"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
-    await expect(callApi(ctx, "chat.forward", { chat: "Crew", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: "No message peer_1 in this group" });
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1", "nope"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
+    await expect(callApi(ctx, "chat.forward", { chat: "Crew", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "not_found", message: 'No message "peer_1" in this group (ghostly group history Crew)' });
     node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "peer_1" } });
     expect(node.forwardMessages).not.toHaveBeenCalled();
+  });
+
+  it("an id named twice is read once, and more than 30 messages or 5 chats are refused before any is read", async () => {
+    const { ctx, node } = fake();
+    // One id 50,000 times was read and guarded 50,000 times (a minute of the daemon's thread) for the one message the
+    // engine then forwarded.
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: Array(50_000).fill("peer_1").concat("peer_2"), to: ["Bob", "Bob", "chat-two"] });
+    expect(node.getMessage).toHaveBeenCalledTimes(2);
+    expect(node.forwardMessages).toHaveBeenCalledWith({ linkId: "chat-one", messageIds: ["peer_1", "peer_2"], to: ["chat-two"] });
+    node.getMessage.mockClear();
+    const many = Array.from({ length: 31 }, (_, i) => `peer_${i}`);
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: many, to: ["Bob"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward at most 30 messages at once, not 31" });
+    // The same chat or group by two names is one of the 5.
+    const state = node.getState();
+    node.getState = () => ({ ...state, links: [...state.links, ...["Cy", "Di", "Ed", "Flo"].map((name, i) => link(`chat-${i + 3}`, name))] });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "chat-two", "Crew", "group:g1", "Cy", "Di", "Ed"] });
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "Crew", "Cy", "Di", "Ed", "Flo", "nobody"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward to at most 5 chats and groups at once" });
+    expect(node.getMessage).toHaveBeenCalledOnce();
+    expect(node.forwardMessages).toHaveBeenCalledTimes(2);
   });
 });
 

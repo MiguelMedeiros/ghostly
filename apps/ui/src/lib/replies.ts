@@ -41,11 +41,12 @@ export type Quotable = ReplyTarget & { sender: string; text: string; member?: st
 
 /**
  * A message's line where it is quoted or pinned: its text's, a bot's card's title (the text is only its fallback), or
- * a voice message's or a video's line in the reader's language (its text is kept in English, `fileMessageText`).
+ * a voice message's or a video's line in the reader's language (its text is kept in English, `fileMessageText`). An
+ * app card's line only where the chat's bubbles draw it as a card (`appCards`: `appCardsShown`), its text elsewhere.
  */
-export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT): string {
+export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT, appCards = false): string {
   if (showsCard(message.card)) return replySnippet(cardLine(message.card));
-  return replySnippet(appCardLine(message.card, t) ?? filePreview(message.file, t) ?? message.text);
+  return replySnippet(appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? message.text);
 }
 
 /**
@@ -124,14 +125,19 @@ export function heldOriginal<T extends Quotable>(held: T, index: ReplyIndex, gro
 /** Who wrote a message or an original, as the page names people: me, the contact, a member. */
 export type NameOf = (from: "me" | "peer" | undefined, member?: string) => string | undefined;
 
-/** The quote a reply shows. The original found here wins over what the wire said about it. */
-export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf, t: Translate = englishT): QuoteView {
+/**
+ * The quote a reply shows. The original found here wins over what the wire said about it. `appCards`: the chat draws
+ * an app card as a card (`appCardsShown`), so its quote reads as one too.
+ */
+export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf, t: Translate = englishT, appCards = false): QuoteView {
   const original = (reply.messageId ? index.byId.get(reply.messageId) : undefined) ?? index.byRef.get(reply.id);
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
-    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons).
-    const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original, t);
+    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons):
+    // only when the engine found the question as the press came (`messageId`), so that line is its own. One that came
+    // before its original kept the wire's line, which is only what the replier said: the original here wins.
+    const snippet = reply.button && reply.messageId && reply.snippet ? reply.snippet : messageSnippet(original, t, appCards);
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;

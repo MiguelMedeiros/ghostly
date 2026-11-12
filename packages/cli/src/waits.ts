@@ -1,5 +1,5 @@
 import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { node, type ApiContext } from "./apiKit";
+import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -16,8 +16,11 @@ const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 
 /**
  * What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. A one-shot's
  * `edit` and `group edit` said "while this profile is online" too, as it was about to leave. Ctrl-C says the same.
+ * On a chat nobody joined yet nothing goes before they do: it said "goes with this profile's next command".
  */
-const goesOn = (ctx: ApiContext) => ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
+export const goesOn = (ctx: ApiContext, chat?: string) => chat !== undefined && nobodyJoinedChat(ctx, chat)
+  ? `goes once the contact joins this chat (nobody has yet)${ctx.mode === "one-shot" ? " while this profile is online (`ghostly daemon --detach`)" : ""}`
+  : ctx.mode === "daemon" && stopped(ctx) ? "goes by itself once this profile is online again" : goesOnIn(ctx.mode);
 
 /**
  * A daemon that stops (`ApiContext.stopping`) ends every wait still open at once, with what it knows, as a timeout:
@@ -37,9 +40,9 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
   const until = performance.now() + ms;
   for (;;) {
     const message = await node(ctx).getMessage(chat, messageId);
-    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!message) throw noMessage(messageId, { group: false, ref: chat });
     if (!message.edit?.pending) return message;
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, known(ctx, { messageId, edits: message.edit.seq }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx, chat)}`, known(ctx, { messageId, edits: message.edit.seq }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -48,22 +51,47 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
 export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
   const until = performance.now() + ms;
   while (node(ctx).removalPending({ linkId: chat, messageId })) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, known(ctx, { messageId }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx, chat)}`, known(ctx, { messageId }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
 /**
+ * A private group with no member but me (they all left, or nobody accepted an invitation yet): what I send there now
+ * reaches nobody, not even a member who joins later (a joiner reads nothing from before). A community's roster may not
+ * list every member yet, so only a private group counts.
+ */
+export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => {
+  const group = state(ctx).groups?.find((g) => g.id === groupId);
+  return group?.profile === "mesh" && !group.members.some((m) => !m.me);
+};
+
+/**
+ * Why I am no longer in a group (removed, say), or null while I am. A member removed while away learns it only after
+ * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
+ * out: it asks to be let in again by itself.
+ */
+const outOf = (ctx: ApiContext, groupId: string): string | null => {
+  const group = state(ctx).groups?.find((g) => g.id === groupId);
+  return group?.status && group.status !== "active" && group.status !== "lost" ? group.statusReason ?? "You are not in this group" : null;
+};
+
+/**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
- * private group, an edge to one of my hubs in a community.
+ * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no
+ * edge will ever take it, and the wait sat its whole time, then said "it goes when one opens" and exited 4, which a
+ * bot retries, sending it again each time. Refused as soon as I learn I am out of the group: it sat its whole time
+ * there too and said the same, though nothing goes any more.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
   const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
-    if (taken > 0) return taken;
+    if (taken > 0 || nobodyElseIn(ctx, groupId)) return taken;
+    const out = outOf(ctx, groupId);
+    if (out) throw new CliError("refused", `${out}: no member took it, and it no longer goes`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -85,7 +113,7 @@ export const ONE_SHOT_RECEIPT_MS = 2_000;
 export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
   const until = performance.now() + ms;
   while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, known(ctx, { chat }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx, chat)}`, known(ctx, { chat }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -119,7 +147,7 @@ async function waitForDelivery(ctx: ApiContext, chat: string, messageId: string,
       try {
         const done = look(message);
         if (done) finish(null, done);
-        else if (last) finish(new CliError("timeout", `${ended(ctx, ms)}: the message is ${message?.delivery ?? "not sent yet"} and ${goesOn(ctx)}`, known(ctx, { messageId, delivery: message?.delivery ?? null })));
+        else if (last) finish(new CliError("timeout", `${ended(ctx, ms)}: the message is ${message?.delivery ?? "not sent yet"} and ${goesOn(ctx, chat)}`, known(ctx, { messageId, delivery: message?.delivery ?? null })));
       } catch (error) { finish(error); }
     }, finish);
     const giveUp = () => check(true);

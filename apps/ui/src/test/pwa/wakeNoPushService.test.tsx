@@ -80,7 +80,7 @@ describe("a browser with no push service", () => {
     const { user } = settings();
     await user.click(await screen.findByTestId("settings-wake-retry"));
     await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("settings-wake-retry")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("settings-wake-retry")).not.toHaveAttribute("aria-busy"));
     expect(hint()).toHaveTextContent("This browser has no push service");
     expect(wakeSwitch()).toHaveAttribute("aria-disabled", "true");
     expect(localStorage.getItem(NO_PUSH_SERVICE_KEY)).toBe("1");
@@ -160,10 +160,44 @@ describe("New token refused", () => {
     const { user } = settings();
     await user.click(await screen.findByTestId("settings-wake-rotate"));
     await waitFor(() => expect(fake.subscribe).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("settings-wake-rotate")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("settings-wake-rotate")).not.toHaveAttribute("aria-busy"));
     expect(hint()).toHaveTextContent("This browser has no push service");
     expect(wakeSwitch()).toHaveAttribute("aria-checked", "true");
     expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+  });
+});
+
+/*
+ * Settings is not drawn again on a change of Language: a refusal's line under a switch is written in the language on
+ * screen, not the one it was said in (it stayed in English under a page all in Portuguese until the switch was tapped).
+ */
+describe("a refusal's line, after a change of Language further up the page", () => {
+  const noRoom = () => new Error("Not enough space on this device (QuotaExceededError)");
+  const choosePortuguese = async (user: ReturnType<typeof settings>["user"]) => {
+    await user.click(screen.getByTestId("settings-language"));
+    await user.click(await screen.findByRole("option", { name: /Português/ }));
+    await screen.findByRole("heading", { name: "Aparência" });
+  };
+
+  it("Wake me while closed: in the new language", async () => {
+    platform(async () => { throw noRoom(); });
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake"));
+    await waitFor(() => expect(hint()).toHaveTextContent("Not enough space on this device"));
+    await choosePortuguese(user);
+    expect(hint()).toHaveTextContent("Não há espaço suficiente neste dispositivo");
+  });
+
+  it("Notify me when a contact comes online: in the new language", async () => {
+    platform(async () => keys);
+    fakeEngine.on("setWakeOnline", () => { throw noRoom(); });
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } } }));
+    const { user } = settings();
+    await user.click(await screen.findByTestId("settings-wake-online"));
+    const line = () => screen.getByTestId("settings-wake-online-row");
+    await waitFor(() => expect(line()).toHaveTextContent("Not enough space on this device"));
+    await choosePortuguese(user);
+    expect(line()).toHaveTextContent("Não há espaço suficiente neste dispositivo");
   });
 });
 

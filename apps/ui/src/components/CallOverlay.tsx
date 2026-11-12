@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { CallState } from "../lib/types";
 import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
-import { useTabTrap } from "../hooks/useDismiss";
+import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
-import { callWindowShown } from "../lib/serviceWindows";
+import { fillNames } from "../lib/fillNodes";
+import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -122,10 +124,15 @@ export function CallOverlay({
     }
   };
   const phone = window.innerWidth < 768;
+  // On a touch screen the small window's buttons take a thumb on 44 px (index.css): five of them, Hang up apart, and
+  // the row clear of the corner grips below it need 264 × 168. At 190 × 136 they were 32 px, 5 px apart.
+  const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   const miniWindow = useFloatingBox(
     "ghostly_call_window_box",
-    () => (phone ? { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 } : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: 190, minHeight: 128 },
+    () => (phone
+      ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
+      : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
   );
 
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
@@ -136,7 +143,15 @@ export function CallOverlay({
   const opener = useRef<HTMLElement | null>(null);
   // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
   useEffect(callWindowShown, []);
+  // A video made to fill the window after it (Desktop on Linux) is drawn over everything: the small window stays over
+  // it, and so does the whole one its Back to full screen opens.
+  const overVideo = useSyncExternalStore(watchWindowFilled, windowFilledNow);
+  const stack = overVideo ? "z-[2147483001]" : "z-50";
   useTabTrap(box, !mini);
+  // Back (Android's back gesture) takes it to the small window, as a phone's own call screen does: the chat under it
+  // stays where it was. It went back under the call (a chat to the list), and the next Back left the app mid-call. For
+  // this call only: the window's button is the choice kept; stored, one Back opened every later call small.
+  useBackCloses(() => setMiniState(true), !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
@@ -148,6 +163,9 @@ export function CallOverlay({
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
+  // The device notice goes by its Switch back, its close or its time, maybe with the focus on it: the focus goes to
+  // the Devices button it is about, not to the page's body.
+  useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
 
   // Your own picture keeps the shape of what it shows (camera or screen), so there are never bars around it.
   const [selfAspect, setSelfAspect] = useState(4 / 3);
@@ -193,8 +211,12 @@ export function CallOverlay({
       setDuration(0);
       return;
     }
+    // Counted on the monotonic clock from what had passed when the window started counting: the device's clock put
+    // forward or back mid-call moves the time of day, not the call's length. From the wall clock, an hour ahead read
+    // 1:00:06 six seconds in, and an hour back -1:-59:-54.
+    const from = performance.now() - Math.max(0, Date.now() - callStartedAt);
     const interval = setInterval(() => {
-      setDuration(Math.floor((Date.now() - callStartedAt) / 1000));
+      setDuration(Math.floor((performance.now() - from) / 1000));
     }, 1000);
     return () => clearInterval(interval);
   }, [callState, callStartedAt]);
@@ -219,11 +241,11 @@ export function CallOverlay({
   const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted, told?.own);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
-  // Sharing is never a surprise, to either side.
+  // Sharing is never a surprise, to either side. The contact's name its own <bdi>: "Ana (2)" keeps its brackets on its side in Arabic.
   const sharingNotice = callState !== "connected" ? null
-    : isScreenSharing && remoteIsScreenSharing ? t("calls.sharing.both", { name: peerName })
+    : isScreenSharing && remoteIsScreenSharing ? fillNames(t("calls.sharing.both"), { name: peerName })
     : isScreenSharing ? t("calls.sharing.you")
-    : remoteIsScreenSharing ? t("calls.sharing.peer", { name: peerName }) : null;
+    : remoteIsScreenSharing ? fillNames(t("calls.sharing.peer"), { name: peerName }) : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -234,8 +256,8 @@ export function CallOverlay({
       {...(mini ? {} : { role: "dialog", "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
-          ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
-          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none"
+          ? `call-mini floating fixed ${stack} bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl`
+          : `fixed inset-0 ${stack} bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none`
       }
     >
       {mini && <Grips handleProps={miniWindow.handleProps} />}
@@ -317,13 +339,14 @@ export function CallOverlay({
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
           style={phone && !mini ? { top: `calc(${64 + Math.round(120 / selfAspect) + 16}px + env(safe-area-inset-top))` } : undefined}
-          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 w-max max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-2xl px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />
             <path d="M8 21h8M12 17v4" />
           </svg>
-          <span className="truncate">{sharingNotice}</span>
+          {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
+          <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
         </p>
       )}
 
@@ -455,7 +478,7 @@ export function CallOverlay({
           </button>
         )}
 
-        {devices && <DeviceMenu devices={devices} />}
+        {devices && <DeviceMenu devices={devices} overVideo={overVideo} />}
 
         {/* Screen share: in any connected call, voice or video. Where no screen can be captured (phones) it is not here at all. */}
         {(canShareScreen || screenShareUnavailable) && onToggleScreenShare && (
@@ -508,8 +531,11 @@ const DEVICE_KINDS_SHOWN: readonly DeviceKind[] = ["audioinput", "videoinput", "
 const KIND_NAME = { audioinput: "settings.media.microphone", videoinput: "settings.media.camera", audiooutput: "settings.media.speaker" } as const;
 const NOTICE_TEXT = { lost: "calls.devices.lost", gone: "calls.devices.gone", failed: "calls.devices.failed", back: "calls.devices.back" } as const;
 
-/** The call's device menu: which microphone, camera and speaker, switched without leaving the call. */
-function DeviceMenu({ devices }: { devices: CallDevices }) {
+/**
+ * The call's device menu: which microphone, camera and speaker, switched without leaving the call. Over a video filling
+ * the window (`overVideo`) the call is drawn over it, and so is its menu: at the menus' usual height it opened under both.
+ */
+function DeviceMenu({ devices, overVideo }: { devices: CallDevices; overVideo: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -533,18 +559,19 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
           <circle cx="17" cy="18" r="2" />
         </svg>
       </button>
-      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst>
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst
+        stack={overVideo ? "z-[2147483002]" : "z-50"}>
         {kinds.map((kind, i) => {
           const devicesOfKind = devices.list[kind];
           if (kind !== "audioinput" && devicesOfKind.length === 0) return null;
           const options = [{ id: "", label: t("settings.media.systemDefault") }, ...devicesOfKind.map((d, n) => ({ id: d.id, label: d.label || `${t(KIND_NAME[kind])} ${n + 1}` }))];
           return (
-            <div key={kind} role="group" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
+            <div key={kind} role="radiogroup" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
               <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{t(KIND_NAME[kind])}</p>
               {options.map((option) => {
                 const chosen = devices.current[kind] === option.id;
                 return (
-                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
+                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} radio checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
                     icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={chosen ? "text-accent" : "invisible"}><path d="M5 12l5 5L20 7" /></svg>}
                     onClick={() => { setOpen(false); if (!chosen) devices.choose(kind, option.id); }}>
                     {option.label}
@@ -559,23 +586,44 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
   );
 }
 
-/** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used. */
+/** A device went away and the default took over (or none could), the chosen one is back (with the way to switch to it), or one chosen could not be used.
+ *  On a phone its buttons take a tap on 44 px (`.tap-target`): the ×'s grows into the 12 px gap, up to Switch back. */
 function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
   const name = notice.name || t(KIND_NAME[notice.kind]);
+  // Its time stops while the keyboard focus or the pointer is on it, or Switch back (offered once) could go from under
+  // someone who Tabbed to it or is reading it; it starts over when both have left, or when it goes.
+  const on = useRef({ focus: false, pointer: false });
+  const { hold } = devices;
+  const set = (what: "focus" | "pointer", value: boolean) => {
+    on.current[what] = value;
+    hold(on.current.focus || on.current.pointer);
+  };
+  useEffect(() => () => hold(false), [hold]);
+  // A newer notice can take its place with the focus on Switch back, which leaves with no blur (a removed element says
+  // none): where the focus is, is read again, or the new notice would never run out.
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    on.current.focus = !!bar.current?.contains(document.activeElement);
+    hold(on.current.focus || on.current.pointer);
+  }, [notice, hold]);
   return (
-    <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+    <div ref={bar} role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+      onFocus={() => set("focus", true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) set("focus", false); }}
+      onPointerEnter={() => set("pointer", true)} onPointerLeave={() => set("pointer", false)}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
-      <span className="min-w-0 truncate">{t(NOTICE_TEXT[notice.type], { name })}</span>
+      {/* On two lines if need be: cut to one on a phone, "… desconectado. Usand…" never said what the call uses now. */}
+      {/* The device's name its own <bdi>: "HD Pro Webcam C920 (046d:082d)" reads as in the system's list, in Arabic too. */}
+      <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
-          className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
           {t("calls.devices.switchBack")}
         </button>
       )}
       <button type="button" onClick={devices.dismiss} aria-label={t("common.close")} title={t("common.close")}
-        className="shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
+        className="tap-target shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>

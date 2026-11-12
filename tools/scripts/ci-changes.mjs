@@ -28,6 +28,8 @@ export const RUST_INPUTS = [
   "native/transports/",
   "Cargo.toml",
   "Cargo.lock",
+  // The compiler, clippy and rustfmt the job runs: a bump is checked before it merges.
+  "rust-toolchain.toml",
   // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
   "apps/web/public/app-frame.html",
   "packages/core/src/miniApp.ts",
@@ -37,6 +39,8 @@ export const RUST_INPUTS = [
   "native/translation/",
   // viewer.rs: a test keeps its connection policy the same as `service open`'s.
   "packages/cli/src/services.ts",
+  // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
+  "packages/core/src/viewerGuard.ts",
 ];
 
 /**
@@ -52,6 +56,10 @@ export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.m
  */
 export const WEBSITE_INPUTS = [
   "apps/website/",
+  // The /android page's Android build facts, checked by apps/website/scripts/android-page.test.mjs.
+  "apps/desktop/tauri.android.conf.json",
+  "apps/desktop/gen/android/app/build.gradle.kts",
+  "docs/ANDROID.md",
   // Published under /reference by apps/website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
   "docs/wisps/",
   "docs/PROTOCOL.md",
@@ -67,6 +75,8 @@ export const WEBSITE_INPUTS = [
   "packages/cli/README.md",
   // llms.test.mjs checks the install line against the CLI's package name.
   "packages/cli/package.json",
+  // llms.test.mjs checks that the security model's events and press fields are the ones `listen --turns` emits.
+  "packages/cli/src/listen.ts",
   // llms.test.mjs checks that llms.txt's Android line follows the Release workflow's ANDROID_FROM.
   ".github/workflows/release.yml",
   // Quoted on /developers: sync-references.mjs's excerpt().

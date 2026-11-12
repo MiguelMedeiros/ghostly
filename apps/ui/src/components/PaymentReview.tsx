@@ -1,6 +1,6 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import { focusInPlace, focusLost, working } from "../lib/focus";
-import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
+import {parseEngineError,walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
 import {formatAt} from '../lib/time';
@@ -14,13 +14,21 @@ import { Notice } from "./ui/Notice";
 
 
 /**
+ * Gone out: submitted or settled, or failed only after it went (the contact refused it, or it was taken back, and its
+ * sats came back). A refusal can beat Approve's answer over a live link; the payment's bubble says how it ended then.
+ */
+const wentOut=(review:Review)=>review.state==='submitted'||review.state==='settled'||(review.state==='failed'&&(!!review.returned||parseEngineError(review.error??'')?.code==='paymentTakenBack'));
+
+/**
  * A payment before it goes out, and its status after: the amount, the fee, the destination, and which money it is.
  * Test money says so and goes on Approve; real money says so, and Approve first asks once more, in words, before
  * anything is sent. Nothing leaves the wallet until that confirmation. `onSent`, when given, is called once an approved
- * payment has gone out (submitted or settled), so a chat's sheet can close and leave its status to the chat's bubble;
- * one that failed, or whose outcome is not known, stays here with its error.
+ * payment has gone out (`wentOut`: even when it came back already), so a chat's sheet can close and leave its status
+ * to the chat's bubble; one that failed before it went, or whose outcome is not known, stays here with its error.
+ * `to`: whom a chat's payment goes to, said in place of its address (a Cashu payment's is only an id: the request's, or
+ * the contact's key).
  */
-export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
+export function PaymentReview({review:initial,wallet,onClose,onSent,to}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void;to?:string}) {
  const {t}=useI18n();
  // `running`: the button pressed (Approve, Cancel, Check), busy while it works; the others wait, disabled.
  const [saved,setReview]=useState(initial),[running,setRunning]=useState<'approve'|'cancel'|'check'|null>(null),busy=running!==null,[error,setError]=useState<Problem|null>(null),[confirming,setConfirming]=useState(false),[feeWhy,setFeeWhy]=useState(false);
@@ -31,7 +39,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  const shown=token?formatTokenAmount(review.amount,review.decimals,t.language):formatAmount(review.amount, t.language);
  const run=async(action:()=>Promise<Review>,key:NonNullable<typeof running>):Promise<Review|null>=>{if(busy)return null;setRunning(key);setError(null);try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?problemText(e, t):{tone:'error',title:t('payments.review.error.update')});return null;}finally{setRunning(null);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
- const approve=()=>void run(()=>wallet.approvePayment(review.id,real),'approve').then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
+ const approve=()=>void run(()=>wallet.approvePayment(review.id,real),'approve').then(next=>{setConfirming(false);if(next&&wentOut(next))onSent?.();});
  // Busy, not disabled, while it works: a disabled button drops the keys to the page, and they stay there on a refusal.
  const press=(key:NonNullable<typeof running>)=>running===key?working(true):{disabled:busy};
  const button='rounded-lg px-3 py-2 max-md:min-h-11 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 data-[loading]:opacity-80 data-[loading]:cursor-progress';
@@ -49,7 +57,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   <p className="text-xs text-text-secondary" data-testid="review-rail">{railLine(t,review.method,review.network)}</p>
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
-   <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
+   <div><dt className="text-text-muted">{t('payments.review.destination')}</dt>{to?<dd data-testid="review-destination"><bdi>{to}</bdi></dd>:<dd className="font-mono" data-testid="review-destination">{review.address}</dd>}</div>
    <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unitFor(t,unit,review.feeCap)}`}</dd></div>
    {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unitFor(t,unit,review.amount+review.fee)}</dd></div>}
    <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{paymentStateLabel(t,status)}</dd></div>

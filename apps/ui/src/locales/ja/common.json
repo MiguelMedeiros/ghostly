@@ -26,6 +26,7 @@
     "title": "確認待ち"
   },
   "notCopied": "コピーできませんでした",
+  "quotedName": "「{{name}}」",
   "save": "保存",
   "size": {
     "b": "{{n}} B",

@@ -32,6 +32,7 @@ import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
+import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
@@ -61,11 +62,29 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
 }
 
 /**
+ * A link one intake took (`invite`: an invite's or a device code's, `group`: a group's), good or refused: it answers
+ * for itself, so the other intake's refusal, kept until closed, goes. Left there, it would read as the refusal of the
+ * chat or group that opened, or sit over the new refusal (they share the top notice's place) and hide it.
+ */
+type LinkKind = "invite" | "group";
+const linksTaken = new EventTarget();
+const linkTaken = (kind: LinkKind) => linksTaken.dispatchEvent(new Event(kind));
+function useOtherLink(kind: LinkKind, drop: () => void) {
+  useEffect(() => {
+    const other = kind === "invite" ? "group" : "invite";
+    linksTaken.addEventListener(other, drop);
+    return () => linksTaken.removeEventListener(other, drop);
+  }, [kind, drop]);
+}
+
+/**
  * An invite link, or a chat address from before chats were routed by session
  * id, carries the chat's keys. They leave the address at once, so they stay
  * out of the history: the address must not wait for the password. The chat
  * itself is made once the lock is passed and a limited start's question answered, as a group's link is joined, and
- * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
+ * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`). A link it refuses is said then too,
+ * not under the lock screen, and the notice stays until closed (`ClosableTopNotice`), as a group link's refusal does,
+ * or until a link it takes comes next.
  */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
@@ -113,13 +132,16 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
+      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+      setInvalid(null);
+      linkTaken("invite");
       if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
       else open(reading.keys);
       return;
@@ -130,8 +152,10 @@ function ChatLinkIntake() {
     // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
     // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
     setInvalid(chatAddress && reading.reason === "not-ghostly" ? "join.chatGone" : INVITE_REFUSAL_MESSAGE[reading.reason]);
+    linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
+  useOtherLink("invite", useCallback(() => setInvalid(null), []));
 
   useEffect(() => {
     if (!held || waits) return;
@@ -139,18 +163,11 @@ function ChatLinkIntake() {
     open(held);
   }, [held, waits, open]);
 
-  useEffect(() => {
-    if (!invalid) return;
-    const timer = setTimeout(() => setInvalid(null), 6000);
-    return () => clearTimeout(timer);
-  }, [invalid]);
-
-  return invalid ? (
-    <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
-      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {t(invalid)}
-    </div>
-  ) : null;
+  // Kept until closed, and said only once the lock is passed and the question answered: under the lock screen nobody
+  // can read it, and a refusal that went before the unlock left the link looking as if it did nothing.
+  return invalid && !waits
+    ? <ClosableTopNotice problem={{ tone: "error", title: t(invalid) }} testId="invite-link-invalid" onClose={() => setInvalid(null)} />
+    : null;
 }
 
 /** "You're already in this chat", or "This is your own invite" from a link: said over the chat it opened, for a moment. */
@@ -174,7 +191,7 @@ function JoinNotice() {
 /**
  * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
  * they open). It sits over the sidebar's header, so it closes as the app's other top notices do. An Escape something
- * else answered (a menu, a popover) is not its own. The focus goes back where it was when it came (the New that could
+ * else answered (a menu, a popover, a dialog over it) is not its own. The focus goes back where it was when it came (the New that could
  * not make a chat) when it was on the notice or nowhere, not to the page; one in a field or a menu stays there.
  */
 function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
@@ -190,10 +207,11 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
   };
   useEffect(() => {
     // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
-    // though their listeners came after this one (the window's run in the order they were added).
+    // though their listeners came after this one (the window's run in the order they were added). Nor is one pressed in
+    // a modal dialog: a <dialog> closes on the key's default action without cancelling it, and is gone by the timeout.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || modalOpen()) return;
       clearTimeout(timer);
       timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
     };
@@ -223,8 +241,9 @@ function ChatNotStoredNotice() {
 
 /**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
- * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
+ * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
+ * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
+ * the ⓘ), there until closed or until the next link is taken.
  * A link to a group not here joins only while few groups joined by links wait to be let in (`LINK_GROUPS_WAITING`),
  * counted once the engine has loaded its groups.
  */
@@ -232,7 +251,7 @@ function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
-  const { hasUnlocked } = useLockScreen();
+  const { isLocked, hasUnlocked } = useLockScreen();
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -245,11 +264,14 @@ function GroupLinkIntake() {
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
-    else setCode(link);
+    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+    else { setProblem(null); setCode(link); }
+    linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
+  useOtherLink("group", useCallback(() => setProblem(null), []));
   useEffect(() => {
-    if (!code || !hasUnlocked || !groupsLoaded) return;
+    if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
     const groups = engine.state?.groups ?? [];
     const id = linkGroupId(code);
@@ -264,7 +286,7 @@ function GroupLinkIntake() {
       .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
       .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, hasUnlocked, groupsLoaded]);
+  }, [code, isLocked, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
@@ -373,7 +395,8 @@ export function Root() {
                     <Route path="*" element={<NoPage />} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
-                      <Route path="/chat/*" element={<ChatRoute />} />
+                      {/* A chat named in it: `#/chat` alone opens none, and goes home as any address no page answers. */}
+                      <Route path="/chat/:id/*" element={<ChatRoute />} />
                       <Route path="/group/:groupId" element={<GroupChat />} />
                       {/* One route for the menu and its sections, so moving between them keeps the page as it is. */}
                       <Route path="/settings/:section?" element={<Settings />} />

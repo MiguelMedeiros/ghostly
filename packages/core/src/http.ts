@@ -363,9 +363,11 @@ interface HostStream {
   url: string;
   body: Uint8Array[];
   bodyBytes: number;
+  /** Body bytes since the pace was last checked. */
+  movedBytes: number;
   abort: AbortController;
   started: boolean;
-  idleTimer?: ReturnType<typeof setTimeout>;
+  paceTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class HttpHost {
@@ -376,6 +378,8 @@ export class HttpHost {
    * so a stream counts toward the limit until its fetch has settled.
    */
   private readonly live = new Set<HostStream>();
+  /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
+  private heldBodyBytes = 0;
 
   constructor(
     private readonly channel: FrameChannel,
@@ -406,13 +410,14 @@ export class HttpHost {
       url,
       body: [],
       bodyBytes: 0,
+      movedBytes: 0,
       abort: new AbortController(),
       started: false,
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
 
-    if (frame.b && !BODYLESS_METHODS.has(method)) this.armIdleTimer(stream);
+    if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
   }
 
@@ -420,14 +425,20 @@ export class HttpHost {
     const stream = this.streams.get(chunk.id);
     if (!stream || stream.started) return;
 
-    stream.bodyBytes += chunk.payload.length;
-    if (stream.bodyBytes > LIMITS.maxRequestBodyBytes) {
+    const bytes = chunk.payload.length;
+    if (stream.bodyBytes + bytes > LIMITS.maxRequestBodyBytes) {
       this.end(stream);
       return this.fail(chunk.id, 413, "request-too-large", "Request body too large.");
     }
+    if (this.heldBodyBytes + bytes > LIMITS.maxHostBodyBytesPerPeer) {
+      this.end(stream);
+      return this.fail(chunk.id, 503, "busy", "Too many request bodies at once.");
+    }
+    stream.bodyBytes += bytes;
+    this.heldBodyBytes += bytes;
+    stream.movedBytes += bytes;
     if (chunk.payload.length > 0) stream.body.push(chunk.payload.slice());
     if (chunk.end) void this.run(stream);
-    else this.armIdleTimer(stream);
   }
 
   handleReset(frame: ResetFrame): void {
@@ -439,9 +450,13 @@ export class HttpHost {
     for (const stream of [...this.streams.values()]) this.end(stream);
   }
 
-  private armIdleTimer(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
-    stream.idleTimer = setTimeout(() => {
+  /** A body that brings less than `minRequestBodyBytesPerIdle` in a `bodyIdleTimeoutMs` is let go, even if it trickles. */
+  private watchPace(stream: HostStream): void {
+    stream.paceTimer = setTimeout(() => {
+      if (stream.movedBytes >= LIMITS.minRequestBodyBytesPerIdle) {
+        stream.movedBytes = 0;
+        return this.watchPace(stream);
+      }
       this.end(stream);
       this.fail(stream.frame.id, 408, "request-timeout", "Request body timed out.");
     }, LIMITS.bodyIdleTimeoutMs);
@@ -453,10 +468,17 @@ export class HttpHost {
   }
 
   private end(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
-    if (!stream.started) this.live.delete(stream);
+    if (!stream.started) this.release(stream);
+  }
+
+  /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */
+  private release(stream: HostStream): void {
+    this.live.delete(stream);
+    this.heldBodyBytes -= stream.bodyBytes;
+    stream.bodyBytes = 0;
   }
 
   private fail(id: number, status: number, code: string, message: string): void {
@@ -482,20 +504,22 @@ export class HttpHost {
 
   private async run(stream: HostStream): Promise<void> {
     stream.started = true;
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     const { frame, service } = stream;
     const timeout = setTimeout(() => stream.abort.abort(), LIMITS.requestTimeoutMs);
     let headersSent = false;
+    // The chunks go once joined, so a body is held once while the local service reads it.
+    const body = stream.body.length > 0 ? concatBytes(...stream.body) : null;
+    stream.body = [];
 
     try {
       const response = await this.localFetch({
         url: stream.url,
         method: frame.m,
         headers: sanitizeRequestHeaders(frame.h),
-        body: stream.body.length > 0 ? concatBytes(...stream.body) : null,
+        body,
         signal: stream.abort.signal,
       });
-      stream.body = [];
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
 
@@ -551,7 +575,7 @@ export class HttpHost {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
       }
     } finally {
-      this.live.delete(stream);
+      this.release(stream);
     }
   }
 }
@@ -642,6 +666,7 @@ interface ClientStream {
   reject: (error: Error) => void;
   headersTimer?: ReturnType<typeof setTimeout>;
   idleTimer?: ReturnType<typeof setTimeout>;
+  unreadCheck?: ReturnType<typeof setTimeout>;
   queue: BodyQueue | null;
   received: number;
   maxBytes: number;
@@ -652,9 +677,12 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private done = false;
   private error: Error | null = null;
   private wake: (() => void) | null = null;
+  /** Bytes received and not yet read. */
+  held = 0;
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
+    this.held += chunk.length;
     this.wake?.();
   }
 
@@ -665,9 +693,22 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     this.wake?.();
   }
 
+  /** Lets go of what was not read yet, ended or not: the reader gets `error` in its place. */
+  drop(error: Error): void {
+    this.chunks = [];
+    this.held = 0;
+    this.done = true;
+    this.error = error;
+    this.wake?.();
+  }
+
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for (;;) {
-      while (this.chunks.length > 0) yield this.chunks.shift()!;
+      while (this.chunks.length > 0) {
+        const chunk = this.chunks.shift()!;
+        this.held -= chunk.length;
+        yield chunk;
+      }
       if (this.error) throw this.error;
       if (this.done) return;
       await new Promise<void>((resolve) => (this.wake = resolve));
@@ -680,6 +721,7 @@ export class HttpClient {
   private nextId = 1;
   private readonly streams = new Map<number, ClientStream>();
   private readonly waiting: (() => void)[] = [];
+  private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
 
@@ -688,7 +730,28 @@ export class HttpClient {
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     if (this.inFlight >= LIMITS.maxClientInFlight) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
+      const bytes = request.body?.length ?? 0;
+      if (this.waiting.length >= LIMITS.maxClientWaiting || this.waitingBytes + bytes > LIMITS.maxClientWaitingBodyBytes) {
+        throw new GhostlyHttpError("busy", "Too many requests waiting");
+      }
+      this.waitingBytes += bytes;
+      // Aborted while it waits: it leaves the queue at once, and lets go of its body.
+      let leave = () => {};
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const wake = () => { request.signal?.removeEventListener("abort", leave); resolve(); };
+          leave = () => {
+            const at = this.waiting.indexOf(wake);
+            if (at >= 0) this.waiting.splice(at, 1);
+            reject(new GhostlyHttpError("aborted", "Request aborted"));
+          };
+          if (request.signal?.aborted) return leave();
+          this.waiting.push(wake);
+          request.signal?.addEventListener("abort", leave, { once: true });
+        });
+      } finally {
+        this.waitingBytes -= bytes;
+      }
       if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
     }
     this.inFlight++;
@@ -774,8 +837,26 @@ export class HttpClient {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
+    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) this.checkUnread(chunk.id, stream, stream.queue);
     if (chunk.end) this.finish(chunk.id);
     else this.armIdleTimer(chunk.id, stream);
+  }
+
+  /**
+   * Nothing tells the peer to slow down, and its last chunk frees the slot: a reader that stalls (a contact's page that
+   * never reads what it fetched) would have the whole body held here, one per request it leaves unread. Past the bound
+   * the reader gets one turn, as a link that hands over many chunks at once leaves it none; still past it, the response
+   * is reset and what it held let go.
+   */
+  private checkUnread(id: number, stream: ClientStream, queue: BodyQueue): void {
+    if (stream.unreadCheck) return;
+    stream.unreadCheck = setTimeout(() => {
+      stream.unreadCheck = undefined;
+      if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
+      const error = new GhostlyHttpError("unread", "Response body not read in time");
+      queue.drop(error);
+      this.abort(id, error);
+    }, 0);
   }
 
   handleReset(frame: ResetFrame): void {

@@ -141,6 +141,9 @@ export function withoutReports(value: string): string {
     .join(", ");
 }
 
+/** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
+export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
+
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(text);
@@ -295,6 +298,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
     if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
+    // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
+    // (a STUN server the contact names would see this machine's address), so none opens while it is on.
+    if (state(ctx).settings?.relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
@@ -311,9 +317,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const peer = link.peerPubKeyZ32;
     // Another open began while this one waited: it answers that one.
     if (open.has(key)) return SERVICE_METHODS["service.open"](ctx, params);
-    // Hide my IP from contacts as it is now: the app keeps to its own origin while it is on.
-    const relayOnly = state(ctx).settings?.relayOnly === true;
-    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port, { relayOnly }).catch((error: unknown) => {
+    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => {
       if (open.get(key) === opening) open.delete(key);
       throw portError(error, port);
     });
@@ -328,12 +332,33 @@ export const SERVICE_METHODS: Record<string, Method> = {
     open.delete(key);
     const entry = await pending?.catch(() => undefined);
     if (!entry) throw new CliError("not_found", "That service is not open here");
-    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
-    // Each connection's end stops the contact's answer too (`proxy`).
-    await new Promise<void>((resolve) => {
-      entry.server.close(() => resolve());
-      entry.server.closeAllConnections();
-    });
+    await closeOpened(entry);
     return { closed: key };
   },
 };
+
+/**
+ * Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+ * Each connection's end stops the contact's answer too (`proxy`).
+ */
+function closeOpened(entry: OpenedService): Promise<void> {
+  return new Promise<void>((resolve) => {
+    entry.server.close(() => resolve());
+    entry.server.closeAllConnections();
+  });
+}
+
+/**
+ * `chat remove`: the services opened from a contact no chat here has any more. Before, they stayed on their ports, each
+ * request a 503, and `service close` answered `No chat` for good.
+ */
+export async function closeServicesOf(ctx: ApiContext, peer: string): Promise<void> {
+  if (state(ctx).links.some((link) => link.peerPubKeyZ32 === peer)) return;
+  const keys = [...open.keys()].filter((key) => key.startsWith(`${peer}/`));
+  await Promise.all(keys.map(async (key) => {
+    const pending = open.get(key);
+    open.delete(key);
+    const entry = await pending?.catch(() => undefined);
+    if (entry) await closeOpened(entry);
+  }));
+}

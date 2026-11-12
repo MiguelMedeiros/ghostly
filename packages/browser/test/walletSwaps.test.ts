@@ -108,7 +108,8 @@ async function reopened() {
 beforeEach(async () => {
   vi.resetAllMocks();
   vi.restoreAllMocks();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // `performance` too: how long a swap's request may still land is measured on the monotonic clock.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
   await transact([STORES.proofs, STORES.payments, STORES.walletTx, STORES.swaps, STORES.melts, STORES.quotes], (s) => { for (const name of Object.keys(s)) s[name].clear(); });
   await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(64, "a")); s[STORES.proofs].put(stored(8, "b")); });
   mintApi.sendOffline.mockImplementation(() => { throw new Error("No exact coins"); });
@@ -413,6 +414,10 @@ describe("redeeming a token", () => {
     mintApi.restore.mockRejectedValue(lost());
     const { wallet } = setup();
     await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    // Sent again at once (its payer's app repeats it): the mint is not asked again before the wallet's own time.
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    vi.setSystemTime(Date.now() + 30_000);
     mintApi.completeSwap.mockResolvedValueOnce(receiveAnswer());
     await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", amount: 62 }]);
@@ -700,6 +705,21 @@ describe("splitting ecash for a token", () => {
     expect(await balance(), "stored once").toBe(72 - 8);
   });
 
+  it("a second send that needs the sats the silent mint holds says the mint has not answered, not that the sats are missing", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    const [held] = await swaps();
+    const again = await wallet.createToken(40, undefined, undefined, outbox).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(SwapUnsettledError);
+    expect((again as SwapUnsettledError).swap.id, "the swap that holds them").toBe(held.id);
+    expect(await swaps(), "no second swap").toHaveLength(1);
+    expect(mintApi.completeSwap).toHaveBeenCalledTimes(1);
+    // More than the wallet has, held or not: that is still not enough sats.
+    await expect(wallet.createToken(100, undefined, undefined, outbox)).rejects.toMatchObject({ engineCode: "notEnoughSats" });
+  });
+
   it("a mint that stops answering is asked about less and less often, every 10 min at most, and the swap is settled once it answers", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
@@ -780,6 +800,25 @@ describe("splitting ecash for a token", () => {
     expect(now.some((p) => p.secret === "a"), "the spent input no longer counts").toBe(false);
     expect(await balance()).toBe(72 - 8);
     expect(await swaps()).toEqual([]);
+  });
+
+  it("a split whose answer was lost keeps its inputs when the device clock steps forward, until its window really passed", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }]);
+    const { wallet, events } = setup();
+    await expect(wallet.createToken(40)).rejects.toBeInstanceOf(SwapUnsettledError);
+
+    // Two hours on the device clock, one round in fact: a request of it may still reach the mint.
+    vi.setSystemTime(Date.now() + 2 * 3_600_000);
+    await pass(30_000);
+    expect(await balance()).toBe(8);
+    expect(await swaps()).toMatchObject([{ kind: "send" }]);
+    expect((await swaps())[0].released).toBeUndefined();
+    expect(events.onSwapSettled).not.toHaveBeenCalled();
+
+    await pass(SETTLED_MS);
+    expect(await balance()).toBe(72);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.anything(), false);
   });
 
   it("given back, then spent by another payment: the old swap is let go", async () => {

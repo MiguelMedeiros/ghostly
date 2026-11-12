@@ -71,6 +71,16 @@ describe("amounts and mint addresses", () => {
     expect(mint.createMintQuoteBolt11).not.toHaveBeenCalled();
   });
 
+  // The app reads the limit back out of the English line (errorText.ts) to say it in its language. A browser in
+  // Egyptian Arabic writes its numbers "١٬٠٠٠٬٠٠٠" by itself, which no rule read: the line showed in English.
+  it("says the limit in the English line the app translates, whatever the browser's own numbers", () => {
+    const own = Number.prototype.toLocaleString;
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return own.call(this, locales ?? "ar-EG", options);
+    });
+    expect(() => assertAmount(1_000_001)).toThrow(/^Amounts above 1,000,000 sats are not supported$/);
+  });
+
   it("takes only https mints, or plain http on this very machine, and drops the trailing slash", () => {
     expect(normalizeMintUrl("  https://mint.example/Bitcoin//  ")).toBe("https://mint.example/Bitcoin");
     expect(normalizeMintUrl("http://localhost:3338/")).toBe("http://localhost:3338");
@@ -469,7 +479,7 @@ describe("Lightning out", () => {
   });
 
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
@@ -514,8 +524,8 @@ describe("Lightning out", () => {
   describe("a melt whose answer was lost", () => {
     /** A melt request's longest life plus the margin for a mint slow to act on it: past it, none can reach the mint. */
     const OVERDUE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
-    // The wallet's clock moves with the polls: a melt is only given up once its request can no longer land.
-    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    // The wallet's clocks (wall and monotonic) move with the polls: a melt is only given up once its request can no longer land.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }); });
 
     it("stays pending while its request may still reach the mint, and is paid when the mint acts on it late", async () => {
       mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));

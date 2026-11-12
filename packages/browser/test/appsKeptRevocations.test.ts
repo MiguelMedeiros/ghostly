@@ -96,8 +96,9 @@ describe("revocations an app's uninstall leaves", () => {
     expect((await store.preview({ url: BUNDLE_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
 
     net.put(MIRROR_URL, v1.bytes);
-    expect((await store.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
-    await expect(store.install({ digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    const copy = await store.preview({ url: MIRROR_URL });
+    expect(copy.run).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.install({ stage: copy.stage, digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
   });
 
   it("a newer version, not revoked, installs from a copy and keeps them; Clear all data drops them", async () => {

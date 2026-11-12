@@ -217,7 +217,7 @@ export interface WalletState {
    * The Lightning card of this network the calls act on: the one a platform is bound to (`forLightning`), else the
    * network's default for receiving. Its source (the Cashu mints by default) and its latest operations.
    */
-  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive">>;
+  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive" | "sameWalletAs">>;
   /** Every Lightning card of this network, in the order they were added. */
   lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this network, if one is set up. */
@@ -567,6 +567,12 @@ export interface ServicesPlatform {
   getSharedServices(): SharedService[];
   /** Throws with a readable message when the target is not acceptable or access was denied. */
   shareService(name: string, target: string): Promise<void>;
+  /**
+   * Is a shared app's address not yet allowed on this device (the extension: one that came with a restored or moved
+   * profile)? Its contacts are refused until `allowLocalAccess`, from a click. Left out where the share asked already.
+   */
+  localAccessNeeded?(target: string): Promise<boolean>;
+  allowLocalAccess?(target: string): Promise<void>;
   removeService(id: string): Promise<void>;
   setServiceEnabled(id: string, enabled: boolean): Promise<void>;
   /** Grants or withdraws one contact's access to one service. Nobody is granted by default. */

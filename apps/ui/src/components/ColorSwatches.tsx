@@ -8,21 +8,23 @@ import { COLOR_THEME_OPTIONS } from "../lib/settings";
  * The color themes as round swatches, one of them ringed: the color is its own label, its name the tooltip. A radio
  * group: one Tab stop (the chosen theme), the arrows (swapped in a right-to-left page), Home and End move and choose.
  * Every swatch has a thin edge in the muted ink, 3:1 or more on the card in every theme, so a pale one (Monochrome's
- * grey, Cyan) still shows on a light card; the theme's own colour stays as it is.
+ * grey, Cyan) still shows on a light card; the theme's own colour stays as it is. On a phone a tap lands on 44 × 44 px
+ * around each 32 px swatch, 12 px apart so no two areas overlap; the ringed one is scaled up 10 %, its area with it, so
+ * that area is set at 40 px inside its 2 px ring.
  */
 export function ColorSwatches({ label, testIdPrefix }: { label: string; testIdPrefix: string }) {
   const { t } = useI18n();
   const { settings, updateColorTheme } = useSettings();
   const stop = radioTabStop(COLOR_THEME_OPTIONS.map(option => ({ checked: settings.colorTheme === option.value, disabled: false })));
   return (
-    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={label} onKeyDown={e => radioGroupKeys(e, { choose: true })}>
+    <div className="flex flex-wrap gap-2 max-md:gap-3" role="radiogroup" aria-label={label} onKeyDown={e => radioGroupKeys(e, { choose: true })}>
       {COLOR_THEME_OPTIONS.map((option, i) => {
         const name = t(option.labelKey as Parameters<typeof t>[0]);
         const on = settings.colorTheme === option.value;
         return (
           <button key={option.value} type="button" role="radio" aria-checked={on} aria-label={name} title={name} data-testid={`${testIdPrefix}-${option.value}`}
             tabIndex={i === stop ? 0 : -1} onClick={() => updateColorTheme(option.value)}
-            className={`w-8 h-8 rounded-full transition-transform cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${on ? "border-2 border-text-primary scale-110" : "border border-text-muted hover:scale-105"}`}
+            className={`relative w-8 h-8 rounded-full transition-transform cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface before:absolute before:content-[''] ${on ? "border-2 border-text-primary scale-110 max-md:before:-inset-1.5" : "border border-text-muted hover:scale-105 max-md:before:-inset-[7px]"}`}
             style={{ background: THEME_COLOR[option.value] }} />
         );
       })}

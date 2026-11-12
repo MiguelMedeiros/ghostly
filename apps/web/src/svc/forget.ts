@@ -48,9 +48,20 @@ function clearOrigin(origin: string): Promise<boolean> {
 }
 
 /**
- * Clears the origins of the contacts' apps opened from one chat (`tag`) or by one profile (`profile`), one at a time,
- * and takes each one cleared off the list. One whose bridge did not answer stays on it, for the profile's next clear.
+ * Clears the origins of the contacts' apps opened from one chat (`tag`) or by one profile (`profile`), all at once, and
+ * takes each one cleared off the list. One whose bridge did not answer stays on it, for the profile's next clear
+ * (a deleted profile's: `forgetServicesOfGone`). At once, as Clear all data and Delete profile wait for it: offline,
+ * where no bridge loads, that is one `CLEAR_ORIGIN_MS`, not one per app the profile opened.
  */
 export function forgetServices(host: ServicesHost, which: ForgetServices): Promise<void> {
-  return opened.forget(which, (service) => clearOrigin(serviceOrigin(host, service.label)));
+  return opened.forget(which, (service) => clearOrigin(serviceOrigin(host, service.label)), true);
+}
+
+/**
+ * Clears the origins of the apps opened by profiles no longer `listed`: one deleted while its bridges could not be
+ * reached (offline, the services host down) has no clear of its own to come. Each start and each return online tries
+ * again, until each is cleared and off the list.
+ */
+export async function forgetServicesOfGone(host: ServicesHost, listed: readonly string[]): Promise<void> {
+  for (const profile of new Set(opened.list().map((o) => o.profile).filter((p) => !listed.includes(p)))) await forgetServices(host, { profile });
 }

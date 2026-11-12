@@ -173,6 +173,23 @@ Ghostly next.
     for (const wrong of ["1.2.0", "1", "next", '"1.2"', "v1.2", ""]) expect(held(wrong).problems, wrong).toEqual([expect.stringMatching(/"release"/)]);
   });
 
+  it("refuses a release that is already out, which would hold nothing", () => {
+    const at = (release: string, version: string) =>
+      parseFragment("docs/changelog/unreleased/x.md", `---\nsection: Fixed\nrelease: ${release}\n---\n- A.\n`, version);
+    const out = (release: string, version: string, next: string) =>
+      `release: ${release}" is out (package.json is ${version}): drop the line, or name the release that ships it, such as ${next}`;
+    expect(at("1.10", "1.10.2").problems).toEqual([expect.stringContaining(out("1.10", "1.10.2", "1.11"))]);
+    expect(at("1.9", "1.10.2").problems).toEqual([expect.stringContaining(out("1.9", "1.10.2", "1.11"))]);
+    expect(at("0.1", "1.10.2").problems).toEqual([expect.stringContaining(out("0.1", "1.10.2", "1.11"))]);
+    expect(at("1.10", "1.10.0").problems).toEqual([expect.stringContaining(out("1.10", "1.10.0", "1.11"))]);
+    // The next minor or major is still to come, and a patch from here holds it.
+    expect(at("1.11", "1.10.2")).toMatchObject({ release: "1.11", problems: [] });
+    expect(at("2.0", "1.10.2")).toMatchObject({ release: "2.0", problems: [] });
+    expect(heldFor("1.11", "1.10.3")).toBe(true);
+    // Without the repository's version (no package.json) there is nothing to compare with.
+    expect(parseFragment("docs/changelog/unreleased/x.md", "---\nsection: Fixed\nrelease: 1.1\n---\n- A.\n").problems).toEqual([]);
+  });
+
   it("refuses a front matter key it does not know, or one given twice", () => {
     const front = (lines: string) => parseFragment("docs/changelog/unreleased/x.md", `---\n${lines}\n---\n- A.\n`).problems;
     expect(front("section: Fixed\nrelease: 1.2")).toEqual([]);

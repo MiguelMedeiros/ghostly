@@ -50,6 +50,8 @@ export interface CallDevices {
   notice: DeviceNotice | null;
   dismiss: () => void;
   switchBack: () => void;
+  /** The keyboard focus or the pointer is on the notice (true) or left it (false): its time stops, then starts over. */
+  hold: (held: boolean) => void;
 }
 
 /** How long a notice stays. */
@@ -71,12 +73,26 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const [speaker, setSpeaker] = useState<string | undefined>();
   const [notice, setNoticeState] = useState<DeviceNotice | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const noticeUp = useRef(false);
+  /** The focus or the pointer is on the notice: it does not run out under someone reading it or about to Switch back. */
+  const held = useRef(false);
 
-  const setNotice = useCallback((next: DeviceNotice | null) => {
+  const startTimer = useCallback(() => {
     clearTimeout(timer.current);
-    setNoticeState(next);
-    if (next) timer.current = setTimeout(() => setNoticeState(null), DEVICE_NOTICE_MS);
+    if (noticeUp.current && !held.current) timer.current = setTimeout(() => {
+      noticeUp.current = false;
+      setNoticeState(null);
+    }, DEVICE_NOTICE_MS);
   }, []);
+  const setNotice = useCallback((next: DeviceNotice | null) => {
+    noticeUp.current = !!next;
+    setNoticeState(next);
+    startTimer();
+  }, [startTimer]);
+  const hold = useCallback((on: boolean) => {
+    held.current = on;
+    startTimer();
+  }, [startTimer]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const audioTrack = webrtc.localStream?.getAudioTracks()[0];
@@ -309,5 +325,6 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     notice,
     dismiss: () => setNotice(null),
     switchBack,
+    hold,
   };
 }

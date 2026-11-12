@@ -77,6 +77,11 @@ const chatOf = (groupId: string) => `group:${groupId}`;
 const said = (m: StoredMessage): GroupEdit => m.removed ? { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, rm: true }
   : { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) };
 const resendKey = (groupId: string, member: string) => `${groupId}\n${member}`;
+/**
+ * A row of mine in a private group written under a member key I no longer hold: removed, then invited back, I came in
+ * with a new key, and the group knows my lines from before by the old one. Its session refuses their edits.
+ */
+const underOldKey = (message: StoredMessage, membership: { me: string; community: boolean }) => !membership.community && !message.id.startsWith(`${membership.me}:`);
 
 export class GroupEdits {
   private readonly now: () => number;
@@ -130,7 +135,7 @@ export class GroupEdits {
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
-    if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
+    if (!message || !canEditInGroup(message) || underOldKey(message, membership)) return refuse("Only your own text messages can be edited");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
@@ -161,10 +166,11 @@ export class GroupEdits {
    */
   async removeMine(groupId: string, messageId: string): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
-    if (!this.host.membership(groupId)) return refuse(this.notMember(groupId));
+    const membership = this.host.membership(groupId);
+    if (!membership) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
-    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id) || underOldKey(message, membership)) return refuse("Only your own messages can be deleted for everyone");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
     const e = removalNumber(message.edit?.seq);
     await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });
@@ -271,7 +277,8 @@ export class GroupEdits {
 
   /**
    * An edit past what a member's window takes: kept, the highest number per message, `GROUP_EDITS_HELD` messages a
-   * group at most (the oldest go first), and taken when the window has room. The work stays what the window allows.
+   * group at most (the oldest of the member holding the most go first), and taken when the window has room. The work
+   * stays what the window allows.
    */
   private hold(groupId: string, sender: string, edit: GroupEdit, pace: RateWindow): "waiting" | "dropped" {
     const key = `${groupId}\n${sender}`;
@@ -285,10 +292,17 @@ export class GroupEdits {
     waiting.set(edit.id, edit);
     let count = 0;
     for (const member of group.values()) count += member.size;
-    for (const [member, edits] of group) {
-      if (count <= GROUP_EDITS_HELD) break;
-      while (count > GROUP_EDITS_HELD && edits.size) { edits.delete(edits.keys().next().value!); count--; }
-      if (!edits.size && member !== key) group.delete(member);
+    // Past the cap the member holding the most loses its oldest (the one just held on a tie), a removal last, so one
+    // member's flood never pushes out another's waiting edits or deletions for everyone.
+    while (count > GROUP_EDITS_HELD) {
+      let most = key;
+      for (const [member, edits] of group) if (edits.size > group.get(most)!.size) most = member;
+      const edits = group.get(most)!;
+      let oldest = edits.keys().next().value!;
+      for (const [id, held] of edits) if (!held.rm) { oldest = id; break; }
+      edits.delete(oldest);
+      count--;
+      if (!edits.size && most !== key) group.delete(most);
     }
     if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait())));
     return waiting.has(edit.id) ? "waiting" : "dropped";

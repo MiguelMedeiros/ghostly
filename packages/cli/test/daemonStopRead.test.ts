@@ -25,7 +25,7 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
    * `answers`: and still answers that call on the connection, as a stopping daemon does the calls it already read.
    * `greets`: "stopping" when it stops as it greets the first connection, "secretless" when it never had a secret.
    */
-  async function fakeDaemon(name: string, drop: (method: string, connection: number) => boolean, { stop = false, answers = false, greets = "proving" as "proving" | "stopping" | "secretless" } = {}): Promise<{ dir: string; methods: string[] }> {
+  async function fakeDaemon(name: string, drop: (method: string, connection: number) => boolean, { stop = false, answers = false, greets = "proving" as "proving" | "stopping" | "secretless" } = {}): Promise<{ dir: string; methods: string[]; asked: { method: string; params: Record<string, unknown> }[] }> {
     const dir = home(name);
     createProfile(dir, "default");
     const paths = profilePaths(dir, "default");
@@ -33,6 +33,7 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
     if (greets === "secretless") removeDaemonSecret(paths.dir);
     writeFileSync(paths.lock, String(process.pid));
     const methods: string[] = [];
+    const asked: { method: string; params: Record<string, unknown> }[] = [];
     let connections = 0;
     const server: Server = createServer((connection: Socket) => {
       const number = ++connections;
@@ -42,6 +43,7 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
       createInterface({ input: connection }).on("line", (line) => {
         const { id, method, params } = JSON.parse(line) as { id: number | string; method: string; params: { nonce?: string } };
         methods.push(method);
+        asked.push({ method, params });
         if (drop(method, number)) {
           if (stop) { removeDaemonSecret(paths.dir); rmSync(paths.lock, { force: true }); server.close(); }
           if (!answers) { connection.destroy(); return; }
@@ -53,7 +55,7 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
     });
     await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
     cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
-    return { dir, methods };
+    return { dir, methods, asked };
   }
 
   it("a chat list the daemon read as it stopped answers from the profile itself, not exit 4 with the chat history hint", async () => {
@@ -67,6 +69,35 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
     const { dir, methods } = await fakeDaemon("read-restarted", (method, connection) => method === "chat.list" && connection === 1);
     expect(ok(await ghostly(["--home", dir, "chat", "list"]))).toEqual({ chats: [{ id: "from connection 2" }] });
     expect(methods.filter((method) => method === "chat.list")).toHaveLength(2);
+  });
+
+  it("a chat wait the daemon left as it restarted waits on with the daemon that runs now, for the time it had left", async () => {
+    const { dir, asked } = await fakeDaemon("chat-wait-restarted", (method, connection) => method === "chat.wait" && connection === 1);
+    const waited = await ghostly(["--home", dir, "chat", "wait", "bob", "--until", "paired", "--timeout", "30"]);
+    // Before: {"code":"timeout","message":"The daemon stopped before it answered chat.wait, which may be done: check (`ghostly chat history` …"} exit 4.
+    expect(ok(waited)).toEqual({ chats: [{ id: "from connection 2" }] });
+    const waits = asked.filter((call) => call.method === "chat.wait");
+    expect(waits).toHaveLength(2);
+    expect(waits[1]!.params).toMatchObject({ chat: "bob", until: "paired" });
+    expect(waits[1]!.params.timeout).toBeLessThanOrEqual(30);
+    expect(waits[1]!.params.timeout).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a file wait the daemon left as it restarted waits on with the daemon that runs now, within its default 300 s", async () => {
+    const { dir, asked } = await fakeDaemon("file-wait-restarted", (method, connection) => method === "file.wait" && connection === 1);
+    // Before: the same exit 4 "may be done", for a wait that changes nothing.
+    expect(ok(await ghostly(["--home", dir, "file", "wait", "chat-1-in-abc"]))).toEqual({ chats: [{ id: "from connection 2" }] });
+    const waits = asked.filter((call) => call.method === "file.wait");
+    expect(waits).toHaveLength(2);
+    expect(waits[1]!.params.timeout).toBeLessThanOrEqual(300);
+    expect(waits[1]!.params.timeout).toBeGreaterThanOrEqual(290);
+  });
+
+  it("a chat wait left unanswered twice says so as a read, not to check a chat's history", async () => {
+    const { dir, methods } = await fakeDaemon("chat-wait-twice", (method) => method === "chat.wait");
+    const failure = error(await ghostly(["--home", dir, "chat", "wait", "bob"]), "unavailable", 1);
+    expect(failure.message).toBe("The daemon went away before it answered chat.wait, twice; a read changes nothing: run it again");
+    expect(methods.filter((method) => method === "chat.wait")).toHaveLength(2);
   });
 
   it("a chat list whose connection ended before the daemon proved itself is asked again, not exit 1 \"The daemon went away\"", async () => {
@@ -109,6 +140,14 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
     expect(methods.filter((method) => method === "settings.set")).toHaveLength(1);
   });
 
+  it("a change whose connection ended before it was written is sent once more, to the daemon that answers now", async () => {
+    const { dir, methods } = await fakeDaemon("write-unsent", (method, connection) => method === HELLO && connection === 1);
+    // Nothing reached the first connection. Before: unavailable (exit 1) "The daemon went away", as a bot's `typing`
+    // or `send` failed in a `daemon restart` while a command started a moment later answered.
+    ok(await ghostly(["--home", dir, "settings", "set", "nick", "bob"]));
+    expect(methods.filter((method) => method === "settings.set")).toHaveLength(1);
+  });
+
   describe("with a real daemon", () => {
     let relay: { url: string; server: HttpServer };
     let dht: { bootstrap: string; destroy(): Promise<void> };
@@ -141,5 +180,20 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
         }
       } finally { await ghostly(["--home", dir, "daemon", "stop"], { env }); }
     }, 300_000);
+
+    it("a chat wait under a daemon restart waits on with the new daemon and ends as its own timeout, not \"may be done\"", async () => {
+      const dir = home("chat-wait-race");
+      ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+      const { chat } = ok(await ghostly(["--home", dir, "invite", "create", "--label", "nobody"], { env })) as { chat: string };
+      ok(await ghostly(["--home", dir, "daemon", "--detach"], { env }));
+      try {
+        const waiting = ghostly(["--home", dir, "chat", "wait", chat, "--until", "paired", "--timeout", "10"], { env });
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        ok(await ghostly(["--home", dir, "daemon", "restart"], { env }));
+        const failure = error(await waiting, "timeout", 4);
+        // Before: "The daemon stopped before it answered chat.wait, which may be done: check (`ghostly chat history` …".
+        expect(failure.message).toMatch(/^Timed out after \d+ s waiting for chat .* to be paired$/);
+      } finally { await ghostly(["--home", dir, "daemon", "stop"], { env }); }
+    }, 120_000);
   });
 });

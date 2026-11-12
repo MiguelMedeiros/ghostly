@@ -25,7 +25,7 @@ describe("the frames handed on are the ones kept with the messages", { timeout: 
     const { mesh, alice, carol } = await three();
     await alice.flush();
     const empty = bytes(mesh.saved.get(alice.myKey));
-    for (let i = 0; i < 50; i++) await carol.sendText(`line ${i} ${"x".repeat(200)}`, 1_000 + i);
+    for (let i = 0; i < 50; i++) { mesh.tick(400); await carol.sendText(`line ${i} ${"x".repeat(200)}`, 1_000 + i); }
     await mesh.settle(); await alice.flush();
     const saved = mesh.saved.get(alice.myKey)!;
     expect(saved.relay ?? []).toEqual([]);
@@ -69,7 +69,7 @@ describe("the frames handed on are the ones kept with the messages", { timeout: 
     expect(mesh.texts(bob)).toEqual(["old one", "old two", "new one"]);
     // Past what a member keeps, the oldest go first: the state's.
     await mesh.open(alice2, carol);
-    for (let i = 0; i < GROUP_LIMITS.relay; i++) await carol.sendText(`line ${i}`, 4_000 + i);
+    for (let i = 0; i < GROUP_LIMITS.relay; i++) { mesh.tick(400); await carol.sendText(`line ${i}`, 4_000 + i); }
     await mesh.settle(); await alice2.flush();
     expect(mesh.saved.get(alice.myKey)!.relay).toEqual([]);
   });

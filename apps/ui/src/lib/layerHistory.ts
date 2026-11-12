@@ -118,13 +118,21 @@ export function closedByArrival(): boolean {
   return arrived;
 }
 
+/**
+ * From the first layer opened or the first traversal of the app's own, whichever comes first: a traversal that landed
+ * with nobody watching stayed `going`, and the person's next Back was taken for it (the layer over the page stayed, or
+ * within GOING_MS of it, got no entry and Back left the page).
+ */
+function watch() {
+  if (watching) return;
+  watching = true;
+  addEventListener("popstate", onPop);
+}
+
 /** A layer opened: Back closes it with `close`. Returns what to call once it is closed. */
 export function openLayer(close: () => void): () => void {
   if (typeof window === "undefined") return () => {};
-  if (!watching) {
-    watching = true;
-    addEventListener("popstate", onPop);
-  }
+  watch();
   const layer = { close };
   open.push(layer);
   schedule();
@@ -138,7 +146,9 @@ export function openLayer(close: () => void): () => void {
 
 /** A traversal of the app's own is on its way: no entry is pushed until it lands. */
 export function traversing(): void {
-  if (typeof window !== "undefined") going = { at: Date.now() };
+  if (typeof window === "undefined") return;
+  watch();
+  going = { at: Date.now() };
 }
 
 /** Runs `then` once the history is off the layers' entries, back on the page's own. */
@@ -152,6 +162,7 @@ export function afterLayers(then: () => void): void {
     going!.then = () => { before?.(); afterLayers(then); };
     return;
   }
+  watch();
   going = { at: Date.now(), then };
   history.go(-here);
 }

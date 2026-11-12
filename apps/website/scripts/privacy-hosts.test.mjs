@@ -46,6 +46,17 @@ test("the privacy page and the agents FAQ name the default relays the project ru
   for (const ways of direct) assert.doesNotMatch(ways, /Iroh/, `the CLI's Iroh is never direct: "${ways}"`);
 });
 
+test("the terms name the default relays the project runs among what it runs", () => {
+  const own = [...defaultHosts("packages/core/src/relay.ts", "DEFAULT_RELAYS"), ...defaultHosts("packages/browser/src/platform/irohWeb.ts", "DEFAULT_IROH_RELAYS")]
+    .filter((host) => host.endsWith(".miguelmedeiros.dev"));
+  const text = read("apps/website/app/terms/page.tsx").replace(/\s+/g, " ");
+  const start = text.indexOf('title="What we run, and what we do not"');
+  assert.ok(start >= 0, "the terms have a section on what the project runs");
+  const section = text.slice(start, text.indexOf("</Section>", start));
+  for (const host of own) assert.ok(section.includes(host), `the terms' "What we run" names ${host}`);
+  assert.doesNotMatch(section, /nothing else that Ghostly depends on|do not run any relay/);
+});
+
 test("the privacy page and /developers name every resolver a domain lookup may ask, in its order", () => {
   const names = dohResolvers();
   assert.deepEqual(names, ["Quad9", "Cloudflare", "Google"]);

@@ -8,8 +8,9 @@ import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
-import { databaseOfSpace, newSpace, pointProfile, recoverProfilePointer, registryKey } from "./profiles";
-import { dropWalletStorageOf } from "./profileData";
+import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
+import { dropWalletStorageOf, keysOfSpace } from "./profileData";
+import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -201,15 +202,17 @@ function dropDatabase(name: string): Promise<void> {
 }
 
 /**
- * Every local key of a namespace (never the first profile's, whose prefix every other one shares). Never the registry
- * of profiles: in a Desktop space of its own (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and
- * the registry `ghostly_<base>_profiles` has its prefix. Deleting the old namespace after a handoff took the registry
- * with it, so the app opened the empty old namespace and listed no other profile (Linux bug hunt, 2026-10-03).
+ * Every local key of a namespace (`keysOfSpace`). Never the registry of profiles: in a Desktop space of its own
+ * (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and the registry `ghostly_<base>_profiles` has its
+ * prefix. Deleting the old namespace after a handoff took the registry with it, so the app opened the empty old
+ * namespace and listed no other profile (Linux bug hunt, 2026-10-03). The first profile's original namespace, whose
+ * prefix every other one shares, is dropped only once no profile runs on it: a take of it left its chats with their keys,
+ * drafts and invites, and the first profile listed them again once removed here.
  */
 function dropKeys(ns: string): void {
-  if (!ns) return;
-  const prefix = `ghostly_${ns}_`, registry = registryKey();
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix) && key !== registry);
+  if (!ns && profileOfDatabase(databaseOfSpace(ns))) return;
+  const owned = keysOfSpace(ns);
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key && owned(key));
   for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
 }
 
@@ -326,9 +329,12 @@ class Staging implements HandoffStaging {
     const kept = new Map(files.map((file) => [file.id, notes.get(file.id) ?? null]));
     try {
       for (let at = 0; at < files.length;) {
-        // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits.
+        // The small files' bytes are read before the transaction opens: one left with nothing asked of it commits. All of
+        // a transaction's at once: each read is a round trip to the file storage's worker, which serves other files
+        // meanwhile. One after the other, 8,000 files took 7.2 s of the stretch both devices are frozen (bug hunt, 2026-11-07).
         const small = new Map<string, Uint8Array | Blob>();
         const blobs = new Map<string, { file: HandoffFile; id: string }[]>();
+        const reads: Promise<void>[] = [];
         let end = at;
         for (let held = 0; end < files.length && end - at < RESTORE_FILES && held < RESTORE_BYTES; end++) {
           const file = files[end];
@@ -336,16 +342,19 @@ class Staging implements HandoffStaging {
           const from = kept.get(file.id);
           // The frozen copy's own Blob, not its bytes: nothing read or written here but its record.
           if (from) { blobs.set(from.database, blobs.get(from.database) ?? []).get(from.database)!.push({ file, id: from.id }); continue; }
-          const bytes = new Uint8Array(file.size);
-          for (let done = 0; done < file.size;) {
-            const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
-            if (!part.length) throw new Error("The file is shorter than it says");
-            bytes.set(part, done);
-            done += part.length;
-          }
-          small.set(file.id, bytes);
+          reads.push((async () => {
+            const bytes = new Uint8Array(file.size);
+            for (let done = 0; done < file.size;) {
+              const part = await store.read(file.id, done, Math.min(FILE_BYTES_STEP, file.size - done));
+              if (!part.length) throw new Error("The file is shorter than it says");
+              bytes.set(part, done);
+              done += part.length;
+            }
+            small.set(file.id, bytes);
+          })());
           held += file.size;
         }
+        await Promise.all(reads);
         for (const [database, list] of blobs) {
           if (!frozen.has(database)) frozen.set(database, await openAsStored(database));
           const rows = frozen.get(database)!.transaction("files", "readonly").objectStore("files");
@@ -376,7 +385,11 @@ class Staging implements HandoffStaging {
       db.close();
       for (const opened of frozen.values()) opened.close();
     }
-    for (const file of files) if (file.size <= SMALL_FILE_BYTES && !kept.get(file.id)) await store.remove(file.id).catch(() => {});
+    // Their bytes are on their records now; the staged copies go a transaction's worth at a time, as they were read.
+    const copies = files.filter((file) => file.size <= SMALL_FILE_BYTES && !kept.get(file.id));
+    for (let at = 0; at < copies.length; at += RESTORE_FILES) {
+      await Promise.all(copies.slice(at, at + RESTORE_FILES).map((file) => store.remove(file.id).catch(() => {})));
+    }
   }
 
   async dropRest(): Promise<void> {
@@ -392,13 +405,26 @@ class Staging implements HandoffStaging {
   }
 }
 
+/**
+ * The microphone, camera and speaker this device chose for the profile, from the namespace it ran before onto the one
+ * staged: a move never carries the giver's (`writeProfileBackup`), whose ids name that browser's devices. Taking the
+ * profile back, a device uses its own headset again; a device the profile never ran on uses the system's defaults.
+ */
+function keepOwnDevices(old: string, staged: string): void {
+  const prefix = (ns: string) => (ns ? `ghostly_${ns}_` : "ghostly_");
+  try {
+    const own = localStorage.getItem(`${prefix(spaceOf(old))}${MEDIA_DEVICES_SUFFIX}`);
+    if (own !== null) localStorage.setItem(`${prefix(spaceOf(staged))}${MEDIA_DEVICES_SUFFIX}`, own);
+  } catch { /* the defaults, as on a device the profile never ran on */ }
+}
+
 const staging: HandoffStagingHost = {
   async open(database) {
     return new Staging(database ? spaceOf(database) : newSpace());
   },
   // Installed, the staged namespace is the profile's own: its notes only served a pull that had not finished, and one
   // key per file would stay outside every profile's prefix for as long as this copy lives (bug hunt, 2026-11-04).
-  async install(old, staged) { pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
+  async install(old, staged) { keepOwnDevices(old, staged); pointProfile(old, staged); await dropNotes(spaceOf(staged)); },
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);
@@ -406,9 +432,11 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
-    await dropFileSpace(database).catch(() => {});
+    const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);
+    // Files that stayed are said: whoever names this namespace keeps naming it, and drops it again later.
+    if (files) throw files;
   },
 };
 

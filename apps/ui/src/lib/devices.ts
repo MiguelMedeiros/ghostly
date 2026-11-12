@@ -84,6 +84,8 @@ const FAILURE_KEYS: Record<string, TranslationKey> = {
   elsewhere: "devices.fail.elsewhere", full: "devices.fail.full", replaced: "devices.fail.replaced", failed: "devices.fail.failed",
   "in-use": "devices.fail.inUse", loading: "devices.fail.loading", offline: "devices.fail.offline", set: "devices.fail.set", typo: "devices.fail.typo", update: "devices.fail.update",
   "not-ghostly": "devices.fail.notGhostly", damaged: "devices.fail.damaged", chat: "devices.fail.chat", "home-screen": "devices.join.homeScreen",
+  // Add a device while the profile moves or the set changes: as a Remove or a Rename then.
+  busy: "devices.remove.fail.busy",
 };
 
 export const failureKey = (reason: EnrollFailure | string): TranslationKey => FAILURE_KEYS[reason] ?? "devices.fail.failed";
@@ -118,11 +120,14 @@ const readDeviceSet = () => engine.call("deviceSet").then((next) => {
   return next;
 });
 
+/** How often a screen that lists the devices reads the set again. */
+export const DEVICE_SET_EVERY_MS = 3_000;
+
 /**
  * The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read.
  * Not read behind a hidden window, and the same object while the set says the same (`useShownPoll`).
  */
-export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
+export function useDeviceSet(everyMs = DEVICE_SET_EVERY_MS): DeviceSetView | null {
   return useShownPoll(readDeviceSet, everyMs);
 }
 

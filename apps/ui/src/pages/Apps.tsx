@@ -6,6 +6,7 @@ import type { AppListing } from "@ghostly/core";
 import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
 import { Toast } from "../components/ui/Toast";
+import { SearchStatus } from "../components/ui/SearchStatus";
 import { useToast } from "../hooks/useToast";
 import { useFocusBack } from "../hooks/useFocusBack";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -15,7 +16,7 @@ import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInst
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { useAppsState } from "../lib/apps/flag";
-import { refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
+import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText, appErrorView, appStoreProblemText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
@@ -30,7 +31,7 @@ import { listText } from "../lib/listText";
 
 /** What a line under an installed app says: what needs the person first, else its tagline. */
 function appHint(app: InstalledAppView, t: Translate): { lead?: string; text: string; tone: "muted" | "warning" | "danger" } {
-  if (app.run.status === "revoked" || app.run.status === "removed") return { text: t("apps.app.stopped"), tone: "danger" };
+  if (appStopped(app)) return { text: t("apps.app.stopped"), tone: "danger" };
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
   // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
@@ -220,7 +221,9 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span className="flex items-center gap-1.5">
-            <span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{storeName}</span>
+            {/* Its link wraps whole: cut, a phone showed only its host, and the owner, repository and file that tell two
+                stores apart were the part cut. */}
+            <span dir="auto" className={`min-w-0 text-sm text-text-primary ${store.name ? "truncate" : "[overflow-wrap:anywhere]"}`}>{storeName}</span>
             {read && (
               <svg aria-hidden="true" data-testid="app-store-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                 className={`shrink-0 text-text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
@@ -233,7 +236,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
-          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{problem}</span>}
+          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger-ink">{problem}</span>}
         </button>
         {!asking && (
           <div className="flex flex-wrap items-center gap-2 ms-auto">
@@ -264,6 +267,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           <input type="search" data-testid="app-store-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
             className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+          <SearchStatus testId="app-store-found" text={!filter.trim() ? "" : matching.length ? t("apps.store.count", { count: matching.length }) : t("apps.store.noMatch")} />
         </div>
       )}
       {open && (
@@ -281,7 +285,11 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                   <AppIcon size={32} installed={app} />
                   <span className="min-w-0 flex-1">
                     <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
-                    <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                    {/* Why the store took it down is read whole: cut to one line, a phone showed only "Removed by <store>: It
+                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. */}
+                    {removed
+                      ? <span dir="auto" data-testid="app-listing-removed" className="text-match-parent block text-xs text-text-muted [overflow-wrap:anywhere]">{t("apps.install.removed", { store: store.name ?? "", reason: removed.reason })}</span>
+                      : <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{listing.tagline}</span>}
                   </span>
                 </span>
                 {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
@@ -354,6 +362,17 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
+  // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
+  const [retried, setRetried] = useState<"installed" | "stores" | null>(null);
+  useEffect(() => {
+    if (!retried || (retried === "installed" ? installedFailure != null || installed === null : storesFailure != null || stores === null)) return;
+    setRetried(null);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const first = document.querySelector(`[data-testid=apps-${retried}]`)?.querySelector<HTMLElement>("button:not(:disabled)");
+    (first ?? document.querySelector<HTMLElement>("[data-testid=apps-add]"))?.focus({ preventScroll: true });
+  }, [retried, installedFailure, installed, storesFailure, stores]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -387,7 +406,7 @@ export function Apps() {
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
-        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => void refreshInstalledApps()} />}
+        {installedFailure != null && <ReadFailed error={installedFailure} testId="apps-installed-error" onRetry={() => { setRetried("installed"); void refreshInstalledApps(); }} />}
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : installed.length === 0 && builtIns.length === 0 ? installedFailure == null && <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
             : <>
@@ -396,13 +415,14 @@ export function Apps() {
             </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
-        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => void reloadStores()} />}
+        {storesFailure != null && <ReadFailed error={storesFailure} testId="apps-stores-error" onRetry={() => { setRetried("stores"); void reloadStores(); }} />}
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? storesFailure == null && <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
             : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onProblem={show} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
-      {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
+      {/* A store added can remove, revoke or list an installed app, as one read again: both lists again (WISP 1200 § Takedowns). */}
+      {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstalled={(app) => setJustInstalled(app.ref)} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} onUninstalled={() => setGone({ app: shown.ref })} />}
       {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
       {first && (

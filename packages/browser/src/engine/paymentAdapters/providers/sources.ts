@@ -156,6 +156,13 @@ export class ProviderSources<P extends Connectable> {
   private stopped = false;
   /** When the balance is read next, while reads get no answer (one key: this source). */
   private readonly reads: AskBackoff<"balance">;
+  /** Balance reads under way, and whether another call to the source got its answer meanwhile (`answered`). */
+  private reading = 0;
+  private answeredMeanwhile = false;
+  /** An answer to another call already brought a read since the last read that answered: the next ones wait their turn. */
+  private answerRead = false;
+  /** The balance changed while a read was under way (`balanceChanged`): it may say the old one, so one more follows it. */
+  private changedMeanwhile = false;
   view: SourceView = { mode: "mainnet", status: "none", offered: [] };
 
   constructor(private readonly options: SourcesOptions<P>) {
@@ -233,6 +240,34 @@ export class ProviderSources<P extends Connectable> {
     if (this.failures && !this.connecting) void this.retryNow();
   }
 
+  /**
+   * The connected source answered another call (a payment, a fee estimate, an invoice made or looked up): it is back.
+   * While its balance reads get no answer, the balance is read now rather than when the wait they earned ends; a
+   * read that answers forgets that wait, as any does. A read already under way is left to say it (if it gets no
+   * answer, the next one is `refreshMs` later). Once per stretch of failed reads, and one that fails keeps doubling
+   * the wait: a source that answers everything but its balance keeps the slow pace. A source whose reads answer:
+   * nothing changes.
+   */
+  answered(provider: P) {
+    if (this.stopped || provider !== this.provider || !this.options.refresh || !this.view.error || this.answerRead) return;
+    this.answerRead = true;
+    if (this.reading) { this.answeredMeanwhile = true; return; }
+    void this.refresh();
+  }
+
+  /**
+   * What the connected source holds changed (a payment through it went through, an invoice of ours was seen paid): its
+   * balance is read now, failed reads or not, instead of on its timer: the card, the wallet's total and the Send
+   * picker would show the balance from before it for up to `refreshMs`. A read already under way may have started
+   * before: one more comes right after it, never two at once. It is also the one read an answer brings (`answered`).
+   */
+  balanceChanged(provider: P) {
+    if (this.stopped || provider !== this.provider || !this.options.refresh) return;
+    this.answerRead = true;
+    if (this.reading) { this.changedMeanwhile = true; return; }
+    void this.refresh();
+  }
+
   private async connect(eager = false) {
     clearTimeout(this.retry);
     if (this.stopped || this.provider) return;
@@ -308,19 +343,24 @@ export class ProviderSources<P extends Connectable> {
   }
 
   /**
-   * Whether the saved source is this provider with these very settings (the same wallet added twice). Its secrets are
-   * unsealed here to compare, and never leave.
+   * Whether the saved source is this provider reaching the same wallet (the same wallet added twice): the provider's
+   * `wallet` says which one (an NWC URI spelled another way, or another app connection to it, is the same), else these
+   * very settings. Its secrets are unsealed here to compare, and never leave.
    */
   async holds(providerId: string, settings: ProviderSettings): Promise<boolean> {
     const stored = this.stored;
     if (!stored || stored.providerId !== providerId) return false;
+    const unseal = async () => stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
+    const wallet = this.find(providerId)?.wallet;
+    if (wallet) {
+      const secrets = await unseal();
+      try { return wallet({ config: stored.config, secrets }) === wallet(settings); } catch { return false; }
+    }
     const same = (a: Record<string, string>, b: Record<string, string>) => {
       const keys = Object.keys(a).sort();
       return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every((k) => a[k] === b[k]);
     };
-    if (!same(stored.config, settings.config)) return false;
-    const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
-    return same(secrets, settings.secrets);
+    return same(stored.config, settings.config) && same(await unseal(), settings.secrets);
   }
 
   /**
@@ -456,23 +496,35 @@ export class ProviderSources<P extends Connectable> {
     if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
     const before = this.view;
     let wait = this.options.refreshMs ?? REFRESH_MS;
+    this.reading++;
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
       this.view = { ...this.view, ...details, read: true, balanceAt: undefined, error: undefined };
       this.remember(details);
       this.reads.forget("balance");
+      this.answerRead = false;
     } catch (error) {
       if (provider !== this.provider) return;
       // Its error stays shown until a read answers.
       this.view = { ...this.view, error: `Could not read the balance: ${redact(error, this.secrets)}` };
       wait = this.reads.missed("balance", Date.now());
+      // The source answered another call while this read was under way (it may have started before the source was
+      // back): the next read comes soon, once, and the wait goes on doubling from where it was.
+      if (this.answeredMeanwhile) wait = this.options.refreshMs ?? REFRESH_MS;
+    } finally {
+      this.reading--;
+      if (!this.reading) this.answeredMeanwhile = false;
     }
     // A read that says what the view already did (the same balance, or none) changes nothing: every 15 s it made a
     // whole wallet view and engine state, with no wallet at all.
     const after = this.view as unknown as Record<string, unknown>, was = before as unknown as Record<string, unknown>;
     if (Object.keys({ ...was, ...after }).some(key => was[key] !== after[key])) this.options.changed();
-    if (this.provider) { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), wait); }
+    if (!this.provider) return;
+    clearTimeout(this.timer);
+    // The balance changed while this read was under way: it may have said the old one.
+    if (this.changedMeanwhile && !this.reading) { this.changedMeanwhile = false; void this.refresh(); return; }
+    this.timer = setTimeout(() => void this.refresh(), wait);
   }
 
   /** Keeps the balance read, for the next start: written only when it changed. */
@@ -489,7 +541,7 @@ export class ProviderSources<P extends Connectable> {
 
   /** `forget`: the source is removed, so what it keeps on this device goes too (a provider's own `forget`). */
   private async disconnect(forget = false) {
-    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance");
+    clearTimeout(this.timer); clearTimeout(this.retry); this.reads.forget("balance"); this.answerRead = false; this.changedMeanwhile = false;
     this.controller.abort(); this.controller = new AbortController();
     const provider = this.provider as (P & { forget?: () => Promise<void> }) | undefined;
     this.provider = undefined; this.descriptor = undefined; this.secrets = {};

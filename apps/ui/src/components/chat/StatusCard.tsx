@@ -27,8 +27,8 @@ export function ProgressBar({ card, className = "" }: { card: TaskCard; classNam
   return (
     <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} {...(progress !== undefined && { "aria-valuenow": progress })}
       data-testid="status-card-progress" data-progress={progress ?? ""}
-      className={`h-1 w-full overflow-hidden rounded-full bg-text-primary/10 ${className}`}>
-      <div className={`h-full rounded-full ${STATUS_TONE[card.status].bar} transition-[width] duration-300 motion-reduce:transition-none`} style={{ width: `${shown}%` }} />
+      className={`progress-track h-1 w-full overflow-hidden rounded-full bg-text-primary/10 ${className}`}>
+      <div className={`progress-fill h-full rounded-full ${STATUS_TONE[card.status].bar} transition-[width] duration-300 motion-reduce:transition-none`} style={{ width: `${shown}%` }} />
     </div>
   );
 }
@@ -78,19 +78,19 @@ function TaskView({ card, time, marks, end }: { card: TaskCard; time?: ReactNode
         className="block w-full cursor-pointer rounded-t-[9px] px-3.5 pt-2.5 pb-1 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <span className="flex min-w-0 items-start gap-2">
           <bdi data-testid="status-card-title" title={card.title}
-            className={`min-w-0 flex-1 text-[13.5px] font-semibold leading-5 text-text-primary ${open ? "[overflow-wrap:anywhere]" : "truncate"}`}>{card.title}</bdi>
-          <span data-testid="status-card-status" className={`inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium leading-5 ${tone.label}`}>
+            className={`min-w-0 flex-1 chat-text-card-heading font-semibold chat-text-leading-5 text-text-primary ${open ? "[overflow-wrap:anywhere]" : "truncate"}`}>{card.title}</bdi>
+          <span data-testid="status-card-status" className={`inline-flex shrink-0 items-center gap-1 chat-text-card-meta font-medium chat-text-leading-5 ${tone.label}`}>
             {tone.mark ? <span aria-hidden="true">{tone.mark} </span> : <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />}
             {t(`cards.task.status.${card.status}`)}
           </span>
         </span>
         <span className="mt-2 flex items-center gap-2">
           <ProgressBar card={card} className="flex-1" />
-          {progress !== undefined && <span className="shrink-0 text-[11px] leading-4 tabular-nums text-text-secondary">{progress}%</span>}
+          {progress !== undefined && <span className="shrink-0 chat-text-card-label chat-text-leading-4 tabular-nums text-text-secondary">{progress}%</span>}
         </span>
       </button>
       {open && (
-        <div id={detailsId} data-testid="status-card-details" className="mx-3.5 mt-1 flex flex-col gap-2 border-t border-text-primary/10 pb-1 pt-2 text-xs leading-snug text-text-primary/85">
+        <div id={detailsId} data-testid="status-card-details" className="mx-3.5 mt-1 flex flex-col gap-2 border-t border-text-primary/10 pb-1 pt-2 chat-text-card-small leading-snug text-text-primary/85">
           {card.step && !isFinished(card.status) && <p className="m-0"><span className="font-semibold">{t("cards.task.now")}</span> <bdi data-testid="status-card-step">{card.step}</bdi></p>}
           {card.items && (
             <ol className="m-0 list-none space-y-1 p-0" data-testid="status-card-items">
@@ -121,7 +121,7 @@ function TaskView({ card, time, marks, end }: { card: TaskCard; time?: ReactNode
         </div>
       )}
       {/* The card's foot: its facts at the start, when it changed and its marks at the end; a narrow card wraps them. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 px-3.5 pb-2 pt-1.5 text-[11.5px] leading-4 text-text-secondary">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 px-3.5 pb-2 pt-1.5 chat-text-card-meta chat-text-leading-4 text-text-secondary">
         {facts.length > 0 && <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">{facts}</span>}
         {(time || marks) && <span className="ms-auto flex shrink-0 items-center gap-[3px] text-[11px]">{time}{marks}</span>}
       </div>

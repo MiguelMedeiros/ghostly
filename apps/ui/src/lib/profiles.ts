@@ -218,6 +218,23 @@ export function themeOf(id: string): ColorTheme {
 }
 
 /**
+ * Calls `changed` when a save of this profile's settings gives it another colour, the one thing of its settings that
+ * its badge and the profile lists show (`themeOf`, read from the saved copy). Any other setting (a name typed key by
+ * key, a switch) is no reason to draw them again, nor to read the other profiles. Returns the way to stop.
+ */
+export function onOwnThemeSaved(changed: () => void): () => void {
+  let theme = themeOf(activeProfileId());
+  const saved = () => {
+    const now = themeOf(activeProfileId());
+    if (now === theme) return;
+    theme = now;
+    changed();
+  };
+  window.addEventListener("settings-updated", saved);
+  return () => window.removeEventListener("settings-updated", saved);
+}
+
+/**
  * A new, empty profile with its own name and a theme no other profile uses yet, so switching is visible at
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
@@ -231,8 +248,9 @@ export function createProfile(name: string): ProfileEntry {
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
-    // The lock goes with it: a new profile must not be a way around the lock of the one it came from.
-    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
+    // The lock goes with it: a new profile must not be a way around the lock of the one it came from. The text size too:
+    // it is for the eyes of who uses this device.
+    inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, textSize: current.textSize, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
   const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };
@@ -275,6 +293,21 @@ export function unregisterProfile(id: string): void {
   const registry = read();
   if (registry.active === id) throw new Error("Switch to another profile first");
   write({ ...registry, profiles: registry.profiles.filter((p) => p.id !== id) });
+}
+
+/**
+ * The profile this page runs as was removed from this device ("Remove this profile here", WISP 06): its data must
+ * already be gone. Another profile goes off the list, and the next page starts as the first one, if it was the choice.
+ * The first profile keeps its place, pointed at its own namespace again, and starts empty.
+ */
+export function forgetProfileHere(id: string): void {
+  const registry = read();
+  if (id) { write({ ...registry, active: registry.active === id ? "" : registry.active, profiles: registry.profiles.filter((p) => p.id !== id) }); return; }
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id) return p;
+    const { space: _was, ...rest } = p;
+    return rest;
+  }) });
 }
 
 /**
@@ -403,6 +436,17 @@ export function pendingSwitch(): PendingSwitch | null {
 export function clearPendingSwitch(): void {
   try { sessionStorage.removeItem(SWITCH_KEY); } catch { /* nothing kept */ }
 }
+/**
+ * Says a switch to profile `id` is under way: the overlay (ProfileSwitchSplash) covers this page now, and the page that
+ * loads next takes it over until that profile has something to show. Nothing for a profile the registry does not list.
+ */
+export function announceSwitch(id: string, avatar?: string): void {
+  const target = read().profiles.find((p) => p.id === id);
+  if (!target) return;
+  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar, at: Date.now() };
+  try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
+  window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+}
 
 /**
  * Makes another profile the active one and restarts the app, so no peer, wallet or timer of the old
@@ -418,9 +462,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   if (id === activeProfileId()) return;
   // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
   if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
-  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
-  try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
-  window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+  announceSwitch(id, options.avatar);
   // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker.
   const shareKept = carryIncomingShare();
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until

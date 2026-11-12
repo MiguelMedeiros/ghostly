@@ -142,3 +142,74 @@ describe("a member back on hubs that changed twice since an edit", () => {
     for (const p of [hubA, hubB]) expect(got.get(p) ?? []).toEqual([]);
   }, 300_000);
 });
+
+describe("a deletion for everyone whose author is out of the group, on a hub let in after the message", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => { restore?.(); restore = null; });
+
+  // A hub let in after a message cannot open its edits, so it cannot tell a removal from another edit. Once the author
+  // was out of the roster it dropped them all, and a member back whose only hub it was kept the message for good.
+  it.each([
+    [11, "removed after the hub carried it"], [22, "removed after the hub carried it"],
+    [11, "gone before the hub was let in"], [33, "gone before the hub was let in"],
+  ] as const)("reaches a member back whose only edge is that hub (seed %i, %s)", async (seed, when) => {
+    const world = new CommunityWorld(undefined, null, seededRandom(seed));
+    restore = sameRun(world, seed);
+    const got = new Map<Peer, { id: string; e: number; m: string; rm?: true }[]>();
+    const hooks = (p: Peer) => ({ groupEdit: (_g: string, e: { id: string; e: number; m: string; rm?: true }) => { got.set(p, [...got.get(p) ?? [], e]); } });
+    const add = (name: string, staysOnline = false) => world.add(name, hooks, { staysOnline });
+    const admin = add("admin");
+    const id = await admin.groups.create("Hubs", "mesh");
+    const link = await admin.groups.enableLink(id);
+    const peers = [admin];
+    const join = async (p: Peer) => { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000, 500); peers.push(p); };
+    for (let i = 1; i < 20; i++) await join(add(`p${i}`, i === 2 || i === 5));
+    const view = (p: Peer) => world.view(p, id)!;
+    await world.until(() => peers.every(p => !!view(p).hubs && view(p).members.every(m => m.online)), 10 * 60_000, 1000);
+    await world.run(150_000);
+
+    const [x, author] = [peers[1], peers[3]];
+    const authorKey = view(author).myKey!;
+    const gone = (await author.groups.send(id, "del B")).messageId!;
+    await world.until(() => peers.every(p => world.texts(p, id).includes("del B")), 60_000, 1000);
+    x.online = false;
+    const out = async () => {
+      if (when === "gone before the hub was let in") await author.groups.leave(id);
+      else await admin.groups.remove(id, authorKey);
+      await world.until(() => peers.filter(p => p.online && p !== author && world.member(p, id)).every(p => !view(p).members.some(m => m.key === authorKey)), 5 * 60_000, 1000);
+    };
+    const remove = () => author.groups.sendEdit(id, { id: gone, e: 1, ts: world.now, m: REMOVED_TEXT, rm: true });
+    let hubA: Peer | undefined;
+    const readers = () => peers.filter(p => ![x, author, peers[2], peers[5], hubA].includes(p));
+    const took = (p: Peer) => (got.get(p) ?? []).some(e => e.id === gone && e.rm);
+    if (when === "gone before the hub was let in") {
+      expect(await remove()).toBeNull();
+      await world.until(() => readers().every(took), 60_000, 1000);
+      await out();
+    }
+
+    // The hubs change: one leaves, the other's app closes, and a newcomer that stays online is the hub.
+    await peers[2].groups.leave(id);
+    peers[5].online = false;
+    const hub = hubA = add("hubA", true);
+    await join(hub);
+    const keyOf = (p: Peer) => view(p).myKey!;
+    const edgeUp = (p: Peer, to: Peer) => view(p).members.some(m => m.key === keyOf(to) && m.online && !m.viaHub);
+    await world.until(() => view(hub).hubs?.hub === true && peers.filter(p => p.online && p !== hub && world.member(p, id)).every(p => edgeUp(p, hub)), 10 * 60_000, 1000);
+    await world.run(60_000);
+    if (when === "removed after the hub carried it") {
+      expect(await remove()).toBeNull();
+      await world.until(() => readers().every(took), 30_000, 1000);
+      author.online = false;
+      await out();
+    }
+    await world.run(60_000);
+
+    // x comes back: only the hub hands it edits.
+    world.drop = (from, to, frame) => frame.t === "group-edit" && to === x && from !== hub;
+    world.reopen(x);
+    await world.until(() => took(x), 240_000, 1000, () => `x took ${JSON.stringify(got.get(x) ?? [])}`);
+    // The hub carried it unread.
+    expect(got.get(hub) ?? []).toEqual([]);
+  }, 300_000);
+});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, COMMUNITY_LIMITS, type CommunityFrame } from "../src/groupCommunity";
@@ -13,23 +13,31 @@ class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
+  /** What each member's session saved, in order (the whole record each time). */
+  readonly saves = new Map<string, GroupState[]>();
   /** Members that pass on what their session took, as a hub does (WISP 902 § Hubs), and whom each member counts on. */
   readonly hubs = new Set<string>();
   readonly carriers = new Map<string, string[]>();
+  /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
+  clock: number | null = null;
+  /** Moves the sessions' clock on by `ms`, from the wall clock the first time: an author's frames taken at its pace. */
+  tick(ms: number): void { this.clock = (this.clock ?? Date.now()) + ms; }
   private closed = new Set<string>();
   private pending: Promise<unknown>[] = [];
   /** An app from before edits: its session has no `edit` hook. */
   add(state: GroupState, old = false): GroupSession {
     const session: GroupSession = new GroupSession(state, {
-      save: async () => {},
+      save: async state => { this.saves.get(session.myKey)!.push(clone(state)); },
       send: (to, frame) => this.deliver(session, to, frame),
       message: () => {},
+      clock: () => this.clock ?? Date.now(),
       ...(old ? {} : { edit: (e: GroupIncomingEdit) => { this.edits.get(session.myKey)!.push(e); } }),
       changed: () => {},
       carriers: () => this.carriers.get(session.myKey) ?? [],
     });
     this.sessions.set(session.myKey, session);
     this.edits.set(session.myKey, []);
+    this.saves.set(session.myKey, []);
     return session;
   }
   private deliver(from: GroupSession, to: string, frame: GroupEdgeFrame): void {
@@ -190,6 +198,89 @@ describe("group-edit frames (a private group)", () => {
       expect(mesh.sent.slice(before).some(f => f.frame.t === GROUP_EDIT_FRAME)).toBe(false);
     });
   }
+
+  for (const via of ["a member", "a hub let in after it"] as const) {
+    it(`one member's many edits of messages that are not there push out only its own: a removal kept for one away still reaches it (through ${via})`, async () => {
+      const { mesh, alice, bob, carol } = await trio();
+      const dave = await admit(mesh, alice);
+      const gone = ((await carol.sendText("secret oops")) as { id: string }).id;
+      await mesh.settle();
+      const epoch = carol.epoch;
+      // On hubs: one let in after the message, which Carol and Bob count on; it cannot open what was said before it.
+      const hub = via === "a member" ? alice : await admit(mesh, alice);
+      if (hub !== alice) { mesh.hubs.add(hub.myKey); for (const s of [carol, bob]) mesh.carriers.set(s.myKey, [hub.myKey]); }
+      // Dave is away; Carol deletes her message for everyone, then is gone (out of the group; on hubs, offline: a hub
+      // carries what it cannot open only while its author is a member).
+      for (const s of [alice, bob, carol, hub]) mesh.setEdge(dave, s, false);
+      expect(await carol.sendEdit(gone, { v: 1, ts: 1, text: REMOVED_TEXT, remove: true })).toHaveProperty("sent");
+      await mesh.settle();
+      if (hub === alice) await carol.leave(); else for (const s of [alice, bob, hub]) mesh.setEdge(carol, s, false);
+      await mesh.settle();
+      // Bob edits, with the longest text, as many messages of his as the log holds, none of which he ever sent.
+      for (let n = 1_000; n < 1_064; n++) {
+        expect(await bob.sendEdit(groupMessageId(bob.myKey, epoch, n), { v: 1, ts: 2, text: "x".repeat(16 * 1024 - 64) })).toHaveProperty("sent");
+      }
+      await mesh.settle();
+      // Dave is back on an edge to the hub alone and catches up: Carol's removal is still there for him.
+      mesh.setEdge(dave, hub, true);
+      await hub.handle(dave.myKey, clone(dave.syncFrame(hub === alice ? [] : [carol.myKey])));
+      await mesh.settle();
+      expect(mesh.of(dave).filter(e => e.id === gone && e.rm)).toHaveLength(1);
+    });
+  }
+
+  it("a burst of edits taken is saved once a window, not once each, and what one save lost comes back at catch-up", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { mesh, alice, bob, carol } = await trio();
+      const id = ((await bob.sendText("Deploy: 0 of 2")) as { id: string }).id;
+      await mesh.settle();
+      for (const s of [alice, carol]) await s.flush();
+      const before = clone(carol.state);
+      for (const s of [alice, carol]) mesh.saves.get(s.myKey)!.length = 0;
+      // Bob edits 200 messages of his that are not there, each signed and sealed: neither member saves its whole record
+      // for each. At his pace, so each is taken (the clock the sessions read, not the save's timer).
+      const epoch = bob.epoch;
+      for (let n = 1_000; n < 1_200; n++) {
+        mesh.tick(400);
+        expect(await bob.sendEdit(groupMessageId(bob.myKey, epoch, n), { v: 1, ts: 2, text: "x" })).toHaveProperty("sent");
+      }
+      // And one honest edit of a line that is there.
+      mesh.tick(400);
+      await bob.sendEdit(id, { v: 1, ts: 3, text: "Deploy: done" });
+      await mesh.settle();
+      for (const s of [alice, carol]) expect(mesh.saves.get(s.myKey)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (const s of [alice, carol]) { await s.flush(); expect(mesh.saves.get(s.myKey)).toHaveLength(1); }
+      // The honest edit is in what was saved: a restart keeps it to hand on.
+      const saved = mesh.saves.get(carol.myKey)!.at(-1)!;
+      const ref = meshMessageRef(id)!;
+      expect(new GroupSession(clone(saved), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} }).state.relayEdits)
+        .toContainEqual(expect.objectContaining({ s: bob.myKey, n: ref.n, v: 1 }));
+      // Carol killed before that save (her app has the edit): her session back from the record before takes the frame
+      // again when she asks for Bob, and keeps it to hand on.
+      const back = mesh.add(clone(before));
+      mesh.setEdge(back, bob, false);
+      await alice.handle(back.myKey, clone(back.syncFrame([bob.myKey])));
+      await mesh.settle();
+      expect(mesh.of(back)).toContainEqual({ id, sender: bob.myKey, e: 1, ts: 3, m: "Deploy: done" });
+      expect(back.state.relayEdits).toContainEqual(expect.objectContaining({ s: bob.myKey, n: ref.n, v: 1 }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an author's own burst of edits is kept as before: the latest of each, as many as the log holds", async () => {
+    const { mesh, alice, bob } = await trio();
+    const ids: string[] = [];
+    // At his pace, so each is taken.
+    for (let i = 0; i < 70; i++) { mesh.tick(400); ids.push(((await bob.sendText(`line ${i}`)) as { id: string }).id); }
+    for (const id of ids) { mesh.tick(400); await bob.sendEdit(id, { v: 1, ts: 1, text: "edited" }); }
+    mesh.tick(400);
+    await bob.sendEdit(ids[69], { v: 2, ts: 2, text: "edited again" });
+    await mesh.settle();
+    expect((alice.state.relayEdits ?? []).map(f => [f.n, f.v])).toEqual(ids.slice(-64).map((id, i) => [meshMessageRef(id)!.n, i === 63 ? 2 : 1]));
+  });
 
   it("someone admitted after the message is not sent its edits, and could not open them", async () => {
     const { mesh, alice, bob, carol } = await trio();

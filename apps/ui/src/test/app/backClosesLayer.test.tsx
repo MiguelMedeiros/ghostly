@@ -2,8 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { BackupProgress } from "../../components/BackupProgress";
+import { CallOverlay } from "../../components/CallOverlay";
 import { DeleteChatDialog } from "../../components/DeleteChatDialog";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
+import { Select } from "../../components/ui/Select";
 import { I18nProvider } from "../../contexts/I18nContext";
 import { SettingsProvider } from "../../contexts/SettingsContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
@@ -32,6 +36,20 @@ function Panel({ onClose }: { onClose(): void }) {
   return <div data-testid="panel" />;
 }
 
+const LANGUAGES = [{ value: "en", label: "English" }, { value: "pt", label: "Português" }];
+
+/** A select on the page, as Settings' Language. */
+function Language() {
+  const [value, setValue] = useState("en");
+  return <Select aria-label="Language" value={value} options={LANGUAGES} onChange={setValue} />;
+}
+
+/** A dialog with a select in it, as New wallet's provider. */
+function Provider({ onClose }: { onClose(): void }) {
+  useBackCloses(onClose);
+  return <dialog open data-testid="provider"><Select aria-label="Provider" value="en" options={LANGUAGES} onChange={() => {}} /></dialog>;
+}
+
 function Chat() {
   const nav = useAppNavigation();
   const navigate = useNavigate();
@@ -39,9 +57,16 @@ function Chat() {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState(false);
+  const [provider, setProvider] = useState(false);
+  const [ringing, setRinging] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [calling, setCalling] = useState(false);
   return (
     <>
       <h1>Chat</h1>
+      <Language />
+      <button onClick={() => setProvider(true)}>New wallet</button>
+      {provider && <Provider onClose={() => setProvider(false)} />}
       <button onClick={() => setPanel(true)}>Panel</button>
       {panel && <Panel onClose={() => setPanel(false)} />}
       <button onClick={() => setMenu(true)}>More</button>
@@ -51,6 +76,13 @@ function Chat() {
       {menu && <ChatMenu onClose={() => setMenu(false)} onDelete={() => setAsking(true)} />}
       {asking && <DeleteChatDialog name="Bob" onClose={() => setAsking(false)} onConfirm={() => { setAsking(false); nav.home(); }} />}
       {busy && <Busy onClose={() => setBusy(false)} />}
+      <button onClick={() => setRinging(true)}>Ring</button>
+      {ringing && <IncomingCallNotification peerName="Bob" hasVideo={false} onAcceptAudio={() => {}} onAcceptVideo={() => {}} onReject={() => setRinging(false)} />}
+      <button onClick={() => setBackingUp(true)}>Back up</button>
+      {backingUp && <BackupProgress job={{ kind: "backup", sealed: true, stage: "writing", files: 1, filesTotal: 3, bytes: 10, bytesTotal: 30 }} onCancel={() => setBackingUp(false)} />}
+      <button onClick={() => setCalling(true)}>Call</button>
+      {calling && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Bob" onHangUp={() => setCalling(false)} onToggleMute={() => {}} onToggleVideo={() => {}} />}
     </>
   );
 }
@@ -139,6 +171,39 @@ describe("Back with a layer open", () => {
     await waitFor(() => expect(where()).toBe("/"));
   });
 
+  it("a select's open list closes alone, the focus staying on the select; the next Back leaves the chat", async () => {
+    const user = await inChat();
+    const select = screen.getByRole("combobox", { name: "Language" });
+    await user.click(select);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await waitFor(() => expect(layerEntry()).toBe(true));
+
+    await back();
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+    expect(select).toHaveAttribute("aria-expanded", "false");
+    expect(select).toHaveFocus();
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("in a dialog, Back closes the select's list only, and the next the dialog", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "New wallet" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const select = screen.getByRole("combobox", { name: "Provider" });
+    await user.click(select);
+    await waitFor(() => expect((history.state as Record<string, unknown>).ghostlyLayer).toBe(2));
+
+    await back();
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(screen.getByTestId("provider")).toBeInTheDocument();
+    expect(select).toHaveFocus();
+    await back();
+    await waitFor(() => expect(screen.queryByTestId("provider")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+  });
+
   it("the app's own move from a dialog counts the pages only: Delete lands on the list", async () => {
     const user = await inChat();
     await user.click(screen.getByRole("button", { name: "Ask" }));
@@ -163,6 +228,47 @@ describe("Back with a layer open", () => {
     // Its entry stays (closed another way than Back), and Back from it leaves the chat in one press.
     await back();
     await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it.each([
+    ["an incoming call", "Ring", "incoming-call"],
+    ["backup progress", "Back up", "backup-progress"],
+  ])("Back over %s leaves it and the chat under it as they were: the next Back does too", async (_what, opens, testId) => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: opens }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    for (const _press of [1, 2]) {
+      await back();
+      await waitFor(() => expect(layerEntry()).toBe(true));
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      expect(where()).toBe("/chat/s1");
+    }
+  });
+
+  it("Back over a call shown full screen takes it to its small window, the chat under it kept; the next Back leaves the chat", async () => {
+    onTestFinished(() => localStorage.removeItem("ghostly_call_mini"));
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await back();
+    await waitFor(() => expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true"));
+    expect(where()).toBe("/chat/s1");
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("Back over a call shown full screen is for that call only: the next call opens full screen again", async () => {
+    onTestFinished(() => localStorage.removeItem("ghostly_call_mini"));
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await back();
+    await waitFor(() => expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true"));
+    await user.click(screen.getByTitle("End call"));
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
   });
 
   it("Back from the entry a menu closed by Escape left, over a layer still open, goes to that layer, not out of the chat", async () => {

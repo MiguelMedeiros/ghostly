@@ -206,9 +206,11 @@ export interface IdentityProofProvider<E = unknown> {
   /**
    * When a verifier's check can go stale (the DNS record may be removed later): the contact's app offers
    * "Check again" after this many seconds and shows the last check time. Omit when the evidence is a
-   * signature that stays valid until expiry.
+   * signature that stays valid until expiry. `perHour`: the most checks the app runs on its own in an hour, for a
+   * server that limits lookups per IP (the rest wait for later); well under that limit, so a check a person starts
+   * (a new contact's proof, "Check again") still gets an answer.
    */
-  recheck?: { afterSeconds: number };
+  recheck?: { afterSeconds: number; perHour?: number };
   /** One sentence for people: what `verify` contacts and who learns what. "Nothing: checked on this device." */
   privacy: string;
   /** Mark providers whose flows are not proven against real-world tools yet. */

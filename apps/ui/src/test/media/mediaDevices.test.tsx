@@ -320,7 +320,13 @@ describe("Settings → Audio & video", () => {
       await user.click(await screen.findByTestId("settings-microphone-test"));
       expect(meter).toHaveBeenCalledWith("Mic A", expect.any(Function));
       act(() => level(0.42));
-      expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("aria-valuenow", "42");
+      const meterShown = await screen.findByTestId("settings-microphone-level");
+      expect(meterShown).toHaveAttribute("aria-valuenow", "42");
+      // Each reading is drawn as it comes, not animated to: a 75 ms width transition after every reading was 60% of
+      // the shown meter's CPU on the Linux Desktop (WebKitGTK laid out and painted each of its frames).
+      const bar = meterShown.firstElementChild as HTMLElement;
+      expect(bar.style.width).toBe("42%");
+      expect(bar.className).not.toMatch(/\btransition/);
       expect(devices.getUserMedia, "the page's own microphone stays shut").not.toHaveBeenCalled();
 
       await user.click(screen.getByTestId("settings-microphone-test"));
@@ -661,6 +667,7 @@ describe("the call window's device menu", () => {
     notice: null,
     dismiss: vi.fn(),
     switchBack: vi.fn(),
+    hold: vi.fn(),
     ...over,
   });
 
@@ -678,6 +685,21 @@ describe("the call window's device menu", () => {
     await user.click(within(menu).getAllByTestId("call-device-audioinput")[1]);
     expect(devicesView.choose).toHaveBeenCalledWith("audioinput", "mic-builtin");
     expect(screen.queryByTestId("call-devices-menu")).toBeNull();
+  });
+
+  // One device of each kind is in use: a screen reader hears a radio group per kind, not checkboxes that sound as if
+  // several could be on.
+  it("reads each kind as a pick-one group: radios, the one in use checked", async () => {
+    const { user } = overlayWith(view());
+    await user.click(screen.getByTestId("call-devices"));
+    const menu = screen.getByTestId("call-devices-menu");
+
+    expect(within(menu).queryAllByRole("checkbox")).toEqual([]);
+    const picked = (kind: string) => within(within(menu).getByRole("radiogroup", { name: kind })).getAllByRole("radio")
+      .map((row) => [row.textContent, row.getAttribute("aria-checked")]);
+    expect(picked("Microphone")).toEqual([["System default", "false"], ["MacBook Pro Microphone", "false"], ["AirPods", "true"]]);
+    expect(picked("Camera")).toEqual([["System default", "true"], ["FaceTime HD Camera", "false"], ["Logitech C920", "false"]]);
+    expect(picked("Speaker")).toEqual([["System default", "true"], ["MacBook Pro Speakers", "false"], ["AirPods", "false"]]);
   });
 
   it("has no speakers where none can be chosen", async () => {

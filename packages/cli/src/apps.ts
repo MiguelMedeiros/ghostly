@@ -3,12 +3,14 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rea
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
-  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
+  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
+import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
@@ -185,32 +187,35 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 }
 
 /**
- * The `ghostly-revoke.json` beside a bundle, as a client reads it beside each bundle URL: beside the URL (without its
- * query), or beside the file. None there, one that does not answer, or one a client would not read, revokes nothing.
+ * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
+ * answer, or one a client would not read, revokes nothing.
  */
-async function revocationsBeside(source: string, isUrl: boolean): Promise<{ file: string; revocations: SignedAppRevocation[] }> {
-  let file: string;
+async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
-    if (isUrl) {
-      const at = new URL(source);
-      at.search = "";
-      at.hash = "";
-      file = new URL(APP_REVOKE_FILE, at).href;
-      bytes = await fetchBundle(file);
-    } else {
-      file = join(dirname(userPath(source)), APP_REVOKE_FILE);
-      if (!existsSync(file)) return { file, revocations: [] };
-      bytes = readBundleFile(file);
-    }
-  } catch { return { file: source, revocations: [] }; }
+    if (isUrl) bytes = await fetchBundle(file);
+    else if (!existsSync(file)) return [];
+    else bytes = readBundleFile(file);
+  } catch { return []; }
   const read = readAppRevocations(bytes);
-  return { file, revocations: read.ok ? read.revocations : [] };
+  return read.ok ? read.revocations : [];
+}
+
+/** The `ghostly-revoke.json` beside a bundle URL, its query and fragment left out; none for what is not a URL. */
+function besideUrl(url: string): string[] {
+  try {
+    const at = new URL(url);
+    at.search = "";
+    at.hash = "";
+    return [new URL(APP_REVOKE_FILE, at).href];
+  } catch { return []; }
 }
 
 /**
  * A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. A version its
- * publisher revoked in the `ghostly-revoke.json` beside it is refused: a client stops it, with no "Run anyway".
+ * publisher revoked is refused, as a client stops it, with no "Run anyway": in the `ghostly-revoke.json` beside it and,
+ * for a URL, beside each of the manifest's `sources` too (WISP 1200 · Revocation: a client reads them there, where a
+ * publisher revokes a version a store's pinned URL still holds). A file is checked offline: beside it only.
  */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
@@ -218,10 +223,19 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
   const m = read.bundle.manifest;
-  const { file, revocations } = await revocationsBeside(source, isUrl);
-  const revocation = appRevocationFor({ ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest }, revocations);
-  if (revocation) {
-    throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+  const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
+  // The `sources` are the publisher's words: beside them only on the hosts a client reads from (isAppFetchUrl), never a
+  // host or port of the publisher's choosing on this machine's network.
+  const files = isUrl
+    ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
+    : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  for (const [i, file] of [...files].entries()) {
+    const revocation = appRevocationFor(version, lists[i]!);
+    if (revocation) {
+      throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+    }
   }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
@@ -232,6 +246,12 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
 const nameFrom = (folder: string) => folder.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 /** An app's name as a title: `my-app` is `My app`. */
 const titleFrom = (name: string) => (name[0]!.toUpperCase() + name.slice(1)).replace(/-/g, " ");
+/**
+ * A path as one word of a POSIX shell line: as typed when it is plain, else single-quoted (`My App` is `'My App'`).
+ * None for a path the JSON answer would print other than it is (a `"`, a backslash, a control) or holding a `'`, whose
+ * quoting takes a backslash: a line copied from the answer would be another command.
+ */
+const shellWord = (word: string) => /^[\w@%+=:,./~-]+$/.test(word) ? word : word.includes("'") || jsonOut(word) !== `"${word}"` ? null : `'${word}'`;
 
 /**
  * `app init <dir> [--name <name>] [--title <title>] [--force]`: a small working app in `<dir>` (made when missing),
@@ -273,9 +293,12 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
   }
   mkdirSync(dir, { recursive: true });
   for (const [path, text] of files) writeWhole(join(dir, path), new TextEncoder().encode(text));
+  // A line to paste: a folder with a space or a `$` stays one word, the folder given; one the answer cannot print as it
+  // is (a quote, a backslash) is left to the person, named in `dir`.
+  const typed = shellWord(dirArg);
   return {
     dir, name, title, files: files.map(([path]) => path), ...(held.length ? { replaced: held } : {}),
-    next: `ghostly app publish ${dirArg} --key <a key file outside ${dirArg}>`,
+    next: typed === null ? "ghostly app publish <the folder> --key <a key file outside it>" : `ghostly app publish ${typed} --key <a key file outside ${typed}>`,
   };
 }
 
@@ -454,6 +477,17 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const digests = what.digests ?? [];
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
+  // Checked here as the statement's checker checks them, so a bad value is a usage error naming its option.
+  for (const [i, digest] of digests.entries()) {
+    if (!isAppHash(digest)) throw new CliError("usage", `--digest ${JSON.stringify(digest)} is not a bundle digest (43 base64url characters, as app verify prints it)`);
+    if (digests.indexOf(digest) !== i) throw new CliError("usage", `--digest ${digest} is given twice`);
+  }
+  if (digests.length > APP_STATEMENT_LIMITS.revokeDigests) throw new CliError("usage", `--digest is given at most ${APP_STATEMENT_LIMITS.revokeDigests} times in one revocation, not ${digests.length}`);
+  // An empty reason is refused as an empty --title is: every client shows it, and it would say nothing.
+  if (what.reason !== undefined && !isAppLine(what.reason, APP_STATEMENT_LIMITS.reason, 1)) {
+    const length = [...what.reason].length;
+    throw new CliError("usage", `--reason is one line of 1 to ${APP_STATEMENT_LIMITS.reason} characters, not ${length > APP_STATEMENT_LIMITS.reason ? `${length} characters` : JSON.stringify(what.reason)}`);
+  }
   // The list is published beside the bundle and every client shows the reason (docs/CLI.md § Safety).
   guardText(what.reason, what.force === true, "reason", "revoke");
 

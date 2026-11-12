@@ -102,6 +102,12 @@ const floorRefusal = (why: unknown): string =>
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
 
+/**
+ * The clock of a transfer's durations kept in memory (when it last moved, its speed, its last progress write): monotonic,
+ * so the device's clock set back mid-transfer neither hides it stuck nor freezes its speed for as long as the step.
+ */
+const elapsed = () => performance.now();
+
 /** A transfer's state the database refused is written again this often, until it goes (`FileDesk.save`). */
 const REWRITE_AFTER_MS = 5_000;
 
@@ -118,8 +124,8 @@ export type FileDeskAction = "accept" | "decline" | "pause" | "resume" | "cancel
 export class FileDesk {
   private readonly chats = new Map<string, Chat>();
   private readonly speeds = new Map<string, Speed>();
-  /** By local id: when its bytes last moved (for the stall rule). */
-  private readonly moved = new Map<string, { at: number }>();
+  /** By local id: when its bytes last moved (for the stall rule), and whether it then waited on a person. */
+  private readonly moved = new Map<string, { at: number; waiting?: boolean }>();
   /** Unfinished when the app started, and not moved since. */
   private readonly restored = new Set<string>();
   /** A look again when a transfer would count as stuck, by local id. */
@@ -173,7 +179,7 @@ export class FileDesk {
       // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
       // every state the engine builds, so each state would cost more with every file the chat ever had.
       if (file.wire3.state === "done") continue;
-      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, Date.now(), this.restored.has(file.id), Date.now())));
+      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, elapsed(), this.restored.has(file.id), elapsed())));
     }
     chat.files.restore(records);
   }
@@ -317,7 +323,7 @@ export class FileDesk {
         const now = out ? chat.files.resend(wireId) : chat.files.request(wireId);
         // Pushed: it counts as stuck again only after another quiet spell.
         this.restored.delete(fileId);
-        this.moved.set(fileId, { at: Date.now() });
+        this.moved.set(fileId, { at: elapsed() });
         const current = chat.files.get(direction, wireId);
         if (current) this.show(linkId, chat, current, chat.files.transferred(direction, wireId));
         this.deps.changed();
@@ -448,7 +454,8 @@ export class FileDesk {
     // A file of no bytes gets no append: it is made here, so there is a file to check and to save. Every backend
     // but IndexedDB reads a file never written as missing, and its check said "arrived damaged".
     if (size === null && record.file.size === 0) await bytes.append(id, 0, new Uint8Array());
-    if (stored && stored.bytes !== bytes.kind) await fileStore.patch(id, { bytes: bytes.kind });
+    // One a light backup left out, still under way then, comes again whole: it is no longer "not in this backup".
+    if (stored && (stored.bytes !== bytes.kind || stored.leftOut)) await fileStore.patch(id, { bytes: bytes.kind, ...(stored.leftOut && { leftOut: false }) });
     const appender = new FileAppender(bytes, id, offset);
     return {
       offset,
@@ -516,7 +523,7 @@ export class FileDesk {
     // as gone, and one that arrived within `changed`'s wait (250 ms behind another's progress) said "No longer available".
     if (offered) this.deps.flush?.();
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
-    const now = Date.now(), last = chat.lastSaved.get(id) ?? 0;
+    const now = elapsed(), last = chat.lastSaved.get(id) ?? -Infinity;
     if (!progress || now - last >= SAVE_EVERY_MS) this.save(chat, id, record);
     else {
       // Held back: the newest is written once the 2 s are up. Only the first ack of each 2 s was, so a cut and a
@@ -569,7 +576,7 @@ export class FileDesk {
     const held = chat.unsaved.get(id);
     if (held) { clearTimeout(held.timer); chat.unsaved.delete(id); }
     // Ended: no more progress to space out.
-    if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, Date.now());
+    if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, elapsed());
     const transfer = this.deps.transfers.get(id);
     const change: FileStateFields = { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) };
     chat.saving = chat.saving.then(() => {
@@ -603,7 +610,7 @@ export class FileDesk {
     if (!id) return;
     const view = this.view(chat, record, transferred, this.stalled(linkId, id, record, progress));
     if (view.state === "transferring" && !view.stage) {
-      const now = Date.now(), last = this.speeds.get(id);
+      const now = elapsed(), last = this.speeds.get(id);
       if (!last) this.speeds.set(id, { bytes: transferred, at: now, rate: 0 });
       else if (now - last.at >= 500) {
         const rate = Math.max(0, (transferred - last.bytes) * 1000 / (now - last.at));
@@ -627,12 +634,17 @@ export class FileDesk {
    * Whether a transfer is stuck (`transferStalled`): not moved for `FILE_LIMITS.stallMs`, or not since the app started.
    * Only bytes moving count (`progress`: confirmed by the receiver, stored here), not a session saying again where it
    * stands. A stall is nothing happening, so a timer looks again when it would be one.
+   *
+   * Time it waits on a person (an offer not answered yet, a pause) is not time stuck: its quiet spell starts when it goes
+   * on. Before, a file accepted after its offer waited a minute read as stuck at once, "Ask again" beside it, for as
+   * long as it waited its turn behind other files.
    */
   private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
     if (transferEnded(record)) { this.unwatch(id); return false; }
-    const now = Date.now();
-    if (progress || !this.moved.has(id)) this.moved.set(id, { at: now });
-    if (progress) this.restored.delete(id);
+    const now = elapsed();
+    const waiting = record.state === "asking" || record.state === "paused";
+    if (progress || waiting || !this.moved.has(id) || this.moved.get(id)!.waiting) this.moved.set(id, { at: now, ...(waiting && { waiting }) });
+    if (progress || waiting) this.restored.delete(id);
     const movedAt = this.moved.get(id)!.at;
     const stalled = transferStalled(record, movedAt, this.restored.has(id), now);
     // Only what can be stuck is looked at again (not an offer waiting for an answer, nor a pause).

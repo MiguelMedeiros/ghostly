@@ -1,6 +1,6 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
+import { FakePeerConnection, device, installWebRTCFakes, remote, type FakeMediaDevices, type FakeTrack } from "./fakes";
 import { renderCall, settle } from "./harness";
 import { CallUnreachableError, CONNECT_TIMEOUT_MS, GATHER_ATTEMPTS, GATHER_STALL_MS, HOST_GATHER_MS } from "../src/useWebRTC";
 
@@ -118,6 +118,26 @@ describe("a connection that finds no candidate", () => {
     expect(call.result.current.callState).toBe("idle");
     expect(call.published).toEqual([]);
     expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
+  });
+
+  it.each([["caller", calling], ["answerer", answering]])("the %s's new connection sends the microphone switched to while the stalled one gathered", async (_, start) => {
+    FakePeerConnection.stallGathering = 1;
+    devices.devices = [device("audioinput", "mic-builtin", "MacBook Pro Microphone"), device("audioinput", "mic-headset", "AirPods")];
+    const call = renderCall();
+    const stream = await start(call);
+    const old = stream.getAudioTracks()[0] as FakeTrack;
+
+    act(() => { void call.result.current.switchMicrophone("mic-headset"); });
+    const headset = devices.userMedia[1].grant().getAudioTracks()[0];
+    await settle();
+    expect(old.stop).toHaveBeenCalled();
+
+    await stallPasses();
+
+    const fresh = FakePeerConnection.instances[1];
+    const audio = fresh.getTransceivers().find((t) => t.receiver.track.kind === "audio")!.sender;
+    expect(audio.track).toBe(headset);
+    expect((headset as FakeTrack).stop).not.toHaveBeenCalled();
   });
 
   it("a hang-up while a stalled connection gathers makes no new one", async () => {

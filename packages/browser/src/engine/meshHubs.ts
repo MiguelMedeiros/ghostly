@@ -724,13 +724,15 @@ export class MeshHubs {
 
   /**
    * As a hub, a member's signed reaction goes on to my other edges, the first time I see that number from that member
-   * for that message; and it is kept (the latest `REACTIONS_KEPT`) for members whose edge opens later.
+   * for that message; and it is kept (the latest `REACTIONS_KEPT`) for members whose edge opens later. Stepped down,
+   * one I kept still follows what I take: a hub again, I would say a reaction taken back meanwhile to a member back.
    */
   passReaction(groupId: string, session: GroupSession, from: string, frame: GroupReactedFrame): void {
     const live = this.live.get(groupId);
-    if (!live?.hub) return;
+    if (!live) return;
     const at = `${frame.k} ${frame.id}`, held = live.reactions.get(at);
     if (held && held.n >= frame.n) return;
+    if (!live.hub) { if (held) live.reactions.set(at, frame); return; }
     live.reactions.delete(at);
     live.reactions.set(at, frame);
     while (live.reactions.size > REACTIONS_KEPT) live.reactions.delete(live.reactions.keys().next().value!);
