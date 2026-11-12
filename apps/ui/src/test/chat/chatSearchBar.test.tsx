@@ -87,6 +87,23 @@ describe("search inside a chat", () => {
     expect(field()).toBeInTheDocument();
   });
 
+  it("opens with Ctrl/Cmd+F on a keyboard that types no Latin letters there (Arabic, Russian), and by the letter on Dvorak", async () => {
+    openChat(true, short());
+    await screen.findByText(`Message ${COUNT - 1}`);
+    // Dvorak: the key at F's place types "u", which is not Find.
+    fireEvent.keyDown(window, { key: "u", code: "KeyF", ctrlKey: true });
+    expect(screen.queryByTestId("chat-search")).toBeNull();
+    // Arabic: F's key types "ب"; the browser's own Find opened over the chat, not the chat's search.
+    const event = new KeyboardEvent("keydown", { key: "ب", code: "KeyF", ctrlKey: true, cancelable: true });
+    act(() => { window.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(field()).toBeInTheDocument();
+    fireEvent.keyDown(field(), { key: "Escape" });
+    // Russian on a Mac: Cmd and F's key, "а".
+    fireEvent.keyDown(window, { key: "а", code: "KeyF", metaKey: true });
+    expect(field()).toBeInTheDocument();
+  });
+
   it("gives its buttons a thumb's 44 px on a phone", async () => {
     openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);
