@@ -144,6 +144,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `agent.turn` comes only with `--turns`: a `--type` that keeps it alone (`agent`) is a usage error.
   `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
   across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
