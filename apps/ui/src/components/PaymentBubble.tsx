@@ -99,10 +99,11 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   const deadline = payment?.kind === "request" && (payment.state === "pending" || payment.state === "failed") && !payment.closed && !payment.lightningPending
     ? payment.target ? payment.target.expiresAt : payment.invoice ? (decodeBolt11(payment.invoice)?.expiresAt ?? NaN) * 1000 : NaN
     : NaN;
-  // One of ours the contact paid: their payment of it can still be on its way after the deadline (an on-chain one
-  // waits for a confirmation, and settles the request even then).
-  const paidOnItsWay = usePlatformValue(() => !!deadline && payment?.direction === "out" && !!wallet?.paymentOnItsWay(payment.id));
   const [now, setNow] = useState(() => Date.now());
+  // One of ours the contact paid: their payment of it can still be on its way after the deadline (an on-chain one
+  // waits for a confirmation, and settles the request even then). Looked for only once the deadline passed: it goes
+  // through every payment, on each change of the engine's state.
+  const paidOnItsWay = usePlatformValue(() => deadline <= now && payment?.direction === "out" && !!wallet?.paymentOnItsWay(payment.id));
   useEffect(() => {
     if (!(deadline > now)) return;
     const timer = setTimeout(() => setNow(Date.now()), Math.min(deadline - now + 50, 2 ** 31 - 1));
