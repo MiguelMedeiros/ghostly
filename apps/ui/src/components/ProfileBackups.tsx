@@ -246,8 +246,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           )}
           {guarded.guard.case === "tombstone" && (
             <InputGroup>
-              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })}
-                aria-label={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
+              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })}
+                aria-label={t("devices.restore.tombstoneConfirm", { name: `\u2068${guarded.opened.name}\u2069` })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
               <Button variant="primary" data-testid="restore-own-go" loading={busy} disabled={ownName.trim() !== guarded.opened.name.trim()} onClick={() => void underProgress("restore", true, (watch) => afterGuard(guarded.opened, watch))}>{t("devices.restore.tombstoneGo")}</Button>
               <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
             </InputGroup>
