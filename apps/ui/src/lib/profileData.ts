@@ -169,8 +169,8 @@ async function walletStorage(dbName: string): Promise<WalletStorage> {
   } finally { db.close(); }
 }
 
-/** A wallet at home on this device (WISP 06 § Wallets that stay home): its kind, its network, and a Lightning card's name. */
-export interface HomeWallet { type: "arkade" | "bark" | "spark" | "usdt" | "fedimint" | "bitcoin" | "lightning"; network: WalletNetwork; name?: string }
+/** A wallet at home on this device (WISP 06 § Wallets that stay home): its kind and its network. */
+export interface HomeWallet { type: "arkade" | "bark" | "spark" | "usdt" | "fedimint" | "bitcoin" | "lightning"; network: WalletNetwork }
 
 /** Where each wallet's record is (`walletHomes.ts` `homeRow`): the settings key of each kind, by network. */
 const HOME_ROWS: [RegExp, HomeWallet["type"]][] = [
@@ -193,8 +193,8 @@ export function walletsAtHome(own: string, rows: readonly (readonly [IDBValidKey
     const cards = /^lightningCards-(\w+)$/.exec(key);
     if (cards && (WALLET_NETWORKS as readonly string[]).includes(cards[1])) {
       const list = (value as { cards?: unknown } | null)?.cards;
-      for (const card of Array.isArray(list) ? list as { name?: unknown }[] : []) {
-        if (homeKey(card) === own) found.push({ type: "lightning", network: cards[1] as WalletNetwork, ...(typeof card.name === "string" && card.name ? { name: card.name } : {}) });
+      for (const card of Array.isArray(list) ? list as unknown[] : []) {
+        if (homeKey(card) === own) found.push({ type: "lightning", network: cards[1] as WalletNetwork });
       }
       continue;
     }

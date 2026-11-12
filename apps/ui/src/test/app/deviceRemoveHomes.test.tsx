@@ -92,7 +92,7 @@ describe("Remove <device>, with wallets at home on it", () => {
 
 describe("Remove this profile here, on the home device of a wallet", () => {
   it("names each wallet at home here, says its data is on no other device, and its loss", async () => {
-    vi.mocked(walletsAtHomeHere).mockResolvedValue([{ type: "bark", network: "mainnet" }, { type: "usdt", network: "testnet" }, { type: "lightning", network: "mainnet", name: "My LND" }]);
+    vi.mocked(walletsAtHomeHere).mockResolvedValue([{ type: "bark", network: "mainnet" }, { type: "usdt", network: "testnet" }, { type: "lightning", network: "mainnet" }]);
     const { user } = renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
     await user.click(screen.getByTestId("device-standby-remove-here"));
     const dialog = screen.getByTestId("device-remove-here");
@@ -102,7 +102,7 @@ describe("Remove this profile here, on the home device of a wallet", () => {
     expect(lines[0]).toHaveTextContent("Mainnet Bark lives on this device. What it keeps here is not on your other devices.");
     expect(lines[0]).toHaveTextContent("An exit or a send still open here can't be finished without it.");
     expect(lines[1]).toHaveTextContent("Your other devices can't send from it until you confirm its last transaction on chain.");
-    expect(lines[2]).toHaveTextContent("My LND lives on this device.");
+    expect(lines[2]).toHaveTextContent("Mainnet Lightning lives on this device.");
     expect(within(lines[2]).queryByTestId("device-remove-here-homes-loss")).toBeNull();
     // Said before the name is typed and Remove pressed.
     expect(within(dialog).getByTestId("device-remove-here-homes").compareDocumentPosition(within(dialog).getByTestId("device-remove-here-go")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

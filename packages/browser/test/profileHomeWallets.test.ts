@@ -62,7 +62,7 @@ describe("the wallets at home on this device", () => {
     await putDeviceRecord(record(`ghostly_${profile.id}`));
     expect(await walletsAtHomeHere(profile.id)).toEqual([
       { type: "bark", network: "mainnet" },
-      { type: "lightning", network: "mainnet", name: "My LND" },
+      { type: "lightning", network: "mainnet" },
       { type: "usdt", network: "testnet" },
     ]);
   });
