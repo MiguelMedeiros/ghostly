@@ -99,6 +99,9 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   const deadline = payment?.kind === "request" && (payment.state === "pending" || payment.state === "failed") && !payment.closed && !payment.lightningPending
     ? payment.target ? payment.target.expiresAt : payment.invoice ? (decodeBolt11(payment.invoice)?.expiresAt ?? NaN) * 1000 : NaN
     : NaN;
+  // One of ours the contact paid: their payment of it can still be on its way after the deadline (an on-chain one
+  // waits for a confirmation, and settles the request even then).
+  const paidOnItsWay = usePlatformValue(() => !!deadline && payment?.direction === "out" && !!wallet?.paymentOnItsWay(payment.id));
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!(deadline > now)) return;
@@ -161,7 +164,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   // Nobody can pay it any more: its target lapsed, or its invoice did and no ecash pays it instead (on the payer's side a
   // mint it shares and may use here, on the requester's any mint or federation it named). Not while a payment of it is
   // on its way: that one may still have gone through.
-  const expired = deadline <= now && !(unfinished && unfinished.state !== "pending")
+  const expired = deadline <= now && !(unfinished && unfinished.state !== "pending") && !paidOnItsWay
     && (!!payment.target || (outgoing ? !payment.mints?.length && !payment.federations?.length : !sharedMints.length || allowed?.cashu === false));
   const lnHolds = viaLightning ?holdsLess("lightning", payer.getState(), payment.amount) : undefined;
   const lnOver = lnHolds !== undefined;

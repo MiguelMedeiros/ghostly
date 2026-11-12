@@ -430,6 +430,8 @@ export interface WalletPlatform {
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
+  /** The contact's payment of one of our requests that is still on its way (an on-chain one waits for a confirmation). */
+  paymentOnItsWay(requestId: string): ChatPayment | null;
   /**
    * Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`.
    * `confirmedReal`: required for a Mainnet request, as for `payQuote`.
