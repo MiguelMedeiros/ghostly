@@ -1,6 +1,6 @@
-import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "../support/fixtures";
+import { test } from "../support/fixtures";
 import { enrollDevice } from "../support/devices";
+import { keepsAnEdge } from "../support/forcedColors";
 
 /**
  * The device screens in forced colors (Windows Contrast themes): there every background is the page's, so a button
@@ -8,30 +8,6 @@ import { enrollDevice } from "../support/devices";
  * the standby's Use here, Remove) keeps an edge there, as the app's own Button does (forced-colors-controls.spec.ts),
  * and shows none in normal colours.
  */
-
-/** An element's border width and colour, and the colour of what it sits on. */
-const edge = (el: Locator) => el.evaluate((node) => {
-  const seen = (from: Element | null): string => {
-    for (let n = from; n; n = n.parentElement) {
-      const c = getComputedStyle(n).backgroundColor;
-      if (!/rgba\(.*, 0\)$/.test(c) && c !== "transparent") return c;
-    }
-    return "rgb(255, 255, 255)";
-  };
-  const style = getComputedStyle(node);
-  return { border: parseFloat(style.borderTopWidth), borderColor: style.borderTopColor, around: seen(node.parentElement) };
-});
-
-async function keepsAnEdge(page: Page, button: Locator, name: string): Promise<void> {
-  await expect(button).toBeVisible();
-  await page.emulateMedia({ forcedColors: "none" });
-  expect((await edge(button)).border, `${name} in normal colours`).toBe(0);
-  await page.emulateMedia({ forcedColors: "active" });
-  const forced = await edge(button);
-  expect.soft(forced.border, `${name}: border in forced colors`).toBeGreaterThanOrEqual(1);
-  expect.soft(forced.borderColor, `${name}: border against what it sits on`).not.toBe(forced.around);
-  await page.emulateMedia({ forcedColors: "none" });
-}
 
 test("forced colors keep an edge on the device screens' main buttons", { tag: ["@feature:app.accessibility", "@feature:devices.screens"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);

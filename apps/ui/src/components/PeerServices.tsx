@@ -42,8 +42,9 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
             platform.openService(peerPubKey, service.id).catch((e) => setError(problemText(e, t)));
           }}
           // At most the strip's width, the name cut with an ellipsis: a 48-character name went 25 px past the strip's
-          // edge on a 320 px phone, its start cut off in Arabic (agents#1629). The whole name is in the title.
-          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer max-w-full min-w-0"
+          // edge on a 320 px phone, its start cut off in Arabic (agents#1629). The whole name is in the title. Forced
+          // colors fill it with the page's colour: a border there, or it read as bold text beside "Apps you can open:".
+          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors cursor-pointer max-w-full min-w-0"
           title={t("chat.services.openTheirs", { service: service.name ?? service.id })}>
           <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
           <span data-testid="open-service-name" className="truncate" dir="auto">{service.name ?? service.id}</span>
