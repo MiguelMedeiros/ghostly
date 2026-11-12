@@ -586,6 +586,8 @@
     "pgpExponentNext": "Use a key made by GnuPG (exponent 65537).",
     "pgpKeyKind": "Ghostly doesn't accept {{kind}} keys",
     "pgpKeyKindNext": "Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to {{max}} bits.",
+    "pgpKeyVersion": "Ghostly doesn't accept OpenPGP v{{version}} keys",
+    "pgpKeyVersionNext": "Use a v4 key (gpg makes Ed25519 ones) or a v6 key.",
     "pgpNoUserIds": "keys.openpgp.org shares this key without its user IDs, so it can't be checked",
     "pgpNoUserIdsNext": "Confirm an email there, or paste your public key (gpg --armor --export).",
     "privateAddress": "{{domain}} points to a private network address",
