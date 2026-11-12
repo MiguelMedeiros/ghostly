@@ -399,6 +399,8 @@ describe("with the apps flag on", () => {
     const said = [
       ["unlisted: The store no longer lists this update", "This store no longer lists this update."],
       ["needs-files: The update's files are gone; it is fetched again at the next check", "The update's files are gone."],
+      // Installed or dropped meanwhile: said of the update, not "Ghostly won't install it" with the engine's English.
+      ["no-update: This update can no longer be installed", "This update no longer waits."],
     ] as const;
     function Shown() {
       const shown = useInstalledApps(true)?.find((a) => a.ref === REF);
@@ -413,7 +415,8 @@ describe("with the apps flag on", () => {
       await user.click(await screen.findByTestId("app-update-accept"));
       const error = await screen.findByTestId("app-details-error");
       expect(error).toHaveTextContent(words);
-      expect(error).not.toHaveTextContent(/link|not on this device yet/);
+      expect(error).not.toHaveTextContent(/link|not on this device yet|won't install/);
+      expect(within(error).queryByRole("button")).toBeNull();
       await waitFor(() => expect(screen.queryByTestId("app-update")).not.toBeInTheDocument());
       expect(screen.getByTestId("app-open")).toBeEnabled();
       unmount();
