@@ -666,6 +666,7 @@ interface ClientStream {
   reject: (error: Error) => void;
   headersTimer?: ReturnType<typeof setTimeout>;
   idleTimer?: ReturnType<typeof setTimeout>;
+  unreadCheck?: ReturnType<typeof setTimeout>;
   queue: BodyQueue | null;
   received: number;
   maxBytes: number;
@@ -676,9 +677,12 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private done = false;
   private error: Error | null = null;
   private wake: (() => void) | null = null;
+  /** Bytes received and not yet read. */
+  held = 0;
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
+    this.held += chunk.length;
     this.wake?.();
   }
 
@@ -689,9 +693,22 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     this.wake?.();
   }
 
+  /** Lets go of what was not read yet, ended or not: the reader gets `error` in its place. */
+  drop(error: Error): void {
+    this.chunks = [];
+    this.held = 0;
+    this.done = true;
+    this.error = error;
+    this.wake?.();
+  }
+
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for (;;) {
-      while (this.chunks.length > 0) yield this.chunks.shift()!;
+      while (this.chunks.length > 0) {
+        const chunk = this.chunks.shift()!;
+        this.held -= chunk.length;
+        yield chunk;
+      }
       if (this.error) throw this.error;
       if (this.done) return;
       await new Promise<void>((resolve) => (this.wake = resolve));
@@ -820,8 +837,26 @@ export class HttpClient {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
+    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) this.checkUnread(chunk.id, stream, stream.queue);
     if (chunk.end) this.finish(chunk.id);
     else this.armIdleTimer(chunk.id, stream);
+  }
+
+  /**
+   * Nothing tells the peer to slow down, and its last chunk frees the slot: a reader that stalls (a contact's page that
+   * never reads what it fetched) would have the whole body held here, one per request it leaves unread. Past the bound
+   * the reader gets one turn, as a link that hands over many chunks at once leaves it none; still past it, the response
+   * is reset and what it held let go.
+   */
+  private checkUnread(id: number, stream: ClientStream, queue: BodyQueue): void {
+    if (stream.unreadCheck) return;
+    stream.unreadCheck = setTimeout(() => {
+      stream.unreadCheck = undefined;
+      if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
+      const error = new GhostlyHttpError("unread", "Response body not read in time");
+      queue.drop(error);
+      this.abort(id, error);
+    }, 0);
   }
 
   handleReset(frame: ResetFrame): void {
