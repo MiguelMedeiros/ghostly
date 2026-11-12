@@ -376,6 +376,8 @@ export class HttpHost {
    * so a stream counts toward the limit until its fetch has settled.
    */
   private readonly live = new Set<HostStream>();
+  /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
+  private heldBodyBytes = 0;
 
   constructor(
     private readonly channel: FrameChannel,
@@ -420,11 +422,17 @@ export class HttpHost {
     const stream = this.streams.get(chunk.id);
     if (!stream || stream.started) return;
 
-    stream.bodyBytes += chunk.payload.length;
-    if (stream.bodyBytes > LIMITS.maxRequestBodyBytes) {
+    const bytes = chunk.payload.length;
+    if (stream.bodyBytes + bytes > LIMITS.maxRequestBodyBytes) {
       this.end(stream);
       return this.fail(chunk.id, 413, "request-too-large", "Request body too large.");
     }
+    if (this.heldBodyBytes + bytes > LIMITS.maxHostBodyBytesPerPeer) {
+      this.end(stream);
+      return this.fail(chunk.id, 503, "busy", "Too many request bodies at once.");
+    }
+    stream.bodyBytes += bytes;
+    this.heldBodyBytes += bytes;
     if (chunk.payload.length > 0) stream.body.push(chunk.payload.slice());
     if (chunk.end) void this.run(stream);
     else this.armIdleTimer(stream);
@@ -456,7 +464,14 @@ export class HttpHost {
     clearTimeout(stream.idleTimer);
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
-    if (!stream.started) this.live.delete(stream);
+    if (!stream.started) this.release(stream);
+  }
+
+  /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */
+  private release(stream: HostStream): void {
+    this.live.delete(stream);
+    this.heldBodyBytes -= stream.bodyBytes;
+    stream.bodyBytes = 0;
   }
 
   private fail(id: number, status: number, code: string, message: string): void {
@@ -486,16 +501,18 @@ export class HttpHost {
     const { frame, service } = stream;
     const timeout = setTimeout(() => stream.abort.abort(), LIMITS.requestTimeoutMs);
     let headersSent = false;
+    // The chunks go once joined, so a body is held once while the local service reads it.
+    const body = stream.body.length > 0 ? concatBytes(...stream.body) : null;
+    stream.body = [];
 
     try {
       const response = await this.localFetch({
         url: stream.url,
         method: frame.m,
         headers: sanitizeRequestHeaders(frame.h),
-        body: stream.body.length > 0 ? concatBytes(...stream.body) : null,
+        body,
         signal: stream.abort.signal,
       });
-      stream.body = [];
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
 
@@ -551,7 +568,7 @@ export class HttpHost {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
       }
     } finally {
-      this.live.delete(stream);
+      this.release(stream);
     }
   }
 }
