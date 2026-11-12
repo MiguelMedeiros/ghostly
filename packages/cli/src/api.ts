@@ -677,6 +677,13 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
+    // A removal on its way goes with the chat's row, and the contact kept the message for good, though `message delete
+    // --everyone` had said its removal goes on.
+    const pending = node(ctx).removalsPending({ linkId: link.id });
+    if (pending.length && !bool(params, "force")) {
+      const n = pending.length, one = n === 1;
+      throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: removing the chat now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and remove the chat then, or pass --force (force: true over the socket) to remove it now`, { messages: pending });
+    }
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
