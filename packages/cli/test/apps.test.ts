@@ -357,6 +357,29 @@ describe("app revoke", () => {
     expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ sequence: 2 });
     expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, sequence: 2 });
   }, 60_000);
+
+  it("writes the list beside --bundle, where app verify reads it, and publish to that --out reads it there", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    // A publish folder of its own, as `--out` into a site's folder.
+    const bundle = join(tmp(), "pubout", "app.ghostlyapp");
+    ok(await ghostly(["app", "publish", dir, "--key", key, "--out", bundle]));
+    const revoked = ok(await ghostly(["app", "revoke", dir, "--key", key, "--bundle", bundle, "--up-to", "1"]));
+    expect(revoked).toMatchObject({ upTo: 1, current: true, added: true, file: join(dirname(bundle), "ghostly-revoke.json") });
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
+    expect((error(await ghostly(["app", "verify", bundle]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("revoked");
+    // The next version into that --out is checked against the list beside it.
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--out", bundle]))).toMatchObject({ sequence: 2 });
+    ok(await ghostly(["app", "revoke", dir, "--key", key, "--bundle", bundle, "--up-to", "3", "--force"]));
+    expect((error(await ghostly(["app", "publish", dir, "--key", key, "--out", bundle]), "refused", 1) as { details?: { reason?: string; sequence?: number } }).details).toMatchObject({ reason: "revoked", sequence: 4 });
+
+    // A bundle in a folder under the app's: its list beside it is never bundled.
+    const inner = join(dir, "dist", "app.ghostlyapp");
+    ok(await ghostly(["app", "publish", dir, "--key", key, "--out", inner]));
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--bundle", inner, "--up-to", "1"]))).toMatchObject({ file: join(dir, "dist", "ghostly-revoke.json") });
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--out", inner]))).toMatchObject({ files: ["index.html"], sequence: 2 });
+  }, 60_000);
 });
 
 describe("writing a bundle, a revocation list or a store index", () => {
