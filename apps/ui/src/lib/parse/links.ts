@@ -60,6 +60,7 @@ export function shownUrl(url: string): string {
 export const link: Detector<"link", { url: string }> = {
   kind: "link",
   pattern: /https?:\/\/\S+/gi,
+  lead: /https?:\/\//gi,
   accept(match) {
     const url = linkEnd(match[0]);
     // "https://" and nothing else is not a place.
