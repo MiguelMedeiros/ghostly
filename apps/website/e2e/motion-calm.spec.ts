@@ -105,16 +105,21 @@ async function look(page: Page, name: string) {
   // Nothing keeps moving: no SMIL, no boo, no running animation longer than a frame.
   await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
   await page.waitForTimeout(800);
-  const moving = await page.evaluate(() => {
-    const smil = document.querySelectorAll("animate, animateTransform, animateMotion").length;
-    const running = document.getAnimations().filter((a) => {
-      if (a.playState !== "running") return false;
-      const t = a.effect?.getTiming();
-      const d = typeof t?.duration === "number" ? t.duration : 0;
-      return d > 16 && (t?.iterations === Infinity || d > 16);
-    });
-    return { smil, running: running.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id}`) };
-  });
-  expect(moving.smil, "SMIL animations in the DOM under reduced motion").toBe(0);
-  expect(moving.running, "animations still running under reduced motion").toEqual([]);
+  const smil = await page.evaluate(() => document.querySelectorAll("animate, animateTransform, animateMotion").length);
+  expect(smil, "SMIL animations in the DOM under reduced motion").toBe(0);
+  // Back at the top the nav drops its backdrop and the story rail fades out: cross-fades the preference keeps
+  // (site.css), a base duration long. A loaded runner can hand the page its frames late, so one may still be running
+  // 800 ms on; it ends, what keeps moving does not.
+  const running = () =>
+    page.evaluate(() =>
+      document
+        .getAnimations()
+        .filter((a) => {
+          if (a.playState !== "running") return false;
+          const t = a.effect?.getTiming();
+          return (typeof t?.duration === "number" ? t.duration : 0) > 16;
+        })
+        .map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id}`),
+    );
+  await expect.poll(running, { message: "animations still running under reduced motion", timeout: 5_000 }).toEqual([]);
 }
