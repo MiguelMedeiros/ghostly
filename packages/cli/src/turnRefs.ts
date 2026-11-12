@@ -14,12 +14,13 @@ const TURN_REF = /^t_[0-9a-f]{32}$/;
 const isRef = (value: unknown): value is string => typeof value === "string" && TURN_REF.test(value);
 
 /**
- * `params` with each turn's id in `message`, `reply` and `messages` as the id its message is stored under: looked for
- * among the chat's (or group's) newest messages first, where a turn's almost always is, then in all of them. One that
- * names no message stays as given, and its command says so as for any unknown id.
+ * `params` with each turn's id in `message`, `reply`, `messages`, `before` and `after` as the id its message is stored
+ * under: looked for among the chat's (or group's) newest messages first, where a turn's almost always is, then in all of
+ * them. One that names no message stays as given, and its command says so as for any unknown id. A timestamp in `before`
+ * or `after` is no turn's id and stays as it is.
  */
 export async function withStoredIds(ctx: ApiContext, params: Params): Promise<Params> {
-  const wanted = new Set([params.message, params.reply, ...(Array.isArray(params.messages) ? params.messages : [])].filter(isRef));
+  const wanted = new Set([params.message, params.reply, params.before, params.after, ...(Array.isArray(params.messages) ? params.messages : [])].filter(isRef));
   if (!wanted.size) return params;
   let target: { id: string; linkId: string; group: boolean } | null = null;
   try {
@@ -39,6 +40,8 @@ export async function withStoredIds(ctx: ApiContext, params: Params): Promise<Pa
     ...params,
     ...(params.message !== undefined && { message: stored(params.message) }),
     ...(params.reply !== undefined && { reply: stored(params.reply) }),
+    ...(params.before !== undefined && { before: stored(params.before) }),
+    ...(params.after !== undefined && { after: stored(params.after) }),
     ...(Array.isArray(params.messages) && { messages: params.messages.map(stored) }),
   };
 }
