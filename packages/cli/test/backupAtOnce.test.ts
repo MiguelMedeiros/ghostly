@@ -30,11 +30,15 @@ it("two backups at once through one daemon each carry their own store, and leave
   const [first, second] = await Promise.allSettled([backup("one.ghostly-backup"), backup("two.ghostly-backup")]);
   expect(first.status).toBe("fulfilled");
   expect(second.status).toBe("fulfilled");
-  // Not sealed: each file shows the store it was given, and only that one.
-  const one = readFileSync(join(dir, "one.ghostly-backup"), "latin1"), two = readFileSync(join(dir, "two.ghostly-backup"), "latin1");
-  expect(one).toContain("STORE-1-");
-  expect(one).not.toContain("STORE-2-");
-  expect(two).toContain("STORE-2-");
-  expect(two).not.toContain("STORE-1-");
+  // Not sealed: each file shows the store it was given, and only that one. Which backup exports first is the file
+  // system's (each reads its folder and settings before), so the two stores are told apart, not their order.
+  const holds = (file: string) => {
+    const text = readFileSync(join(dir, file), "latin1");
+    return ["STORE-1-", "STORE-2-"].filter((store) => text.includes(store));
+  };
+  const [one, two] = [holds("one.ghostly-backup"), holds("two.ghostly-backup")];
+  expect(one).toHaveLength(1);
+  expect(two).toHaveLength(1);
+  expect(one).not.toEqual(two);
   expect(readdirSync(paths.db), "each removes its own store file when done").toEqual([]);
 });
