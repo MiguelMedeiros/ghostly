@@ -314,7 +314,7 @@
   "online": "在线",
   "options": "选项",
   "payments": {
-    "needLive": "付款需要直连",
+    "needLive": "发送需要联系人在线：ecash 从不排队等待。请求可以等到对方回来。",
     "noWallet": "你的联系人还没有钱包",
     "off": "此聊天已关闭：在“接收”中开启一种方式",
     "offOrOld": "你的联系人在此聊天中关闭了付款，或需要更新 Ghostly"

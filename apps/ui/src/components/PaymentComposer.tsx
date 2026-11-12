@@ -332,7 +332,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // money, so no amount is too much for it.
   const tooMuch = canSend && holds !== undefined && value > holds;
   /** What Send and Request do on this card, with this contact. */
-  const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
+  // A card that could Send says why it cannot now (the contact away), where it would say what Send does: a tooltip
+  // alone is never seen on a phone. Lightning only Requests in a chat, and says so.
+  const how = (id: ChatRail) => describe ? describe(id) : sendUnavailable && id !== "lightning" ? sendUnavailable : t(HOW[id], { name: who });
 
   const back = (
     <div className={`payment-back${card ? ` wallet-card-${card.rail}` : ""}`} data-testid="payment-back" data-network={network}>

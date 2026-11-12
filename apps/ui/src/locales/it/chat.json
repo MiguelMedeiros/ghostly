@@ -315,7 +315,7 @@
   "online": "online",
   "options": "Opzioni",
   "payments": {
-    "needLive": "I pagamenti richiedono una connessione diretta",
+    "needLive": "Invia richiede che il tuo contatto sia online: l'ecash non resta mai in coda. Una richiesta può aspettare il suo ritorno.",
     "noWallet": "Il tuo contatto non ha ancora un portafoglio",
     "off": "Disattivato in questa chat: attiva un metodo in Accetta",
     "offOrOld": "Il tuo contatto ha disattivato i pagamenti in questa chat, o deve aggiornare Ghostly"
