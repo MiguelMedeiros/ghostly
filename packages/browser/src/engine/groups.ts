@@ -1748,6 +1748,8 @@ export class Groups {
     this.hereHeard.delete(groupId);
     this.hereActed.delete(groupId);
     this.signals.forget(groupId);
+    // The history goes, so its unread, "@" and list time go too, as Leave's do: a later join under the id starts clean.
+    dropMarks(this.marks, groupId);
     this.authorOrder.forget(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
