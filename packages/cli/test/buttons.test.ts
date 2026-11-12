@@ -188,6 +188,18 @@ describe("button update", () => {
     expect(params("button update", ["Alice", "me_1", "--text", "x", "--force"])).toMatchObject({ text: "x", force: true });
   });
 
+  it("refuses a new text past 16 KiB as edit does, with its size, before the secret guard reads it", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
+    await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const long = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about " + "é".repeat(8193);
+    const bytes = new TextEncoder().encode(long).length;
+    for (const [chat, message] of [["Alice", "me_1"], ["Sala", "me_2"]])
+      await expect(callApi(ctx, "button.update", { chat, message, text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } });
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
   it("finds the message by the id both sides know too, and in a group", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
