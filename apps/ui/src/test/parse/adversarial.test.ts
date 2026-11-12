@@ -168,6 +168,13 @@ describe("direction controls in links", () => {
     // Only the host decides: case, a port and escapes in the path still show as typed.
     expect(shownUrl("HTTPS://X.Example:8443/a%20b?q=%2E")).toBe("HTTPS://X.Example:8443/a%20b?q=%2E");
   });
+
+  it("previews a link in the chat list as its bubble shows it", () => {
+    expect(plainText("see https://www.paypal.com@evil.example/a now")).toBe("see https://evil.example/a now");
+    expect(plainText("https://аpple.com/")).toBe("https://xn--pple-43d.com/");
+    expect(plainText("https://paypal.com%2Eevil.example/x.")).toBe("https://paypal.com.evil.example/x.");
+    expect(plainText("https://x.example/a_(b)")).toBe("https://x.example/a_(b)");
+  });
 });
 
 describe("long mentions", () => {
