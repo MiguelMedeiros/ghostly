@@ -14,14 +14,14 @@ import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/v
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
-import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
 const OUT_OF_VIEW_MS = 1500;
@@ -372,7 +372,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     data-testid="video-accept"
                     disabled={noRoom}
                     onClick={() => act("accept")}
-                    className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}

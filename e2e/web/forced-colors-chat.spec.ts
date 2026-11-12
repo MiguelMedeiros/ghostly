@@ -1,5 +1,7 @@
+import { writeFileSync } from "node:fs";
 import type { Locator } from "@playwright/test";
-import { chat, expect, say, test } from "../support/fixtures";
+import { chat, connect, expect, link, say, test } from "../support/fixtures";
+import { keepsAnEdge } from "../support/forcedColors";
 import { pair } from "../support/paired";
 
 /**
@@ -51,4 +53,23 @@ test("forced colors draw a message's bubble with an edge, on a plain wallpaper a
     // Nothing moves.
     expect(await mine.boundingBox()).toEqual(box);
   }
+});
+
+test("forced colors keep an edge on a large file offer's Accept and Decline", { tag: ["@feature:app.accessibility", "@feature:files.large.offer"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(150_000);
+  const [alice, bob] = await Promise.all([peer("fc-offer-alice"), peer("fc-offer-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  // Over the 25 MiB a receiver takes without asking, so Bob is asked. Each answer was drawn by its fill alone.
+  const path = testInfo.outputPath("photos.zip");
+  writeFileSync(path, Buffer.alloc(30 * 1024 * 1024, 7));
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  const offer = bob.page.getByTestId("file-offer");
+  await expect(offer.getByTestId("file-accept")).toBeVisible({ timeout: 60_000 });
+  await bob.page.emulateMedia({ colorScheme: "dark" });
+  await keepsAnEdge(bob.page, offer.getByTestId("file-accept"), "the offer's Accept");
+  await keepsAnEdge(bob.page, offer.getByTestId("file-decline"), "the offer's Decline");
+  await bob.page.emulateMedia({ forcedColors: "active" });
+  await offer.screenshot({ path: testInfo.outputPath("forced-file-offer.png") });
 });

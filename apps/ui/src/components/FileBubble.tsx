@@ -10,7 +10,7 @@ import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureRead
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
-import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
+import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
@@ -18,7 +18,8 @@ import { problemLine, saveProblemLine } from "../lib/problemText";
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
 
-const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
+const answerButton = `text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full border-none ${FORCED_EDGE} cursor-pointer`;
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
@@ -263,7 +264,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       </div>
       {offered && group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none cursor-pointer"
+          <button type="button" className={`${answerButton} bg-accent text-on-accent`}
             data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}</button>
         </div>
       )}
@@ -279,9 +280,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             </p>
           )}
           <div className="flex gap-2">
-            <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50"
+            <button type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
               data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
-            <button type="button" className="text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
+            <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
         </div>
       )}
