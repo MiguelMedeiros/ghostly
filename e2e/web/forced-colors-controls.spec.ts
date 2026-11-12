@@ -370,3 +370,29 @@ test("forced colors keep a group's unread dot drawn, in the list and on the rail
     await bot.stop();
   }
 });
+
+/**
+ * The chat list's search was framed by its fill and an inset ring (a box-shadow), both dropped by forced colors: only the
+ * magnifier and the placeholder were left, a loose line over the list. There it has a border that shows against what it
+ * sits on, on a computer (dark) and a phone (light); its size is the same in both modes, and normal colours draw no border.
+ */
+test("forced colors keep the chat list's search framed", { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+  const [computer, phone] = await Promise.all([peer("alice"), peer("bob", { mobile: true })]);
+  for (const { page, width, height, colorScheme } of [{ page: computer.page, width: 1280, height: 800, colorScheme: "dark" }, { page: phone.page, width: 375, height: 812, colorScheme: "light" }] as const) {
+    await page.setViewportSize({ width, height });
+    await still(page);
+    const frame = page.getByRole("searchbox", { name: "Search chats" }).locator("..");
+    await page.emulateMedia({ forcedColors: "none", colorScheme });
+    await expect(frame).toBeVisible();
+    const normal = (await frame.boundingBox())!;
+    expect((await look(frame)).border, `${width} ${colorScheme}: no border in normal colours`).toBe(0);
+
+    await page.emulateMedia({ forcedColors: "active", colorScheme });
+    const forced = await look(frame);
+    expect.soft(forced.border, `${width} ${colorScheme}: border in forced colors`).toBeGreaterThanOrEqual(1);
+    expect.soft(forced.borderColor, `${width} ${colorScheme}: border against the list`).not.toBe(forced.around);
+    const box = (await frame.boundingBox())!;
+    expect.soft({ width: box.width, height: box.height }, `${width} ${colorScheme}: same size`).toEqual({ width: normal.width, height: normal.height });
+    await page.screenshot({ path: test.info().outputPath(`forced-chat-search-${width}-${colorScheme}.png`) });
+  }
+});

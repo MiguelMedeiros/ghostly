@@ -499,9 +499,9 @@ export function Sidebar() {
       <ListNotices />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
 
-      {/* Search */}
+      {/* Search. Forced colors drop its fill and ring: there it gets a border instead, its padding 1px less to keep its size. */}
       <div className="px-3 py-2 bg-sidebar-bg">
-        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
+        <div className="flex items-center gap-3 bg-search-bg rounded-lg px-3 py-1.5 ring-1 ring-inset ring-field-border forced-colors:border forced-colors:border-[color:CanvasText] forced-colors:px-[11px] forced-colors:py-[5px] has-[input:focus-visible]:outline-2 has-[input:focus-visible]:-outline-offset-2 has-[input:focus-visible]:outline-focus-ring">
           <svg
             width="16"
             height="16"
