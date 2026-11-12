@@ -53,16 +53,17 @@ function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: Bu
 type BuiltIn = "carried" | "installed";
 
 /** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
-function runLine(run: AppRunStatus, t: Translate): string | null {
+function runLine(run: AppRunStatus, t: Translate): ReactNode {
   if (run.status === "revoked") return t("apps.install.revoked");
-  if (run.status === "removed") return run.by.map((b) => t("apps.install.removed", { store: b.name, reason: b.reason })).join("\n");
+  // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
+  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
 
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
   const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
-  return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
+  return <p data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
 }
 
 /** The publisher and the stores, as a person checks them. */
