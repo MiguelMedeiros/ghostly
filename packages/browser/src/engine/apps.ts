@@ -1302,17 +1302,23 @@ export class Apps {
 
   /**
    * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
-   * `read` holds the files already read, which are skipped, and gets the ones read now. Null when no file answered now.
+   * `read` holds the files already read, which are skipped, and gets the ones read now. `files`: each file's read in
+   * this update check, shared by every app whose URLs sit beside it (a publisher's apps in one folder). Null when no
+   * file answered now.
    */
-  private async readRevocations(ref: string, urls: string[], read = new Set<string>()): Promise<SignedAppRevocation[] | null> {
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), files = new Map<string, Promise<SignedAppRevocation[] | null>>()): Promise<SignedAppRevocation[] | null> {
     let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       if (read.has(url)) continue;
       read.add(url);
-      try {
-        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
-        if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
-      } catch { /* not published there, or not reachable now */ }
+      let reading = files.get(url);
+      if (!reading) {
+        reading = this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }).then((bytes) => this.readRevocationsFile(bytes))
+          .catch((): null => null); // not published there, or not reachable now
+        files.set(url, reading);
+      }
+      const file = await reading;
+      if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
     }
     return out;
   }
@@ -1853,12 +1859,14 @@ export class Apps {
     // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
-    const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
+    // A publisher's revocations file is read once in a check, however many of its apps sit beside it.
+    const revocationFiles = new Map<string, Promise<SignedAppRevocation[] | null>>();
+    const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores, revocationFiles).catch(() => null)));
     return out.filter((r) => r !== null);
   }
 
   /** One app's part of the update check (`checkNow`); null when it is not installed any more. */
-  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<AppCheckResult | null> {
+  private async checkApp(listed: InstalledApp, stores: AddedAppStore[], revocationFiles: Map<string, Promise<SignedAppRevocation[] | null>>): Promise<AppCheckResult | null> {
     if (!(await this.hasBundle(listed.bytes, listed.digest, listed.manifest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
     const first = await this.app(listed.ref);
     if (!first) return null;
@@ -1910,7 +1918,7 @@ export class Apps {
     }
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
-    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, revocationFiles);
     app = withRevocations(app, before ?? []);
     // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
     if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
@@ -1991,7 +1999,7 @@ export class Apps {
       break;
     }
     // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, revocationFiles);
     // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
