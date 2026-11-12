@@ -83,6 +83,13 @@ describe("SSH identity proofs", () => {
     expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text), s))).subject).toBe(fingerprint);
   }, 20_000);
 
+  it("verifies the file route when the editor ended the statement with a Windows line ending, and nothing else added", async () => {
+    const s = statementFor(ssh, fingerprint);
+    expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, "\r\n"), s))).subject).toBe(fingerprint);
+    for (const ending of ["\n\n", "\r", " \n", "\r\n\r\n"])
+      await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, ending), s)), JSON.stringify(ending)).rejects.toThrow(/not over this statement/);
+  }, 20_000);
+
   it("refuses another namespace, another statement and another key, with a message a person can act on", async () => {
     const s = statementFor(ssh, fingerprint), paste = (text: string) => signer(ssh).parse(text, s);
     await expect(Promise.resolve().then(() => paste(mine.sign(s.text, "git")))).rejects.toThrow(/for "git", not "ghostly"/);
