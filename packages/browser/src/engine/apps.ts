@@ -1799,8 +1799,15 @@ export class Apps {
     }
     const stores = await this.stores();
     // An app installed from a store takes only what that store lists now: an update it no longer lists is not installed
-    // (the next check drops it and looks at what the store lists instead).
-    if (installed.store !== undefined && this.pinnedListing(installed, stores)?.digest !== pending.digest) fail("unlisted", "The store no longer lists this update");
+    // (the next check looks at what the store lists instead). It goes now, as the check drops it, once the store's list
+    // was read: kept, its Update was offered and refused the same way at every press until that check.
+    if (installed.store !== undefined && this.pinnedListing(installed, stores)?.digest !== pending.digest) {
+      if (stores.find((s) => s.key === installed.store)?.index) {
+        const { pending: _p, ...rest } = installed;
+        if (await this.putAppIfUnchanged(rest, installed)) await this.removeBundle(pending.bytes, pending.digest);
+      }
+      fail("unlisted", "The store no longer lists this update");
+    }
     const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), installed.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);

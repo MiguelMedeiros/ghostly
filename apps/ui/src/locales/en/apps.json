@@ -90,7 +90,9 @@
     "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large.",
-    "unlistedVersion": "The link holds a version this store has not listed yet."
+    "unlistedVersion": "The link holds a version this store has not listed yet.",
+    "updateFilesGone": "The update's files are gone. Ghostly fetches it again at the next check.",
+    "updateUnlisted": "This store no longer lists this update. Ghostly looks at what it lists at the next check."
   },
   "files": {
     "allow": "Allow",
