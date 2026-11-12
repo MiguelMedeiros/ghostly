@@ -114,9 +114,8 @@ function hyperdhtPatched(): Plugin {
       }
       return out === code ? undefined : { code: out, map: null };
     },
-    buildEnd(error) {
-      // A build that already failed reports its own error: this check would only hide it.
-      if (error) return;
+    // In generateBundle, which only runs for a build that got that far: a check in buildEnd hid the build's own error.
+    generateBundle() {
       const ids = new Set(this.getModuleIds());
       for (const file of PATCHED.keys()) if (!ids.has(join(HYPERDHT, file))) this.error(`hyperdht/${file} is not in the bundle: its patch would not ship`);
     },
@@ -150,7 +149,16 @@ function walletSdksOnNode(): Plugin {
  * tools/scripts/cli-shrinkwrap.mjs); the workspace packages, Breez's web build and hyperdht are bundled in.
  */
 export default defineConfig({
-  resolve: { alias: [{ find: /^openpgp\/lightweight$/, replacement: openpgp }] },
+  // `hyperdht` is always the repository's copy (HYPERDHT, the lockfile's and npm-shrinkwrap.json's): the Desktop's
+  // sidecar folder (native/transports/hyperdht, imported by the runtime) gets an install of its own once
+  // tools/scripts/prepare-native-runtime.mjs has run, and the CLI would otherwise bundle that one instead.
+  resolve: {
+    alias: [
+      { find: /^openpgp\/lightweight$/, replacement: openpgp },
+      { find: /^hyperdht$/, replacement: join(HYPERDHT, "index.js") },
+      { find: /^hyperdht\/(.*)$/, replacement: `${HYPERDHT}/$1` },
+    ],
+  },
   plugins: [walletSdksOnNode(), hyperdhtPatched()],
   build: {
     ssr: "src/bin.ts",

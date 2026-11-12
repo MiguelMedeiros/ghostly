@@ -28,3 +28,9 @@ it("bundles hyperdht with tools/patches applied: every line the patch adds is in
   for (const line of added) expect(lines.has(line), line).toBe(true);
   for (const line of removed) expect(lines.has(line), line).toBe(false);
 });
+
+it("bundles the repository's hyperdht, never the copy the Desktop's sidecar folder installs for itself", () => {
+  // tools/scripts/prepare-native-runtime.mjs gives native/transports/hyperdht a node_modules of its own; the runtime
+  // imports that folder's endpoint.mjs, so without the alias the build took hyperdht from there (the macOS Desktop job).
+  for (const file of built) expect(readFileSync(file, "utf8"), file).not.toContain("native/transports/hyperdht/node_modules/");
+});
