@@ -174,6 +174,22 @@ describe("settings", () => {
     expect(edge.setTyping).not.toHaveBeenCalled();
   });
 
+  it("typing: a file (a voice note) or a payment sent ends it too", async () => {
+    const { node } = engine();
+    const link = stubLink({ supportsFiles: true });
+    const chat = await addChat(node, link);
+    node["storeMessage"] = vi.fn(async () => {}) as never;
+    node["transferFile"] = vi.fn(async () => {}) as never;
+    node.setTyping({ linkId: chat.id, typing: true, kind: "recording" });
+    await node.sendFile({ linkId: chat.id, file: { id: `${chat.id}-out-AAAAAAAAAAAAAAAA`, name: "v.ogg", size: 10, mime: "audio/ogg" }, timestamp: 1 });
+    expect(link.setTyping.mock.calls).toEqual([[true, { kind: "recording" }], [false]]);
+    link.setTyping.mockClear();
+    node["desk"].send = vi.fn(async () => ({ paymentId: "p" })) as never;
+    node.setTyping({ linkId: chat.id, typing: true });
+    await node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 2 });
+    expect(link.setTyping.mock.calls).toEqual([[true, { kind: "typing" }], [false]]);
+  });
+
   it("typing: the chat shows the contact typing only while its link says so", async () => {
     const { node } = engine();
     const link = stubLink({ peerTyping: false });
