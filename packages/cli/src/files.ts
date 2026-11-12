@@ -313,11 +313,13 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     throw error;
   });
   if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
-  if (transfer.state !== "done") {
-    const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
-    throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
-  }
+  if (transfer.state !== "done") throw waitsForYou((stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, fileId, where, transfer.size);
   return { ...where, file: fileId, state: "done", size: transfer.size };
+}
+
+/** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
+function waitsForYou(name: string | undefined, fileId: string, where: { chat: string } | { group: string } | undefined, size: number): CliError {
+  return new CliError("confirm", `${name ?? "The file"} (${megabytes(size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size, stage: "asking" });
 }
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -469,9 +471,17 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!stored?.metadata) throw noFile(fileId);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
-    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
+    // A group's file waiting for a Download has no transfer in the engine's state: its record says it waits.
+    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? waitingGroupFile(stored) ?? stored.transfer;
     // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
     if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    // Nor will one that waits for `file accept`: said naming it, as --wait does. It answered "not all here yet (0 of N
+    // bytes)" before, and a script retried it for good.
+    if (transfer?.state === "transferring" && transfer.stage === "asking" && transfer.direction === "in") {
+      let where;
+      try { where = fileChat(ctx, params, fileId).where; } catch { /* a chat no longer here: the file's id names it */ }
+      throw waitsForYou(stored.metadata.name, fileId, where, transfer.size);
+    }
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
