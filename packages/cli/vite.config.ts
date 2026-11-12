@@ -114,7 +114,9 @@ function hyperdhtPatched(): Plugin {
       }
       return out === code ? undefined : { code: out, map: null };
     },
-    buildEnd() {
+    buildEnd(error) {
+      // A build that already failed reports its own error: this check would only hide it.
+      if (error) return;
       const ids = new Set(this.getModuleIds());
       for (const file of PATCHED.keys()) if (!ids.has(join(HYPERDHT, file))) this.error(`hyperdht/${file} is not in the bundle: its patch would not ship`);
     },
