@@ -586,6 +586,8 @@
     "pgpExponentNext": "Utilisez une clé créée par GnuPG (exposant 65537).",
     "pgpKeyKind": "Ghostly n'accepte pas les clés {{kind}}",
     "pgpKeyKindNext": "Utilisez Ed25519, ECDSA (P-256, P-384, P-521, brainpool) ou RSA de 2048 à {{max}} bits.",
+    "pgpKeyVersion": "Ghostly n'accepte pas les clés OpenPGP v{{version}}",
+    "pgpKeyVersionNext": "Utilisez une clé v4 (gpg en crée en Ed25519) ou une clé v6.",
     "pgpNoUserIds": "keys.openpgp.org partage cette clé sans ses identifiants d'utilisateur, elle ne peut donc pas être vérifiée",
     "pgpNoUserIdsNext": "Confirmez une adresse e-mail là-bas, ou collez votre clé publique (gpg --armor --export).",
     "privateAddress": "{{domain}} pointe vers une adresse de réseau privé",

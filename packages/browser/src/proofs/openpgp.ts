@@ -223,18 +223,35 @@ async function explainInvalidKey(key: OpenPGP.PublicKey, keyId: OpenPGP.KeyID | 
 }
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 
+const keyVersionRefused = (version: number) => `This is an OpenPGP v${version} key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.`;
+/** The version byte of the public or secret key packet `bytes` start with, read from its header alone. */
+function firstKeyVersion(bytes: Uint8Array): number | undefined {
+  const [h, l] = bytes;
+  if (!(h & 0x80)) return undefined;
+  const newFormat = !!(h & 0x40), tag = newFormat ? h & 0x3f : (h >> 2) & 0x0f;
+  if (tag !== 5 && tag !== 6) return undefined;
+  // New format: a one, two or five byte length (a key packet has no partial lengths). Old format: one, two or four.
+  const at = newFormat ? (l < 192 ? 2 : l < 224 ? 3 : l === 255 ? 6 : undefined) : [2, 3, 5][h & 3];
+  return at === undefined ? undefined : bytes[at];
+}
+
 /** Parses exactly one public key; refuses private keys, v3/v5 keys and key rings. */
 async function readOneKey(pgp: Pgp, input: { armored: string } | { binary: Uint8Array }): Promise<OpenPGP.PublicKey> {
   const cfg = config(pgp);
   let keys: OpenPGP.Key[];
   try {
     keys = 'armored' in input ? await pgp.readKeys({ armoredKeys: input.armored, config: cfg }) : await pgp.readKeys({ binaryKeys: input.binary, config: cfg });
-  } catch (e) { throw new PgpProofError(`Could not read this public key: ${message(e)}`); }
+  } catch (e) {
+    // OpenPGP.js skips a v5 key packet unread (GnuPG 2.3 and later make Ed448 keys as v5), so it finds no key at all.
+    const bytes = 'armored' in input ? await pgp.unarmor(input.armored).then(a => a.data as Uint8Array, () => undefined) : input.binary;
+    if (bytes && firstKeyVersion(bytes) === 5) throw new PgpProofError(keyVersionRefused(5));
+    throw new PgpProofError(`Could not read this public key: ${message(e)}`);
+  }
   if (keys.length !== 1) throw new PgpProofError('Paste one public key, not a key ring.');
   const [key] = keys;
   if (key.isPrivate()) throw new PgpProofError('This is a PRIVATE key. Ghostly only needs your public key (gpg --armor --export).');
   const version = key.keyPacket.version;
-  if (version !== 4 && version !== 6) throw new PgpProofError(`OpenPGP v${version} keys are not accepted; use a v4 (RFC 4880) or v6 (RFC 9580) key.`);
+  if (version !== 4 && version !== 6) throw new PgpProofError(keyVersionRefused(version));
   assertRsaSizes(key as OpenPGP.PublicKey);
   return key as OpenPGP.PublicKey;
 }
