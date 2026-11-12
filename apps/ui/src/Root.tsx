@@ -374,7 +374,8 @@ export function Root() {
                     <Route path="*" element={<NoPage />} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
-                      <Route path="/chat/*" element={<ChatRoute />} />
+                      {/* A chat named in it: `#/chat` alone opens none, and goes home as any address no page answers. */}
+                      <Route path="/chat/:id/*" element={<ChatRoute />} />
                       <Route path="/group/:groupId" element={<GroupChat />} />
                       {/* One route for the menu and its sections, so moving between them keeps the page as it is. */}
                       <Route path="/settings/:section?" element={<Settings />} />
