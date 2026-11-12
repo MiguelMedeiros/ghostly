@@ -502,6 +502,27 @@ describe("app verify <url>", () => {
     await expect(verifyApp("https://example.com/app.ghostlyapp")).rejects.toMatchObject({ code: "refused" });
   });
 
+  it("follows a redirect only on the URL's own host and port or to a host a client reads from, never into this machine's network", async () => {
+    for (const location of ["https://127.0.0.1:4701/admin", "https://169.254.169.254/latest/meta-data/", "https://example.com:8443/app.ghostlyapp", "https://other.example/app.ghostlyapp"]) {
+      const seen: string[] = [];
+      vi.stubGlobal("fetch", async (url: string) => {
+        seen.push(url);
+        return new Response(null, { status: 302, headers: { location } });
+      });
+      await expect(verifyApp("https://example.com/app.ghostlyapp")).rejects.toMatchObject({ code: "refused" });
+      expect(seen).toEqual(["https://example.com/app.ghostlyapp"]);
+    }
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url.endsWith("/ghostly-revoke.json")) return new Response("no", { status: 404 });
+      seen.push(url);
+      if (url.endsWith("/v2/app.ghostlyapp")) return new Response(stream([bundle]), { status: 200 });
+      return new Response(null, { status: 302, headers: { location: "/v2/app.ghostlyapp" } });
+    });
+    expect(await verifyApp("https://example.com/app.ghostlyapp")).toMatchObject({ valid: true, digest: vector.read.digest });
+    expect(seen).toEqual(["https://example.com/app.ghostlyapp", "https://example.com/v2/app.ghostlyapp"]);
+  });
+
   it("stops past 16 MiB, by its length or while it reads", async () => {
     const limit = 16 * 1024 * 1024;
     vi.stubGlobal("fetch", async () => new Response(stream([bundle]), { status: 200, headers: { "content-length": String(limit + 1) } }));
