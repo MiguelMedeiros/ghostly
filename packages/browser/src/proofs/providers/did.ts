@@ -90,11 +90,12 @@ function nobleScript(statement: string, curve: DidCurve): string {
   ].join("\n");
 }
 
+/** OpenSSL alone: the signature comes out as one line of base64 (xxd, for hex, is missing on many Linux systems). */
 function opensslCommand(statement: string, curve: DidCurve): string {
   const save = `printf '%s' '${statement}' > statement.txt`;
   return curve === "Ed25519"
-    ? `${save} && openssl pkeyutl -sign -rawin -inkey key.pem -in statement.txt | xxd -p | tr -d '\\n'`
-    : `${save} && openssl dgst -sha256 -sign key.pem statement.txt | xxd -p | tr -d '\\n'`;
+    ? `${save} && openssl pkeyutl -sign -rawin -inkey key.pem -in statement.txt | openssl base64 -A`
+    : `${save} && openssl dgst -sha256 -sign key.pem statement.txt | openssl base64 -A`;
 }
 
 const signer: ExternalToolSigner<DidEvidence> = {
