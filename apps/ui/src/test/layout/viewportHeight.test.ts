@@ -15,6 +15,8 @@ class Viewport extends EventTarget {
 }
 let viewport: Viewport;
 let inner = 874;
+/** A phone's touch screen, unless a test says the device has none (a laptop, a desktop). */
+let touchPoints = 5;
 
 function resize(height: number, innerHeight = inner, width = viewport.width) {
   viewport.height = height;
@@ -31,12 +33,15 @@ beforeEach(() => {
   shell.className = "app-shell";
   viewport = new Viewport();
   inner = 874;
+  touchPoints = 5;
   Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
   Object.defineProperty(window, "innerHeight", { configurable: true, get: () => inner });
+  Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, get: () => touchPoints });
 });
 afterEach(() => {
   Reflect.deleteProperty(window, "visualViewport");
   Reflect.deleteProperty(window, "innerHeight");
+  Reflect.deleteProperty(navigator, "maxTouchPoints");
   delete document.documentElement.dataset.keyboard;
   shell.remove();
 });
@@ -174,6 +179,26 @@ describe("the app's height and the keyboard", () => {
       resize(437, 437);
       expect(keyboard()).toBe("false");
       resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("with no touch screen, a window made shorter while a field has the focus is not a keyboard (a narrow desktop window, 200 % zoom)", () => {
+    touchPoints = 0;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("input"));
+    try {
+      act(() => field.focus());
+      // Another window stacked under it, devtools docked, full screen left.
+      resize(574, 574);
+      expect(appHeight()).toBe("574px");
+      expect(keyboard()).toBe("false");
+      // The field loses the focus, nothing resizes: the tab bar was left hidden until the next resize.
+      act(() => field.blur());
+      expect(keyboard()).toBe("false");
+      act(() => field.focus());
       expect(keyboard()).toBe("false");
     } finally {
       field.remove();

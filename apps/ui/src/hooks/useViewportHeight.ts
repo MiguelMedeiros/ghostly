@@ -52,6 +52,9 @@ export function useViewportHeight() {
     document.documentElement.dataset.standalone = String(isStandalone());
     const viewport = window.visualViewport;
     if (!viewport) return;
+    // No touch screen, no keyboard on it: a laptop or desktop window made shorter while a field has the focus (another
+    // window stacked under it, at 200 % zoom in the phone layout) hid the tab bar until the window was resized again.
+    const touch = (navigator.maxTouchPoints ?? 0) > 0;
 
     let width = viewport.width;
     // The tallest visible height seen at each width: turned back to a width, the keyboard is measured against the
@@ -96,7 +99,7 @@ export function useViewportHeight() {
       // screen, devtools docked) is the whole height there now, or the phone tab bar stayed hidden under 768px.
       const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
       tallest.set(width, whole);
-      const measured = Math.max(window.innerHeight - viewport.height, whole - viewport.height);
+      const measured = touch ? Math.max(window.innerHeight - viewport.height, whole - viewport.height) : 0;
       let covered = measured;
       if (typing && measured > SHORTCUT_BAR && measured <= KEYBOARD) bar = measured;
       // Once the screen has turned with the bar up, iOS reports the whole height again a moment later and keeps it,
