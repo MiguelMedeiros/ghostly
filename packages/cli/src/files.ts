@@ -44,17 +44,22 @@ export function mimeOf(path: string, given?: string): string {
  * a date can hold it; else when it was stored here.
  */
 async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
-  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+  // Past the newest, among the history's file rows only (the messages store's file index): the whole history, read for
+  // each old voice message saved, held the daemon 0.8 s at 100,000 messages.
+  const older = (linkId: string) => node(ctx).fileMessages(linkId);
+  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id, older))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
 }
 
 /**
  * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
- * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row.
+ * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row;
+ * `older` reads fewer, where the message is known to be among them.
  */
-async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean): Promise<StoredMessage | undefined> {
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean, older?: (linkId: string) => Promise<StoredMessage[]>): Promise<StoredMessage | undefined> {
   const page = await node(ctx).messagePage({ linkId, limit: 200 });
   const newest = page.messages.find(test);
   if (newest || !page.more) return newest;
+  if (older) return (await older(linkId)).find(test);
   const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
   return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
 }
