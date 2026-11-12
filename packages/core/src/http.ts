@@ -363,9 +363,11 @@ interface HostStream {
   url: string;
   body: Uint8Array[];
   bodyBytes: number;
+  /** Body bytes since the pace was last checked. */
+  movedBytes: number;
   abort: AbortController;
   started: boolean;
-  idleTimer?: ReturnType<typeof setTimeout>;
+  paceTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class HttpHost {
@@ -408,13 +410,14 @@ export class HttpHost {
       url,
       body: [],
       bodyBytes: 0,
+      movedBytes: 0,
       abort: new AbortController(),
       started: false,
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
 
-    if (frame.b && !BODYLESS_METHODS.has(method)) this.armIdleTimer(stream);
+    if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
   }
 
@@ -433,9 +436,9 @@ export class HttpHost {
     }
     stream.bodyBytes += bytes;
     this.heldBodyBytes += bytes;
+    stream.movedBytes += bytes;
     if (chunk.payload.length > 0) stream.body.push(chunk.payload.slice());
     if (chunk.end) void this.run(stream);
-    else this.armIdleTimer(stream);
   }
 
   handleReset(frame: ResetFrame): void {
@@ -447,9 +450,13 @@ export class HttpHost {
     for (const stream of [...this.streams.values()]) this.end(stream);
   }
 
-  private armIdleTimer(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
-    stream.idleTimer = setTimeout(() => {
+  /** A body that brings less than `minRequestBodyBytesPerIdle` in a `bodyIdleTimeoutMs` is let go, even if it trickles. */
+  private watchPace(stream: HostStream): void {
+    stream.paceTimer = setTimeout(() => {
+      if (stream.movedBytes >= LIMITS.minRequestBodyBytesPerIdle) {
+        stream.movedBytes = 0;
+        return this.watchPace(stream);
+      }
       this.end(stream);
       this.fail(stream.frame.id, 408, "request-timeout", "Request body timed out.");
     }, LIMITS.bodyIdleTimeoutMs);
@@ -461,7 +468,7 @@ export class HttpHost {
   }
 
   private end(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
     if (!stream.started) this.release(stream);
@@ -497,7 +504,7 @@ export class HttpHost {
 
   private async run(stream: HostStream): Promise<void> {
     stream.started = true;
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     const { frame, service } = stream;
     const timeout = setTimeout(() => stream.abort.abort(), LIMITS.requestTimeoutMs);
     let headersSent = false;
