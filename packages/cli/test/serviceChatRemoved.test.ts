@@ -16,7 +16,7 @@ const answers = (port: number) => new Promise<boolean>((resolve) => {
 
 /** A daemon whose engine holds these chats; `removeLink` takes one out. */
 function daemonWith(links: { id: string; peerPubKeyZ32: string }[]): ApiContext {
-  const node = { getState: () => ({ links, groups: [], settings: {} }), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); } };
+  const node = { getState: () => ({ links, groups: [], settings: {} }), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); }, removalsPending: () => [] };
   return {
     mode: "daemon", version: "test", runtime: { server: { node }, paths: { name: "default", dir: mkdtempSync(join(tmpdir(), "ghostly-service-chat-removed-")) } },
     calls: { list: () => [], forgetChat: () => {} }, groupAuto: { forgetChat: () => {} },
