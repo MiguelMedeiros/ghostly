@@ -127,6 +127,7 @@ export function Settings() {
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  const chosenLanguageName = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language;
   const install = useInstallState();
   // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
   const canWake = !!pushPlatform();
@@ -658,10 +659,20 @@ export function Settings() {
         <TextSizeSetting />
         <Row label={t("settings.language")}
           hint={languageNotLoaded ? (
-            <span role="status" data-testid="settings-language-not-loaded">
-              {t("settings.languageNotLoaded", { language: LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language })}{" "}
-              <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
-            </span>
+            // A new version found: a deploy replaced this build, whose language files are gone from the server, so asking
+            // again never brings them. Its Reload is offered here, where a phone shows no update banner.
+            update.update?.apply === "reload" ? (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNeedsUpdate", { language: chosenLanguageName })} {t("updates.applyHint")}{" "}
+                <button type="button" onClick={() => void update.install()} aria-busy={update.stage === "installing" || undefined}
+                  className="underline text-accent cursor-pointer">{t("updates.reload")}</button>
+              </span>
+            ) : (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNotLoaded", { language: chosenLanguageName })}{" "}
+                <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
+              </span>
+            )
           ) : undefined}>
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />

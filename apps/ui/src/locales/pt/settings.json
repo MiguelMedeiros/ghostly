@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "Senha incorreta",
   "language": "Idioma",
+  "languageNeedsUpdate": "{{language}} precisa da nova versão do Ghostly.",
   "languageNotLoaded": "Não foi possível carregar {{language}}. Verifique sua conexão.",
   "languageRetry": "Tentar de novo",
   "license": "Licença",

@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "パスワードが正しくありません",
   "language": "言語",
+  "languageNeedsUpdate": "{{language}} には Ghostly の新しいバージョンが必要です。",
   "languageNotLoaded": "{{language}} を読み込めませんでした。接続を確認してください。",
   "languageRetry": "もう一度試す",
   "license": "ライセンス",
