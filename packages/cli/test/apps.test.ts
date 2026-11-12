@@ -480,6 +480,22 @@ describe("app verify <url>", () => {
     expect(seen).toEqual([pinned, pinned.replace("app.ghostlyapp", "ghostly-revoke.json"), "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
   }, 60_000);
 
+  it("reads beside the manifest's sources only on the hosts a client reads from, not a host or port the publisher names", async () => {
+    const { manifest, files } = chess();
+    const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const dir = appFolder({ ...manifest, sources: ["https://10.0.0.5:8443/x/app.ghostlyapp", "https://localhost/app.ghostlyapp", "https://raw.githubusercontent.com:8443/ana/chess/HEAD/app.ghostlyapp", head] }, files);
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const url = "https://example.com/chess/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (at: string) => {
+      seen.push(at);
+      return at === url ? new Response(stream([new Uint8Array(published)]), { status: 200 }) : new Response("no", { status: 404 });
+    });
+    expect(await verifyApp(url)).toMatchObject({ valid: true });
+    expect(seen).toEqual([url, "https://example.com/chess/ghostly-revoke.json", "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+  }, 60_000);
+
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "not_found" });
