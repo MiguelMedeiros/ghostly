@@ -17,6 +17,21 @@ function jump(id: string) {
 }
 
 /**
+ * Where a match no longer among `now` stood in it: the place of the first one older than it (`before`, newest first, as
+ * the matches were while it was among them) that still is, or the end. Matches that came since are newer, before it.
+ * -1 when it was never among `before`.
+ */
+function placeOf(id: string, before: readonly string[], now: readonly string[]): number {
+  const was = before.indexOf(id);
+  if (was < 0) return -1;
+  for (let i = was + 1; i < before.length; i++) {
+    const at = now.indexOf(before[i]);
+    if (at >= 0) return at;
+  }
+  return now.length;
+}
+
+/**
  * Search inside a chat (apps/ui/src/lib/chatSearch.ts): its messages as this device keeps them, never the page's text, so a
  * chat of thousands of messages answers as fast as a short one. Ctrl/Cmd+F opens it while `active` (the chat on
  * screen), Escape in its field closes it, another chat closes it. The newest match comes first; `older` and `newer`
@@ -105,13 +120,20 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   }, [term]);
 
   const index = current ? results.indexOf(current) : -1;
+  /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
+  const held = useRef(results);
+  if (index >= 0) held.current = results;
   const step = useCallback((by: 1 | -1) => {
     // Enter before the pause is over: these words now, on their newest match.
     if (query.trim() && query !== term) { setTerm(query); return; }
     const list = latest.current;
     if (!list.length) return;
     const at = current ? list.indexOf(current) : -1;
-    const next = list[at < 0 ? 0 : (at + by + list.length) % list.length];
+    // The one being read went (deleted here or for everyone, edited so it no longer matches): on from where it stood,
+    // to the one older or newer than it. Before, the search began again at the newest.
+    const gone = at < 0 && current ? placeOf(current, held.current, list) : -1;
+    const next = gone >= 0 ? list[(by === 1 ? gone : gone - 1 + list.length) % list.length]
+      : list[at < 0 ? 0 : (at + by + list.length) % list.length];
     setCurrent(next);
     jump(next);
   }, [current, query, term]);
