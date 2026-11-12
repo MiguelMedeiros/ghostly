@@ -42,6 +42,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
     removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
+    removalsPending: () => [],
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
