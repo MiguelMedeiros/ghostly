@@ -5,7 +5,7 @@ import {
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, MessagePage, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { droppedPin, pinOfFormerMember, pinView } from "./pins";
@@ -226,6 +226,11 @@ export interface GroupStore {
   deleteGroup(groupId: string): Promise<void>;
   getMessages(linkId: string): Promise<StoredMessage[]>;
   /**
+   * The newest `limit` rows before `before`, oldest first (`db.getMessagePage`): `unmark` reads from the newest back
+   * with it. A store without it reads the whole history.
+   */
+  getMessagePage?(linkId: string, page: { limit: number; before?: { timestamp: number; id?: string } }): Promise<MessagePage>;
+  /**
    * The private groups' small rows (`engine/groupRows.ts`): what a message changes is written there alone. A store
    * without them writes the whole record at every save, as before.
    */
@@ -350,19 +355,43 @@ export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; 
   return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(m => m.mentioned) };
 }
 
+/** Rows `unmark` reads at a time from the newest back: the marks it moves back are almost always among the last few. */
+export const UNMARK_PAGE = 64;
+
+/**
+ * `newestMarked` of a group's rows without `skip`, for the marks in `want` only: read a page at a time from the newest
+ * back until each is found, where the whole history cost ~20 ms per 1,000 rows on each member's daemon for every delete.
+ * A store without pages reads it whole.
+ */
+export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "getMessagePage">, linkId: string, skip: string, want: { last: boolean; peer: boolean; mention: boolean }): Promise<ReturnType<typeof newestMarked>> {
+  if (!store.getMessagePage) return newestMarked((await store.getMessages(linkId)).filter(m => m.id !== skip));
+  const found: ReturnType<typeof newestMarked> = {};
+  for (let before: { timestamp: number; id: string } | undefined; ;) {
+    const page = await store.getMessagePage(linkId, { limit: UNMARK_PAGE, before });
+    for (const m of [...page.messages].reverse()) {
+      if (m.id === skip) continue;
+      if (!m.event && !m.groupPay) { found.last ??= m; if (m.sender !== "me") found.peer ??= m; }
+      if (m.mentioned) found.mention ??= m;
+    }
+    const oldest = page.messages[0];
+    if (!page.more || !oldest || ((!want.last || found.last) && (!want.peer || found.peer) && (!want.mention || found.mention))) return found;
+    before = { timestamp: oldest.timestamp, id: oldest.id };
+  }
+}
+
 /**
  * A message deleted for everyone (WISP 400 § Delete for everyone: a tombstone does not count as unread or move the
  * chat): the marks it moved go back to the newest line still kept, as `load` reads them, and the record's `came` it
  * raised goes too. A mark a newer line moved stays, and the history is read only when the message moved one
- * (`markedBy`): removals go at the pace of edits. `history`: the group's rows, with it gone. True when `came` changed
- * (the record is to be saved). `mentionOnly`: an edit took my mention out of it: the message is still there, so only
- * the "@" goes back.
+ * (`markedBy`): removals go at the pace of edits. `history`: where the group's rows are, read from the newest back
+ * until each mark to move is found (`newestMarkedOf`). True when `came` changed (the record is to be saved).
+ * `mentionOnly`: an edit took my mention out of it: the message is still there, so only the "@" goes back.
  */
-export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage, mentionOnly = false): Promise<boolean> {
+export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: Pick<GroupStore, "getMessages" | "getMessagePage">, removed: StoredMessage, mentionOnly = false): Promise<boolean> {
   const by = marks.by.get(groupId);
   const last = !mentionOnly && by?.last === removed.id, peer = !mentionOnly && by?.peer === removed.id, mention = by?.mention === removed.id;
   if (!by || !(last || peer || mention)) return false;
-  const newest = newestMarked((await history()).filter(m => m.id !== removed.id));
+  const newest = await newestMarkedOf(history, MESSAGE_LINK(groupId), removed.id, { last, peer, mention });
   const back = (map: Map<string, number>, row: StoredMessage | undefined) => { if (row) map.set(groupId, row.timestamp); else map.delete(groupId); };
   let came = false;
   if (last) back(marks.lastMessageAt, newest.last);
@@ -1586,7 +1615,7 @@ export class Groups {
   async unmark(groupId: string, removed: StoredMessage, mentionOnly = false): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed, mentionOnly);
     const group = this.stored.get(groupId);
-    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed, mentionOnly) && group) await this.store.putGroup(group);
+    if (await unmark(this.marks, group, groupId, this.store, removed, mentionOnly) && group) await this.store.putGroup(group);
   }
 
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */

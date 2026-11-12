@@ -501,7 +501,7 @@ export class Communities {
   /** A message deleted for everyone left this device: the marks it set go back (`unmark` in groups.ts); `mentionOnly`, its "@" alone. */
   async unmark(groupId: string, removed: StoredMessage, mentionOnly = false): Promise<void> {
     const group = this.stored.get(groupId);
-    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed, mentionOnly) && group) await this.store.putGroup(group);
+    if (await unmark(this.marks, group, groupId, this.store, removed, mentionOnly) && group) await this.store.putGroup(group);
   }
 
   views(): GroupView[] {

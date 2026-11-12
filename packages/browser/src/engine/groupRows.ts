@@ -117,6 +117,7 @@ export class GroupRows {
       putGroup: group => this.put(group),
       deleteGroup: async groupId => { this.written.delete(groupId); await raw.deleteGroup(groupId); },
       getMessages: linkId => raw.getMessages(linkId),
+      ...(raw.getMessagePage && { getMessagePage: (linkId, page) => raw.getMessagePage!(linkId, page) }),
     };
   }
 
