@@ -676,22 +676,34 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private done = false;
   private error: Error | null = null;
   private wake: (() => void) | null = null;
+  /** Bytes received and not yet read. */
+  held = 0;
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
+    this.held += chunk.length;
     this.wake?.();
   }
 
+  /** On an error, what was not read yet is let go: the reader gets the error, not the rest of a body that failed. */
   finish(error?: Error): void {
     if (this.done) return;
     this.done = true;
     this.error = error ?? null;
+    if (error) {
+      this.chunks = [];
+      this.held = 0;
+    }
     this.wake?.();
   }
 
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     for (;;) {
-      while (this.chunks.length > 0) yield this.chunks.shift()!;
+      while (this.chunks.length > 0) {
+        const chunk = this.chunks.shift()!;
+        this.held -= chunk.length;
+        yield chunk;
+      }
       if (this.error) throw this.error;
       if (this.done) return;
       await new Promise<void>((resolve) => (this.wake = resolve));
@@ -818,6 +830,11 @@ export class HttpClient {
     stream.received += chunk.payload.length;
     if (stream.received > stream.maxBytes) {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
+    }
+    // Nothing tells the peer to slow down, and its last chunk frees the slot: a reader that stalls (a contact's page
+    // that never reads what it fetched) would have the whole body held here, one per request it leaves unread.
+    if (stream.queue.held + chunk.payload.length > LIMITS.maxUnreadResponseBytes) {
+      return this.abort(chunk.id, new GhostlyHttpError("unread", "Response body not read in time"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
     if (chunk.end) this.finish(chunk.id);

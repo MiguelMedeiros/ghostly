@@ -671,6 +671,42 @@ describe("HttpClient", () => {
     c.client.close();
     await expect(response.bytes()).rejects.toMatchObject({ code: "closed" });
   });
+
+  it("resets a response its reader leaves unread past the bound, and lets go of what it held", async () => {
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    const fits = LIMITS.maxUnreadResponseBytes / chunk.length;
+    for (let i = 0; i < fits; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: chunk });
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+
+    c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: Uint8Array.of(1) });
+    expect(c.controls().at(-1)).toEqual({ t: "rst", id: 1, d: "q", e: "Response body not read in time" });
+    const iterator = response.body[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toMatchObject({ code: "unread" });
+
+    // The slot is free again: the next request goes out at once.
+    void c.client.request("atlas", { method: "GET", path: "/next" });
+    expect(lastReq(c.controls()).p).toBe("/next");
+  });
+
+  it("lets a reader that keeps up take a body far past the unread bound", async () => {
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const reading = response.bytes();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    const count = (2 * LIMITS.maxUnreadResponseBytes) / chunk.length;
+    for (let i = 0; i < count; i++) {
+      c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i === count - 1, payload: chunk });
+      await flush();
+    }
+    expect((await reading).length).toBe(2 * LIMITS.maxUnreadResponseBytes);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+  });
 });
 
 describe("webLocalFetch", () => {
