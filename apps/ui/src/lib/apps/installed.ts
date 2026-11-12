@@ -69,6 +69,7 @@ export function forgetInstalledApps(): void {
   loading = null;
   failed = null;
   asked++;
+  unsent.clear();
 }
 
 /** Why the last read of the installed apps failed, or null when it did not: the Apps page says it, not "No apps yet." */
@@ -150,13 +151,27 @@ export async function sendAppCard(linkId: string, app: InstalledAppView, opened:
   return result.error;
 }
 
+/** The "opened" cards that did not go out, by chat and app: the same app shown again there sends it then. */
+const unsent = new Set<string>();
+
+/**
+ * Tells the contact that `app` opened in `linkId` with the "opened" card, after `openApp` resolved `shown`: one already
+ * running there, shown again, sends none, unless its card failed when it opened. Resolves the send's error, if any.
+ */
+export async function sendOpenedCard(linkId: string, app: InstalledAppView, shown: "shown" | void): Promise<string | null> {
+  const key = `${linkId}\n${app.ref}`;
+  if (shown === "shown" && !unsent.has(key)) return null;
+  const failed = await sendAppCard(linkId, app, true);
+  if (failed) unsent.add(key); else unsent.delete(key);
+  return failed;
+}
+
 /**
  * Opens `app` in the 1:1 chat `linkId` and tells the contact with the "opened" card: the chat's + → Apps, and the
  * Apps page's chat picker for an app that runs in a chat. Opened first: an app that cannot start there sends no card,
- * and one already running there, shown again, sends none either.
+ * and one already running there, shown again, sends none either (unless its card failed: `sendOpenedCard`).
  */
 export async function openAppInChat(app: InstalledAppView, linkId: string, options?: OpenAppOptions): Promise<void> {
-  if (await openApp(app.ref, linkId, options) === "shown") return;
-  const failed = await sendAppCard(linkId, app, true);
+  const failed = await sendOpenedCard(linkId, app, await openApp(app.ref, linkId, options));
   if (failed) throw new Error(failed);
 }
