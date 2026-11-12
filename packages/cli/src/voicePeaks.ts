@@ -345,6 +345,13 @@ function pushWavFrames(view: DataView, from: number, to: number, channels: numbe
 
 // ---------- Opus (WebM, Ogg) ----------
 
+/**
+ * Opus packets a demuxer keeps: as many as the longest voice note read past its limit can have, at 2.5 ms (Opus's
+ * shortest packet) each. Past it a file is longer than a voice note anyway. Before, a 1 MB WebM of blocks each lacing
+ * 256 empty frames held ~8 KB of heap per byte read, and took the daemon down out of memory.
+ */
+export const MAX_OPUS_PACKETS = Math.ceil((VOICE_LIMITS.maxDurationMs + PAST_LIMIT_MS) / 2.5);
+
 export interface OpusStream {
   /** The OpusHead (RFC 7845): channels, pre-skip, channel mapping. */
   head: Uint8Array | null;
@@ -381,7 +388,7 @@ export function demuxWebm(bytes: Uint8Array): OpusStream | null {
   const tracks: Track[] = [];
   const blocks: { track: number; data: Uint8Array }[] = [];
   let at = 0;
-  while (at < bytes.length) {
+  while (at < bytes.length && blocks.length < MAX_OPUS_PACKETS) {
     const id = vint(bytes, at, true);
     if (!id) break;
     const size = vint(bytes, at + id.length, false);
@@ -402,7 +409,7 @@ export function demuxWebm(bytes: Uint8Array): OpusStream | null {
     else if (id.value === 0x9f && track) track.channels = uint(data);
     else if (id.value === 0xa3 || id.value === 0xa1) {
       const number = vint(data, 0, false);
-      if (number) for (const frame of laced(data, number.length)) blocks.push({ track: number.value, data: frame });
+      if (number) for (const frame of laced(data, number.length).slice(0, MAX_OPUS_PACKETS - blocks.length)) blocks.push({ track: number.value, data: frame });
     }
     at = end;
   }
@@ -460,7 +467,7 @@ export function demuxOgg(bytes: Uint8Array): OpusStream | null {
   let packet: Uint8Array[] = [];
   let endGranule: number | undefined;
   let at = 0;
-  while (at + 27 <= bytes.length && ascii(bytes, at, 4) === "OggS") {
+  while (at + 27 <= bytes.length && ascii(bytes, at, 4) === "OggS" && frames.length < MAX_OPUS_PACKETS) {
     const segments = bytes[at + 26]!;
     const table = bytes.subarray(at + 27, at + 27 + segments);
     let pos = at + 27 + segments;
@@ -471,6 +478,7 @@ export function demuxOgg(bytes: Uint8Array): OpusStream | null {
       serial = pageSerial;
       if (granule >= 0) endGranule = granule;
       for (const size of table) {
+        if (frames.length >= MAX_OPUS_PACKETS) break;
         packet.push(bytes.subarray(pos, pos + size));
         pos += size;
         if (size < 255) {
