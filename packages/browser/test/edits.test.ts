@@ -1014,9 +1014,25 @@ describe("what an edit keeps", () => {
     expect(m.edit!.history.at(-1)!.text).toBe(`v${EDIT_HISTORY_KEEP + 4}`);
     const big = "x".repeat(EDIT_HISTORY_MAX_BYTES / 2);
     m = withEdit(withEdit(withEdit(base, { seq: 1, at: 1, text: big + "1" }), { seq: 2, at: 2, text: big + "2" }), { seq: 3, at: 3, text: "small" });
-    expect(m.edit!.history.map(v => v.text.length)).toEqual([big.length + 1]);
+    expect(m.edit!.history.map(v => v.text.length)).toEqual([2, big.length + 1]);
     // The same text again only moves the number on.
     expect(withEdit(base, { seq: 1, at: 5, text: "v0" }).edit!.history).toEqual([]);
+  });
+
+  it("the first version stays as it came: a card does not drop it, a chosen time does not date another, many edits do not push it out", () => {
+    const sent: StoredMessage = { ...base, sender: "peer", preview: undefined };
+    // A status card on a text that had none keeps the text it replaces; a plain edit dated back to the send comes after it.
+    let m = withEdit(sent, { seq: 1, at: 100, text: "Forged", card: { kind: "task", title: "x" } as StatusCard });
+    m = withEdit(m, { seq: 2, at: 50, text: "v2" });
+    expect(m.edit!.history).toEqual([{ at: 100, text: "v0" }, { at: 101, text: "Forged" }]);
+    // A card updating a card still keeps none.
+    const carded = withEdit(m, { seq: 3, at: 300, text: "c1", card: { kind: "task", title: "y" } as StatusCard });
+    expect(withEdit(carded, { seq: 4, at: 400, text: "c2", card: { kind: "task", title: "z" } as StatusCard }).edit!.history).toHaveLength(3);
+    // Past the bounds, the newest go and the first stays; no later version shares its time.
+    for (let i = 3; i <= EDIT_HISTORY_KEEP + 5; i++) m = withEdit(m, { seq: i, at: 100, text: `v${i}` });
+    expect(m.edit!.history).toHaveLength(EDIT_HISTORY_KEEP);
+    expect(m.edit!.history[0]).toEqual({ at: 100, text: "v0" });
+    expect(m.edit!.history.slice(1).every(v => v.at > 100)).toBe(true);
   });
 
   it("only for texts: mine to edit, the contact's to take edits", () => {
