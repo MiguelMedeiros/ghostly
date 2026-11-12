@@ -52,6 +52,19 @@ export function heedInterruptedSignIn(invoke: Invoke, listen: Listen): void {
 }
 
 /**
+ * A page that starts lets go of what the page before it held out of sight: the connection service and its wake lock
+ * (`connection_service`), and files held moving (`keep_awake`). Kotlin keeps what a page said last for the whole
+ * process, and a reload (a profile switch, the standby screen after a handoff, Remove this profile here) runs none of
+ * the old page's cleanups; a page that never mounts the app (its lock screen, the standby screen) would never say
+ * otherwise. The app's hooks say on again once a running, unlocked profile wants it (`useStayConnected`,
+ * `useComputerAwake`). Call it before the page renders.
+ */
+export function letGoOfServices(invoke: Invoke): void {
+  void invoke("connection_service", { on: false, links: false }).catch(() => {});
+  void invoke("keep_awake", { on: false, files: false }).catch(() => {});
+}
+
+/**
  * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
  * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`), with no room for them (`noRoom`)
  * or past the most one share brings (`pastLimit`).
