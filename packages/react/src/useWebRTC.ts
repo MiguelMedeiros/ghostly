@@ -1070,7 +1070,13 @@ export function useWebRTC({
         const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         const video = withVideo && !cameraError;
-        if (cameraError) showCameraOff(cameraError);
+        if (cameraError) {
+          showCameraOff(cameraError);
+          // Gone on as a voice call: its lines say so from the start, as the contact's chat does (the offer says voice).
+          callHadVideoRef.current = false;
+          if (startedLineRef.current) removeCallEventMessage?.(startedLineRef.current);
+          startedLineRef.current = addCallEventMessage?.("call_started", false) || null;
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(video ? "camera" : null);
@@ -1118,7 +1124,7 @@ export function useWebRTC({
         showNoPath(error);
         // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
         // after its "call started" line. No offer went out, so the contact has nothing to hear.
-        addCallEventMessage?.("call_failed", withVideo);
+        addCallEventMessage?.("call_failed", callHadVideoRef.current);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -1239,7 +1245,10 @@ export function useWebRTC({
         const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         const video = withVideo && !cameraError;
-        if (cameraError) showCameraOff(cameraError);
+        if (cameraError) {
+          showCameraOff(cameraError);
+          callHadVideoRef.current = signalHasVideo(offer);
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(video ? "camera" : null);
