@@ -19,7 +19,9 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
-import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
+import { appWithContact, chatAppOver, takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
+import { useToast } from "../hooks/useToast";
+import { Toast } from "../components/ui/Toast";
 import { openAppInChat } from "../lib/apps/installed";
 import { rowDaysReader } from "../lib/chatDays";
 import { readContactNick, rowPicker, type NickRead } from "../lib/chatRows";
@@ -562,15 +564,23 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
   const appCovers = useChatAppCovers(appHere);
   // An app the person opened here from the Apps page (its chat picker): opened once this chat shows, as + → Apps opens
-  // one. What went wrong shows in + → Apps.
+  // one. What went wrong shows in + → Apps; while an app covers the chat (+ → Apps with it), on a card over that app.
   const [appsError, setAppsError] = useState<string | null>(null);
+  const { toast: appWhy, show: showAppWhy, dismiss: dismissAppWhy } = useToast();
+  const sayAppWhy = useCallback((why: string, title: string) => {
+    if (appHere) showAppWhy(why, { title: appWithContact(title, appHere, t) });
+  }, [appHere, showAppWhy, t]);
   const openRequested = useOpenRequested(appHere);
   useEffect(() => {
     if (!visible || !appHere || !openRequested) return;
     const request = takeOpenRequest(appHere);
     if (!request) return;
-    void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => { setAppsError(appErrorText(e, t)); setShowApps(true); });
-  }, [visible, appHere, openRequested, t]);
+    void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => {
+      const why = appErrorText(e, t);
+      if (chatAppOver(appHere)) sayAppWhy(why, request.app.title);
+      else { setAppsError(why); setShowApps(true); }
+    });
+  }, [visible, appHere, openRequested, t, sayAppWhy]);
   /**
    * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
    * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
@@ -1356,7 +1366,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {showApps && appsOn && chatLink && params && (
-        <ChatAppsDialog linkId={chatLink.id} name={shownName} error={appsError} onClose={() => { setShowApps(false); setAppsError(null); }}
+        <ChatAppsDialog linkId={chatLink.id} name={shownName} error={appsError} onClose={() => { setShowApps(false); setAppsError(null); }} onCovered={sayAppWhy}
           waiting={appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t)} />
       )}
       {showServices && params && (
@@ -1409,6 +1419,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
         peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
     )}
+    {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
+    <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />
     {showIdentities && params && (
       <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}
         card={identityCard} onClose={() => setShowIdentities(false)} />
