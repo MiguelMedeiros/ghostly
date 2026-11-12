@@ -199,6 +199,18 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
 }
 
 /**
+ * Reads that need nothing of a chat's history: a one-shot for one leaves every saved chat unstarted too (`deferChats`),
+ * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
+ * `profile show` took 0.8 s and 243 MB instead of 0.45 s and 162 MB with 53,800 messages in the profile.
+ */
+const NO_HISTORY_READS: ReadonlySet<string> = new Set(["status", "profile.get", "settings.get", "status.get", "chat.list"]);
+
+/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
+export function readsNoHistory(method: string): boolean {
+  return NO_HISTORY_READS.has(method);
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -784,7 +796,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "show":
       noMoreThan(0, parsed.positionals, "profile show");
-      print(await withSession(g, (s) => s.call("profile.get"), { offline: true }));
+      print(await withSession(g, (s) => s.call("profile.get"), { offline: true, deferChats: readsNoHistory("profile.get") }));
       return;
     case "set": {
       noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
@@ -1366,7 +1378,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" }, force: { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
+  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true, deferChats: readsNoHistory("settings.get") })); return; }
   if (sub === "set") {
     const [key, given] = parsed.positionals;
     if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value> [--force]");
@@ -1528,7 +1540,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
