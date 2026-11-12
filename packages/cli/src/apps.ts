@@ -229,8 +229,10 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const files = isUrl
     ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
     : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
-  for (const file of files) {
-    const revocation = appRevocationFor(version, await revocationsIn(file, isUrl));
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  for (const [i, file] of [...files].entries()) {
+    const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
       throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
     }
