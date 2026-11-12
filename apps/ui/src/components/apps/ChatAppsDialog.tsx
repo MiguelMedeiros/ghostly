@@ -6,7 +6,7 @@ import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { appStopped, refreshInstalledApps, sendAppCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 
@@ -47,8 +47,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
       // Opened first: an app that cannot start here sends no card. Then the contact is told, with what to install.
       const shown = await openApp(app.ref, linkId);
       opened.current = true;
-      // Already running in this chat, and shown again: the contact was told when it opened.
-      const failed = shown === "shown" ? null : await sendAppCard(linkId, app, true);
+      // Already running in this chat, and shown again: the contact was told when it opened (or is told now, if that failed).
+      const failed = await sendOpenedCard(linkId, app, shown);
       if (failed) throw new Error(failed);
       // The panel closed while the card was on its way (an Escape there) and gave the focus back to Open, gone with this
       // dialog: the chat's message field has it.
