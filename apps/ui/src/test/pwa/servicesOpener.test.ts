@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
+import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
@@ -272,6 +272,50 @@ describe("one request from the app, over the contact's link", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("takes every file of a page that asks for more at once than the page sends together: the rest wait their turn, none refused", async () => {
+    // A gallery's images and its modules: Chromium hands the services worker 100 at once (60 images and 40 modules
+    // under one page), well past the requests this page has on the link together.
+    const jar = new CookieJar();
+    const waiting: (() => void)[] = [];
+    let live = 0, most = 0, sent = 0;
+    const send = async (request: ClientRequest) => {
+      sent++;
+      most = Math.max(most, ++live);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      live--;
+      return answer(200, [["content-type", "image/png"]], [request.path]);
+    };
+    const requests = Array.from({ length: 100 }, (_, i) => {
+      const r = recorder();
+      const done = serve(r.port, { type: "request", method: "GET", path: `/img/${i}.png`, headers: [], body: null, destination: "image" }, send, jar, words);
+      return { ...r, done };
+    });
+    // One the page let go of while it waited (the image scrolled away) leaves its turn and never reaches the contact.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    requests[99]!.cancel();
+    while (waiting.length) { waiting.shift()!(); await new Promise((resolve) => setTimeout(resolve, 0)); }
+    await Promise.all(requests.map((r) => r.done));
+    expect(most).toBeLessThanOrEqual(MAX_PENDING_REQUESTS);
+    expect(sent).toBe(99);
+    for (const [i, r] of requests.slice(0, 99).entries()) {
+      expect(r.replies[0]?.type, `/img/${i}.png`).toBe("head");
+      expect(r.replies[r.replies.length - 1]).toEqual({ type: "end" });
+    }
+    expect(requests[99]!.replies.every((r) => r.type === "error")).toBe(true);
+    // Past what may wait in this page too, a request is refused at once, as before.
+    const held: (() => void)[] = [];
+    const stuck = async () => { await new Promise<void>((resolve) => held.push(resolve)); return answer(200, [], []); };
+    const more = Array.from({ length: MAX_PENDING_REQUESTS + MAX_WAITING_REQUESTS + 1 }, () => {
+      const r = recorder();
+      void serve(r.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, stuck, jar, words);
+      return r;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(more.filter((r) => r.replies.length).map((r) => r.replies)).toEqual([[{ type: "error", status: 503, text: "Failed" }]]);
+    for (const r of more) r.cancel();
+    for (const go of held) go();
   });
 
   it("sends nothing on the link for what is not a request, and says it failed at once: the worker would wait for an answer", async () => {
