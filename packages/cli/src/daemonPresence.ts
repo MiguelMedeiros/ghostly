@@ -30,6 +30,14 @@ export class DaemonPresence {
     this.timer.unref?.();
   }
 
+  /**
+   * Whether the engine's online notices go (WISP 401 § Online notices, `NodeOptions.onlineNotices`): only while presence
+   * is said. Off, a contact's closed app was pushed "<bot> is online" 30 s after each start, while the bot showed no dot.
+   */
+  saysOnline(): boolean {
+    return this.timer !== undefined;
+  }
+
   stop(): void {
     clearInterval(this.timer);
     this.timer = undefined;
