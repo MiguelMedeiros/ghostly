@@ -298,6 +298,11 @@ describe("the line", () => {
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
     // queue:priority alone puts a pull request in the line, so the time it was given counts too.
     expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
+    // With queue on it, only queue's times count: queue:priority given (and taken off) since moves it nowhere.
+    const both = [at("queue", "2026-10-08T01:00:00Z"), at("queue:priority", "2026-10-08T03:00:00Z")];
+    expect(queuedAt(both, "x", ["queue"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue", "queue:priority"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue:priority"])).toBe("2026-10-08T03:00:00Z");
   });
 
   it("takes the head as vouched for when queue was added; queue:priority's time only for one in line by it alone", () => {
@@ -399,6 +404,19 @@ describe("a run of the train", () => {
     lone.add(41, { priorityOnly: true });
     await lone.run();
     expect(lone.landed).toEqual(["#41"]);
+  });
+
+  it("keeps the place of a pull request given queue:priority and then not, since it kept queue all along", async () => {
+    const repo = fakeRepo();
+    for (const n of [21, 22, 23]) repo.add(n, { ci: running });
+    repo.events.get(21)!.push(
+      { event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:00:00Z" },
+      { event: "unlabeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:05:00Z" },
+    );
+    await repo.run();
+    expect(repo.comments.get(21)![0].body).toMatch(/1st\*\*\. /);
+    expect(repo.comments.get(22)![0].body).toMatch(/2nd\*\*\. /);
+    expect(repo.comments.get(23)![0].body).toMatch(/3rd\*\*\. /);
   });
 
   it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {

@@ -289,9 +289,14 @@ export const ordinal = (n) => {
  */
 export const inLine = (labels) => labels.includes(LABEL.queue) || labels.includes(LABEL.priority);
 
-/** When a pull request joined the line: the latest time it got `queue` (or `queue:priority`, which puts it there too). */
-export function queuedAt(events, fallback) {
-  const times = events.filter((e) => e.event === "labeled" && inLine([e.label?.name])).map((e) => e.created_at);
+/**
+ * When a pull request joined the line: the latest time it got `queue` (or `queue:priority`, which puts it there too).
+ * With `queue` among its `labels`, only that label's times count: `queue:priority` given to one already in line, and
+ * maybe taken off again, never moves it back.
+ */
+export function queuedAt(events, fallback, labels = []) {
+  const joins = labels.includes(LABEL.queue) ? (name) => name === LABEL.queue : (name) => inLine([name]);
+  const times = events.filter((e) => e.event === "labeled" && joins(e.label?.name)).map((e) => e.created_at);
   return times.sort().at(-1) ?? fallback;
 }
 
@@ -301,7 +306,7 @@ export function queuedAt(events, fallback) {
  */
 export function vouchedAt(events, labels, fallback) {
   if (!inLine(labels)) return fallback;
-  return queuedAt(labels.includes(LABEL.queue) ? events.filter((e) => e.label?.name === LABEL.queue) : events, fallback);
+  return queuedAt(events, fallback, labels);
 }
 
 /**
@@ -673,7 +678,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
   for (const p of queued) {
     const events = (p.events = await gh.events(p.number));
-    p.queuedAt = queuedAt(events, p.createdAt);
+    p.queuedAt = queuedAt(events, p.createdAt, p.labels);
     p.priority = p.labels.includes(LABEL.priority);
     const jobs = await gh.ciJobs(p.sha, counts(p));
     p.ci = ciState(jobs);
