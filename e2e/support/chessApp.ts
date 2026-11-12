@@ -5,14 +5,15 @@
  * `store sign`, `app revoke`) with keys the CLI makes in the test's own temporary folder (thrown away with it, never a
  * real key), and served at `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.
  *
- * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts).
+ * The CLI is the one Playwright's globalSetup built (support/headlessBuild.ts). A spec takes the publisher as the
+ * `publisher` fixture of this module's `test`, which removes its folder when the test ends.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { BrowserContext, FrameLocator, Locator, Page } from "@playwright/test";
-import { expect, type Peer, type PeerOptions } from "./fixtures";
+import { expect, test as base, type Peer, type PeerOptions } from "./fixtures";
 import { serveStore } from "./appStore";
 import { CHESS, type ChessBuild } from "./chessFixture";
 
@@ -88,7 +89,21 @@ export class ChessPublisher {
   serve(context: BrowserContext): Promise<string[]> {
     return serveStore(context, this);
   }
+
+  /** Removes its folder (keys, sources, bundles); `files` stays served. */
+  dispose(): void {
+    rmSync(this.dir, { recursive: true, force: true });
+  }
 }
+
+/** The suite's `test`, with a `publisher` of its own for each test, whose folder goes when the test ends (passed or not). */
+export const test = base.extend<{ publisher: ChessPublisher }>({
+  publisher: async ({}, use) => {
+    const publisher = new ChessPublisher();
+    await use(publisher);
+    publisher.dispose();
+  },
+});
 
 /** Adds the store by its link and presses Install on Chess, which the store shows without being opened (the Apps page): the install screen, not yet confirmed. */
 export async function openStoreInstall(page: Page): Promise<Locator> {
