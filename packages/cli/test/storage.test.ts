@@ -1291,6 +1291,26 @@ describe("messages kept in rows.db", () => {
     expect(held(close)).toEqual([]);
   });
 
+  it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
+    const dir = folder();
+    const factory = await open(dir);
+    const d = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("messages").createIndex("byU", "u", { unique: true }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 1 }, "a"); });
+    // Refused, and the transaction goes on (`preventDefault`): it commits having written nothing.
+    const refused = d.transaction("messages", "readwrite");
+    refused.objectStore("messages").put({ u: 1 }, "b").onerror = (event) => event.preventDefault();
+    await new Promise<void>((resolve, reject) => { refused.oncomplete = () => resolve(); refused.onabort = () => reject(refused.error); });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 2 }, "c"); });
+
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("messages").objectStore("messages").getAllKeys())).toEqual(["a", "c"]);
+  });
+
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
