@@ -1875,3 +1875,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     border-end-end-radius: 0;
   }
 }
+
+/* Forced colors: a progress bar (a file on its way, a backup or a restore, a task card). Its track and its fill were
+   backgrounds alone, which forced colors replace with the page's: an empty strip. A CanvasText frame on the page's
+   colour and a Highlight fill instead, both kept as drawn; at least 6px tall, so the frame leaves the fill room. Only
+   the bars here. */
+@media (forced-colors: active) {
+  .progress-track { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; min-block-size: 6px; }
+  .progress-fill { forced-color-adjust: none; background: Highlight; }
+}

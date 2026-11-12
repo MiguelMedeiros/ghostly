@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -401,10 +401,10 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
   }, [lacks, busy]);
   const focusBack = useFocusBack(busy);
-  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
+  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   // No link it came from answered with its files (offline, the host down, each holding another version): the engine
   // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
@@ -449,7 +449,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update")}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update", appUpdateErrorView)}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}

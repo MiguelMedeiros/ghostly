@@ -395,6 +395,31 @@ describe("with the apps flag on", () => {
     }
   });
 
+  it("an Update refused as unlisted or for its gone files says it of the update, never of a link or of the app's files; the dropped update's Update goes", async () => {
+    const said = [
+      ["unlisted: The store no longer lists this update", "This store no longer lists this update."],
+      ["needs-files: The update's files are gone; it is fetched again at the next check", "The update's files are gone."],
+    ] as const;
+    function Shown() {
+      const shown = useInstalledApps(true)?.find((a) => a.ref === REF);
+      return shown ? <InstalledAppDialog app={shown} onClose={() => {}} onOpen={() => {}} /> : null;
+    }
+    for (const [refusal, words] of said) {
+      forgetInstalledApps();
+      // As the engine does: the refused update no longer waits.
+      let list = [installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] } })];
+      fakeEngine.on("appList", () => list).on("appUpdateAccept", () => { list = [installed()]; throw new Error(refusal); });
+      const { user, unmount } = renderApp(<Shown />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      const error = await screen.findByTestId("app-details-error");
+      expect(error).toHaveTextContent(words);
+      expect(error).not.toHaveTextContent(/link|not on this device yet/);
+      await waitFor(() => expect(screen.queryByTestId("app-update")).not.toBeInTheDocument());
+      expect(screen.getByTestId("app-open")).toBeEnabled();
+      unmount();
+    }
+  });
+
   it("while Add store runs, the store's Cancel, Escape and the backdrop do not close Add: no Cancel the store is added after all", async () => {
     const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
     let finish: () => void = () => {};

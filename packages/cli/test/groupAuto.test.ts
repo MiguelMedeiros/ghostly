@@ -257,7 +257,7 @@ describe("group auto", () => {
 
   it("over the API: group.auto reads and sets it, group.list shows it, chat.remove forgets the chat", async () => {
     const w = world();
-    Object.assign(w.engine, { removeLink: vi.fn(async () => undefined) });
+    Object.assign(w.engine, { removeLink: vi.fn(async () => undefined), removalsPending: () => [] });
     const ctx = { runtime: { server: { node: w.engine }, paths: { name: "default" } }, calls: { list: () => [], forgetChat: () => {} }, groupAuto: w.auto, mode: "daemon", version: "test" } as unknown as ApiContext;
     expect(await callApi(ctx, "group.auto", {})).toEqual({ autoJoin: { on: false, from: [] } });
     await expect(callApi(ctx, "group.auto", { on: true })).rejects.toMatchObject({ code: "bad_request" });

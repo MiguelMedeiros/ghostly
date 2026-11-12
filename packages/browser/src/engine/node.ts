@@ -757,6 +757,12 @@ export interface NodeOptions {
    * --from`, `GroupsHost.autoJoins`): one that comes while 32 wait takes the place of another chat's. Default: none.
    */
   autoJoins?: (linkId: string) => boolean;
+  /**
+   * Whether this run tells its contacts by push that it came online (WISP 401 § Online notices), asked each time it
+   * would. Default: yes, as an app does. The CLI says yes only in a daemon that says presence (`daemonPresence`): a
+   * headless profile shows no dot, and a notice would tell more than the dot it hides.
+   */
+  onlineNotices?: () => boolean;
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
   /**
@@ -3711,10 +3717,10 @@ export class GhostlyNode implements EngineImplementation {
    * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
    * target; a group's edge is never told. `WAKE_ONLINE_BATCH` at a time, the rest a `WAKE_ONLINE_BATCH_MS` later (those
    * still away then), so a push relay's minute keeps room for the message and call wake-ups. None while this profile does
-   * not share when it is online (`sharePresence`).
+   * not share when it is online (`sharePresence`), nor while the host says this run is not online to them (`onlineNotices`).
    */
   private sayOnline(now = Date.now()): void {
-    if (!this.networkOn || this.shuttingDown || this.settings.sharePresence === false) return;
+    if (!this.networkOn || this.shuttingDown || this.settings.sharePresence === false || this.options.onlineNotices?.() === false) return;
     let sent = 0;
     for (const live of this.links.values()) {
       const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
@@ -4864,6 +4870,11 @@ export class GhostlyNode implements EngineImplementation {
   /** Whether my removal of this message of a 1:1 chat is still on its way to the contact (`removeMessage`). */
   removalPending({ linkId, messageId }: { linkId: string; messageId: string }): boolean {
     return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);
+  }
+
+  /** The messages of a 1:1 chat whose removal of mine is still on its way to the contact, by id (`removeMessage`). */
+  removalsPending({ linkId }: { linkId: string }): string[] {
+    return (this.links.get(linkId)?.stored.removals ?? []).map(r => r.id);
   }
 
   /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
