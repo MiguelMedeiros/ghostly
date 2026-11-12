@@ -62,6 +62,22 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
 }
 
 /**
+ * A link one intake took (`invite`: an invite's or a device code's, `group`: a group's), good or refused: it answers
+ * for itself, so the other intake's refusal, kept until closed, goes. Left there, it would read as the refusal of the
+ * chat or group that opened, or sit over the new refusal (they share the top notice's place) and hide it.
+ */
+type LinkKind = "invite" | "group";
+const linksTaken = new EventTarget();
+const linkTaken = (kind: LinkKind) => linksTaken.dispatchEvent(new Event(kind));
+function useOtherLink(kind: LinkKind, drop: () => void) {
+  useEffect(() => {
+    const other = kind === "invite" ? "group" : "invite";
+    linksTaken.addEventListener(other, drop);
+    return () => linksTaken.removeEventListener(other, drop);
+  }, [kind, drop]);
+}
+
+/**
  * An invite link, or a chat address from before chats were routed by session
  * id, carries the chat's keys. They leave the address at once, so they stay
  * out of the history: the address must not wait for the password. The chat
@@ -116,15 +132,16 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { setInvalid(null); offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { setInvalid(null); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
       // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
       setInvalid(null);
+      linkTaken("invite");
       if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
       else open(reading.keys);
       return;
@@ -135,8 +152,10 @@ function ChatLinkIntake() {
     // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
     // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
     setInvalid(chatAddress && reading.reason === "not-ghostly" ? "join.chatGone" : INVITE_REFUSAL_MESSAGE[reading.reason]);
+    linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
+  useOtherLink("invite", useCallback(() => setInvalid(null), []));
 
   useEffect(() => {
     if (!held || waits) return;
@@ -247,8 +266,10 @@ function GroupLinkIntake() {
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
     else { setProblem(null); setCode(link); }
+    linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
+  useOtherLink("group", useCallback(() => setProblem(null), []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
