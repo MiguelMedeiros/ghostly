@@ -1,7 +1,10 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
+import type { GroupPayNote, GroupView } from "@ghostly/browser/shared/types";
+import { groupPayStatus, groupPayTitle } from "../lib/groupPayments";
 import type { Translate } from "../contexts/I18nContext";
 import { formatAmount, formatDecimal, formatTokenAmount } from "../lib/amount";
+import { problemLine } from "../lib/problemText";
 import type { ChatPayment, WalletState } from "../lib/platform";
 import { satsIn } from "./NetworkTag";
 
@@ -86,6 +89,28 @@ export function paymentLine(t: Translate, payment: ChatPayment, state: WalletSta
     : t("wallet.cards.amount", { amount: formatAmount(payment.amount, t.language), unit: satsIn(t, paymentIsTest(payment, state) ? "testnet" : "mainnet") });
   return t("chat.preview.payment", { what: paymentTitle(t, payment), amount });
 }
+
+/**
+ * Where a payment or a request stands, as its bubble's state line says it: "Paid", "Taken back · <why>", "Lightning
+ * payment pending…". Empty for a request taken back with nothing to say (its bubble shows no state then).
+ */
+export function paymentStateLine(t: Translate, payment: ChatPayment): string {
+  const label = payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending")
+    : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation")
+    : payment.closed ? t("payments.bubble.state.closed")
+    : payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`)
+    : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);
+  return payment.error && payment.state !== "settled" ? `${label} · ${problemLine(payment.error, t)}` : label;
+}
+
+/** How much a group's payment note is for: "21 test sats", "1.5 USDT". */
+export const groupPayAmount = (note: GroupPayNote, t: Translate): string => note.decimals
+  ? `${formatTokenAmount(note.amount, note.decimals, t.language)} ${note.unit === "testusdt" ? t("payments.group.testUsdt") : "USDT"}`
+  : `${formatAmount(Number(note.amount), t.language)} ${satsIn(t, note.test ? "testnet" : "mainnet", Number(note.amount))}`;
+
+/** A group's payment note read out as it changes (MessageAnnouncer): who pays whom, how much, and where it stands now. */
+export const groupPayNoteLine = (note: GroupPayNote, group: GroupView, t: Translate): string =>
+  `${groupPayTitle(note, group, t)} · ${groupPayAmount(note, t)} · ${groupPayStatus(note, group, t).text}`;
 
 /**
  * The English line the app keeps with a payment's message (Chat.tsx, the engine's payments.ts): "⚡ 1,000 sats",

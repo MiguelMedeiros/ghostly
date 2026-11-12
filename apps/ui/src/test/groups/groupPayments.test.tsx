@@ -177,6 +177,14 @@ describe("GroupChat: payments in the timeline", () => {
     expect(screen.getByTestId("group-pay-note-state")).toHaveTextContent("Paid");
   });
 
+  it("a note that moves on while the group is open is said to a screen reader, once, in the group's words", async () => {
+    const view = openGroup([line({ id: "gpay:req-1", groupPay: note() })]);
+    await screen.findByTestId("group-pay-note");
+    expect(screen.getByTestId("chat-announcement")).toHaveTextContent("");
+    act(() => view.engine.messages("group:group-1", [line({ id: "gpay:req-1", groupPay: note({ state: "sent", claims: [BOB] }) })]));
+    expect(screen.getByTestId("chat-announcement")).toHaveTextContent(/^Alice asked Bob · 21 test sats · Bob says they paid · waiting for Alice's wallet$/);
+  });
+
   it("my own request shows its bubble, captioned once; its note is not shown twice", async () => {
     const payments = { "req-1": paymentView({ id: "req-1", linkId: "edge-a", kind: "request", direction: "out", amount: 21, state: "pending", mints: ["https://mint.example.com"] }),
       "pay-1": paymentView({ id: "pay-1", linkId: "edge-a", kind: "payment", direction: "in", amount: 21, requestId: "req-1", state: "settled" }) };

@@ -26,6 +26,7 @@
     "notSentCount_one": "رسالة واحدة لم تُرسل",
     "notSentCount_other": "{{count}} رسالة لم تُرسل",
     "notSentCount_two": "رسالتان لم تُرسلا",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "نُقلت إلى الموضع {{place}} من {{count}} محادثات مثبتة",
     "pinMoved_many": "نُقلت إلى الموضع {{place}} من {{count}} محادثة مثبتة",
     "pinMoved_other": "نُقلت إلى الموضع {{place}} من {{count}} محادثة مثبتة",

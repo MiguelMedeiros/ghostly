@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
     "notSent": "Tu mensaje «{{text}}» no se envió",
     "notSentCount": "{{count}} mensajes no enviados",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
     "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
     "waiting": "Tu mensaje «{{text}}» está esperando a que tu contacto esté en línea",
