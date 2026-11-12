@@ -66,4 +66,6 @@ export const link: Detector<"link", { url: string }> = {
     if (url.length <= match[0].indexOf("//") + 2) return null;
     return { data: { url }, end: match.index + url.length };
   },
+  // The chat list reads it as the bubble shows it, not as typed.
+  plain: (atom) => shownUrl(atom.text),
 };
