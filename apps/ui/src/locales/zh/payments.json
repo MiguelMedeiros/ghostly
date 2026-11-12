@@ -62,6 +62,7 @@
     "preparing": "准备中…",
     "review": "查看付款",
     "state": {
+      "checking": "正在核实付款…",
       "closed": "已关闭",
       "lightningPending": "Lightning 付款处理中…",
       "payment": {
