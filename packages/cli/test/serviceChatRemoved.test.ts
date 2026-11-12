@@ -14,16 +14,21 @@ const answers = (port: number) => new Promise<boolean>((resolve) => {
   req.end();
 });
 
+/** A daemon whose engine holds these chats; `removeLink` takes one out. */
+function daemonWith(links: { id: string; peerPubKeyZ32: string }[]): ApiContext {
+  const node = { getState: () => ({ links, groups: [], settings: {} }), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); } };
+  return {
+    mode: "daemon", version: "test", runtime: { server: { node }, paths: { name: "default", dir: mkdtempSync(join(tmpdir(), "ghostly-service-chat-removed-")) } },
+    calls: { list: () => [], forgetChat: () => {} }, groupAuto: { forgetChat: () => {} },
+  } as unknown as ApiContext;
+}
+
 /** `chat remove`: a contact's service opened from that chat closes with it. */
 describe("a service opened from a chat that is removed", () => {
   it("is closed by chat remove, not left on its port for good", async () => {
     const link = { id: "gonechat", peerPubKeyZ32: "gonepeer", peerServices: [{ id: "app", name: "App" }] };
     const links = [link];
-    const node = { getState: () => ({ links, groups: [], settings: {} }), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); } };
-    const ctx = {
-      mode: "daemon", version: "test", runtime: { server: { node }, paths: { name: "default", dir: mkdtempSync(join(tmpdir(), "ghostly-service-chat-removed-")) } },
-      calls: { list: () => [], forgetChat: () => {} }, groupAuto: { forgetChat: () => {} },
-    } as unknown as ApiContext;
+    const ctx = daemonWith(links);
     const { url } = (await SERVICE_METHODS["service.open"](ctx, { chat: link.id, service: "app" })) as { url: string };
     const port = Number(new URL(url).port);
     expect(await answers(port)).toBe(true);
@@ -34,14 +39,20 @@ describe("a service opened from a chat that is removed", () => {
     expect(await answers(port)).toBe(false);
   });
 
+  it("is closed by the raw engine removeLink too", async () => {
+    const link = { id: "rawchat", peerPubKeyZ32: "rawpeer", peerServices: [{ id: "app", name: "App" }] };
+    const ctx = daemonWith([link]);
+    const { url } = (await SERVICE_METHODS["service.open"](ctx, { chat: link.id, service: "app" })) as { url: string };
+
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: link.id }, yes: true });
+
+    expect(await answers(Number(new URL(url).port))).toBe(false);
+  });
+
   it("stays open while another chat with the same contact is left", async () => {
     const one = { id: "firstchat", peerPubKeyZ32: "keptpeer", peerServices: [{ id: "app", name: "App" }] };
     const links = [one, { ...one, id: "secondchat" }];
-    const node = { getState: () => ({ links, groups: [], settings: {} }), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); } };
-    const ctx = {
-      mode: "daemon", version: "test", runtime: { server: { node }, paths: { name: "default", dir: mkdtempSync(join(tmpdir(), "ghostly-service-chat-removed-")) } },
-      calls: { list: () => [], forgetChat: () => {} }, groupAuto: { forgetChat: () => {} },
-    } as unknown as ApiContext;
+    const ctx = daemonWith(links);
     const { url } = (await SERVICE_METHODS["service.open"](ctx, { chat: one.id, service: "app" })) as { url: string };
 
     await callApi(ctx, "chat.remove", { chat: one.id, yes: true });

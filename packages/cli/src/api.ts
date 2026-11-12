@@ -953,13 +953,16 @@ const METHODS: Record<string, Method> = {
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
+    const removedPeer = method === "removeLink" ? state(ctx).links.find((link) => link.id === args?.linkId)?.peerPubKeyZ32 : undefined;
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
-      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it, and its hold goes with it.
+      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it, its hold goes with it and its
+      // services opened here close.
       if (method === "removeLink") {
         ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
         ctx.groupAuto.forgetChat(str(args ?? {}, "linkId", true));
         await forgetHold(ctx, str(args ?? {}, "linkId", true));
+        if (removedPeer) await closeServicesOf(ctx, removedPeer);
       }
       // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
       if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
