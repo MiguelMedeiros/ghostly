@@ -57,10 +57,33 @@ async function read(url, limit, fetcher = fetch) {
   const res = await fetcher(url, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (res.status === 404) throw Object.assign(new Error(`${url}: HTTP 404`), { missing: true });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const tooLarge = () => new Error(`${url}: larger than ${limit} bytes`);
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > limit) throw new Error(`${url}: larger than ${limit} bytes`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > limit) throw new Error(`${url}: larger than ${limit} bytes`);
+  if (declared > limit) {
+    await res.body?.cancel();
+    throw tooLarge();
+  }
+  if (!res.body) return new Uint8Array();
+  // A body with no length (or one fetch unpacks) is read only up to the limit, not whole and then refused.
+  const chunks = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
   return bytes;
 }
 
