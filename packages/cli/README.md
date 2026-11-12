@@ -242,7 +242,8 @@ is on in the chat is refused (`busy`): hang the call up first. `chat connect`, o
 hold is kept in the profile folder, and a `profile backup` carries it: a daemon that restarts (or a restored copy
 that starts) takes it back when its time is up, and a DHT only the chat had chosen itself (`chat transport dht`) is
 never undone by it. A `chat transport` chosen during a hold ends the
-hold (`lifted`) and stays as chosen; `chat remove` drops it with the chat. Several chats held at once each keep their
+hold (`lifted`) and stays as chosen, as does the engine's own `setChatTransport` or `setDeliveryMode` (`ghostly
+engine`); `chat remove`, or `engine removeLink`, drops it with the chat. Several chats held at once each keep their
 own hold. `chat show` answers `heldUntil` (a time in ms, or
 null; `hold` there is the store-and-forward state, something else), and the stream says `chat.held` and
 `chat.released` (`reason`: expired, connect or lifted).

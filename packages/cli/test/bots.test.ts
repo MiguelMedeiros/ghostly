@@ -515,6 +515,34 @@ describe("chat disconnect --hold", () => {
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-two", mode: "stream" });
   });
 
+  // The engine's own calls on the socket (`ghostly engine removeLink|setChatTransport|setDeliveryMode`) left the hold as
+  // it was: a removed chat's end said chat.released for a chat that was gone, and a DHT only chosen meanwhile was taken
+  // back to the live link when the hold's time was up.
+  it("goes with its chat removed by the engine's own call, with no release said", async () => {
+    vi.useFakeTimers();
+    const { ctx, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"]]);
+  });
+
+  it("ends when the engine's own call chooses the chat's transport, which stays as chosen", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "setChatTransport", params: { linkId: "chat-one", transport: "dht" } });
+    await callApi(ctx, "engine.call", { method: "setDeliveryMode", params: { linkId: "chat-two", mode: "dht" } });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    expect(emitted.filter((e) => e.type === "chat.released").map((e) => [e.chat, e.reason])).toEqual([["chat-one", "lifted"], ["chat-two", "lifted"]]);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+  });
+
   // A one-shot that only read (`chat show`, `chat list`, `status`) opens no chat, and the engine refuses to switch one
   // it has not opened: each said on stderr that the hold "could not end: Delivery method unavailable." and `chat show`
   // still gave its past `heldUntil`, until a command that opened the chat ran.

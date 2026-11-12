@@ -964,11 +964,14 @@ const METHODS: Record<string, Method> = {
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
-      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it.
+      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it, and its hold goes with it.
       if (method === "removeLink") {
         ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
         ctx.groupAuto.forgetChat(str(args ?? {}, "linkId", true));
+        await forgetHold(ctx, str(args ?? {}, "linkId", true));
       }
+      // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
+      if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
       return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
