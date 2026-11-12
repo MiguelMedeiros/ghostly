@@ -237,6 +237,17 @@ const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot h
 
 // ---------- methods ----------
 
+/**
+ * A removal on its way goes with the chat's row, and the contact kept the message for good, though `message delete
+ * --everyone` had said its removal goes on: `chat remove` and the engine's `removeLink` are refused until `--force`.
+ */
+function noRemovalOnItsWay(ctx: ApiContext, linkId: string): void {
+  const pending = node(ctx).removalsPending({ linkId });
+  if (!pending.length) return;
+  const n = pending.length, one = n === 1;
+  throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: removing the chat now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and remove the chat then, or pass --force (force: true over the socket) to remove it now`, { messages: pending });
+}
+
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
@@ -677,13 +688,7 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
-    // A removal on its way goes with the chat's row, and the contact kept the message for good, though `message delete
-    // --everyone` had said its removal goes on.
-    const pending = node(ctx).removalsPending({ linkId: link.id });
-    if (pending.length && !bool(params, "force")) {
-      const n = pending.length, one = n === 1;
-      throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: removing the chat now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and remove the chat then, or pass --force (force: true over the socket) to remove it now`, { messages: pending });
-    }
+    if (!bool(params, "force")) noRemovalOnItsWay(ctx, link.id);
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
@@ -960,7 +965,10 @@ const METHODS: Record<string, Method> = {
     if (problem) throw wrong(problem);
     // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
     if (typeof args?.linkId === "string") {
-      if (method === "removeLink") noCallOn(ctx, args.linkId, "remove the chat");
+      if (method === "removeLink") {
+        noCallOn(ctx, args.linkId, "remove the chat");
+        if (!bool(params, "force")) noRemovalOnItsWay(ctx, args.linkId);
+      }
       else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
     }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
