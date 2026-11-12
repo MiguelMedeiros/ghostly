@@ -361,6 +361,10 @@ describe("the handoff's progress", () => {
     expect(steps[1]).toHaveAttribute("aria-current", "step");
     expect(steps[1]).toHaveTextContent("Copying files · 120 MB of 480 MB");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    // In forced colors the backgrounds are the page's: the track keeps an edge and the fill a system colour of its own.
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:border-[color:CanvasText]");
+    expect(screen.getByRole("progressbar").className).toContain("forced-colors:forced-color-adjust-none");
+    expect((screen.getByRole("progressbar").firstElementChild as HTMLElement).className).toContain("forced-colors:bg-[color:Highlight]");
     expect(screen.getByTestId("handoff-cancel")).toHaveTextContent("Cancel");
     expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Nothing changes until the last step.");
   });
