@@ -1062,11 +1062,6 @@ html[data-standalone="true"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
 .animate-fade-in {
   animation: fade-in 0.2s ease-out forwards;
 }
@@ -1185,10 +1180,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   z-index: 60;
   width: max-content;
   max-width: calc(100% - 2rem);
-}
-
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
 /*
@@ -1453,7 +1444,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
  * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
  */
-:root[data-away] :is(.animate-spin, .animate-pulse, .animate-pulse-dot, .typing-dots > span, .profile-switch-badge,
+:root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
 :root[data-away] .new-wallet-shimmer::after { animation-play-state: paused !important; }
 
@@ -1495,13 +1486,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-repeat: no-repeat;
   animation: sats-shine 0.9s ease-out 0.1s both;
 }
-
-@keyframes bolt-pop {
-  0% { transform: scale(0.4) rotate(-20deg); opacity: 0; }
-  60% { transform: scale(1.35) rotate(6deg); opacity: 1; }
-  100% { transform: none; }
-}
-.animate-bolt-pop { display: inline-block; animation: bolt-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
 @keyframes nudge {
   0%, 100% { transform: none; }
