@@ -182,9 +182,12 @@ export async function serve(host: Host): Promise<Served> {
   return {
     server,
     close: () => (closing ??= new Promise<void>((resolve) => {
-      // First: a greeting copied from this daemon proves nothing once it has stopped.
-      removeDaemonSecret(ctx.runtime.paths.dir);
+      // The socket first (its file goes at once), then the secret: a greeting copied from this daemon proves nothing once
+      // it has stopped. The other way round, a client that found the secret gone in between (a read whose hello's
+      // answer came just before) asked again on the socket still listening, and the close ended that connection as well:
+      // "The daemon went away before it answered chat.list, twice".
       server.close(() => resolve());
+      removeDaemonSecret(ctx.runtime.paths.dir);
       // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
       // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
       stopping.abort();
