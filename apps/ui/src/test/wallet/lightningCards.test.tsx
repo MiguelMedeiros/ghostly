@@ -8,7 +8,7 @@ import { PaymentComposer } from "../../components/PaymentComposer";
 import { rememberRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView, paymentView, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { lightningSource, REGTEST_INVOICE, reviewContext } from "../payments/fixtures";
+import { lightningSource, liveRegtestInvoice, reviewContext } from "../payments/fixtures";
 import { offered } from "./descriptors";
 import { choose } from "../select";
 
@@ -110,7 +110,8 @@ describe("in a chat", () => {
   });
 
   it("a contact's request is paid with the card picked: the first eligible one to start with", async () => {
-    const request: Partial<PaymentView> = { kind: "request", direction: "in", amount: 100, invoice: REGTEST_INVOICE, network: "testnet" };
+    const invoice = liveRegtestInvoice(250_000);
+    const request: Partial<PaymentView> = { kind: "request", direction: "in", amount: 100, invoice, network: "testnet" };
     fakeEngine.setState({ links: [linkView()], wallet: withCards(lnCard("low", "Low (NWC)", { balance: 10, receive: true }), home()), payments: { "pay-1": paymentView(request) } });
     const { user, engine } = renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
     engine.on("walletQuoteInvoice", () => ({ quote: "q-1", mint: "", amount: 100, feeReserve: 3, source: "lnd" })).on("payRequest", () => undefined);
@@ -118,7 +119,7 @@ describe("in a chat", () => {
     const pick = screen.getByRole("combobox", { name: "Lightning card" });
     expect(pick).toHaveTextContent("Home (LND)");
     await user.click(screen.getByRole("button", { name: "Review payment" }));
-    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: REGTEST_INVOICE, via: undefined, network: "testnet", card: "home" }]);
+    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice, via: undefined, network: "testnet", card: "home" }]);
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Through Home (LND)");
     await user.click(screen.getByRole("button", { name: "Approve payment" }));
     expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning", network: "testnet", card: "home" })]);
