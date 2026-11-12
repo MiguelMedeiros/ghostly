@@ -94,7 +94,12 @@ export const BACKUP_METHODS: Record<string, Method> = {
    * the files over the cut (`keptInLight`) are left out, their records kept.
    */
   async "profile.backup"(ctx, params) {
-    const path = resolve(str(params, "path", true));
+    const asked = str(params, "path", true), path = resolve(asked);
+    // A folder is no name for the backup: one there was "exists: choose another name", as if a file were in the way,
+    // and one with a separator at its end and no folder there became a file of that name (resolve() drops the slash).
+    if (asked.endsWith("/") || asked.endsWith(sep) || (await stat(path).catch(() => undefined))?.isDirectory()) {
+      throw new CliError("bad_request", `${path} names a folder: name the backup's file in it, e.g. --out ${join(path, "<name>.ghostly-backup")} (path over the socket)`);
+    }
     // `refused`, not `confirm` (exit 5, "pass --force"): backup takes no flag that writes over a file.
     if (existsSync(path)) throw new CliError("refused", `${path} exists: choose another name`);
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");

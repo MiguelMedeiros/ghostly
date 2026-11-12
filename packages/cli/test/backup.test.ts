@@ -78,6 +78,25 @@ it("a profile's files travel with it, large ones too, and a damaged or cut backu
   }
 });
 
+it("--out naming a folder is refused in words that say so, and leaves no file of the folder's name", async () => {
+  const dir = home("backup-folder");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Folder bot"]));
+  // A slash at its end and no such folder: before, the backup was written as a file named "backups".
+  const missing = join(dir, "backups");
+  const slashed = error(await ghostly(["--home", dir, "profile", "backup", "--out", `${missing}/`], { env: PASS }), "bad_request", 1);
+  expect(slashed.message).toBe(`${missing} names a folder: name the backup's file in it, e.g. --out ${join(missing, "<name>.ghostly-backup")} (path over the socket)`);
+  expect(existsSync(missing)).toBe(false);
+  // A folder that is there: before, "exists: choose another name", as if a file were in the way.
+  const folder = join(dir, "kept");
+  mkdirSync(folder);
+  for (const out of [folder, `${folder}/`]) {
+    expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: PASS }), "bad_request", 1).message).toContain(`${folder} names a folder: name the backup's file in it`);
+  }
+  expect(readdirSync(folder)).toEqual([]);
+  // The file in it, as the message says, is made.
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
+});
+
 it("a backup without a passphrase is made only when asked for by name, says so, and restores with none", async () => {
   const dir = home("backup-open");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Open bot"]));
