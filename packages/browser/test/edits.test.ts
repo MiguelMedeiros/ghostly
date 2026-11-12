@@ -429,6 +429,25 @@ describe("the contact's edits", () => {
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
 
+  // A message from the hold or the DHT while its removal comes on the live link: the removal finds no row and is
+  // confirmed, so it never comes again; the row written after it stayed, deleted text and all.
+  it("a removal that comes while its message is being stored still takes it", async () => {
+    const t = await setup();
+    const inner = t.node as unknown as { storeMessage(m: StoredMessage): Promise<unknown>; receiveEdit(linkId: string, edit: WireEdit): Promise<boolean>; resolveReply(m: StoredMessage): Promise<StoredMessage> };
+    let removal: Promise<boolean> | undefined;
+    const resolveReply = inner.resolveReply.bind(t.node);
+    // The removal runs while the store looks for a reply's original, after the store's own check of deleted ids.
+    inner.resolveReply = async message => {
+      removal ??= inner.receiveEdit(t.id, { id: WIRE("Z"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true });
+      await removal;
+      return resolveReply(message);
+    };
+    await inner.storeMessage({ linkId: t.id, id: `peer_${WIRE("Z")}`, text: "deleted for everyone", sender: "peer", timestamp: Date.now(), via: "pkarr" });
+    expect(await removal).toBe(true);
+    expect(t.node.deletedIdsOf(t.id)).toContain(`peer_${WIRE("Z")}`);
+    expect((await t.messages()).map(m => m.text)).not.toContain("deleted for everyone");
+  });
+
   it("a removal after a refusal line is here leaves it: the line has no paymentId, its id says what it is", async () => {
     const t = await setup();
     const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
