@@ -25,6 +25,12 @@ export const LIMITS = {
   maxPathBytes: 8 * 1024,
   /** Requests a host serves at once for one peer. */
   maxConcurrentRequestsPerPeer: 32,
+  /**
+   * Request-body bytes a host holds for one peer at once, from a body's first chunk until its local fetch settles.
+   * Past it a request is refused (`busy`). As much as a client's in-flight requests can carry, so only a peer that
+   * ignores that limit reaches it.
+   */
+  maxHostBodyBytesPerPeer: 16 * 8 * 1024 * 1024,
   /** Requests a client keeps in flight; the rest wait in a queue. */
   maxClientInFlight: 16,
   /**

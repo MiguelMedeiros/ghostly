@@ -294,6 +294,48 @@ describe("HttpHost", () => {
     expect(localFetch).not.toHaveBeenCalled();
   });
 
+  it("holds at most the peer's body budget, counting a finished body until its local fetch settles", async () => {
+    const fetches: { request: LocalRequest; settle: () => void }[] = [];
+    const t = host((request) => new Promise((resolve) => fetches.push({ request, settle: () => resolve(ok()) })));
+    const full = new Uint8Array(LIMITS.maxRequestBodyBytes);
+    const perBody = LIMITS.maxHostBodyBytesPerPeer / LIMITS.maxRequestBodyBytes;
+    for (let id = 1; id <= perBody; id++) {
+      t.host.handleRequest(req({ id, m: "POST", b: true }));
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id, end: false, payload: full });
+    }
+    const oneByte = (id: number, end = false) => {
+      t.host.handleRequest(req({ id, m: "POST", b: true }));
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id, end, payload: Uint8Array.of(1) });
+    };
+
+    oneByte(100);
+    expect(errorOf(t.controls(), 100)).toEqual([503, "busy"]);
+
+    // A finished body still counts while the local service has it.
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: true, payload: new Uint8Array(0) });
+    await flush();
+    expect(fetches).toHaveLength(1);
+    expect(fetches[0].request.body).toHaveLength(LIMITS.maxRequestBodyBytes);
+    oneByte(101);
+    expect(errorOf(t.controls(), 101)).toEqual([503, "busy"]);
+
+    fetches[0].settle();
+    await flush();
+    t.host.handleRequest(req({ id: 102, m: "POST", b: true }));
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 102, end: false, payload: full });
+    expect(errorOf(t.controls(), 102)).toBeUndefined();
+    oneByte(103);
+    expect(errorOf(t.controls(), 103)).toEqual([503, "busy"]);
+
+    // A body the client drops frees its bytes at once.
+    t.host.handleReset({ t: "rst", id: 102, d: "q", e: "" });
+    oneByte(104, true);
+    await flush();
+    expect(errorOf(t.controls(), 104)).toBeUndefined();
+    expect(fetches).toHaveLength(2);
+    t.host.closeAll();
+  });
+
   it("answers 504 when the local service does not answer in time", async () => {
     vi.useFakeTimers();
     let signal!: AbortSignal;
