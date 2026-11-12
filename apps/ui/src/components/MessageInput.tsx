@@ -318,8 +318,10 @@ export function MessageInput({
     }
     keepEditWords(draftId, editKey, text);
   }, [draftId, editKey, text]);
-  const endEdit = () => {
-    const draft = draftAside.current ?? "";
+  /** `typed`: what the person wrote while the edit was being saved, which is not the edit: it joins the draft set aside. */
+  const endEdit = (typed = "") => {
+    const aside = draftAside.current ?? "";
+    const draft = aside && typed ? `${aside}${/\s$/.test(aside) ? "" : " "}${typed}` : aside || typed;
     draftAside.current = null;
     editOpening.current = null;
     if (draftId) keepEditWords(draftId, null);
@@ -495,7 +497,11 @@ export function MessageInput({
         const named = picker.compose(text);
         const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
         const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
-        if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
+        // The field stays open while the save is on its way (a second or so while the extension's peer starts again):
+        // what was typed on after the saved words, or in their place, is kept rather than wiped.
+        const now = textRef.current;
+        const typed = now === text ? "" : (now.startsWith(text) ? now.slice(text.length) : now).trim();
+        if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(typed); }
       } finally {
         saving.current = false;
       }
