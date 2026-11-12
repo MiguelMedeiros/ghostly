@@ -20,7 +20,8 @@ vi.mock("node:fs", async (original) => {
       syncs.count++;
       if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
       const end = (error: NodeJS.ErrnoException | null) => { disk.synced++; done(error); };
-      fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
+      const go = () => fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
+      if (disk.held) void disk.held.then(go); else go();
     },
     renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
     writeSync: (fd: number, bytes: Buffer, at = 0) => {
@@ -41,8 +42,11 @@ vi.mock("node:fs", async (original) => {
  * disk, a sync off the thread that fails.
  */
 const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false }));
-/** How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is). And the syncs done. */
-const disk = vi.hoisted(() => ({ syncMs: 0, synced: 0 }));
+/**
+ * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
+ * waits for first, when a test holds it. And the syncs done.
+ */
+const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0 }));
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -143,13 +147,24 @@ describe("persistent IndexedDB", () => {
     const d = await db(await open(dir));
     // A disk that takes 10 ms a sync (#597's): one per transaction, one after another, held 8 sends in flight to the pace of 1.
     disk.syncMs = 10;
+    // The first sync is held until the other 7 have committed (journaled, their `complete` not heard): a slow runner
+    // commits them more than 10 ms apart, and one that commits after the sync ended has a third one to itself.
+    let release = () => {};
+    disk.held = new Promise<void>((resolve) => { release = resolve; });
+    const journal = join(dir, "journal.bin");
     const before = syncs.count, done = disk.synced;
     // The syncs finished when each transaction's `complete` came: never before the one that covers it.
     const heard: number[] = [];
     try {
-      await Promise.all(Array.from({ length: 8 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
+      const all = Promise.all(Array.from({ length: 8 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
         .then(() => { heard.push(disk.synced - done); })));
-    } finally { disk.syncMs = 0; }
+      for (const until = Date.now() + 5_000; Date.now() < until && !(existsSync(journal) && readFileSync(journal).includes("text 7"));) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(heard).toEqual([]);
+      release();
+      await all;
+    } finally { release(); disk.held = null; disk.syncMs = 0; }
     expect(syncs.count - before).toBeLessThanOrEqual(2);
     expect(heard[0]).toBeGreaterThanOrEqual(1);
     expect(heard[heard.length - 1]).toBe(syncs.count - before);
