@@ -713,6 +713,21 @@ describe("an expired request", () => {
     expect(status()).not.toHaveTextContent("Expired");
   });
 
+  it("is not called expired on the requester's side while the contact's on-chain payment of it waits for a confirmation", () => {
+    const lapsed = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() - 60_000 });
+    const request = paymentView({ kind: "request", direction: "out", target: lapsed });
+    const receipt = paymentView({ id: "pay-2", requestId: "pay-1", target: lapsed, txid: "ab".repeat(32) });
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": receipt } });
+    const { unmount } = renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).not.toHaveTextContent("Expired");
+    expect(screen.getByTestId("payment-bubble")).not.toHaveAttribute("data-expired");
+    unmount();
+    // Once that payment failed, nothing is on its way any more.
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": { ...receipt, state: "failed" } } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
   it("says it in the app's language", () => {
     fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView(expiredInvoice({ direction: "out" })) } });
     renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
