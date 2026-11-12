@@ -458,7 +458,8 @@ export const FILE_METHODS: Record<string, Method> = {
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
-    if (bool(params, "wait")) await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
+    // A sent file is all here (below): --wait waited for the contact's download, and failed with their decline.
+    if (bool(params, "wait") && (await fileStore.get(fileId))?.direction !== "out") await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw noFile(fileId);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
