@@ -183,6 +183,12 @@ it("a path that is wrong on this machine is named as the person typed it: a fold
   const message = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
   expect(message).toBe(`No such file or folder: ${missing}`);
   expect(existsSync(missing)).toBe(false);
+  // A file where the folder should be is there: named as a file, as `file save` names it, not as missing.
+  const notes = join(dir, "notes.txt");
+  writeFileSync(notes, "NOTES");
+  const under = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(notes, "b.bin"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
+  expect(under).toBe(`${notes} is a file, not a folder`);
+  expect(readFileSync(notes, "utf8")).toBe("NOTES");
 });
 
 // A passphrase file that was a folder named no path, one given as "" (an unset variable) said "No such file or folder: "
