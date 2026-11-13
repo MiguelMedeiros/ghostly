@@ -1,5 +1,5 @@
 import { act, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MESSAGE_CHANGES_TICK_MS } from "@ghostly/browser/platform/engine";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
@@ -20,6 +20,18 @@ import { renderApp } from "../render";
 
 // The real sync (the setup stubs it out).
 vi.unmock("@ghostly/browser/platform/sync");
+// Once the chat starts it, it reconciles every 5 s for as long as the page lives, and here the page is this file: a tick
+// after the file's environment is gone (no localStorage) fails the run. Its interval stops with the file.
+const intervals: ReturnType<typeof setInterval>[] = [];
+beforeEach(() => {
+  const real = globalThis.setInterval;
+  vi.spyOn(globalThis, "setInterval").mockImplementation(((...args: Parameters<typeof setInterval>) => {
+    const id = real(...args);
+    intervals.push(id);
+    return id;
+  }) as typeof setInterval);
+});
+afterAll(() => { for (const id of intervals) clearInterval(id); });
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const NOW = Date.now();
