@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, groupWait, here, refs, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -83,7 +83,7 @@ export const commands: Record<string, Command> = {
       remove: { type: "boolean", description: "Take your reaction back" },
       wait: { ...groupWait.wait, description: "none or sent: until an edge took it (default: none with a daemon, sent without)" }, timeout: groupWait.timeout,
     },
-    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
+    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: reaction(options, a.emoji), remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "group remove": {
     method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],
