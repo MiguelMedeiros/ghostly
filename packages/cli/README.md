@@ -453,11 +453,13 @@ The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600
 
 Methods: `status`, `status.get|set|clear`, `profile.get|set`, `settings.get|set`, `invite.create|join`, `chat.list|get|history|send|retry|
 delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept|edit|react|pin|forward|typing`,
-`group.create|join|list|get|history|send|edit|react|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
+`group.create|join|list|get|history|send|edit|react|leave|forget|accept|decline|typing|auto`, `wallet.list|create|remove|faucet|history|
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
-`file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub`, `profile.picture|backup`,
-`identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
-`call.start|answer|hangup|list|get|flush|auto`,
+`file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub|rename`, `profile.picture|backup`,
+`saved.add|list|remove`, `button.press|update`, `task.send|update`, `routine.send|update`, `usage.send`,
+`identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `x401.key.new`,
+`x401.credential.add|list|remove`, `service.list|add|remove|enable|share|peer|open|close`,
+`app.open|close|send|serve|served|unserve`, `call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, `daemon.hello`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false,"yes":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
