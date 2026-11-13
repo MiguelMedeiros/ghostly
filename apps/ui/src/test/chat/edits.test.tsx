@@ -88,6 +88,12 @@ describe("the edited mark", () => {
     expect(buildDetails(mine({ edit: edited({ pending: true }) }), null).sections.find(s => s.id === "edits")!.rows[1]).toMatchObject({ label: "Contact" });
     expect(buildDetails(mine(), null).sections.find(s => s.id === "edits")).toBeUndefined();
   });
+
+  it("only the first version kept reads as the original, whatever time a later one carries", () => {
+    const history = [{ at: 1_700_000_030_000, text: "Step 1" }, { at: 1_700_000_000_000, text: "Forged" }];
+    const rows = buildDetails(mine({ text: "Done", edit: edited({ history }) }), null).sections.find(s => s.id === "edits")!.rows;
+    expect(rows.slice(1).map(r => r.label.split(",")[0])).toEqual(["Before", "Before"]);
+  });
 });
 
 describe("the composer while editing", () => {

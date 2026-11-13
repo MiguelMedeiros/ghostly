@@ -48,6 +48,23 @@ const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), '
  */
 const asSent = url => { url.hash = ''; if (!url.search) url.search = ''; return url }
 
+/** Microsoft's push service, whose endpoints carry their subscription in a query: `/w/?token=…`. */
+const WNS = /(^|\.)notify\.windows\.com$/
+
+/**
+ * What the push service routes the endpoint on, or nothing for one the relay does not forward. A push service decodes
+ * the path before routing and reads no query, so a `%` in the path or a query would spell one subscription many ways,
+ * each a count of its own: refused (a real path is letters, digits, `-_:/.`). WNS reads one `token` from the query:
+ * that one alone, counted by its value.
+ */
+const routedOn = url => {
+  if (url.pathname.includes('%')) return
+  if (!url.search) return url.href
+  const params = [...url.searchParams]
+  if (!WNS.test(url.hostname) || params.length !== 1 || params[0][0] !== 'token' || !params[0][1]) return
+  return `${url.origin}${url.pathname}?token=${encodeURIComponent(params[0][1])}`
+}
+
 /** The request to forward, or a reason it is refused. */
 export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAULT_LIMITS.bodyBytes } = {}) {
   let request
@@ -56,6 +73,8 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   let url
   try { url = asSent(new URL(endpoint)) } catch { return { error: 'No endpoint' } }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
+  const routed = routedOn(url)
+  if (!routed) return { error: 'Not a push endpoint' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
   if (bytes.length > bodyBytes) return { error: 'Too large' }
@@ -75,7 +94,7 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
   // The subscription it wakes: a push service refuses a key the subscription was not made with, so another key wakes
   // nothing. Hashed, so the relay's table holds no endpoint and an entry weighs the same however long the URL.
-  const subscription = createHash('sha256').update(`${url.href} ${authorization.split('k=').pop()}`).digest('base64')
+  const subscription = createHash('sha256').update(`${routed} ${authorization.split('k=').pop()}`).digest('base64')
   return { endpoint: url.href, headers: forwarded, body: bytes, subscription }
 }
 

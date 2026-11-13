@@ -279,17 +279,35 @@ export function viewerServicePolicy(relayOnly: boolean): string {
 }
 
 /**
+ * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
+ * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
+ * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ */
+export const VIEWER_PERMISSIONS_POLICY = [
+  "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
+  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+].map((feature) => `${feature}=()`).join(", ");
+
+/** A contact's headers that would set the page's features: the viewer's own policy takes their place. */
+const VIEWER_FEATURE_HEADERS = ["permissions-policy", "feature-policy"];
+
+/**
  * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
- * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
+ * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it. The page's
+ * features are Ghostly's alone (`VIEWER_PERMISSIONS_POLICY`): a contact's permissions policy could allow them, and one
+ * the browser cannot read would void the whole header, Ghostly's part with it.
  */
 export function withViewerPolicy(headers: HeaderList, relayOnly = false): HeaderList {
   const policies: string[] = [];
   const out: HeaderList = [];
   for (const [name, value] of headers) {
-    if (name.toLowerCase() === "content-security-policy") policies.push(value);
-    else out.push([name, value]);
+    const lower = name.toLowerCase();
+    if (lower === "content-security-policy") policies.push(value);
+    else if (!VIEWER_FEATURE_HEADERS.includes(lower)) out.push([name, value]);
   }
   out.push(["content-security-policy", [...policies, viewerServicePolicy(relayOnly)].join(", ")]);
+  out.push(["permissions-policy", VIEWER_PERMISSIONS_POLICY]);
   return out;
 }
 

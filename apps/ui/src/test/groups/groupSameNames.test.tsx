@@ -38,7 +38,7 @@ describe("a group's members with one name", () => {
     const roster = [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, " ａｌｉｃｅ  ")];
     const same = sameNamed(roster);
     expect(memberName(roster[1]!, undefined, same)).toBe(apart("Alice", "adm1n0"));
-    expect(memberName(roster[2]!, undefined, same)).toBe(apart(" ａｌｉｃｅ  ", "0th3r9"));
+    expect(memberName(roster[2]!, undefined, same)).toBe(apart("ａｌｉｃｅ", "0th3r9"));
     expect(authorName({ members: roster }, ADMIN)).toBe(apart("Alice", "adm1n0"));
     // A name that already shows a key's end is the same name, isolated as shown or not.
     expect(sameNamed([member(ADMIN, "Alice", "admin"), member(OTHER, "Alice (…adm1n0)")]).has(OTHER)).toBe(true);
@@ -62,16 +62,18 @@ describe("a group's members with one name", () => {
   });
 
   it("are told apart whatever a name adds that draws nothing: a filler, a selector, a joiner, a blank", () => {
-    const unseen = [
-      "Anaㅤ", "Anaﾠ", "Anaᅟ", "Anaᅠ", "Ana͏", "Ana︀", "Ana\u{e0100}", "Ana᠋", "Ana឵",
-      "A‍na", "An‌a", "Ana⠀", "Ana️", "ㅤAna (…adm1n0)",
+    // Shown beside its key's end without the blanks it was padded with; the joiners and selectors a name needs stay.
+    const unseen: [nick: string, shown: string][] = [
+      ["Anaㅤ", "Ana"], ["Anaﾠ", "Ana"], ["Anaᅟ", "Ana"], ["Anaᅠ", "Ana"], ["Ana͏", "Ana"], ["Ana︀", "Ana︀"],
+      ["Ana\u{e0100}", "Ana\u{e0100}"], ["Ana᠋", "Ana᠋"], ["Ana឵", "Ana"], ["A‍na", "A‍na"], ["An‌a", "An‌a"], ["Ana⠀", "Ana"],
+      ["Ana️", "Ana️"], ["ㅤAna (…adm1n0)", "Ana"],
     ];
-    for (const nick of unseen) {
+    for (const [nick, shown] of unseen) {
       // A name a receiver keeps as it came, and one the name step lets a person type.
       expect(sanitizeNick(nick)).toBe(nick);
       const roster = [member(ADMIN, "Ana", "admin"), member(OTHER, nick)];
       expect([...sameNamed(roster)], nick).toEqual([ADMIN, OTHER]);
-      expect(authorName({ members: roster }, OTHER)).toBe(`${nick} \u2066(…0th3r9)\u2069`);
+      expect(authorName({ members: roster }, OTHER)).toBe(apart(shown, "0th3r9"));
       expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, nick)], "Ana")], nick).toEqual([ME, OTHER]);
     }
     // Names that read apart stay apart, and a name that needs its joiners shows them as it came.
@@ -81,6 +83,43 @@ describe("a group's members with one name", () => {
     const persian = [member(ADMIN, "می‌خواهم", "admin"), member(OTHER, "میخواهم")];
     expect(memberName(persian[0]!, undefined, sameNamed(persian))).toBe("می‌خواهم \u2066(…adm1n0)\u2069");
     expect(memberName(member(OTHER, "👩‍💻 Ana"), undefined, sameNamed([member(ADMIN, "Bob", "admin"), member(OTHER, "👩‍💻 Ana")]))).toBe("👩‍💻 Ana");
+  });
+
+  it("are told apart whatever letter of another alphabet that looks the same a name swaps in", () => {
+    // Cyrillic А, Greek Α, Cyrillic е, і and с, Greek ι, all capital Greek and Cyrillic (Greek Ϲ too, which NFKC
+    // makes Σ), a mathematical Greek 𝚨, Cyrillic ё with its dots.
+    const lookalikes = ["Аlice", "Αlice", "Alicе", "Аlісе", "Alιce", "ΑLICΕ", "АLІСЕ", "ΑLΙϹΕ", "𝚨lice", "Alicё"];
+    for (const nick of lookalikes) {
+      expect(sanitizeNick(nick)).toBe(nick);
+      const roster = [member(ADMIN, nick === "Alicё" ? "Alicë" : "Alice", "admin"), member(OTHER, nick)];
+      expect([...sameNamed(roster)], nick).toEqual([ADMIN, OTHER]);
+      // Shown as chosen, told apart by the key's end.
+      expect(authorName({ members: roster }, OTHER)).toBe(apart(nick, "0th3r9"));
+      expect([...sameNamed([member(ME, undefined, "member", true), member(OTHER, nick)], roster[0]!.nick)], nick).toEqual([ME, OTHER]);
+    }
+    // A name all in another alphabet reads as it is, apart from any Latin one.
+    expect(sameNamed([member(ADMIN, "Алиса", "admin"), member(OTHER, "Alice")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "Δημήτρης", "admin"), member(OTHER, "Dimitris")]).size).toBe(0);
+    expect(sameNamed([member(ADMIN, "Алиса", "admin"), member(OTHER, "Алиса")]).size).toBe(2);
+  });
+
+  it("a name that copies another member's key end shows only its own, right after the name, however it is padded", async () => {
+    // The admin's key ends "adm1n0": a member named "Alice (…adm1n0)" padded with blank Braille to the 64-character cap
+    // had its own key's end pushed past where the line above its messages is cut.
+    const fakes = [
+      "Alice (…adm1n0)", `Alice (…adm1n0)${"⠀".repeat(49)}`, `Alice${"⠀".repeat(20)} (…adm1n0)${"ㅤ".repeat(20)}`,
+      "Alice （…adm1n0）", "Alice (...adm1n0)",
+    ];
+    for (const fake of fakes) {
+      expect(sanitizeNick(fake), fake).toBe(fake);
+      const roster = [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, fake)];
+      expect(authorName({ profile: "mesh", members: roster }, OTHER), fake).toBe(apart("Alice", "0th3r9"));
+      expect(authorName({ profile: "mesh", members: roster }, ADMIN), fake).toBe(apart("Alice", "adm1n0"));
+    }
+    openChat({ profile: "mesh", members: [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, fakes[1])] },
+      [said("g1", ADMIN, "from the admin", 0), said("g2", OTHER, "send the deposit here", 1)]);
+    expect(nickOf(await rowOf("send the deposit here"))).toBe(`~${apart("Alice", "0th3r9")}`);
+    expect(nickOf(await rowOf("from the admin"))).toBe(`~${apart("Alice", "adm1n0")}`);
   });
 
   it("in a private group, a member removed and invited again is named as before, her old key's messages as her new key's", () => {

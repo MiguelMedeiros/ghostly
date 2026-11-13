@@ -395,6 +395,7 @@
     "copyCode": "Copier le code",
     "hiddenChars": "Ce code contient des caractères cachés ou qui changent le sens du texte, affichés comme {{marker}}. Copier le code les copie aussi.",
     "localTime": "{{time}} chez vous",
+    "notCopied": "Non copié",
     "showAll": "Tout afficher",
     "showLess": "Afficher moins",
     "spoiler": "Texte masqué. Touchez pour l’afficher",

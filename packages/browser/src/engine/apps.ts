@@ -941,7 +941,9 @@ export class Apps {
    * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
    * A store removed since the caller read the stores pins nothing: it is judged at the write, as `removeStore` unpins
    * only the records written before it. A revocation the record gained since `was` (`keepStoreRevocations`) is kept:
-   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already.
+   * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already. So is what the person's stores
+   * revoke of the versions written, as held at the write: a version fetched while a store's index revoked it was not on
+   * the record `keepStoreRevocations` read.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
@@ -953,6 +955,8 @@ export class Apps {
       if (!sameRecord(now, was)) return;
       const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
+      const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
+      app = withRevocations(app, stopping(this.versionsOf(app), revoked));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -1753,6 +1757,8 @@ export class Apps {
           return this.view((await this.app(version.ref))!, stores);
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
+        // A store's index read while the files were written that revokes or removes it: judged again from the top.
+        if (this.runStatus(version, await this.heldViews(), [...(installed?.revocations ?? []), ...known]).status !== "ok") continue;
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
         // It starts with the revocations read for the preview and the ones kept (of other versions: a later one may name one).
         const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), known);
@@ -1947,8 +1953,18 @@ export class Apps {
     const revokeRead = new Set<string>();
     const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
     app = withRevocations(app, before ?? []);
+    // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
+    // being taken again, once the record keeps it no more and its store's next index does not carry it.
+    const kept = await this.keptRevocationsOf(app.ref);
+    const judge = (version: AppVersion) => this.runStatus(version, this.storeViews(stores), [...(app.revocations ?? []), ...kept]);
     // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
-    if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
+    if (app.pending && judge(versionOf(app.pending.manifest, app.pending.digest)).status !== "ok") {
+      const stops = stopping([versionOf(app.pending.manifest, app.pending.digest)], [...(app.revocations ?? []), ...stores.flatMap((s) => s.index?.revoked ?? [])]);
+      if (stops.length) {
+        const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+        keepRevocations(tx.objectStore(STORES.settings), app.ref, stops);
+        await done(tx);
+      }
       dropped.push(app.pending);
       const { pending: _p, ...rest } = app;
       app = rest;
@@ -1972,7 +1988,7 @@ export class Apps {
       // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
       // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
       const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
-      if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      if (holds && !twin && judge(holds).status !== "ok") continue;
       // Unless the app is marked for that very one already (a mark is only taken from a bundle read whole and checked,
       // and the peek's digest is the SHA-256 of the manifest it read): nothing new is learned, and the mark keeps its `at`.
       if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
@@ -2003,7 +2019,9 @@ export class Apps {
         if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
         continue;
       }
-      if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      if (judge(version).status !== "ok") continue;
+      // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
+      if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") continue;
       if (app.pending && version.sequence < app.pending.sequence) continue;
       const kind = await this.writeBundle(version.digest, bytes);
       wrote = { bytes: kind, digest: version.digest };

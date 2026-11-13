@@ -47,15 +47,25 @@ function checkTextSize(text: string): void {
 
 /**
  * The engine's state as `engine getState` prints it without `--show-secret`: the settings' credentials, a group's
- * entry link (anyone who reads it can join) and a pending chat's invite code (whoever reads it can take the chat)
- * are `<hidden>`.
+ * entry link and the link of another group kept under its id (anyone who reads one can join), a pending chat's
+ * invite code (whoever reads it can take the chat) and this side's wake-up tokens are `<hidden>`.
  */
-export function hideStateSecrets<T extends { settings: Settings; groups?: { entryLink?: string }[]; links?: { inviteCode?: string }[] }>(state: T) {
+export function hideStateSecrets<T extends {
+  settings: Settings;
+  groups?: { entryLink?: string; others?: unknown[]; wakeTokens?: string[] }[];
+  links?: { inviteCode?: string; wakeToken?: string }[];
+}>(state: T) {
+  const hideOther = (o: unknown) => (o && typeof o === "object" && "link" in o ? { ...o, link: "<hidden>" } : o);
   return {
     ...state,
     settings: redactSettings(state.settings),
-    ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}),
-    ...(state.links ? { links: state.links.map((l) => (l.inviteCode ? { ...l, inviteCode: "<hidden>" } : l)) } : {}),
+    ...(state.groups ? { groups: state.groups.map((g) => ({ ...g,
+      ...(g.entryLink ? { entryLink: "<hidden>" } : {}),
+      ...(g.others ? { others: g.others.map(hideOther) } : {}),
+      ...(g.wakeTokens ? { wakeTokens: g.wakeTokens.map(() => "<hidden>") } : {}) })) } : {}),
+    ...(state.links ? { links: state.links.map((l) => ({ ...l,
+      ...(l.inviteCode ? { inviteCode: "<hidden>" } : {}),
+      ...(l.wakeToken ? { wakeToken: "<hidden>" } : {}) })) } : {}),
   };
 }
 
@@ -1026,11 +1036,13 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
   // `file send` guard them.
   "createGroup", "renameGroup", "updateSettings", "sendFile",
+  // The status every contact reads, as `status set` guards it.
+  "setOwnStatus",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
@@ -1241,7 +1253,7 @@ async function groupPayTwinsOf(ctx: ApiContext, group: GroupView, page: readonly
     const note = (await node(ctx).getMessage(`group:${group.id}`, groupPayLineId(id)))?.groupPay;
     if (note) notes.set(note.id, note);
   }
-  return groupPayTwins(rows, notes, payments, group.myKey);
+  return groupPayTwins(rows, notes, payments, group);
 }
 
 /** Past this many originals outside a page, its history is read once instead of row by row. */

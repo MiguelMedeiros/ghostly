@@ -196,6 +196,20 @@ describe("chats", () => {
     expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
     expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+    // What a script or a paste leaves on a key (a line break, a space, an invisible character, capitals) keeps it a key.
+    for (const ref of [`${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(findChat([mallory, alice], ref).id).toBe("chatAlice");
+      expect(() => findChat([mallory], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+  });
+
+  it("a contact's key with no chat is no group either, whatever a group's admin named it", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+    const named = { id: "g".repeat(22), name: KEY, members: [], status: "joined" } as unknown as GroupView;
+    for (const ref of [KEY, `${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(() => findChatOrGroup([], [named], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+    expect(findChatOrGroup([], [named], `group:${KEY}`)).toEqual({ group: named });
   });
 
   it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
@@ -1364,6 +1378,19 @@ describe("a pending chat's invite code is a secret", () => {
     expect(JSON.stringify(printed)).not.toMatch(/ghostly1pendingsecret|ghostly-link|"SK"/);
     expect(printed.links.map((l) => l.inviteCode)).toEqual([undefined, "<hidden>", "<hidden>"]);
     expect(printed.groups[0]).toMatchObject({ entryLink: "<hidden>" });
+  });
+
+  it("engine getState hides another group's link under a held id and the wake-up tokens", () => {
+    const state = pending().node.getState();
+    const full = { ...state,
+      links: state.links.map((l, i) => (i === 0 ? { ...l, wakeToken: "wake-chat" } : l)),
+      groups: [{ ...group, wakeTokens: ["wake-group"], others: [{ link: "group1/g/entry-key" }, { linkId: "chat-zero", name: "Other", members: 2 }] }] };
+    const printed = hideStateSecrets(full);
+    expect(JSON.stringify(printed)).not.toMatch(/entry-key|wake-chat|wake-group/);
+    expect(printed.groups[0]).toMatchObject({ wakeTokens: ["<hidden>"], others: [{ link: "<hidden>" }, { linkId: "chat-zero", name: "Other", members: 2 }] });
+    expect(printed.links[0]).toMatchObject({ wakeToken: "<hidden>" });
+    // With --show-secret the state is printed as the engine gave it.
+    expect(JSON.stringify(full)).toMatch(/entry-key.*wake-group|wake-group.*entry-key/);
   });
 });
 

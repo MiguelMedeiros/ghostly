@@ -1,0 +1,1 @@
+Hubs: a hub passes on at most 30 of one member's reactions in 10 seconds, the pace a member takes them at. It used to pass on every reaction with a higher number, so one member's burst reached every member about twice over before any limit applied.
