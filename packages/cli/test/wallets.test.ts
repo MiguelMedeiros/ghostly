@@ -5,6 +5,7 @@ import { INVITE_TAKEN } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
+import { pairs } from "../src/commands/shared";
 import { asCliError } from "../src/errors";
 import { invoiceNetwork, paymentJson } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
@@ -351,7 +352,10 @@ describe("wallets", () => {
     };
     expect(await refusal({ type: "lightning" })).toEqual({ code: "bad_request", message: "lightning needs --provider: one of nwc (ghostly wallet list)" });
     expect(await refusal({ type: "lightning", provider: "nwc" })).toEqual({ code: "bad_request", message: "nwc needs --value uri=<nostr+walletconnect://…>" });
-    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "nwc takes no --value bogus: its fields are uri" });
+    // A secret given with no name= but with a base64 `=` (a macaroon, a rune, an API key) reads as its own name: never said.
+    const macaroon = "AgEDbG5kAvgBAwoQ3b7x9QnQyZk6Y2l8m1Z0aBIBMBoWCgdhZGRyZXNzEgRyZWFkEgV3cml0ZRoTCgRpbmZvEgRyZWFk";
+    expect(await refusal({ type: "lightning", provider: "nwc", values: pairs([`${macaroon}==`]) })).toEqual({ code: "bad_request", message: "one --value names no field of nwc: its fields are uri" });
+    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "one --value names no field of nwc: its fields are uri" });
     expect(await refusal({ type: "bitcoin", values: { network: "signet" } })).toEqual({ code: "bad_request", message: "bdk needs --value script=<bip84|bip86>" });
     expect(await refusal({ type: "fedimint" })).toEqual({ code: "bad_request", message: "fedimint needs --invite <fed11…>" });
     expect(await refusal({ type: "spark", network: "mainnet" })).toEqual({ code: "bad_request", message: "spark on mainnet needs --api-key <key> (or api-key=… on --stdin)" });
