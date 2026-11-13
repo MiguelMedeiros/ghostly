@@ -65,6 +65,7 @@
     "damaged": "Its files on this device are damaged. Get its files again.",
     "equivocation": "This link holds a different copy of a version you have. Ghostly kept yours.",
     "expired": "That took too long. Check the app again.",
+    "filesNotFound": "Couldn't get its files: none of the links it came from has this version now, or none answered. Try again later.",
     "githubLink": "That GitHub page is not an app. Paste the repository's link, or the link to its app file.",
     "host": "Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.",
     "hostProblem": "The host had a problem (error {{status}}). Try again later.",
@@ -89,7 +90,10 @@
     "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large.",
-    "unlistedVersion": "The link holds a version this store has not listed yet."
+    "unlistedVersion": "The link holds a version this store has not listed yet.",
+    "updateFilesGone": "The update's files are gone. Ghostly fetches it again at the next check.",
+    "updateGone": "This update no longer waits. The version installed is the one shown above.",
+    "updateUnlisted": "This store no longer lists this update. Ghostly looks at what it lists at the next check."
   },
   "files": {
     "allow": "Allow",

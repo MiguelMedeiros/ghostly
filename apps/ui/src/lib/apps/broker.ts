@@ -335,6 +335,16 @@ function readRange(value: unknown): { offset: number; length: number } {
   return { offset: offset as number, length: length as number };
 }
 
+/**
+ * How many bytes a `storage.keys` answer takes as JSON, escapes included: a key is bounded by its UTF-8 bytes, but a
+ * control character, one byte kept, is six as JSON (`\u0001`), so a full scope's list reaches about 3.7 MB.
+ */
+function keysBytes(keys: readonly string[]): number {
+  let bytes = 2;
+  for (const key of keys) bytes += JSON.stringify(key).length + 1;
+  return bytes;
+}
+
 function storageKey(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || utf8Bytes(value) > MINI_APP_LIMITS.storageKeyBytes) refuse("bad-key");
   return value as string;
@@ -438,8 +448,8 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
   };
 
   /**
-   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read` and `files.list`
-   * share the chain, so an app cannot double its bytes a second by mixing them.
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read`, `files.list` and
+   * `storage.keys` share the chain, so an app cannot double its bytes a second by mixing them.
    */
   const counted = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
     const read = reading.then(async () => {
@@ -534,7 +544,9 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
         await host.storage.delete(launch.ref, scope, storageKey(args[0]));
         return {};
       case "storage.keys":
-        return { value: await host.storage.keys(launch.ref, scope) };
+        // Counted with the file reads: the app sets the size of each list, and 50 lists a second of a full scope
+        // were ~185 MB of JSON a second for the page to write (and on Desktop, the main thread to read again).
+        return { value: await counted(() => host.storage.keys(launch.ref, scope), keysBytes) };
       case "chat.send": {
         if (!chatAllowed || !launch.chat) refuse("not-allowed");
         if (args.length !== 1 || utf8Bytes(JSON.stringify(args[0])) > MINI_APP_LIMITS.chatDataBytes) refuse("too-large");

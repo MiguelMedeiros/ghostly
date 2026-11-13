@@ -144,6 +144,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `agent.turn` comes only with `--turns`: a `--type` that keeps it alone (`agent`) is a usage error.
   `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
   across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
@@ -225,7 +226,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
-  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`, and `history --before`
+  or `--after` for the messages around it).
 - **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
   `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
@@ -291,7 +293,7 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
-  name contacts see in `profile set`, `profile create --name` and `settings set nick`, the `--name` of `file send`,
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name in `file send`,
   the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,

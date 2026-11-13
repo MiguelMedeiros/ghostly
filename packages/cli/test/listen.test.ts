@@ -73,7 +73,12 @@ describe("--type", () => {
   it("a first word that is no family is a usage error naming them; a type no event has is said on stderr", () => {
     const warned: string[] = [];
     const check = (...types: string[]) => checkTypes(types, (line) => warned.push(line));
-    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received", "agent.turn")).not.toThrow();
+    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received")).not.toThrow();
+    expect(warned).toEqual([]);
+    // agent.turn comes only from --turns, which takes the place of --type: one kept alone was a listener silent for good.
+    for (const type of ["agent.turn", "agent", "agent.", "agent.*", "agent*"]) {
+      expect(() => check(type), type).toThrow(`No event is of type ${type} without --turns: ghostly listen --turns gives agent.turn events, in the place of --type`);
+    }
     expect(warned).toEqual([]);
     for (const type of ["bogus", "messages.received", "bogus.", "bogus*", ".message"]) {
       const error = (() => { try { check(type); } catch (e) { return e; } })();
@@ -618,6 +623,11 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.pressButton).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs, buttonId: "yes" });
     await callApi(ctx, "chat.delete", { chat: "c1", message: ref });
     expect(node.deleteMessage).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs });
+    // History's cursors: the context before or after a turn; a timestamp stays a timestamp.
+    await callApi(ctx, "chat.history", { chat: "c1", before: ref, after: 1 });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "c1", limit: 50, before: theirs, after: 1 });
+    await callApi(ctx, "group.history", { group: "g1", after: groupRef });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "group:g1", limit: 50, before: undefined, after: inGroup });
 
     // A stored id still names its message; a turn's id of another chat, or of no message, names none here.
     await callApi(ctx, "chat.react", { chat: "c1", message: theirs, emoji: "👍" });

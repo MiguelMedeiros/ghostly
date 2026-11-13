@@ -275,9 +275,14 @@ export const ordinal = (n) => {
  */
 export const inLine = (labels) => labels.includes(LABEL.queue) || labels.includes(LABEL.priority);
 
-/** When a pull request joined the line: the latest time it got `queue` (or `queue:priority`, which puts it there too). */
-export function queuedAt(events, fallback) {
-  const times = events.filter((e) => e.event === "labeled" && inLine([e.label?.name])).map((e) => e.created_at);
+/**
+ * When a pull request joined the line: the latest time it got `queue` (or `queue:priority`, which puts it there too).
+ * With `queue` among its `labels`, only that label's times count: `queue:priority` given to one already in line, and
+ * maybe taken off again, never moves it back.
+ */
+export function queuedAt(events, fallback, labels = []) {
+  const joins = labels.includes(LABEL.queue) ? (name) => name === LABEL.queue : (name) => inLine([name]);
+  const times = events.filter((e) => e.event === "labeled" && joins(e.label?.name)).map((e) => e.created_at);
   return times.sort().at(-1) ?? fallback;
 }
 
@@ -287,7 +292,7 @@ export function queuedAt(events, fallback) {
  */
 export function vouchedAt(events, labels, fallback) {
   if (!inLine(labels)) return fallback;
-  return queuedAt(labels.includes(LABEL.queue) ? events.filter((e) => e.label?.name === LABEL.queue) : events, fallback);
+  return queuedAt(events, fallback, labels);
 }
 
 /**
@@ -646,7 +651,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
   for (const p of queued) {
     const events = (p.events = await gh.events(p.number));
-    p.queuedAt = queuedAt(events, p.createdAt);
+    p.queuedAt = queuedAt(events, p.createdAt, p.labels);
     p.priority = p.labels.includes(LABEL.priority);
     const jobs = await gh.ciJobs(p.sha, counts(p));
     p.ci = ciState(jobs);
@@ -1138,7 +1143,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (base === "dev") {
       const { title, message } = squashMessage(p, await gh.pullCommits(p.number));
       r = await w.squash(p.number, p.sha, title, message);
-    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
+    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p);
     if (r.ok) {
       say(`MERGED #${p.number} alone`);
       done.merged.push(p.number);
@@ -1174,7 +1179,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   /**
    * The next pull request, alone: merged at once when its head holds the base's tip and is green, else rebased onto
-   * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run).
+   * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run). So does CI
+   * "none": nothing runs on a head at the tip whose own run was cancelled (a batch it boarded closed without it), and
+   * none would start there. Not for one whose runs cannot count (`refused`): a fresh commit's would not count either.
    */
   const goAlone = async (p, { retried = false, rerun = false, past = null } = {}) => {
     const tip = await gh.branchSha(base);
@@ -1187,7 +1194,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
       return (await board([p])) ?? false;
     }
-    const built = await git.rebase(base, p, { force: rerun });
+    const built = await git.rebase(base, p, { force: rerun || (p.ci === "none" && !refused(p)) });
     if (built.dropped === "conflict" && past) return pastConflict(p);
     if (built.dropped === "conflict") {
       // A rebase replays the branch's own commits and skips its merges, so a conflict the author resolved in a merge of
@@ -1876,10 +1883,14 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
       }
     },
-    /** An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it). */
-    async landPull(base, number, sha) {
-      fetch([`+refs/pull/${number}/head:${ns}/pr-${number}`]);
-      return this.land(base, sha);
+    /**
+     * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
+     * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     */
+    async landPull(base, p) {
+      if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      return this.land(base, p.sha);
     },
   };
 }

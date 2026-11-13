@@ -32,6 +32,12 @@ pub enum Event {
         id: u64,
         text: String,
     },
+    /// A binary message (WISP 102 § Frames), in base64, as HyperDHT's (`hyperdht.rs`).
+    #[serde(rename = "frame")]
+    Binary {
+        id: u64,
+        bytes: String,
+    },
     Closed {
         id: u64,
     },
@@ -42,8 +48,8 @@ pub enum Event {
     /// The endpoint is connected to its home relay again, after it lost it (`tell_relay_back`).
     RelayBack {},
 }
-/// A frame for the stream, and who hears once it is written there.
-type Outgoing = (String, oneshot::Sender<()>);
+/// A frame for the stream (its bytes, and whether it is a binary message), and who hears once it is written there.
+type Outgoing = (Vec<u8>, bool, oneshot::Sender<()>);
 struct Socket {
     connection: Connection,
     tx: mpsc::Sender<Outgoing>,
@@ -195,8 +201,8 @@ impl TransportState {
         let state = self.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = async { while let Some((text, written)) = rx.recv().await { wire::write_frame(&mut send, text.as_bytes()).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
-                _ = async { loop { let frame = wire::read_frame(&mut recv).await?; let text = String::from_utf8(frame).map_err(|_| "Non-text paired frame")?; events.send(Event::Frame { id, text }).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
+                _ = async { while let Some((frame, binary, written)) = rx.recv().await { wire::write_message(&mut send, &frame, binary).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
+                _ = async { loop { let (frame, binary) = wire::read_message(&mut recv).await?; let event = if binary { Event::Binary { id, bytes: base64::engine::general_purpose::STANDARD.encode(frame) } } else { Event::Frame { id, text: String::from_utf8(frame).map_err(|_| "Non-text paired frame")? } }; events.send(event).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
                 _ = connection.closed() => {},
             }
             state.close(id);
@@ -227,7 +233,7 @@ impl TransportState {
             .collect();
         futures_util::future::join_all(partings.into_iter().map(|(tx, text)| async move {
             let (written, done) = oneshot::channel();
-            if tx.send((text, written)).await.is_ok() {
+            if tx.send((text.into_bytes(), false, written)).await.is_ok() {
                 let _ = done.await;
             }
         }))
@@ -620,14 +626,26 @@ pub async fn paired_iroh_connect(
 }
 /// One frame, answered once it is written on the stream: on a link slower than the page sends, it waits there for
 /// room. So the page counts it against its send budget until then, and the engine sees the queue that is really
-/// there (files and apps keep to their share of it). Only a closed connection is an error.
+/// there (files and apps keep to their share of it). Only a closed connection is an error. The frame is `text`, or
+/// `bytes`: a binary message (WISP 102 § Frames) in base64, as HyperDHT's (`paired_hyperdht_send`).
 #[tauri::command]
 pub async fn paired_native_send(
     state: State<'_, TransportState>,
     connection_id: u64,
-    text: String,
+    text: Option<String>,
+    bytes: Option<String>,
 ) -> Result<(), String> {
-    if text.is_empty() || text.len() > wire::MAX_FRAME {
+    let (frame, binary) = match (text, bytes) {
+        (Some(text), None) => (text.into_bytes(), false),
+        (None, Some(bytes)) => (
+            base64::engine::general_purpose::STANDARD
+                .decode(bytes)
+                .map_err(|_| "Invalid binary frame")?,
+            true,
+        ),
+        _ => return Err("Invalid frame".into()),
+    };
+    if frame.is_empty() || frame.len() > wire::MAX_FRAME {
         return Err("Frame exceeds transport budget".into());
     }
     let tx = state
@@ -641,7 +659,7 @@ pub async fn paired_native_send(
         .tx
         .clone();
     let (written, done) = oneshot::channel();
-    tx.send((text, written))
+    tx.send((frame, binary, written))
         .await
         .map_err(|_| "Connection closed")?;
     done.await.map_err(|_| "Connection closed".into())
@@ -1161,7 +1179,7 @@ mod tests {
         event(&bob_seen, kind("open")).await;
 
         assert_eq!(state.network_changed().await, 2);
-        paired_native_send(one.state(), sent, "after the change".into())
+        paired_native_send(one.state(), sent, Some("after the change".into()), None)
             .await
             .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
@@ -1238,7 +1256,7 @@ mod tests {
         paired_native_parting(leaving.state(), to_bob, Some(hang_up.into())).unwrap();
         paired_native_parting(leaving.state(), to_carol, Some(hang_up.into())).unwrap();
         paired_native_parting(leaving.state(), to_carol, None).unwrap();
-        paired_native_send(leaving.state(), to_bob, "sent before".into())
+        paired_native_send(leaving.state(), to_bob, Some("sent before".into()), None)
             .await
             .unwrap();
 
@@ -1292,7 +1310,7 @@ mod tests {
         );
         let incoming = accepted["id"].as_u64().unwrap();
 
-        paired_native_send(app.state(), outgoing, "hello bob".into())
+        paired_native_send(app.state(), outgoing, Some("hello bob".into()), None)
             .await
             .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
@@ -1301,11 +1319,55 @@ mod tests {
             (Some(incoming), Some("hello bob"))
         );
         let largest = "x".repeat(wire::MAX_FRAME);
-        paired_native_send(app.state(), incoming, largest.clone())
+        paired_native_send(app.state(), incoming, Some(largest.clone()), None)
             .await
             .unwrap();
         let frame = event(&alice_seen, kind("frame")).await;
         assert_eq!(frame["text"].as_str().map(str::len), Some(wire::MAX_FRAME));
+    }
+
+    /// A binary message (WISP 102 § Frames: a file's bytes where the session agreed `files/4`) crosses as bytes, in
+    /// base64 between the page and Rust as HyperDHT's, up to a text frame's budget, and a text after it is still text.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn binary_messages_travel_both_ways_beside_text() {
+        let app = app();
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let (alice, _, alice_seen) = start(&app, 64).await;
+        let (_bob, bob_address, bob_seen) = start(&app, 65).await;
+        let outgoing = connect(&app, alice, &bob_address).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        // Not UTF-8: as text, this closed the connection ("Non-text paired frame").
+        let bytes = [0u8, 0xff, 0xfe, 0x80];
+        paired_native_send(app.state(), outgoing, None, Some(encode(&bytes)))
+            .await
+            .unwrap();
+        paired_native_send(app.state(), outgoing, Some("after the bytes".into()), None)
+            .await
+            .unwrap();
+        let frame = event(&bob_seen, kind("frame")).await;
+        assert_eq!(
+            (
+                frame["id"].as_u64(),
+                frame["bytes"].as_str(),
+                frame.get("text")
+            ),
+            (Some(incoming), Some(encode(&bytes).as_str()), None)
+        );
+        event(&bob_seen, |e| e["text"] == "after the bytes").await;
+
+        let largest = vec![0xffu8; wire::MAX_FRAME];
+        paired_native_send(app.state(), incoming, None, Some(encode(&largest)))
+            .await
+            .unwrap();
+        let frame = event(&alice_seen, kind("frame")).await;
+        assert_eq!(frame["bytes"].as_str(), Some(encode(&largest).as_str()));
+        assert!(!bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .chain(alice_seen.lock().unwrap().iter())
+            .any(|e| e["type"] == "closed"));
     }
 
     /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes.
@@ -1330,7 +1392,7 @@ mod tests {
         id: u64,
         text: String,
     ) -> Result<(), String> {
-        paired_native_send(app.state(), id, text).await
+        paired_native_send(app.state(), id, Some(text), None).await
     }
 
     /// An app sending at its full rate over a link slower than that: each frame waits for room on the stream, in
@@ -1403,23 +1465,47 @@ mod tests {
     async fn refuses_frames_out_of_budget_and_unknown_connections() {
         let app = app();
         assert_eq!(
-            paired_native_send(app.state(), 1, String::new())
+            paired_native_send(app.state(), 1, Some(String::new()), None)
                 .await
                 .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".repeat(wire::MAX_FRAME + 1))
+            paired_native_send(app.state(), 1, Some("x".repeat(wire::MAX_FRAME + 1)), None)
                 .await
                 .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".into())
+            paired_native_send(app.state(), 1, Some("x".into()), None)
                 .await
                 .unwrap_err(),
             "Connection closed"
         );
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        for (text, bytes, error) in [
+            (None, None, "Invalid frame"),
+            (Some("x".to_string()), Some(encode(b"x")), "Invalid frame"),
+            (
+                None,
+                Some("not base64!".to_string()),
+                "Invalid binary frame",
+            ),
+            (None, Some(String::new()), "Frame exceeds transport budget"),
+            (
+                None,
+                Some(encode(&vec![0; wire::MAX_FRAME + 1])),
+                "Frame exceeds transport budget",
+            ),
+            (None, Some(encode(b"x")), "Connection closed"),
+        ] {
+            assert_eq!(
+                paired_native_send(app.state(), 1, text, bytes)
+                    .await
+                    .unwrap_err(),
+                error
+            );
+        }
         assert_eq!(
             paired_iroh_address(app.state(), 1).await.unwrap_err(),
             "Endpoint closed"
@@ -1446,7 +1532,7 @@ mod tests {
         })
         .await;
         assert_eq!(
-            paired_native_send(app.state(), first, "late".into())
+            paired_native_send(app.state(), first, Some("late".into()), None)
                 .await
                 .unwrap_err(),
             "Connection closed"
@@ -1459,7 +1545,7 @@ mod tests {
         })
         .await;
         assert_ne!(reopened["binding"]["context"], first_binding["context"]);
-        paired_native_send(app.state(), second, "again".into())
+        paired_native_send(app.state(), second, Some("again".into()), None)
             .await
             .unwrap();
         event(&bob_seen, |e| e["text"] == "again").await;

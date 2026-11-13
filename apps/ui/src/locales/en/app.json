@@ -26,6 +26,5 @@
       "full": "Free some space, then try again."
     },
     "tryAgain": "Try again"
-  },
-  "tagline": "Encrypted peer-to-peer messaging over the DHT"
+  }
 }

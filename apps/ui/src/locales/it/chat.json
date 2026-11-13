@@ -242,7 +242,6 @@
     "newOne": "1 nuovo messaggio, scorri in fondo"
   },
   "keyChanged": "Questa chat si è fermata: la chiave del tuo contatto è cambiata.",
-  "lastSeen": "Ultimo accesso {{time}}",
   "listTime": {
     "days": "{{count}} g",
     "hours": "{{count}} h",
@@ -485,7 +484,6 @@
     "showTranslation": "Mostra traduzione",
     "translate": "Traduci"
   },
-  "typeMessage": "Scrivi un messaggio...",
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",
   "typingThinking": "sta pensando…",

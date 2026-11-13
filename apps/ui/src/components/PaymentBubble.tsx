@@ -38,7 +38,7 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
 }
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
-export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean }) {
+export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = false, contact }: { paymentId: string; peerPubKey: string; fallbackText: string; mine?: boolean; contact?: string }) {
   const { t } = useI18n();
   // Drawn again when the wallets, this payment or the chat's ways of paying change, not on every engine state.
   const wallet = useWalletPlatform();
@@ -100,6 +100,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
     ? payment.target ? payment.target.expiresAt : payment.invoice ? (decodeBolt11(payment.invoice)?.expiresAt ?? NaN) * 1000 : NaN
     : NaN;
   const [now, setNow] = useState(() => Date.now());
+  // One of ours the contact paid: their payment of it can still be on its way after the deadline (an on-chain one
+  // waits for a confirmation, and settles the request even then). Looked for only once the deadline passed: it goes
+  // through every payment, on each change of the engine's state.
+  const paidOnItsWay = usePlatformValue(() => deadline <= now && payment?.direction === "out" && !!wallet?.paymentOnItsWay(payment.id));
   useEffect(() => {
     if (!(deadline > now)) return;
     const timer = setTimeout(() => setNow(Date.now()), Math.min(deadline - now + 50, 2 ** 31 - 1));
@@ -161,7 +165,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
   // Nobody can pay it any more: its target lapsed, or its invoice did and no ecash pays it instead (on the payer's side a
   // mint it shares and may use here, on the requester's any mint or federation it named). Not while a payment of it is
   // on its way: that one may still have gone through.
-  const expired = deadline <= now && !(unfinished && unfinished.state !== "pending")
+  const expired = deadline <= now && !(unfinished && unfinished.state !== "pending") && !paidOnItsWay
     && (!!payment.target || (outgoing ? !payment.mints?.length && !payment.federations?.length : !sharedMints.length || allowed?.cashu === false));
   const lnHolds = viaLightning ?holdsLess("lightning", payer.getState(), payment.amount) : undefined;
   const lnOver = lnHolds !== undefined;
@@ -210,7 +214,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
       </p>
       {payment.target && <p className="chat-text-card-line text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="chat-text-card-line text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
-      {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
+      {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} to={shownReview.method === "cashu" ? contact || t("payments.composer.yourContact") : undefined} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
       {payment.memo && <p className="chat-text-pay-memo m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
         className={`chat-text-pay-label m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}

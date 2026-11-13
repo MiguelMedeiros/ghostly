@@ -44,17 +44,22 @@ export function mimeOf(path: string, given?: string): string {
  * a date can hold it; else when it was stored here.
  */
 async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
-  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+  // Past the newest, among the history's file rows only (the messages store's file index): the whole history, read for
+  // each old voice message saved, held the daemon 0.8 s at 100,000 messages.
+  const older = (linkId: string) => node(ctx).fileMessages(linkId);
+  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id, older))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
 }
 
 /**
  * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
- * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row.
+ * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row;
+ * `older` reads fewer, where the message is known to be among them.
  */
-async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean): Promise<StoredMessage | undefined> {
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean, older?: (linkId: string) => Promise<StoredMessage[]>): Promise<StoredMessage | undefined> {
   const page = await node(ctx).messagePage({ linkId, limit: 200 });
   const newest = page.messages.find(test);
   if (newest || !page.more) return newest;
+  if (older) return (await older(linkId)).find(test);
   const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
   return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
 }
@@ -192,7 +197,7 @@ async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, picked: number) {
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number) {
   if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"));
@@ -209,7 +214,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const size = source.size;
   const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
   const fileId = groupFileId(group.id, "out");
-  const file: MessageFile = { id: fileId, name: sanitizeFileName(str(params, "name") ?? basename(path)), size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+  const file: MessageFile = { id: fileId, name, size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
   const timestamp = Date.now();
   const bytes = await fileBytes();
   const digest = await whileUnchanged(path, () => bytes.stage(fileId, source));
@@ -317,10 +322,12 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
-    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
-    guardText(str(params, "name"), bool(params, "force"), "file's name", "send it");
-    const target = chatOrGroupOf(ctx, params);
     const path = resolve(str(params, "path", true));
+    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety): the name that goes out,
+    // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
+    const name = sanitizeFileName(str(params, "name") ?? basename(path));
+    guardText(name, bool(params, "force"), "file's name", "send it");
+    const target = chatOrGroupOf(ctx, params);
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
@@ -332,10 +339,12 @@ export const FILE_METHODS: Record<string, Method> = {
     // nobody joined yet: none.
     const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
-    if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
+    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
-    if (!link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
+    // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
+    // as files/3 on the next one (the engine's `sendWaitingFile`), as the app's composer sends it.
+    if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"));
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
@@ -348,7 +357,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
     const wireId = toBase64Url(randomBytes(12));
-    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name, size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await whileUnchanged(path, () => bytes.stage(file.id, source));
@@ -442,6 +451,11 @@ export const FILE_METHODS: Record<string, Method> = {
       if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
       if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
     }
+    // Paused by the contact: only their resume moves it. The engine takes these and does nothing, and it stays paused.
+    const view = state(ctx).transfers[fileId];
+    if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
+      throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
+    }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
@@ -458,7 +472,8 @@ export const FILE_METHODS: Record<string, Method> = {
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
-    if (bool(params, "wait")) await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
+    // A sent file is all here (below): --wait waited for the contact's download, and failed with their decline.
+    if (bool(params, "wait") && (await fileStore.get(fileId))?.direction !== "out") await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw noFile(fileId);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");

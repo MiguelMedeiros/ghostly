@@ -241,7 +241,6 @@
     "newOne": "1 mensaje nuevo, desplazar al final"
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
-  "lastSeen": "Última vez {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -484,7 +483,6 @@
     "showTranslation": "Ver traducción",
     "translate": "Traducir"
   },
-  "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",

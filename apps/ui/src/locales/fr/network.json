@@ -14,6 +14,7 @@
   "protocolDirect": "Atteint la {{dht}} directement (UDP) et les relais {{pkarr}} (HTTP)",
   "protocolRelays": "Atteint la {{dht}} via les relais {{pkarr}} (HTTP)",
   "pushRelay": "Relais push (facultatif)",
+  "pushRelayBusy": "Le dernier réveil par ce relais a été refusé : il était à sa limite (HTTP {{http}}). Il réveille de nouveau les contacts dès qu'il a de la place.",
   "pushRelayHint": "Pour réveiller des contacts depuis un navigateur. Vide : aucun.",
   "pushRelayInfo": "Un navigateur ne peut pas envoyer à un service push ; ce relais le fait. Il voit votre adresse IP et quand vous réveillez quelqu'un, jamais le message.",
   "pushRelayRefused": "Le dernier réveil par ce relais a échoué : il n'a pas répondu comme un relais push (HTTP {{http}}). Les contacts dont l'app est fermée ne sont pas réveillés par lui.",

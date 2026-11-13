@@ -848,9 +848,35 @@ describe("chats", () => {
   // Auto-answer from the chats named kept the removed one: it read as on and could answer nobody.
   it("remove takes the chat out of auto-answer's chats", async () => {
     const { ctx, node } = fake();
-    Object.assign(node, { removeLink: vi.fn(async () => undefined) });
+    Object.assign(node, { removeLink: vi.fn(async () => undefined), removalsPending: () => [] });
     expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
     expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
+  });
+
+  // `engine removeLink` took a chat whose delete for everyone had not reached the contact, as `chat remove` no longer does:
+  // the contact kept the message for good.
+  it("engine removeLink is refused while a delete for everyone is on its way, as chat remove is, until --force", async () => {
+    const { ctx, node } = fake();
+    const removeLink = vi.fn(async () => undefined);
+    Object.assign(node, { removeLink, removalsPending: () => ["m1"] });
+    for (const [method, params] of [["chat.remove", { chat: "chat-one", yes: true }], ["engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true }]] as const) {
+      await expect(callApi(ctx, method, params)).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("deleted for everyone"), details: { messages: ["m1"] } });
+    }
+    expect(removeLink).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true, force: true });
+    expect(removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  // `engine clearProfileData` took every chat's row with the removals still on their way, as `chat remove` no longer does.
+  it("engine clearProfileData is refused while a delete for everyone is on its way in any chat, until --force", async () => {
+    const { ctx, node } = fake();
+    const clearProfileData = vi.fn(async () => undefined);
+    Object.assign(node, { clearProfileData, removalsPending: ({ linkId }: { linkId: string }) => (linkId === "chat-two" ? ["m2"] : []) });
+    Object.assign(ctx, { mode: "one-shot" });
+    await expect(callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("clearing the profile now"), details: { messages: ["m2"] } });
+    expect(clearProfileData).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true, force: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+    expect(clearProfileData).toHaveBeenCalledOnce();
   });
 
   // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
@@ -1195,7 +1221,7 @@ describe("the engine passthrough", () => {
   it("a call that deletes chats or groups asks for yes, as the commands made for it do", async () => {
     const { ctx, node } = fake();
     const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), deviceRemove: vi.fn() };
-    Object.assign(node, calls);
+    Object.assign(node, calls, { removalsPending: () => [] });
     for (const [method, call] of Object.entries(calls)) {
       await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
       expect(call, method).not.toHaveBeenCalled();
@@ -1209,7 +1235,7 @@ describe("the engine passthrough", () => {
   it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
     const { ctx, node } = fake();
     const stop = vi.fn();
-    Object.assign(node, { clearProfileData: vi.fn(async () => undefined) });
+    Object.assign(node, { clearProfileData: vi.fn(async () => undefined), removalsPending: () => [] });
     Object.assign(ctx, { stop });
     vi.useFakeTimers();
     try {

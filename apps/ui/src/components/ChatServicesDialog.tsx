@@ -83,7 +83,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                         // A refusal (a call on screen on the web, a window Desktop could not open) is said under its app.
                         platform.openService(peerPubKey, service.id).catch((e) => setRefused({ id: service.id, problem: problemText(e, t) }));
                       }}
-                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer">{t("chat.services.open")}</button>
+                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer">{t("chat.services.open")}</button>
                       : <span className="text-[11px] text-text-muted text-end">{t("chat.services.openElsewhere")}</span>}
                   </div>
                   {refused?.id === service.id && <Notice problem={refused.problem} testId="chat-service-problem" />}

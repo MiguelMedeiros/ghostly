@@ -274,6 +274,10 @@ export function checkTypes(types: readonly string[], warn: (line: string) => voi
     if (type === "*") continue;
     const family = type.split(/[.*]/)[0];
     if (!EVENT_FAMILIES.includes(family)) throw new CliError("usage", `No event is of type ${type}: --type takes a type, or a family (${EVENT_FAMILIES.join(", ")})`);
+    // Turns are made from the events --type keeps, and --turns is refused beside it: a --type that keeps only
+    // agent.turn kept nothing, and the listener stayed silent for good without a word.
+    const known = EVENT_TYPES.filter((each) => matches({ seq: 0, id: "", type: each, at: 0 }, [type]));
+    if (known.length === 1 && known[0] === "agent.turn") throw new CliError("usage", `No event is of type ${type} without --turns: ghostly listen --turns gives agent.turn events, in the place of --type`);
     if (!EVENT_TYPES.some((known) => matches({ seq: 0, id: "", type: known, at: 0 }, [type]))) warn(`ghostly: no event is of type ${type}; the ${family} family has ${EVENT_TYPES.filter((known) => known.startsWith(family + ".")).join(", ")}`);
   }
 }
@@ -434,12 +438,11 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (stopped) return;
       const skip = () => keep(event.seq);
       if (options.allow && !(await options.allow.allows(event))) return skip();
+      // What --turns drops is dropped before the translation: a contact's edits and a group's messages that name nobody
+      // went through the model one by one, 16 KiB each, every turn behind them waiting, to be thrown away.
+      if (options.turns && !gap && !toTurn(event)) return skip();
       if (options.translate) event = await options.translate(event);
-      if (options.turns && !gap) {
-        const next = toTurn(event);
-        if (!next) return skip();
-        event = next;
-      }
+      if (options.turns && !gap) event = toTurn(event)!;
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
         const hook = running = runExec(options.exec, event, options.print);
