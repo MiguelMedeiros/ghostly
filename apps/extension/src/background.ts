@@ -438,15 +438,15 @@ interface ViewerBinding {
 }
 
 /** The English page, for a request that came without one. */
-const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
+const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed, upload: servicesEn.window.upload };
 
-/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name only if short text. */
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name and upload line only if short text. */
 function viewerPageOf(page: unknown): ViewerPage {
   const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
   if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
-  const { lang, dir, unreachable, failed, app } = page as Record<string, unknown>;
+  const { lang, dir, unreachable, failed, upload, app } = page as Record<string, unknown>;
   if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
-  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(app) ? { app: app as string } : {}) };
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(upload) ? { upload: upload as string } : {}), ...(text(app) ? { app: app as string } : {}) };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -633,9 +633,11 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
 
   // DevTools leaves `bytes` out of a piece it holds as a file or a stream (a FormData with a picked file, an XHR sending
   // one; an empty piece is `bytes: ""`), and has no command that reads it: sent without it, the app would get the form
-  // with an empty file, or no body at all, as if it were the upload. The request fails instead.
+  // with an empty file, or no body at all, as if it were the upload. The request fails instead, saying why and where
+  // the file does go (a page of an older build has no such line: its plain failure).
   if (paused.request.postDataEntries?.some((e) => typeof e.bytes !== "string")) {
-    await answerFailed(tabId, paused.requestId, binding.page, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
+    const { page } = binding;
+    await answerFailed(tabId, paused.requestId, { ...page, failed: page.upload ?? page.failed }, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
     return;
   }
   let bodyB64: string | null = null;

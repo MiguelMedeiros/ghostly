@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
+import servicesEn from "../../ui/src/locales/en/services.json";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -500,10 +501,22 @@ describe("viewer tabs", () => {
       const answer = await pauseRequest(world, tabId, { url, method: "POST", postDataEntries });
       expect(answer.method).toBe("Fetch.fulfillRequest");
       expect(answer.params).toMatchObject({ responseCode: 502 });
-      expect(bodyText(answer.params)).toContain("The request failed.");
+      // Why, and where the file does go: not a bare "The request failed." with nothing to do next.
+      expect(bodyText(answer.params)).toContain(servicesEn.window.upload);
     }
     expect(engine().requests).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("says why an upload failed in the words of the page that opened the tab, and its plain failure from an older page", async () => {
+    const file = (tag: string) => ({ url: `https://${SERVICE}.${PEER}.${tag}.invalid/upload`, method: "POST", postDataEntries: [{}] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const said = await pauseRequest(world, await openViewer(world, PEER, SERVICE, TAG, { lang: "ar", dir: "rtl", unreachable: "a", failed: "b", upload: "ملف" }), file(TAG));
+    expect(bodyText(said.params)).toContain('<html lang="ar" dir="rtl">');
+    expect(bodyText(said.params)).toContain("ملف");
+    // A page from the build before: its own failure line, in its language.
+    const older = await pauseRequest(world, await openViewer(world, PEER, SERVICE, OTHER_TAG, { lang: "ar", dir: "rtl", unreachable: "a", failed: "فشل" }), file(OTHER_TAG));
+    expect(bodyText(older.params)).toContain("فشل");
   });
 
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
