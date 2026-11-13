@@ -374,6 +374,13 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // An app uninstalled elsewhere (another tab) while its screen is open here: the screen goes, so it is no longer chosen
+  // (it would open by itself once the app is installed again), and the focus goes to Add as for an uninstall here.
+  useEffect(() => {
+    if (!details || !installed || installed.some((a) => a.ref === details)) return;
+    setDetails(null);
+    setGone({ app: details });
+  }, [details, installed]);
   // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
   // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
   const [retried, setRetried] = useState<"installed" | "stores" | null>(null);
