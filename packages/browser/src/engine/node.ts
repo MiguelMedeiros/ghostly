@@ -810,9 +810,10 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
-   * Leave the chats this run finds saved unstarted; a chat made or joined in the run starts as usual, and a saved one
-   * once the command names it (`startDeferredChat`): a headless one-shot about one chat, or that makes or joins one,
-   * whose records the saved chats' publishes would hold back for the relays' next minute.
+   * Leave the chats this run finds saved unstarted, and the edges of its groups; a chat made or joined in the run starts
+   * as usual, a saved one once the command names it (`startDeferredChat`), a group's edges once the command names that
+   * group (`startDeferredGroup`): a headless one-shot about one chat or one group, or that makes or joins a chat, whose
+   * records the others' publishes would hold back for the relays' next minute.
    */
   deferChats?: boolean;
   /**
@@ -952,6 +953,8 @@ export class GhostlyNode implements EngineImplementation {
   private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode && !this.options.offline; }
   /** The chats found saved at start that this run leaves unstarted (`NodeOptions.deferChats`). */
   private readonly deferredChats = new Set<string>();
+  /** The groups whose edges this run leaves unstarted (`NodeOptions.deferChats`): every saved one, until a command names it. */
+  private readonly deferredGroups = new Set<string>();
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
@@ -2400,7 +2403,11 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const links = await db.getLinks();
-    if (this.options.deferChats) for (const stored of links) if (!stored.group) this.deferredChats.add(stored.id);
+    if (this.options.deferChats) for (const stored of links) {
+      if (!stored.group) this.deferredChats.add(stored.id);
+      // A group's edges, not the entry sessions of a join that waits for its admin: those go on as they did.
+      else if (!stored.groupEntry) this.deferredGroups.add(stored.group);
+    }
     // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
     // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
@@ -8556,7 +8563,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private startEdge(linkId: string): void {
     const live = this.links.get(linkId);
-    if (!live || live.link || this.options.deferGroups) return;
+    if (!live || live.link || this.options.deferGroups || (!live.stored.groupEntry && this.deferredGroups.has(live.stored.group!))) return;
     const { stored } = live;
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
@@ -8884,6 +8891,17 @@ export class GhostlyNode implements EngineImplementation {
     await this.restoreDeferred(linkId);
     if (!this.deferredChats.delete(linkId)) return;
     if (this.networkOn && !this.shuttingDown) this.startLink(linkId);
+  }
+
+  /**
+   * Starts the edges of a group this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names. Each
+   * group's edges put their records and read their members' on the relays: started, six groups shared with one member
+   * asked the relays about three times what the named group alone does, and a `group react` behind them waited out its
+   * 60 s with no edge up. Any other group, or one already started, is left as it is.
+   */
+  startDeferredGroup(groupId: string): void {
+    if (!this.deferredGroups.delete(groupId) || !this.networkOn || this.shuttingDown) return;
+    for (const [linkId, live] of this.links) if (live.stored.group === groupId) this.startEdge(linkId);
   }
 
   private startLink(linkId: string): void {
