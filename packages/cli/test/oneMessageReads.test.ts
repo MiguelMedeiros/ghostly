@@ -236,4 +236,19 @@ describe("forward to a group waits for an edge, as group send does", () => {
     expect(chatOnly("chat.pin", { chat: "Crew", message: "k:0:1" })).toBe(false);
     expect(chatOnly("chat.react", { chat: "Alice", message: "peer_1", emoji: "👍" })).toBe(true);
   });
+
+  it("a one-shot starts the groups' sessions for a group's file named with its group: it travels over the group's edges", async () => {
+    const { chatOnly, oneChatOnly } = await import("../src/main");
+    const file = "group-g1-in-AAAAAAAAAAAAAAAA";
+    expect(chatOnly("file.wait", { chat: "Crew", file })).toBe(false);
+    expect(chatOnly("file.save", { chat: "Crew", file, wait: true })).toBe(false);
+    expect(chatOnly("file.action", { chat: "Crew", file, action: "accept" })).toBe(false);
+    expect(chatOnly("file.action", { chat: "Crew", file, action: "request" })).toBe(false);
+    // As without its group (no chat named), and the other 1:1 chats stay unstarted.
+    expect(chatOnly("file.wait", { file })).toBe(false);
+    expect(oneChatOnly("file.wait", { chat: "Crew", file })).toBe(true);
+    // A 1:1 chat's file needs no group.
+    expect(chatOnly("file.wait", { chat: "Alice", file: "chat-one-in-AAAAAAAAAAAAAAAA" })).toBe(true);
+    expect(chatOnly("file.action", { chat: "Alice", file: "chat-one-in-AAAAAAAAAAAAAAAA", action: "accept" })).toBe(true);
+  });
 });

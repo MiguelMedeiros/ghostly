@@ -173,6 +173,9 @@ function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
   // So may `message delete --everyone`'s: a group's removal goes over its members' edges, which a one-shot that left
   // the groups unstarted never opened (it waited its whole timeout, and the members kept the message).
   if (method === "chat.delete" && params.everyone === true) return true;
+  // So may a group's file's `file wait`, `save --wait`, `accept` and `request` (its id starts `group-`, groupFiles.ts):
+  // it comes over the group's edges only, and with the groups unstarted the wait ran out with no byte here.
+  if (method.startsWith("file.") && typeof params.file === "string" && params.file.startsWith("group-")) return true;
   // And `pin`'s and `forward --to`'s: a group's pin or forwarded copy goes over the same edges (the pin never went,
   // and a forward's wait could only time out).
   return method === "chat.pin" || method === "chat.forward";
