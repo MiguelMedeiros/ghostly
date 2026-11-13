@@ -490,9 +490,11 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
-    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
-    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
-    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
+    // A file that is there: `file send` looks at it before the profile opens.
+    const sound = import.meta.filename;
+    expect(params("file send", ["alice", sound, "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", sound, "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", sound])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
