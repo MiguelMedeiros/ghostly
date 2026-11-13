@@ -406,8 +406,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   // WebKitGTK names another app's dragged files to the page by their address only: Rust says when such a drag is over
-  // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says).
-  const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")));
+  // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says). On a
+  // chat Rust picks them on the page's file input instead: read from the disk as they are sent, as + → Document's.
+  const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")), window,
+    () => invoke<number>("choose_dropped_files"));
   void listen<boolean>("file-drag", ({ payload }) => draggedOver(payload === true)).catch(() => {});
   const apps = desktopApps(appsPlatform());
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,

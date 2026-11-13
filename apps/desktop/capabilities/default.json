@@ -25,6 +25,7 @@
     "allow-app-title",
     "allow-bitcoind-rpc",
     "allow-call-service",
+    "allow-choose-dropped-files",
     "allow-close-service-windows",
     "allow-connection-service",
     "allow-copy-secret",

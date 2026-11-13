@@ -186,6 +186,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::choose_dropped_files,
             dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
