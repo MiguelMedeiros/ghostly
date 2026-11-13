@@ -445,10 +445,14 @@ export function useWebRTC({
     [captureFrom],
   );
 
+  /** The id of the note shown last that the camera is off (`showCameraOff`): the camera coming on takes it away. */
+  const cameraOffShownRef = useRef(0);
   /** A video call went on without the camera (`captureForCall`): the person is told why it is off. */
   const showCameraOff = useCallback((error: unknown) => {
     setMediaProblemOf("camera");
+    if (!mediaProblem(error)) return;
     showMediaProblem(error);
+    cameraOffShownRef.current = mediaProblemIdRef.current;
   }, [showMediaProblem]);
 
   /**
@@ -994,6 +998,8 @@ export function useWebRTC({
       setLocalStream(stream);
       setPicture(next);
       if (next) callHadVideoRef.current = true;
+      // The camera is on now: a note still up that it is off would say the opposite.
+      if (next === "camera") setMediaProblemShownState((shown) => (shown?.id === cameraOffShownRef.current ? null : shown));
       publishPicture(next);
     },
     [setPicture, publishPicture, captureFrom],
