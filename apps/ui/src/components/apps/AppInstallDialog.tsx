@@ -407,6 +407,17 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     const active = document.activeElement;
     if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
   }, [lacks, busy]);
+  // A check while the screen is open stops the app (revoked, removed by a store) or lets it run again: Open, or Run anyway
+  // and Keep stopped, go with the focus one of them had. The screen takes it, as when the update's section goes. Files
+  // fetched again hand it on above, once Fetch files ends.
+  const status = app.run.status, ran = useRef(status);
+  useEffect(() => {
+    const was = ran.current;
+    ran.current = status;
+    if (was === status || was === "needs-files") return;
+    const active = document.activeElement;
+    if (!active || active === document.body) box.current?.focus({ preventScroll: true });
+  }, [status]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();

@@ -1,8 +1,8 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { InstalledAppDialog } from "../../components/apps/AppInstallDialog";
-import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
+import { forgetInstalledApps, refreshInstalledApps, useInstalledApps } from "../../lib/apps/installed";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -36,6 +36,49 @@ describe("an installed app's waiting update, by keyboard", () => {
     await waitFor(() => expect(screen.queryByTestId("app-update")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("app-details")).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+/*
+ * A check while the screen is open finds the app stopped (its publisher revoked it, a store removed it) or allowed
+ * again: Open, or Run anyway and Keep stopped, go, and the focus one of them had stays in the screen, never on the page.
+ */
+describe("an installed app whose state changes while its screen has the focus", () => {
+  const REMOVED: InstalledAppView["run"] = { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Sends your moves to a server", at: 1 }] };
+  async function change(from: InstalledAppView["run"], to: InstalledAppView["run"], focus: string) {
+    let list: InstalledAppView[] = [{ ...app, run: from }];
+    fakeEngine.on("appList", () => list);
+    renderApp(<><button type="button" data-testid="elsewhere">Elsewhere</button><Shown /></>);
+    (await screen.findByTestId(focus)).focus();
+    list = [{ ...app, run: to }];
+    await act(() => refreshInstalledApps());
+    expect(screen.queryByTestId(focus)).not.toBeInTheDocument();
+  }
+
+  it("revoked while Open has the focus: the screen takes it", async () => {
+    await change({ status: "ok" }, { status: "revoked" }, "app-open");
+    expect(screen.getByTestId("app-details")).toHaveFocus();
+  });
+
+  it("removed by a store while Open has the focus: the screen takes it", async () => {
+    await change({ status: "ok" }, REMOVED, "app-open");
+    expect(screen.getByTestId("app-details")).toHaveFocus();
+  });
+
+  it("listed again while Run anyway has the focus: the screen takes it", async () => {
+    await change(REMOVED, { status: "ok" }, "app-run-anyway");
+    expect(screen.getByTestId("app-details")).toHaveFocus();
+  });
+
+  it("the focus elsewhere is left where it is", async () => {
+    let list: InstalledAppView[] = [app];
+    fakeEngine.on("appList", () => list);
+    renderApp(<><button type="button" data-testid="elsewhere">Elsewhere</button><Shown /></>);
+    await screen.findByTestId("app-open");
+    screen.getByTestId("elsewhere").focus();
+    list = [{ ...app, run: { status: "revoked" } }];
+    await act(() => refreshInstalledApps());
+    expect(screen.getByTestId("elsewhere")).toHaveFocus();
   });
 });
 
