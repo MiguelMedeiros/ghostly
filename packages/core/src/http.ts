@@ -91,12 +91,14 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   if (!path.startsWith("/") || path.startsWith("//")) return null;
   for (const char of path) {
     const code = char.codePointAt(0) ?? 0;
-    if (code <= 32 || code === 127 || char === "\\") return null;
+    if (code <= 32 || code === 127) return null;
   }
-  // Encoded separators survive URL normalization here but not in every server:
-  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
   const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  // Some servers read `\` in the path as `/`. In the query a browser's fetch leaves it raw (`?path=C:\x`), so it passes.
+  if (pathPart.includes("\\")) return null;
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   if (/%(2f|5c|2e)/i.test(pathPart)) return null;
   if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;

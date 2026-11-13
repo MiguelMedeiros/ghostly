@@ -85,6 +85,15 @@ describe("resolveTargetUrl", () => {
     }
   });
 
+  it("allows a raw backslash in the query, where a browser's fetch leaves it as it is", () => {
+    const sent = new URL("https://a/api?path=C:\\Users\\x");
+    const path = sent.pathname + sent.search;
+    expect(path).toBe("/api?path=C:\\Users\\x");
+    expect(resolveTargetUrl(root, path)).toBe("http://localhost:3400/api?path=C:\\Users\\x");
+    expect(resolveTargetUrl(app, "/x?next=\\..\\admin")).toBe("http://localhost:3400/app/x?next=\\..\\admin");
+    for (const path of ["/a\\b?q=c\\d", "/a\\?q=1"]) expect(resolveTargetUrl(root, path), path).toBeNull();
+  });
+
   it("refuses encoded separators and dots in the path but allows them in the query", () => {
     for (const path of ["/app/..%2fadmin", "/%2F", "/a%5cb", "/%2e%2e/x", "/%2E"]) expect(resolveTargetUrl(root, path), path).toBeNull();
     expect(resolveTargetUrl(root, "/search?q=a%2Fb%2e")).toBe("http://localhost:3400/search?q=a%2Fb%2e");
