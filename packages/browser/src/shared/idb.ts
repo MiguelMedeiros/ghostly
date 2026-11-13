@@ -333,7 +333,7 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  */
 export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
-/** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
+/** A group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
 export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKey(""), `${groupLiveKey("")}￿`);
 /** A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`): the profile's too. */

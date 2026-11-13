@@ -6,7 +6,7 @@ import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { SEQ_BLOCK } from "../src/engine/groupRows";
 import { openRows } from "../src/engine/sealedRows";
 import { STORES, clearProfileStores, committed, groupLightKey, groupLiveKey, store, wrap } from "../src/shared/idb";
-import type { GroupLight, StoredGroup } from "../src/shared/types";
+import type { GroupLight, GroupLive, StoredGroup } from "../src/shared/types";
 import { CommunityWorld } from "./communityWorld";
 // covers: groups.send
 
@@ -350,5 +350,120 @@ describe("a private group's saves", () => {
     expect(await live(two)).toBeDefined();
     await clearProfileStores();
     expect(await live(two)).toBeUndefined();
+  });
+});
+
+/** Groups kept in memory as the engine's database keeps them, and the characters each write took. `old`: as apps from before, records alone. */
+function counted(old = false) {
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>(), counts = { records: 0, chars: 0 };
+  const memory: Required<Pick<GroupStore, "getGroups" | "putGroup" | "deleteGroup" | "getMessages" | "getGroupLive" | "putGroupLive">> = {
+    getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
+    putGroup: async (g, row) => {
+      counts.records++; counts.chars += JSON.stringify(g).length + (row ? JSON.stringify(row).length : 0);
+      groups.set(g.id, structuredClone(g));
+      if (row) live.set(g.id, structuredClone(row)); else if (row === null) live.delete(g.id);
+    },
+    deleteGroup: async id => { groups.delete(id); live.delete(id); },
+    getMessages: async () => [],
+    getGroupLive: async () => structuredClone(live),
+    putGroupLive: async (id, row) => { counts.chars += JSON.stringify(row).length; live.set(id, structuredClone(row)); },
+  };
+  const as = (before: boolean): GroupStore => before ? { getGroups: memory.getGroups, putGroup: g => memory.putGroup(g), deleteGroup: memory.deleteGroup, getMessages: memory.getMessages } : memory;
+  return { store: as(old), as, groups, live, counts };
+}
+
+const communityOf = (groups: Groups, id: string) => groups.communities.session(id)!;
+/** The number a community message was sent at: the last part of its id. */
+const numberOf = (messageId: string | undefined) => Number(messageId!.split(":").at(-1));
+
+describe("a community's saves", () => {
+  it("a message writes a few KB, however long the community's membership history", async () => {
+    const memory = counted();
+    const { groups } = engine(memory.store);
+    await groups.load();
+    const id = await groups.create("Ghosts", "community");
+    const session = communityOf(groups, id);
+    for (let i = 1; i < 250; i++) await session.admit(createIdentity().pubKeyZ32);
+    const grow = async (cycles: number) => {
+      for (let i = 0; i < cycles; i++) {
+        const key = createIdentity().pubKeyZ32;
+        await session.admit(key);
+        await session.remove(key);
+      }
+    };
+    const measure = async (label: string) => {
+      const record = JSON.stringify(memory.groups.get(id)).length;
+      const { chars, records } = memory.counts;
+      for (let i = 0; i < 200; i++) expect((await groups.send(id, `${label} ${i} `.padEnd(200, "x"))).error).toBeNull();
+      await groups.flush();
+      return { record, perMessage: (memory.counts.chars - chars) / 200, records: memory.counts.records - records };
+    };
+    const fresh = await measure("250 members");
+    await grow(300);
+    const grown = await measure("after 300 joins and removals");
+    expect(fresh.record, "the record holds the chain").toBeGreaterThan(100_000);
+    expect(grown.record).toBeGreaterThan(250_000);
+    for (const { perMessage, records } of [fresh, grown]) {
+      expect(perMessage).toBeLessThan(8_000);
+      // One whole write each `SEQ_BLOCK` numbers at most.
+      expect(records).toBeLessThanOrEqual(1);
+    }
+    // A commit writes the record, and the next message is small again.
+    await session.rotate();
+    const { records } = memory.counts;
+    await groups.send(id, "after the rotate");
+    await groups.send(id, "and again");
+    expect(memory.counts.records - records).toBeLessThanOrEqual(1);
+  }, 300_000);
+
+  it("started again, an app from before reading the record alone sends above every number used; back here, so does this one", async () => {
+    const memory = counted();
+    const now = engine(memory.store);
+    await now.groups.load();
+    const id = await now.groups.create("Ghosts", "community");
+    for (let i = 0; i < 2; i++) await communityOf(now.groups, id).admit(createIdentity().pubKeyZ32);
+    const said: number[] = [];
+    for (let i = 0; i < 5; i++) said.push(numberOf((await now.groups.send(id, `new ${i}`)).messageId));
+    await now.groups.flush();
+    expect(said).toEqual([0, 1, 2, 3, 4]);
+    expect(memory.groups.get(id)!.community!.seq, "the record reserves numbers above them").toBe(SEQ_BLOCK);
+
+    const again = engine(memory.store);
+    await again.groups.load();
+    said.push(numberOf((await again.groups.send(id, "five")).messageId));
+    await again.groups.flush();
+    expect(said.at(-1), "no gap, no number used twice").toBe(5);
+
+    const old = engine(memory.as(true));
+    await old.groups.load();
+    const oldSaid: number[] = [];
+    for (let i = 0; i < 2; i++) oldSaid.push(numberOf((await old.groups.send(id, `old ${i}`)).messageId));
+    await old.groups.flush();
+    expect(Math.min(...oldSaid)).toBeGreaterThan(Math.max(...said));
+    expect(memory.live.has(id), "its small row is still there, from before the old app ran").toBe(true);
+
+    const back = engine(memory.store);
+    await back.groups.load();
+    const last = numberOf((await back.groups.send(id, "back")).messageId);
+    expect(last).toBeGreaterThan(Math.max(...oldSaid));
+  });
+
+  it("a community record written whole by an app from before, with no small row, loads as it is", async () => {
+    const memory = counted(true);
+    const old = engine(memory.store);
+    await old.groups.load();
+    const id = await old.groups.create("Ghosts", "community");
+    await communityOf(old.groups, id).admit(createIdentity().pubKeyZ32);
+    for (let i = 0; i < 3; i++) await old.groups.send(id, `old ${i}`);
+    await old.groups.flush();
+    const before = memory.groups.get(id)!;
+    expect(before.seqReserved).toBeUndefined();
+
+    const now = engine(memory.as(false));
+    await now.groups.load();
+    const session = communityOf(now.groups, id);
+    expect(session.state.chain.length).toBe(before.community!.chain.length);
+    expect(session.state.seq).toBe(before.community!.seq);
+    expect(numberOf((await now.groups.send(id, "new")).messageId)).toBe(3);
   });
 });

@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import type { GroupState } from "@ghostly/core";
+import type { CommunityState, GroupState } from "@ghostly/core";
 import type { GroupLight, GroupLive, StoredGroup } from "../shared/types";
 import type { GroupStore } from "./groups";
 
@@ -40,7 +40,7 @@ const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks"
  */
 const LIGHT = ["pin", "removedIds", "removals", "hubs", "large"] as const;
 
-const topOf = (state: GroupState): string => state.chain[state.chain.length - 1]?.sig ?? "";
+const topOf = (state: GroupState | CommunityState): string => state.chain[state.chain.length - 1]?.sig ?? "";
 
 /** The members' edits the state keeps to hand on, by their signatures. */
 const editsOf = (state: GroupState): string => (state.relayEdits ?? []).map(f => f.sig).join(" ");
@@ -87,6 +87,35 @@ function marks(light: GroupLight, now: GroupLight, of: string): boolean {
   return !light.hubs && !light.large && light.of === markOf(JSON.stringify(older));
 }
 
+/**
+ * A community's the same (#2554): every message I sent wrote its whole membership history before it went (130 KB at 250
+ * members, 300 KB after 300 joins and removals, about 1 MB at the chain's cap), and every second with messages coming in
+ * wrote it again. The small row holds what a message changes: my counter under its commit (`seqH`), what I saw, the
+ * names, and the frames I hand on that no message row holds (`store`, `lasting`) or that are mine not yet said or heard.
+ * The reservation goes by commit: `seqReserved.e` is `seqH`, and the record is written whole before I send under another.
+ */
+const LIVE_COMMUNITY = ["seq", "seqH", "seen", "nicks", "store", "lasting", "unheard", "alone", "unsaid"] as const;
+
+type CommunityLive = Pick<CommunityState, (typeof LIVE_COMMUNITY)[number]>;
+
+/** A community's record but for the small row's fields and `came`, in one string: its commits, statements and secrets by their signatures and hashes. */
+function communityKey(group: StoredGroup): string {
+  const { community, seqReserved: _reserved, came: _came, ...rest } = group;
+  const { chain, side, secrets, meta, metaPast, ...state } = community!;
+  for (const field of LIVE_COMMUNITY) delete (state as Partial<CommunityState>)[field];
+  return JSON.stringify([rest, state, chain.length, chain[0]?.sig, topOf(community!), side.map(c => c.sig), Object.keys(secrets), meta?.sig, metaPast?.map(m => m.sig)]);
+}
+
+function communityLiveOf(group: StoredGroup): GroupLive {
+  const s = group.community!;
+  const state: CommunityLive = { seq: s.seq, seqH: s.seqH, seen: s.seen, nicks: s.nicks, store: s.store, ...(s.lasting && { lasting: s.lasting }),
+    ...(s.unheard && { unheard: s.unheard }), ...(s.alone && { alone: s.alone }), ...(s.unsaid && { unsaid: s.unsaid }) };
+  return { top: topOf(s), state, ...(group.came && { came: group.came }) };
+}
+
+/** A community's record as written: its state then (`seq` reserved), and its `communityKey`. */
+interface WrittenCommunity { key: string; state: CommunityState }
+
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
   return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
@@ -99,6 +128,11 @@ const cameOf = (group: StoredGroup): string => JSON.stringify(group.came ?? {});
 
 const later = (a: number | undefined, b: number | undefined) => a === undefined ? b : b === undefined ? a : Math.max(a, b);
 
+/** A small row its record no longer goes with: its marks still count where they are later. */
+function cameFrom(group: StoredGroup, live: GroupLive): void {
+  if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
+}
+
 /**
  * A group's record as written: its state now (`seq` reserved), its `recordKey`, the rest of it (`restKey`), what it
  * holds of `LIGHT` (`markOf`), the members' apps it notes (`StoredGroup.large`), the members' edits written last, in the
@@ -108,14 +142,15 @@ interface Written { key: string; state: GroupState; rest: string; of: string; la
 
 export class GroupRows {
   private readonly written = new Map<string, Written>();
-  /** What the engine writes a private group through: its record holds the state as it was last written whole. */
+  private readonly communities = new Map<string, WrittenCommunity>();
+  /** What the engine writes a group through, private or community: its record holds the state as it was last written whole. */
   readonly store: GroupStore;
 
   constructor(private readonly raw: GroupStore) {
     this.store = {
       getGroups: () => raw.getGroups(),
       putGroup: group => this.put(group),
-      deleteGroup: async groupId => { this.written.delete(groupId); await raw.deleteGroup(groupId); },
+      deleteGroup: async groupId => { this.written.delete(groupId); this.communities.delete(groupId); await raw.deleteGroup(groupId); },
       getMessages: linkId => raw.getMessages(linkId),
       ...(raw.getMessagePage && { getMessagePage: (linkId, page) => raw.getMessagePage!(linkId, page) }),
     };
@@ -132,9 +167,11 @@ export class GroupRows {
     const lights = await this.raw.getGroupLight?.().catch(() => undefined) ?? new Map<string, GroupLight>();
     for (const group of groups) {
       const live = rows.get(group.id), state = group.state, held = group.seqReserved;
-      if (!live || !state || group.community) continue;
-      if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || live.state.seqEpoch !== state.seqEpoch || !(live.state.seq <= state.seq)) {
-        if (live.came) group.came = { ...group.came, ...live.came, peer: later(group.came?.peer, live.came.peer), mention: later(group.came?.mention, live.came.mention) };
+      if (live && group.community) { this.loadCommunity(group, live); continue; }
+      if (!live || !state) continue;
+      const row = live.state as Pick<GroupState, "seq" | "seqEpoch">;
+      if (!held || held.e !== state.seqEpoch || held.n !== state.seq || live.top !== topOf(state) || row.seqEpoch !== state.seqEpoch || !(row.seq <= state.seq)) {
+        cameFrom(group, live);
         continue;
       }
       // Written with the record and each time `came` changed since: a mark taken back (`unmark`) stays back.
@@ -157,11 +194,46 @@ export class GroupRows {
     }
   }
 
+  /** A community's record and its small row, as `load` does a private group's. */
+  private loadCommunity(group: StoredGroup, live: GroupLive): void {
+    const state = group.community!, held = group.seqReserved, row = live.state as CommunityLive;
+    // Else an app from before wrote the record since: it sent under another commit or past the numbers reserved, or took a commit.
+    if (!held || held.e !== state.seqH || held.n !== state.seq || live.top !== topOf(state) || row.seqH !== state.seqH || !(row.seq <= state.seq)) {
+      cameFrom(group, live);
+      return;
+    }
+    if (live.came) group.came = live.came; else delete group.came;
+    const merged = { ...state };
+    for (const field of LIVE_COMMUNITY) delete (merged as Partial<CommunityState>)[field];
+    group.community = Object.assign(merged, row);
+    this.communities.set(group.id, { key: communityKey(group), state: structuredClone(state) });
+  }
+
+  /**
+   * A community's write: its small row alone while the rest of the record is what was written whole and I send below the
+   * numbers it reserves under the same commit; else the record too, reserving the next block.
+   */
+  private async putCommunity(group: StoredGroup): Promise<void> {
+    const state = group.community!, was = this.communities.get(group.id);
+    if (was && was.state.seqH === state.seqH && state.seq <= was.state.seq && was.key === communityKey(group)) return this.raw.putGroupLive!(group.id, communityLiveOf(group));
+    // A copy: the session goes on changing the state it holds before it saves it.
+    const written: WrittenCommunity = { key: communityKey(group), state: { ...structuredClone(state), seq: state.seq + SEQ_BLOCK } };
+    this.communities.set(group.id, written);
+    try {
+      await this.raw.putGroup({ ...group, community: written.state, seqReserved: { e: state.seqH, n: written.state.seq } }, communityLiveOf(group));
+    } catch (error) {
+      // Not kept: the record still reserves what it did before, and the next write is whole again.
+      if (this.communities.get(group.id) === written) this.communities.delete(group.id);
+      throw error;
+    }
+  }
+
   /**
    * A session's save: its small row alone while the rest of its state is what the record holds, and the members' edits'
    * row when they changed; else the record too.
    */
   async save(group: StoredGroup): Promise<void> {
+    if (group.community) return this.put(group);
     const written = this.written.get(group.id), state = group.state!, edits = editsOf(state);
     if (this.raw.putGroupLive && written && holds(written.state, written.key, state) && (edits === written.edits || this.raw.putGroupLight)) {
       await this.raw.putGroupLive(group.id, liveOf(group));
@@ -176,9 +248,10 @@ export class GroupRows {
 
   private async put(group: StoredGroup): Promise<void> {
     const state = group.state;
-    if (!this.raw.putGroupLive || group.community) return this.raw.putGroup(group);
+    if (!this.raw.putGroupLive) return this.raw.putGroup(group);
+    if (group.community) return this.putCommunity(group);
     // Out of the group, or not in it yet: no small row.
-    if (!state) { this.written.delete(group.id); return this.raw.putGroup(group, null); }
+    if (!state) { this.written.delete(group.id); this.communities.delete(group.id); return this.raw.putGroup(group, null); }
     const was = this.written.get(group.id);
     if (was && holds(was.state, was.key, state)) {
       const rest = restKey(group);

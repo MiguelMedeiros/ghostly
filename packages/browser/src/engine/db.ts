@@ -427,7 +427,7 @@ export const db = {
     if (live) await committed(settings.put(live, groupLiveKey(group.id)));
     else await committed(settings.delete(groupLiveKey(group.id)));
   },
-  /** Every private group's small row, by group id. */
+  /** Every group's small row, by group id. */
   async getGroupLive(): Promise<Map<string, GroupLive>> {
     const settings = await store(STORES.settings, "readonly");
     const [keys, rows] = await Promise.all([wrap(settings.getAllKeys(GROUP_LIVE_RANGE())), wrap(settings.getAll(GROUP_LIVE_RANGE()))]);

@@ -222,7 +222,7 @@ export class FramesTaken {
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
 export interface GroupStore {
   getGroups(): Promise<StoredGroup[]>;
-  /** `live`: a private group's small row too, in the same write (`null` deletes it); only with `putGroupLive`. */
+  /** `live`: a group's small row too, private or community, in the same write (`null` deletes it); only with `putGroupLive`. */
   putGroup(group: StoredGroup, live?: GroupLive | null): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
   getMessages(linkId: string): Promise<StoredMessage[]>;
@@ -232,7 +232,7 @@ export interface GroupStore {
    */
   getMessagePage?(linkId: string, page: { limit: number; before?: { timestamp: number; id?: string } }): Promise<MessagePage>;
   /**
-   * The private groups' small rows (`engine/groupRows.ts`): what a message changes is written there alone. A store
+   * The groups' small rows, private and community (`engine/groupRows.ts`): what a message changes is written there alone. A store
    * without them writes the whole record at every save, as before.
    */
   getGroupLive?(): Promise<Map<string, GroupLive>>;
@@ -801,14 +801,14 @@ export class Groups {
   /** Files and voice messages in every group, private or community (WISP 503 · Group Files). */
   readonly files?: GroupFileDesk;
 
-  /** Where private groups are written: a message writes the group's small row, a commit its record too (`GroupRows`). */
+  /** Where groups are written, private or community: a message writes the group's small row, a commit its record too (`GroupRows`). */
   private readonly rows: GroupRows;
   private readonly store: GroupStore;
 
   constructor(private readonly host: GroupsHost, store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
     this.rows = new GroupRows(store);
     this.store = this.rows.store;
-    this.communities = new Communities(host, store, communityTimings, random);
+    this.communities = new Communities(host, this.store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
     // A member some of whose messages are still on their way (and not known gone): its rows wait for them.

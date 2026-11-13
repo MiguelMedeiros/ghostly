@@ -32,8 +32,10 @@ describe("a community's message keeps the frame it came in", { timeout: 240_000 
     const { world, peers, id } = await communityOf(["alice", "bob"]);
     const [alice, bob] = peers;
     const sizes: number[] = [];
-    const put = bob.store.putGroup.bind(bob.store);
-    bob.store.putGroup = async group => { if (group.id === id) sizes.push(JSON.stringify(group).length); await put(group); };
+    // The record, or the small row that a message writes alone (`GroupRows`).
+    const put = bob.store.putGroup.bind(bob.store), putLive = bob.store.putGroupLive!.bind(bob.store);
+    bob.store.putGroup = async (group, live) => { if (group.id === id) sizes.push(JSON.stringify(group).length); await put(group, live); };
+    bob.store.putGroupLive = async (groupId, live) => { if (groupId === id) sizes.push(JSON.stringify(live).length); await putLive(groupId, live); };
     for (let i = 0; i < 50; i++) { await alice.groups.send(id, `line ${i} ${"x".repeat(200)}`); await world.run(2_000); await bob.groups.communities.session(id)!.flush(); }
     await alice.groups.communities.session(id)!.flush();
     expect(said(bob, id).filter(m => m.frame)).toHaveLength(50);
