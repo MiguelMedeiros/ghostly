@@ -168,7 +168,70 @@ const reachedOnly = create => (...args) => {
   }
   return handshake
 }
-const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
+
+/**
+ * hyperdht 6.36.0 refuses a listen on a key its node already listens on by comparing that key with every listening
+ * server's: after a restart at the default limits, 8,192 listens at once made 33 million comparisons, a fifth of the
+ * relay's CPU, its thread pegged while most listens missed a browser's 20 s. Each node now keeps its servers by key as
+ * each takes one, and a listen looks its own up. A server holds its key, as hyperdht's walk read it, while it is in the
+ * node's list and has the key: the list is checked on each look, so a server left in the map past that holds nothing.
+ * `_listen` is hyperdht's own, the walk aside.
+ */
+const Server = hyperdht('./lib/server.js')
+const Announcer = hyperdht('./lib/announcer.js')
+const { unslabbedHash } = hyperdht('./lib/crypto.js')
+const { NODE_DESTROYED, KEYPAIR_ALREADY_USED } = hyperdht('./lib/errors.js')
+const safetyCatch = hyperdht('safety-catch')
+const b4a = hyperdht('b4a')
+// Node → hex public key → the server that took it last.
+const keyHolders = new WeakMap()
+const holdersOf = dht => {
+  let holders = keyHolders.get(dht)
+  if (!holders) keyHolders.set(dht, holders = new Map())
+  return holders
+}
+const holderOf = (dht, publicKey) => {
+  const server = keyHolders.get(dht)?.get(b4a.toString(publicKey, 'hex'))
+  return server && server._keyPair && dht.listening.has(server) ? server : null
+}
+Server.prototype._listen = async function (keyPair, opts) {
+  this.dht.listening.add(this)
+  try {
+    await this.dht.bind()
+    if (this._closing) return
+    if (holderOf(this.dht, keyPair.publicKey)) throw KEYPAIR_ALREADY_USED()
+    this.target = unslabbedHash(keyPair.publicKey)
+    this._keyPair = keyPair
+    this._heldKey = b4a.toString(keyPair.publicKey, 'hex')
+    holdersOf(this.dht).set(this._heldKey, this)
+    this._announcer = new Announcer(this.dht, keyPair, this.target, opts)
+    this.dht._router.set(this.target, {
+      relay: null,
+      record: this._announcer.record,
+      onpeerhandshake: this._onpeerhandshake.bind(this),
+      onpeerholepunch: this._onpeerholepunch.bind(this),
+    })
+    this._localAddresses().catch(safetyCatch)
+    if (this.suspended) await this._announcer.suspend()
+    await this._announcer.start()
+  } catch (err) {
+    await this._stopListening()
+    this._gc()
+    throw err
+  }
+  if (this._closing) return
+  if (this.dht.destroyed) throw NODE_DESTROYED()
+  if (this.pool) this.pool._attachServer(this)
+  this.emit('listening')
+}
+// Out of the node's list, out of the map (unless another server has taken the key since).
+const gc = Server.prototype._gc
+Server.prototype._gc = function () {
+  const holders = keyHolders.get(this.dht)
+  if (this._heldKey && holders?.get(this._heldKey) === this) holders.delete(this._heldKey)
+  return gc.call(this)
+}
+const listensOn = (dht, keyPair) => keyPair?.publicKey?.byteLength === 32 && holderOf(dht, keyPair.publicKey) !== null
 
 /**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
@@ -297,7 +360,8 @@ const unsent = stream => {
  * here, before the relay's node makes any. An ack frees exactly what its write held (its `buffer` or `buffers`, which
  * udx-native drops then); a write the native side refuses (not connected) throws before it is counted.
  */
-const UDXStream = createRequire(hyperdht.resolve('dht-rpc'))('udx-native/lib/stream.js')
+const dhtRpc = createRequire(hyperdht.resolve('dht-rpc'))
+const UDXStream = dhtRpc('udx-native/lib/stream.js')
 const writeBytes = write => {
   if (write.buffer) return write.buffer.byteLength
   let bytes = 0
@@ -316,6 +380,122 @@ UDXStream.prototype._onack = function (id) {
   const write = this._wreqs[id]
   if (write) this._unacked = Math.max(0, (this._unacked ?? 0) - writeBytes(write))
   return acked.call(this, id)
+}
+
+/**
+ * dht-rpc 6.28.0 hands each reply to its request by walking `inflight`, every request the node has out or waiting in its
+ * queue, and finds a request it destroys (its last timeout) with indexOf over the same list. A relay full to its limits
+ * has thousands there (each listen's keep-alives, a restart's lookups and announcements): after a restart the two walks
+ * took a third of the relay's CPU, its thread pegged while most listens missed a browser's 20 s. `inflight` now keeps
+ * each request's slot and the requests of each tid (tids wrap at 65,536, so two may share one), and a reply goes to the
+ * oldest request of its tid, a destroy to its slot, at once. Everything else dht-rpc does with the list is unchanged.
+ */
+class Inflight extends Array {
+  // tid → its requests in flight, oldest first (nearly always one).
+  tids = new Map()
+  push(request) {
+    if (!requestPatched) patchRequest(Object.getPrototypeOf(request))
+    request._slot = this.length
+    super.push(request)
+    const same = this.tids.get(request.tid)
+    if (same) same.push(request)
+    else this.tids.set(request.tid, [request])
+    return this.length
+  }
+  pop() {
+    if (!this.length) return undefined
+    const request = super.pop()
+    request._slot = -1
+    const same = this.tids.get(request.tid)
+    if (same.length === 1) this.tids.delete(request.tid)
+    else same.splice(same.indexOf(request), 1)
+    return request
+  }
+  indexOf(request) {
+    return request?._slot >= 0 && this[request._slot] === request ? request._slot : -1
+  }
+  // The request into the last slot, the last one into its: dht-rpc then pops it.
+  toLast(request) {
+    const i = this.indexOf(request)
+    const last = this.length - 1
+    if (i === -1 || i === last) return
+    this[i] = this[last]
+    this[i]._slot = i
+    this[last] = request
+    request._slot = last
+  }
+  first(tid) {
+    return this.tids.get(tid)?.[0]
+  }
+}
+const IO = dhtRpc('./lib/io.js')
+// dht-rpc sets an empty list in the constructor; this keeps an Inflight in its place.
+Object.defineProperty(IO.prototype, 'inflight', {
+  set(list) {
+    const inflight = new Inflight()
+    for (const request of list) inflight.push(request)
+    Object.defineProperty(this, 'inflight', { value: inflight, writable: true, enumerable: true, configurable: true })
+  },
+})
+let requestPatched = false
+// dht-rpc's Request is not exported: patched from the first one made.
+function patchRequest(proto) {
+  requestPatched = true
+  const destroy = proto.destroy
+  proto.destroy = function (error) {
+    if (!this.destroyed && this._io.inflight instanceof Inflight) this._io.inflight.toLast(this)
+    return destroy.call(this, error)
+  }
+}
+const c = dhtRpc('compact-encoding')
+const peer = dhtRpc('./lib/peer.js')
+const RESPONSE_ID = (0b0001 << 4) | 0b11
+// dht-rpc's own decodeReply and validateId.
+function decodeReply(from, state) {
+  try {
+    const flags = c.uint.decode(state)
+    const tid = c.uint16.decode(state)
+    const to = peer.ipv4.decode(state)
+    const id = flags & 1 ? c.fixed32.decode(state) : null
+    const token = flags & 2 ? c.fixed32.decode(state) : null
+    const closerNodes = flags & 4 ? peer.ipv4Array.decode(state) : null
+    const error = flags & 8 ? c.uint.decode(state) : 0
+    const value = flags & 16 ? c.buffer.decode(state) : null
+    if (id !== null) {
+      const expected = peer.id(from.host, from.port)
+      from.id = b4a.equals(expected, id) ? expected : null
+    }
+    return { tid, rtt: 0, from, to, token, closerNodes, error, value }
+  } catch {
+    return null
+  }
+}
+const onmessage = IO.prototype.onmessage
+// A request goes to dht-rpc's own; a reply as dht-rpc 6.28.0 handles it, found by its tid.
+IO.prototype.onmessage = function (socket, buffer, { host, port }) {
+  if (buffer[0] !== RESPONSE_ID || !(this.inflight instanceof Inflight)) return onmessage.call(this, socket, buffer, { host, port })
+  if (buffer.byteLength < 2 || !(port > 0 && port < 65536) || this.suspended === true) return
+  const from = { id: null, host, port }
+  const res = decodeReply(from, { start: 1, end: buffer.byteLength, buffer })
+  if (res === null) return
+  const req = this.inflight.first(res.tid)
+  if (!req) return
+  const external = socket !== (this.firewalled ? this.clientSocket : this.serverSocket)
+  res.rtt = Date.now() - req._timestamp
+  if (this._adt && req.sent <= 2) this._adt.put(`${req.to.host}:${req.to.port}`, res.rtt)
+  this.inflight.toLast(req)
+  this.inflight.pop()
+  if (req.session) req.session._detach(req)
+  if (req._timeout) {
+    clearTimeout(req._timeout)
+    req._timeout = null
+  }
+  this.congestion.recv()
+  if (req.internal && req.command < this.stats.commands.length) this.stats.commands[req.command].rx++
+  this.stats.requests.active--
+  this.stats.requests.responses++
+  this.onresponse(res, external)
+  req.onresponse(res, req)
 }
 
 /**
