@@ -104,6 +104,19 @@ function saveKey(path: string, key: LoadedKey): void {
   try { writeSync(fd, key.pem); } finally { closeSync(fd); }
 }
 
+/**
+ * Saves the key, then writes what it signs: the key first, so nothing it signed is ever on disk without it. A write
+ * that fails (a folder it may not write) takes back the key this run made, which nothing signed by it needs: kept,
+ * the next run read it as an existing key and never said to back it up.
+ */
+function saveKeyThen(path: string, key: LoadedKey, write: () => void): void {
+  saveKey(path, key);
+  try { write(); } catch (error) {
+    if (key.pem) rmSync(path, { force: true });
+    throw error;
+  }
+}
+
 /** What the person is told on stderr when a key was made: where, which, and to back it up. Never the key. */
 function madeKeyNote(path: string, kind: KeyKind, key: string): string {
   return kind === "publisher"
@@ -456,9 +469,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
     throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
   }
-  saveKey(keyPath, key);
-  mkdirSync(dirname(out), { recursive: true });
-  writeWhole(out, bundle);
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(dirname(out), { recursive: true });
+    writeWhole(out, bundle);
+  });
 
   return {
     ...described(read.bundle, bundle),
@@ -623,9 +637,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  saveKey(keyPath, key);
-  mkdirSync(outDir, { recursive: true });
-  writeWhole(indexOut, indexBytes);
+  // The signature after the index is written keeps the key: the index names it, and a run again signs it with it.
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(outDir, { recursive: true });
+    writeWhole(indexOut, indexBytes);
+  });
   writeWhole(sigOut, sigBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
