@@ -1317,6 +1317,7 @@ async function listenCommand(argv: string[]): Promise<void> {
       types, turns,
       translate: translator?.event,
       exec: parsed.options.exec as string | undefined,
+      profile: { home: g.home, name: g.profile },
       webhook,
       cursor,
       cursorFailed,

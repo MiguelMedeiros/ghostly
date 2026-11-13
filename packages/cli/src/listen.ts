@@ -41,6 +41,12 @@ export interface ListenOptions {
   /** `EXEC_SLOW_MS` and `EXEC_STOP_MS`, shorter in tests. */
   execSlowMs?: number;
   stopMs?: number;
+  /**
+   * The folder and profile the listen runs on, set as `GHOSTLY_HOME` and `GHOSTLY_PROFILE` in an --exec hook's
+   * environment: its own `ghostly send` answers from them. Before, a listen given `--profile` or `--home` ran its hook
+   * on the environment's, and the answer went to the current profile ("No chat …", or another identity's chat).
+   */
+  profile?: { home: string; name: string };
 }
 
 /** The cursor's own write failed, not the event's handling. */
@@ -312,14 +318,14 @@ interface Hook { event: GhostlyEvent; ended: Promise<HookEnd>; signal(name: Node
  * `toStderr` (with `--print`, whose stdout is the JSON stream): the hook's stdout is streamed to listen's stderr, so a
  * hook that echoes never puts a line that is not an event into the stream. Piped as it comes, never held in memory.
  */
-function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook {
+function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profile?: ListenOptions["profile"]): Hook {
   // Its own process group (not on Windows, where that opens a console), so a stop ends the hook and what it started.
   const group = process.platform !== "win32";
   const child = spawn(command, {
     shell: true,
     detached: group,
     stdio: ["pipe", toStderr ? "pipe" : "inherit", "inherit"],
-    env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
+    env: { ...hookEnv(process.env), ...(profile ? { GHOSTLY_HOME: profile.home, GHOSTLY_PROFILE: profile.name } : {}), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
   });
   const signal = (name: NodeJS.Signals) => {
     try { if (group && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch { /* gone already */ }
@@ -453,7 +459,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (options.turns && !gap) event = toTurn(event)!;
       const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
-        const hook = running = runExec(options.exec, event, options.print);
+        const hook = running = runExec(options.exec, event, options.print, options.profile);
         // Once, as the webhook's "not answering": a hook that never ends held every later event without a word.
         const slow = setTimeout(() => process.stderr.write(`ghostly: --exec still runs on event ${hook.event.seq} (${hook.event.type}) after ${Math.round(slowMs / 1000)} s: the events after it wait for it\n`), slowMs);
         const { code, signal } = await hook.ended.finally(() => { clearTimeout(slow); running = null; });
