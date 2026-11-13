@@ -148,8 +148,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   else void started.catch(() => {});
 });
 
-async function reopenAfterUpdate(): Promise<void> {
-  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+/** In the same line as the toolbar button: pressed while the new version starts, it finds the page opened again. */
+function reopenAfterUpdate(): Promise<void> {
+  return inTurn(async () => { for (const url of await takePagesToReopen()) await openTab(url); });
 }
 
 /**
@@ -174,7 +175,11 @@ let showing: Promise<void> = Promise.resolve();
  * neither found the other's tab, so each opened one.
  */
 function showApp(route?: string): Promise<void> {
-  const run = showing.catch(() => {}).then(() => showAppNow(route));
+  return inTurn(() => showAppNow(route));
+}
+
+function inTurn(task: () => Promise<void>): Promise<void> {
+  const run = showing.catch(() => {}).then(task);
   showing = run;
   return run;
 }
@@ -186,15 +191,17 @@ async function showAppNow(route?: string): Promise<void> {
     // Only the fragment changes: the page stays, and its router goes there.
     await chrome.tabs.update(existing.tabId, route ? { active: true, url: `${url}#${route}` } : { active: true });
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
-  } else {
-    const tab = await chrome.tabs.create({ url: route ? `${url}#${route}` : url });
-    // The new tab is among the extension's contexts only once its page loads (some 20-30 ms later): the next one
-    // waits for that, or it opens a second tab too.
-    for (let attempt = 0; attempt < 40 && tab.id !== undefined; attempt++) {
-      const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
-      if (contexts.some((context) => context.tabId === tab.id)) return;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+  } else await openTab(route ? `${url}#${route}` : url);
+}
+
+async function openTab(url: string): Promise<void> {
+  const tab = await chrome.tabs.create({ url });
+  // The new tab is among the extension's contexts only once its page loads (some 20-30 ms later): the next one
+  // waits for that, or it opens a second tab too.
+  for (let attempt = 0; attempt < 40 && tab.id !== undefined; attempt++) {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+    if (contexts.some((context) => context.tabId === tab.id)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
