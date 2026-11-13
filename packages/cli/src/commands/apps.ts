@@ -86,7 +86,7 @@ export const commands: Record<string, Command> = {
     args: ["bundle"],
     options: {
       grant: { type: "list", description: "A permission the app asks and you allow: chat (talk to the contact's app) or name (your name in that chat); again for each" },
-      url: { type: "string", description: "Where a contact's app reads the bundle, for the card (default: the URL it was served from, else the manifest's first source)" },
+      url: { type: "string", description: "Where a contact's app reads the bundle, for the card (raw.githubusercontent.com, or cdn.jsdelivr.net at a commit; default: the first of those it was served from or its manifest names)" },
     },
     params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : here(a.bundle), grant: options.grant, url: options.url }),
   },
