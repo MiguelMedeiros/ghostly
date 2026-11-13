@@ -1200,7 +1200,7 @@ export class CashuWallet {
         const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
-          amount: Number(metadata.amount),
+          amount: metadata.amount.toNumber(),
           unit: metadata.unit,
           mint,
           memo: metadata.memo || undefined,
@@ -1212,7 +1212,7 @@ export class CashuWallet {
         const request = decodePaymentRequest(value);
         return {
           kind: "request",
-          amount: request.amount === undefined ? null : Number(request.amount),
+          amount: request.amount === undefined ? null : request.amount.toNumber(),
           unit: request.unit ?? UNIT,
           mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
@@ -1243,7 +1243,7 @@ export class CashuWallet {
       unit = metadata.unit;
       // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
       mint = mintUrlSpelling(metadata.mint);
-      faceValue = Number(metadata.amount);
+      faceValue = metadata.amount.toNumber();
     } catch {
       throw new Error("That is not a valid ecash token");
     }
