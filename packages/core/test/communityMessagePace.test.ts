@@ -59,7 +59,8 @@ async function community() {
   return { net, alice, bob, mallory };
 }
 
-describe("a community member's messages, at its pace", () => {
+// Signing and checking hundreds of frames takes seconds on an idle runner: past vitest's 5 s default on a busy one.
+describe("a community member's messages, at its pace", { timeout: 60_000 }, () => {
   it("are taken as much as a catch-up holds at once, then a window at a time, the rest neither stored nor passed on", async () => {
     const { net, mallory } = await community();
     const sent = BURST + 200;
