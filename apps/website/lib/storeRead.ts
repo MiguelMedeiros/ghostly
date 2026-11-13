@@ -128,13 +128,15 @@ function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: stri
  * with core's `readAppRevocations`, as the app reads it: one entry that does not verify refuses the whole file, and a
  * file that is missing, refused or over the app's bound revokes nothing. `files` keeps each file's answer for the read,
  * by its URL and by the SHA-256 of its bytes as the app keeps them: the same file at many URLs (a signature check per
- * entry, up to 4096) is checked once, not once per URL that serves it.
+ * entry, up to 4096) is checked once, not once per URL that serves it. `checked` holds each revocation that verified, so
+ * the same entries in another order (other bytes) are not checked again either.
  */
 function publisherRevoked(
   listing: { ref: string; digest: string; sequence: number; urls: string[] },
   sources: readonly string[] | undefined,
   revocations: Record<string, Uint8Array>,
   files: Map<string, SignedAppRevocation[]>,
+  checked: Set<string>,
 ): boolean {
   const urls = [...listing.urls.slice(0, STORE_LIMITS.urls), ...(sources ?? [])].filter(isStoreFetchUrl);
   for (const url of new Set(urls.map((u) => besideUrl(u, "ghostly-revoke.json")))) {
@@ -147,7 +149,7 @@ function publisherRevoked(
         const known = files.get(id);
         if (known !== undefined) held = known;
         else {
-          const read = readAppRevocations(bytes);
+          const read = readAppRevocations(bytes, checked);
           if (read.ok) held = read.revocations;
           files.set(id, held);
         }
@@ -206,6 +208,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
   const apps: StoreApp[] = [];
   const skipped: { ref: string; reason: string }[] = [];
   const revocationFiles = new Map<string, SignedAppRevocation[]>();
+  const checkedRevocations = new Set<string>();
   for (const listing of index.apps) {
     const skip = (reason: string) => skipped.push({ ref: listing.ref, reason });
     if (apps.length >= STORE_LIMITS.apps) {
@@ -227,7 +230,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
     }
     const { url, bundle } = found;
     const { manifest, digest, files } = bundle;
-    if (publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationFiles)) {
+    if (publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationFiles, checkedRevocations)) {
       skip("revoked");
       continue;
     }
