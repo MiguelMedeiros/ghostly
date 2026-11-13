@@ -93,6 +93,50 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
 
+  it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    // Enter at once: no new preview made yet, the message's own goes with the edit.
+    let view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // The site fails now: the card stays as it was.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // Removed with ×, or another link: it does not go.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    fireEvent.click(screen.getByTestId("link-preview-remove"));
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+    view.unmount();
+    onSave.mockClear();
+    editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("look https://other.example/page");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://other.example/page", undefined));
+  });
+
   it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
     const fetch = sites();
     composer();

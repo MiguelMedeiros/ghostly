@@ -119,8 +119,9 @@ interface MessageInputProps {
   /**
    * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
    * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
+   * `preview`: the message's link preview, which goes with the edit while its link stays and is not removed.
    */
-  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
+  edit?: { key: string; text: string; snippet: string; preview?: LinkPreview; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
   /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
   onEditLast?: () => void;
   /**
@@ -257,7 +258,7 @@ export function MessageInput({
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
   // Translate what I send, this chat's choice on this device (the Translation sheet).
   const translatesSend = useTranslatesWhatISend(draftId);
-  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
+  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
   // the chat before the person asked for it, so there the field waits for a tap (apps/ui/src/lib/touchOnly.ts).
