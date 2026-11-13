@@ -295,6 +295,8 @@
     "payWithFee": "{{amount}} + 手数料最大 {{fee}} を支払う",
     "paying": "支払い中…",
     "paysThrough": "{{domain}} 経由で支払い",
+    "pending": "支払いを処理中…",
+    "pendingAtCard": "{{card}}で支払いを処理中…",
     "pendingAtMint": "ミントで支払いを処理中…",
     "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",

@@ -295,6 +295,8 @@
     "payWithFee": "Pagar {{amount}} + taxa de até {{fee}}",
     "paying": "Pagando…",
     "paysThrough": "Pago via {{domain}}",
+    "pending": "Pagamento pendente…",
+    "pendingAtCard": "Pagamento pendente em {{card}}…",
     "pendingAtMint": "Pagamento pendente no mint…",
     "qrTooLong": "Longo demais para um QR code: copie em vez disso.",
     "redeem": "Resgatar",
