@@ -279,6 +279,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["No mint could create an invoice: mint.example did not answer", `${BROWSER}/engine/wallet.ts`, "No mint could create an invoice: "],
   ["This wallet has no test mint to ask for test coins", `${BROWSER}/engine/wallet.ts`],
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
+  ["mint.example has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."],
+  ["mint.example:3338 has not answered yet. The ecash is added to your wallet as soon as it does.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The ecash is added to your wallet as soon as it does."],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
   // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
@@ -464,7 +466,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Unknown payment", `${BROWSER}/engine/payments.ts`],
   ["The mint did not confirm the ecash", `${BROWSER}/engine/payments.ts`],
   ["your contact closed it", `${BROWSER}/engine/payments.ts`],
-  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/node.ts`],
+  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/payments.ts`],
   ["Fedimint is off in this chat", `${BROWSER}/engine/payments.ts`],
   ["This app has no Fedimint wallet", `${BROWSER}/engine/payments.ts`],
   ["Unsupported amount", `${BROWSER}/engine/payments.ts`],
@@ -610,6 +612,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["A contact's app does not open in the browser extension while Hide my IP from contacts is on", "apps/extension/src/background.ts"],
   ["A contact's app does not open in the web app while Hide my IP from contacts is on", "apps/web/src/host.ts"],
+  ["The profile locked before the contact's app opened", "apps/ui/src/lib/serviceWindows.ts"],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
@@ -652,6 +655,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // An OpenPGP key of a kind or size the Add dialog refuses.
   ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
   ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
+  ["This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.", `${BROWSER}/proofs/openpgp.ts`, " key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key."],
+  ["This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", `${BROWSER}/proofs/openpgp.ts`, "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -796,6 +801,15 @@ describe("errors in the app's language", () => {
     }
     const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
     expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
+    const v5 = "This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.";
+    expect(problemText(new Error(v5), t)).toEqual({ tone: "error", title: t("errors.proof.pgpKeyVersion", { version: "5" }), next: t("errors.proof.pgpKeyVersionNext") });
+  });
+
+  it.each(LANGUAGES)("a key keys.openpgp.org serves without its user IDs says why it cannot be checked and what to do in %s", (language) => {
+    const t = translators[language];
+    const raw = "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.pgpNoUserIds"), next: t("errors.proof.pgpNoUserIdsNext") });
+    expect(problemText(new Error(raw), t, "proof").title).not.toBe(t("errors.proof.checkFailed"));
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
@@ -1036,6 +1050,18 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
     expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {
+    const pay = "testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.";
+    const redeem = "testnut.cashu.space has not answered yet. The ecash is added to your wallet as soon as it does.";
+    expect(problemText(new Error(pay), english)).toEqual({ tone: "error", title: "testnut.cashu.space hasn't answered yet", next: "The payment wasn't made. The sats set aside for it come back to your wallet a few minutes after the mint answers." });
+    expect(problemText(new Error(redeem), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space ainda não respondeu", next: "O ecash entra na sua carteira assim que ele responder." });
+    for (const language of LANGUAGES) for (const raw of [pay, redeem]) {
+      const { title, next } = problemText(new Error(raw), translators[language]);
+      expect(title, language).toContain("testnut.cashu.space");
+      expect(next, language).toBeTruthy();
+    }
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {

@@ -79,6 +79,13 @@ describe('OpenPGP proof: refused', () => {
     await refuse('secp256k1-clearsign', 'secp256k1', /secp256k1.*does not accept/);
   });
   it('a SHA-1 signature', () => refuse('alice-sha1', 'alice', /weak hash/));
+  it('a v5 key, as GnuPG 2.3 and later make Ed448 ones, named as such and not as no key at all', async () => {
+    await refuse('ed448-v5-clearsign', 'ed448-v5', /^This is an OpenPGP v5 key, which Ghostly does not accept\./);
+    await expect(readPgpPublicKey(read('ed448-v5.pub.asc'), { now: NOW })).rejects.toThrow(/OpenPGP v5 key/);
+    // Off the wire too: the same key in binary.
+    const { data } = await openpgp.unarmor(read('ed448-v5.pub.asc'));
+    await expect(verifyPgpEvidence({ scheme: 'openpgp/1', key: toBase64Url(data as Uint8Array), signature: toBase64Url(new Uint8Array([0xc2, 0])) }, statement, { now: NOW })).rejects.toThrow(/OpenPGP v5 key/);
+  });
   it('an inline signed message and a message with two signers', async () => {
     await refuse('alice-inline', 'alice', /gpg --sign/);
     await refuse('two-signers', 'alice', /one key only/);

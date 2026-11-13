@@ -152,6 +152,19 @@ describe("invite cards", () => {
     bubble(`${inviteCode.slice(0, -1)}${inviteCode.endsWith("q") ? "p" : "q"}`);
     expect(screen.queryByTestId("entity-cards")).toBeNull();
   });
+
+  it("shows no card for an invite or a Nostr code the text holds only inside a spoiler, and one for what shows outside it", () => {
+    const { inviteCode } = createChatInvite();
+    const npub = npubEncode(hex());
+    for (const text of [`guess who: ||${inviteLink(inviteCode)}||`, `||${npub}||`, `> ||here: ${inviteCode}||`, `[||tap||](${inviteLink(inviteCode)})`]) {
+      const view = bubble(text);
+      expect(screen.queryByTestId("entity-cards"), text).toBeNull();
+      view.unmount();
+    }
+    bubble(`${npub} and ||${inviteLink(inviteCode)}||`);
+    expect(screen.getByTestId("entity-nostr")).toBeInTheDocument();
+    expect(screen.queryByTestId("entity-invite")).toBeNull();
+  });
 });
 
 describe("group cards", () => {

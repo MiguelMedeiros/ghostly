@@ -1,5 +1,6 @@
 import { MEMBER_KEY } from "@ghostly/core";
 import { isWorthlessMint } from "../shared/mints";
+import { groupPayLineId } from "../shared/groupPayNotes";
 import { paymentWireId } from "../shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, GroupPayRail, GroupView, PaymentView, StoredMessage } from "../shared/types";
 
@@ -20,7 +21,7 @@ const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const RESEND = 32;
 /** Notes from others still waiting for their initiator, kept per group in memory only; the oldest go first. */
 export const WAITING = 256;
-export const NOTE_ID = (id: string) => `gpay:${id}`;
+export const NOTE_ID = groupPayLineId;
 
 /** A `group-pay` frame, strictly: anything else is dropped. */
 export function parseGroupPay(raw: unknown, groupId: string): GroupPayFrame | null {
@@ -103,8 +104,10 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
 export interface Placement { groupId: string; me: string; peer?: string }
 
 const federationOf = (p: PaymentView): string | undefined => p.federation ?? p.federations?.[0];
+/** A request's `mint` is where its invoice was paid in (a Cashu mint's Lightning, `onLightningPaid`), not how it was asked. */
 const railOf = (p: PaymentView): GroupPayRail =>
-  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint" : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
+  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint"
+    : p.invoice && !p.mints?.length && (p.kind === "request" || !p.mint) ? "lightning" : "cashu";
 /** Test money as the chat's bubble reads it (paymentIsTest): a target's chain, else the record's network, else a Fedimint federation's network, else its mints. */
 const testOf = (p: PaymentView, federationNetwork: (federation: string) => string | undefined): boolean => {
   if (p.target) return p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin";

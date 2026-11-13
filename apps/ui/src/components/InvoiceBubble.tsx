@@ -14,6 +14,7 @@ import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { cardOn } from "../lib/chatPayments";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
+import { RichText } from "./rich/RichText";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
@@ -106,7 +107,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
   const fits = useMemo(() => qrFits(qr), [qr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
-      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
+      <p className="chat-text-pay-label uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
       <p className="m-0 mt-0.5 leading-tight">
         {otherUnit ? (
           <span className="text-[15px] font-semibold" data-testid="money-other-unit">{otherUnit}</span>
@@ -124,9 +125,9 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
       </p>
       {/* A memo or a mint's address is text someone else wrote, in any script: laid out by its own direction, as a message is. */}
       {lines.filter(Boolean).map((line) => (
-        <p key={line} dir="auto" className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
+        <p key={line} dir="auto" className="chat-text-pay-detail leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
-      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      {!fits && <p className="chat-text-pay-detail leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
       {fits && showQr && (
         <button
           onClick={() => setShowQr(false)}
@@ -249,15 +250,15 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
       qr={`lightning:${invoice.invoice}`.toUpperCase()}
     >
       {paid ? (
-        <span ref={target} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="invoice-paid">{t("payments.invoice.paid")}</span>
+        <span ref={target} tabIndex={-1} className="text-accent-hover chat-text-card-line font-bold self-center focus:outline-none" data-testid="invoice-paid">{t("payments.invoice.paid")}</span>
       ) : pending ? (
-        <span ref={target} tabIndex={-1} className="text-xs self-center text-text-primary/80 focus:outline-none" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
+        <span ref={target} tabIndex={-1} className="chat-text-card-line self-center text-text-primary/80 focus:outline-none" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
       ) : quote && confirming && over === undefined ? (
         <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         // Each step's own buttons (keyed): reused across steps, the Cancel pressed would come back as Copy, focused.
         <Fragment key="quote">
-          {over !== undefined && <p className="text-danger-ink text-xs m-0 basis-full" data-testid="invoice-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit: satsIn(t, network) })}</p>}
+          {over !== undefined && <p className="text-danger-ink chat-text-card-line m-0 basis-full" data-testid="invoice-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit: satsIn(t, network) })}</p>}
           <button ref={target} className={button} disabled={over !== undefined} {...working(busy)} data-testid="invoice-confirm" onClick={() => { if (busy) return; if (network === "mainnet") setConfirming(true); else void pay(quote, false); }}>
             {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
@@ -280,7 +281,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
         </Fragment>
       )}
       {failed && <MoneyCopyRefused value={invoice.invoice} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
+      {error && <Notice problem={error} className="chat-text-card-line m-0 basis-full" />}
     </Card>
   );
 }
@@ -303,9 +304,9 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   }, [paying]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
-      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
-      <p className="m-0 mt-0.5 leading-tight"><span className="text-accent me-1">⚡</span><span className="text-[15px] font-semibold break-all" data-testid="lnurl-text">{destination.text}</span></p>
-      <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/80">{t("payments.invoice.paysThrough", { domain: destination.domain })}</p>
+      <p className="chat-text-pay-label uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
+      <p className="m-0 mt-0.5 leading-tight"><span className="text-accent me-1">⚡</span><span className="chat-text-pay-title font-semibold break-all" data-testid="lnurl-text">{destination.text}</span></p>
+      <p className="chat-text-pay-detail leading-snug m-0 mt-1 text-text-primary/80">{t("payments.invoice.paysThrough", { domain: destination.domain })}</p>
       {paying && wallet ? (
         <div className="mt-2"><LightningAddressPay wallet={wallet} text={destination.text} dense onDone={() => setPaying(false)} /></div>
       ) : (
@@ -358,7 +359,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
     };
   }, [wallet, value]);
 
-  if (!inspection) return <span className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">{value}</span>;
+  if (!inspection) return <span className="chat-text-message wrap-break-word whitespace-pre-wrap">{value}</span>;
 
   const host = (url: string) => {
     try {
@@ -412,9 +413,9 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       qr={value}
     >
       {redeemed ? (
-        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{feeKept > 0 ? t("payments.invoice.redeemedFee", { fee: formatAmount(feeKept, t.language) }) : t("payments.invoice.redeemed")}</span>
+        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover chat-text-card-line font-bold self-center focus:outline-none" data-testid="token-redeemed">{feeKept > 0 ? t("payments.invoice.redeemedFee", { fee: formatAmount(feeKept, t.language) }) : t("payments.invoice.redeemed")}</span>
       ) : spent ? (
-        <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
+        <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 chat-text-card-line font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
         wallet && !mine && !offOn(network) && inspection.accepted && (
           <button
@@ -447,7 +448,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       )}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
       {failed && <MoneyCopyRefused value={value} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
+      {error && <Notice problem={error} className="chat-text-card-line m-0 basis-full" />}
     </Card>
   );
 }
@@ -491,12 +492,13 @@ export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: Money
   const off = !!method && offHere(method, network);
   return (
     <>
-      {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
+      {/* The words around the money read as any message's text: a spoiler among them stays covered. */}
+      {money.rest && <RichText text={money.rest} className="chat-text-message wrap-break-word whitespace-pre-wrap block m-0 mb-1.5" />}
       <Fragment key={whatItPays(money)}>
         {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}
       </Fragment>
-      {off && method && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
+      {off && method && !mine && <p className="chat-text-pay-label text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>
   );
 }

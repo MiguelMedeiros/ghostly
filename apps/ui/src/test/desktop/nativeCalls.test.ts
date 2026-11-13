@@ -787,6 +787,33 @@ describe("the devices, which are GStreamer's and known by name", () => {
     await expect(nativeDevices.meter!("Mic B", () => {})).rejects.toBe("The microphone could not start");
   });
 
+  it("tells Rust when the window goes out of sight once Settings' meter is on, with no call or camera open", async () => {
+    // Out of sight, Rust says no level to the meter: 12 a second, each an eval in the page, for a meter nobody sees.
+    // A page of its own: no picture of an earlier test has started following the window already. That earlier
+    // module's own listener is still on `document`, so the one this page adds is called by itself.
+    vi.resetModules();
+    const fresh = await import("../../desktop/nativeCalls");
+    tauri.invoke.mockImplementation(async (command) => (command === "native_microphone_meter" ? { meter: 1, device: null } : undefined));
+    const hidden = { on: false };
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const added = vi.spyOn(document, "addEventListener");
+    const told = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_pictures_shown").map(([, args]) => args);
+    try {
+      const stop = await fresh.nativeDevices.meter!(undefined, () => {});
+      const follows = added.mock.calls.filter(([type]) => type === "visibilitychange").map(([, listener]) => listener as () => void);
+      expect(follows, "the page follows the window's sight").toHaveLength(1);
+      hidden.on = true;
+      follows[0]();
+      hidden.on = false;
+      follows[0]();
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }]));
+      stop();
+    } finally {
+      added.mockRestore();
+      hiddenSpy.mockRestore();
+    }
+  });
+
   it("plays the speakers' test in Rust, on the speaker by name", async () => {
     await nativeDevices.testSpeaker!("Headphones");
     await nativeDevices.testSpeaker!(undefined);

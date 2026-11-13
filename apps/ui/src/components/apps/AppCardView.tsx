@@ -86,23 +86,23 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
           {/* A long title is cut alone: the version stays whole after it, the one a contact opened or this app has. A
               version too long for half the line ("1.2.0-beta.3+20261106.a1b2c3d") is cut at its end instead, or it took
               the title's place. The row goes the page's way, from the icon; the title and version read in their own. */}
-          <p className="flex items-baseline gap-1 text-sm font-medium text-text-primary" data-testid="app-card-title">
+          <p className="flex items-baseline gap-1 chat-text-card-title font-medium text-text-primary" data-testid="app-card-title">
             <span dir="auto" className="truncate min-w-0">{title}</span>
             {version && <>{" "}<span dir="ltr" className="shrink-0 max-w-[50%] truncate">{version}</span></>}
           </p>
-          <p data-testid="app-card-who" className={`text-xs text-text-secondary ${mine ? "truncate" : "flex min-w-0 overflow-hidden whitespace-nowrap"}`}>{who}</p>
-          <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
-            <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />
+          <p data-testid="app-card-who" className={`chat-text-card-line text-text-secondary ${mine ? "truncate" : "flex min-w-0 overflow-hidden whitespace-nowrap"}`}>{who}</p>
+          <p className="flex flex-wrap items-center gap-x-2 chat-text-card-line text-text-muted">
+            <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} size="chat-text-card-note" />
             <span ref={checkRef} tabIndex={stopped ? -1 : undefined} data-testid="app-card-check" className={stopped ? "text-danger-ink" : undefined}>{stopped ? t("apps.app.stopped") : app ? t("apps.card.installed") : t("apps.card.notChecked")}</span>
           </p>
         </div>
       </div>
-      {waiting && <p className="text-xs text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
+      {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
+      {error && <p role="alert" className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
+            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
         {app?.run.status === "removed" &&<Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>

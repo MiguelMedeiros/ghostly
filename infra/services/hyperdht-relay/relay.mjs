@@ -134,6 +134,28 @@ async function holdsKey(keyPair, options, onLeave) {
   sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
   return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
 }
+/**
+ * Where a dial's stream goes. A far server that says it is open has HyperDHT connect the dial's UDX stream to the first
+ * public address it names, whatever that is, and send it everything the client writes: through the relay, anyone could
+ * have its node send UDP to any public host and port, from the relay's address. The public addresses a far server names
+ * are dropped from its reply to a dial here, so HyperDHT connects to the address the DHT node that relayed the handshake
+ * saw it at (an open server names that one itself). Its private ones stay: HyperDHT tries them only on a LAN, by a ping.
+ * Every other way a dial connects follows a packet from the far peer.
+ */
+const { isBogon } = hyperdht('bogon')
+const NoiseWrap = hyperdht('./lib/noise-wrap.js')
+const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
+const reached = payload => payload?.addresses4?.length ? { ...payload, addresses4: payload.addresses4.filter(address => isBogon(address.host)) } : payload
+const reachedOnly = create => (...args) => {
+  const handshake = create(...args)
+  const recv = handshake.recv.bind(handshake)
+  // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
+  handshake.recv = (...message) => {
+    const payload = recv(...message)
+    return typeof payload?.then === 'function' ? payload.then(reached) : reached(payload)
+  }
+  return handshake
+}
 const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
 
 /**
@@ -230,7 +252,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
-        return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
+        return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
@@ -651,9 +673,19 @@ export async function startRelay(options = {}) {
   }, 60_000)
   forgetRoom.unref?.()
 
+  // Set as close() starts: while it waits for its clients, a client that redials on its 1001 would be let in again and
+  // cut with 1006 at the end of the wait, and a health check would keep sending new ones.
+  let stopping = false
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
-    if (request.url === '/healthz') {
+    // A GET or a monitor's HEAD (Node sends no body for it), with or without a query string, as the push relay reads it.
+    const health = (request.method === 'GET' || request.method === 'HEAD') && request.url.split('?')[0] === '/healthz'
+    if (health && stopping) {
+      response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: false, stopping: true }))
+      return
+    }
+    if (health) {
       // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
       // Anyone may read it (behind a proxy every caller is on loopback), so only the node's state: the client counts
       // and the time of the last answer move with each browser, and on a small relay would tell when one opens the app.
@@ -678,13 +710,14 @@ export async function startRelay(options = {}) {
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.
-    const refuse = (status, why) => {
+    const refuse = (status, why, headers = '') => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
       if (why) refusals.line('refused', why)
       socket.on('error', () => {})
-      socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
+      socket.end(`HTTP/1.1 ${status}\r\n${headers}Connection: close\r\n\r\n`)
     }
+    if (stopping) return refuse('503 Service Unavailable', 'stopping', 'Retry-After: 1\r\n')
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     const room = clients.size >= limits.clients ? makeRoom(address) : undefined
     if (room === null) return refuse('503 Service Unavailable', 'full')
@@ -853,8 +886,9 @@ export async function startRelay(options = {}) {
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
-    // one that has not closed within `stopMs` is cut.
+    // one that has not closed within `stopMs` is cut. Meanwhile a new client is refused (503) and /healthz reads 503.
     async close({ stopMs = 1000 } = {}) {
+      stopping = true
       for (const ws of clients) ws.close(1001, 'The relay is stopping')
       if (clients.size) {
         let timer
@@ -942,6 +976,29 @@ const TIMER_MAX_MS = 2 ** 31 - 1
 
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
 
+/**
+ * The GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables in `env` that are none of `known`, sorted, each with the known
+ * name at most 3 edits away when there is one (`GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)`): a misspelt name was the
+ * default without a word, often the less safe one. Not a refusal: one env file may serve both relays.
+ */
+function ignoredSettings (env, known) {
+  return Object.keys(env).filter(name => /^GHOSTLY_(RELAY|HYPERDHT)_/.test(name) && !known.includes(name)).sort().map(name => {
+    const [closest] = known.map(other => ({ other, edits: editDistance(name, other) })).sort((a, b) => a.edits - b.edits)
+    return closest && closest.edits <= 3 ? `${name} (${closest.other}?)` : name
+  })
+}
+
+/** Levenshtein distance: the fewest characters to add, drop or change to turn `a` into `b`. */
+function editDistance (a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    row = next
+  }
+  return row[b.length]
+}
+
 /** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
 export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
 
@@ -955,7 +1012,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
  * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes.
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes. `ignored`
+ * names the other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
   const limits = {}
@@ -979,6 +1037,10 @@ export function readSettings (env) {
     proxies,
     cloudflare,
     limits,
+    ignored: ignoredSettings(env, [
+      ...Object.keys(DEFAULT_LIMITS).map(limitVariable), 'GHOSTLY_HYPERDHT_BOOTSTRAP', 'GHOSTLY_HYPERDHT_TESTNET',
+      'GHOSTLY_RELAY_ORIGINS', 'GHOSTLY_RELAY_CLOUDFLARE', 'GHOSTLY_RELAY_PROXIES',
+    ]),
   }
 }
 

@@ -8,10 +8,14 @@ import { expect, pairWithWeb, PKG, test, type AndroidApp } from "./support/andro
  * link went down within seconds, and on return it had to connect again. With "Stay connected in the background" on
  * (the default) the app holds a remote-messaging foreground service with a quiet notification (ConnectionService.kt).
  *
- * How long the app stays away: E2E_ANDROID_AWAY_S (60 s by default; the PR's 1 / 5 / 15 / 30 min runs set it).
+ * The emulator applies none of Android's background limits by itself, so the spec sets them while the app is away
+ * (`backgroundLimits`); with the switch off the same limits take the chat down, which the last test checks.
+ *
+ * How long the app stays away: E2E_ANDROID_AWAY_S (90 s by default: a link the peer stops hearing goes down after its
+ * missed pings, about a minute; the PR's 1 / 5 / 15 / 30 min runs set it).
  */
 
-const AWAY_MS = Number(process.env.E2E_ANDROID_AWAY_S || 60) * 1000;
+const AWAY_MS = Number(process.env.E2E_ANDROID_AWAY_S || 90) * 1000;
 const STEP_MS = Math.min(10_000, AWAY_MS);
 
 const connection = (page: Page) => page.getByTestId("connection-options").filter({ visible: true }).first();
@@ -35,19 +39,49 @@ function serviceRecord(app: AndroidApp): string {
 }
 
 /**
- * The app away for AWAY_MS while the web peer (always in front) watches the chat: how long the web peer saw it
- * connected, and once back, how long the app took to say Connected again.
+ * Android's limits on an app out of sight, which the emulator leaves off: it never freezes a cached app (adj 700,
+ * isFrozen=false), so what takes a chat down there with the switch off is not what takes it down on a phone. The app's
+ * standby bucket "rare" and the device in Doze (on battery, deep idle forced), as a phone left on a table has them:
+ * Doze cuts the network of every app that runs nothing in the foreground, and a foreground service is what keeps it.
+ * Not "Restricted" battery use (appops RUN_ANY_IN_BACKGROUND): Android stops the service itself there, and the person
+ * chose that. Lifted before the app comes back, as the screen turned on does. Returns the undo.
+ */
+function backgroundLimits(app: AndroidApp): () => void {
+  const { adb } = app;
+  const deepWas = adb.run("shell", "dumpsys", "deviceidle", "enabled", "deep").trim();
+  adb.run("shell", "dumpsys", "deviceidle", "whitelist", `-${PKG}`);
+  adb.run("shell", "dumpsys", "battery", "unplug");
+  adb.run("shell", "am", "set-standby-bucket", PKG, "rare");
+  adb.run("shell", "dumpsys", "deviceidle", "enable", "deep");
+  const forced = adb.run("shell", "dumpsys", "deviceidle", "force-idle", "deep");
+  if (!/deep idle/i.test(forced) || /unable/i.test(forced)) throw new Error(`dumpsys deviceidle force-idle deep: ${forced}`);
+  return () => {
+    adb.tryRun("shell", "dumpsys", "deviceidle", "unforce");
+    if (deepWas === "0") adb.tryRun("shell", "dumpsys", "deviceidle", "disable", "deep");
+    adb.tryRun("shell", "am", "set-standby-bucket", PKG, "active");
+    adb.tryRun("shell", "dumpsys", "battery", "reset");
+  };
+}
+
+/**
+ * The app away for AWAY_MS, under Android's background limits, while the web peer (always in front) watches the chat:
+ * how long the web peer saw it connected, and once back, how long the app took to say Connected again.
  */
 async function awayAndBack(app: AndroidApp, web: Page): Promise<{ webConnected: number; steps: number; backMs: number; seen: string[] }> {
   app.background();
+  const lift = backgroundLimits(app);
   const seen: string[] = [];
   let webConnected = 0, steps = 0;
-  for (let at = STEP_MS; at <= AWAY_MS; at += STEP_MS) {
-    await new Promise((done) => setTimeout(done, STEP_MS));
-    const live = await connected(web);
-    steps++;
-    if (live) webConnected++;
-    seen.push(`${at / 1000}s web ${live ? "connected" : "not connected"} [${processState(app)}]${serviceRuns(app) ? " service" : ""}`);
+  try {
+    for (let at = STEP_MS; at <= AWAY_MS; at += STEP_MS) {
+      await new Promise((done) => setTimeout(done, STEP_MS));
+      const live = await connected(web);
+      steps++;
+      if (live) webConnected++;
+      seen.push(`${at / 1000}s web ${live ? "connected" : "not connected"} [${processState(app)}]${serviceRuns(app) ? " service" : ""}`);
+    }
+  } finally {
+    lift();
   }
   const back = Date.now();
   app.foreground();
@@ -126,7 +160,8 @@ test("off, the app stops out of sight as before, and the service is let go", { t
   await app.page.evaluate(() => { localStorage.setItem("ghostly_stay_connected", "0"); dispatchEvent(new Event("ghostly-stay-connected")); });
   await expect.poll(() => serviceRuns(app), { message: "the connection service stopped" }).toBe(false);
 
-  // The "before" numbers: nothing asserted of them, they are what the switch changes.
+  // The "before": under the same limits the chat goes down, so the first test's "connected all along" is the service's.
   const away = await awayAndBack(app, web.page);
   test.info().annotations.push({ type: "measure", description: `off, away ${AWAY_MS / 1000}s: web connected ${away.webConnected}/${away.steps}, back ${away.backMs} ms` });
+  expect(away.webConnected, `the web peer saw the chat go down: ${away.seen.join(", ")}`).toBeLessThan(away.steps);
 });

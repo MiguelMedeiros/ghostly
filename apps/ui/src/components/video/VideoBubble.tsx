@@ -127,8 +127,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     const fullscreen = theater ? platform?.fullscreenWindow : null;
     if (!fullscreen) return;
     void fullscreen(true).catch(() => {});
-    // Spent: a notice at the top that also answers Escape stays.
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setTheater(false); } };
+    // Spent: a notice at the top that also answers Escape stays. Not one from a menu over it (a call's Devices): the menu
+    // closes, and the video stays as it is.
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || (event.target instanceof Element && event.target.closest("[data-menu]"))) return;
+      event.preventDefault();
+      setTheater(false);
+    };
     document.addEventListener("keydown", onKey);
     // A call that rings or starts is drawn under it: it makes way, as a contact's app drawn over the app does.
     const stop = onCallWindowShown(() => setTheater(false));
@@ -412,7 +417,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         )}
       </div>
       {offered && typeof transfer.room === "number" && (
-        <p className={`text-[11px] m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
+        <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
         </p>
       )}
@@ -426,7 +431,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
           ) : null}
           {status && (
-            <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
+            <p className={`flex items-center gap-1 min-w-0 chat-text-media-meta m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
               {/* Wraps, as a file's line: cut, it lost its speed and time left. */}
               <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
@@ -443,14 +448,14 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="video-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
-        <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
+        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
-            <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
+            <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer">{t("chat.message.download")}</button>
           )}
         </p>
       )}
-      {actionError && !status && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
+      {actionError && !status && <p className="chat-text-media-line text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
     </div>
   );
 }

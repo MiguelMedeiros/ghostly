@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MESH_HUBS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
+import { MESH_HUBS, REACTION_LIMITS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.hubs.budget, groups.send, groups.catch-up, groups.remove-member, groups.leave
 
@@ -90,6 +90,33 @@ describe("hubs in a private group past 16 members", () => {
     const forged = { ...frame, t: "group-reacted", k: keyOf(b, others[6]) };
     await others[7].groups.handleEdgeFrame(id, keyOf(b, hub), structuredClone(forged));
     expect(reactions.get(others[7])?.some(r => r.member === keyOf(b, others[6])) ?? false).toBe(false);
+  }, 180_000);
+
+  it("a hub passes on a member's reactions at the pace a member takes them, whatever numbers or messages they name", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, peers } = b;
+    const hubs = [peers[2], peers[5]], others = peers.filter(p => !hubs.includes(p));
+    await world.until(() => onHubs(b, others) && others.every(p => edgesOf(b, p).length <= MESH_HUBS.hubsPerMember + (p === b.admin ? 1 : 0)), 10 * 60_000, 1000);
+    const reactor = others[3], reactorKey = keyOf(b, reactor), target = keyOf(b, others[4]);
+    const hub = hubs.find(h => edgesOf(b, reactor).some(e => e.peer === keyOf(b, h)))!;
+    const sentBefore = peers.reduce((s, p) => s + p.sent.frames, 0);
+    // A burst at once: one message with rising numbers, then messages that are not there.
+    for (let n = 1; n <= 100; n++) {
+      const wire = { id: `${target}:0:0`, e: "👍", n };
+      await hub.groups.handleEdgeFrame(id, reactorKey, { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) });
+    }
+    for (let i = 1; i <= 100; i++) {
+      const wire = { id: `${target}:9:${i}`, e: "👍", n: 100 + i };
+      await hub.groups.handleEdgeFrame(id, reactorKey, { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) });
+    }
+    await world.run(1_000);
+    // Every other member hears at most a window's worth from that member (once per hub), not every frame.
+    for (const p of peers.filter(p => p !== reactor && p !== hub)) {
+      const heard = new Set((reactions.get(p) ?? []).filter(r => r.member === reactorKey).map(r => r.n));
+      expect(heard.size).toBeGreaterThan(0);
+      expect(heard.size).toBeLessThanOrEqual(REACTION_LIMITS.receive);
+    }
+    expect(peers.reduce((s, p) => s + p.sent.frames, 0) - sentBefore).toBeLessThanOrEqual(REACTION_LIMITS.receive * 2 * peers.length);
   }, 180_000);
 
   it("a group of 16 stays a full mesh, whatever hubs there could be", async () => {

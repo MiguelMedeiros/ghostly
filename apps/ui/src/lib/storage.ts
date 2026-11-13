@@ -98,6 +98,15 @@ function getKey(sessionId: string): string {
   return `${getPrefix()}${sessionId}`;
 }
 
+/**
+ * The key a chat's id is read from, or null for an id no chat has: a chat's id never has `_` (`isSessionKey`), and one
+ * that has it (a chat address's `chat_folders`) names another of the profile's keys or, in the first profile, whose
+ * prefix starts every other profile's, another profile's chat.
+ */
+function readableKey(sessionId: string): string | null {
+  return sessionId && !sessionId.includes("_") ? getKey(sessionId) : null;
+}
+
 /** Whether a stored key is one of this profile's chats: the prefix and the chat's id; a longer key is another profile's, or not a chat. */
 export function isSessionKey(key: string | null | undefined): key is string {
   return !!key?.startsWith(getPrefix()) && !key.slice(getPrefix().length).includes("_");
@@ -342,8 +351,10 @@ function makeRoom(chatId: string, write: () => boolean): void {
 
 /** A session as stored, unparsed: to tell cheaply whether it changed. */
 export function storedSession(sessionId: string): string | null {
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
-    return readKey(getKey(sessionId));
+    return readKey(key);
   } catch {
     return null;
   }
@@ -351,8 +362,10 @@ export function storedSession(sessionId: string): string | null {
 
 /** The session as stored, its older messages left out (see `STORED_MESSAGES`). */
 function loadStored(sessionId: string): ChatSession | null {
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
-    const raw = readKey(getKey(sessionId));
+    const raw = readKey(key);
     if (!raw) return null;
     return JSON.parse(raw) as ChatSession;
   } catch {
@@ -704,7 +717,8 @@ export function listShownSessions(): ChatSession[] {
 
 /** A chat's session through the page's one cache: as stored (`parsed`), and with its older messages (`session`). */
 function readShown(sessionId: string): { parsed: ChatSession; session: ChatSession } | null {
-  const key = getKey(sessionId);
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
     const raw = readKey(key);
     return raw ? readThrough(key, raw, shownCache) : null;
@@ -810,7 +824,8 @@ function contactOf(key: string): ChatKeys | undefined {
 
 /** The contact's key in the chat `sessionId`, without reading its messages again: what finds its link in the engine's state. */
 export function sessionPeerKey(sessionId: string): string | undefined {
-  return contactOf(getKey(sessionId))?.peer;
+  const key = readableKey(sessionId);
+  return key ? contactOf(key)?.peer : undefined;
 }
 
 /**

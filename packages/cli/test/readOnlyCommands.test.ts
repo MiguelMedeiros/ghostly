@@ -4,9 +4,10 @@ import { LOCAL_SETTINGS, offlineCall, readOnly } from "../src/main";
 // covers: headless.cli
 
 /**
- * Every table command is named here once: one that only reads what the profile stores, or changes only this device,
- * opens it offline as a one-shot, any other online. A new command fails here until it is put in one of the three, so
- * nothing goes online by default (eight reads did: 3 relay PUTs and 2 GETs each, 3.3 s with a relay that takes 1.5 s).
+ * Every table command is named here once: one that only reads what the profile stores, changes only this device, or
+ * says something on a live session only opens it offline as a one-shot, any other online. A new command fails here
+ * until it is put in one of the four, so nothing goes online by default (eight reads did: 3 relay PUTs and 2 GETs
+ * each, 3.3 s with a relay that takes 1.5 s).
  */
 const READS = [
   "events", "status", "chat history", "chat list", "chat show", "message details", "group history", "group list", "group show",
@@ -18,13 +19,18 @@ const READS = [
  * it, and only a live session says it (a one-shot waits for none; the daemon, or the profile's next run online, does).
  */
 const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set", "x401 credential add", "x401 credential remove", "x401 key new"];
+/**
+ * Said on a live session only: a one-shot starts the chat or group as it says it, so it reaches nobody (it waited for
+ * the relays all the same). Offline unless `--for` waits for the chat to be live.
+ */
+const LIVE_ONLY = ["group typing", "typing"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
   "forward", "invite create", "invite join", "message delete", "message retry", "pin", "react", "routine send", "routine update", "task send",
-  "task update", "typing", "usage send",
+  "task update", "usage send",
   "group accept", "group admin", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
-  "group link", "group picture", "group react", "group remove", "group rename", "group rotate", "group typing",
+  "group link", "group picture", "group react", "group remove", "group rename", "group rotate",
   "file accept", "file cancel", "file decline", "file pause", "file request", "file resend", "file resume", "file save", "file send", "file wait",
   "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
@@ -37,14 +43,22 @@ const ONLINE = [
 describe("which one-shots open the profile offline", () => {
   const table = Object.entries(COMMANDS).filter(([, c]) => !c.run);
 
-  it("names every table command once, as a read, a change of this device or neither", () => {
-    expect([...READS, ...LOCAL_WRITES, ...ONLINE].sort()).toEqual(table.map(([name]) => name).sort());
+  it("names every table command once, as a read, a change of this device, live only or none of them", () => {
+    expect([...READS, ...LOCAL_WRITES, ...LIVE_ONLY, ...ONLINE].sort()).toEqual(table.map(([name]) => name).sort());
   });
 
   it("opens the reads and this device's changes offline, and the others online", () => {
     for (const [name, c] of table) {
       expect(readOnly(c.method, {}), name).toBe(READS.includes(name));
-      expect(offlineCall(c.method, {}), name).toBe(READS.includes(name) || LOCAL_WRITES.includes(name));
+      expect(offlineCall(c.method, {}), name).toBe(READS.includes(name) || LOCAL_WRITES.includes(name) || LIVE_ONLY.includes(name));
+    }
+  });
+
+  it("opens typing offline, and online with --for: that one waits for the chat or group to be live", () => {
+    for (const method of ["chat.typing", "group.typing"]) {
+      expect(offlineCall(method, { chat: "bob", stop: true }), method).toBe(true);
+      expect(offlineCall(method, { chat: "bob", for: 30 }), method).toBe(false);
+      expect(readOnly(method, {}), method).toBe(false);
     }
   });
 
@@ -67,7 +81,7 @@ describe("which one-shots open the profile offline", () => {
   });
 
   it("sets this device's own settings offline, and those the contacts or the relays see online", () => {
-    expect([...LOCAL_SETTINGS].sort()).toEqual(["autoDownloads", "sendTyping", "serveFiles"]);
+    expect([...LOCAL_SETTINGS].sort()).toEqual(["autoDownloads", "daemonPresence", "sendTyping", "serveFiles"]);
     for (const key of ["nick", "shareProfile", "online", "relays", "irohRelays", "hyperdhtRelay", "iceServers", "publicProfiles"]) {
       expect(LOCAL_SETTINGS.has(key), key).toBe(false);
     }

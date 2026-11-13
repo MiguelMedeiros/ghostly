@@ -10,6 +10,7 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { setChatOnCall } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
+import { asksEachAlone } from "../desktop/androidMediaDenied";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -29,6 +30,7 @@ import { appsComposerHint } from "../lib/apps/availability";
 import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
+import { fillNames } from "../lib/fillNodes";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
@@ -43,7 +45,7 @@ import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
-import { keepSentOriginal } from "../lib/sentOriginals";
+import { forgetSentOriginal, keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -87,6 +89,7 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
+import { copySecret } from "../lib/shareLink";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
@@ -129,7 +132,7 @@ import { WorkingLine } from "../components/chat/WorkingMark";
 import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { panelCard, routineStacksReader } from "../lib/statusCards";
+import { appCardsShown, panelCard, routineStacksReader } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
@@ -320,6 +323,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     iceServers: engine.state?.settings.iceServers,
     // "Hide my IP from contacts" (Settings → Network): through that TURN server only.
     relayOnly: engine.state?.settings.relayOnly === true,
+    // The Android app shows a dialog per device at each request: a video call asks each alone, once.
+    asksEachAlone: asksEachAlone(),
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
@@ -464,9 +469,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (waiting) {
       if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
+      forgetSentOriginal(sessionId, messageId);
       return;
     }
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
     if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
   });
 
@@ -524,6 +531,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
   });
 
   // Saved messages: kept on this device, never sent; the Saved view lists them.
@@ -553,6 +561,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showServices, setShowServices] = useState(false);
   // Mini-apps in this 1:1 chat (WISP 1200), where Apps shows: + → Apps.
   const appsOn = useAppsAvailable();
+  // An app card shows as a card here, so its quote and the pinned bar read it as one; else its text (appCardsShown).
+  const appCards = appCardsShown(paired ? chatLink?.id : undefined, appsOn);
   const [showApps, setShowApps] = useState(false);
   // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
   // app always is).
@@ -629,16 +639,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     window.dispatchEvent(new Event("session-updated"));
   };
 
+  // The invite is a secret: copied marked, as the invite card's Copy. A refused copy shows the link (the invite's QR
+  // dialog) to copy by hand, never copied unmarked.
   const handleCopyCode = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copySecret(text);
     } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+      setShowInviteQr(true);
+      return;
     }
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 2000);
@@ -821,7 +829,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // A reply's quote and the composer's bar name the author as this chat does.
   const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? lineName : undefined;
-  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t),
+  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: messageSnippet(replyingTo, t, appCards),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
@@ -835,9 +843,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const wakeNotice = (wakeCall.waking || wakeCall.gaveUp) && (
     <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
       className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
-      <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+      <span>{fillNames(t(wakeCall.waking ? "calls.waking" : "calls.wakeGaveUp"), { name: shownName })}</span>
       {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
     </div>
+  );
+  // A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it from
+  // starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
+  // A call refused again while it shows is a new alert, said again. Like the wake notice, over whatever is on screen
+  // when the chat is not: Camera pressed in a call's small window over Settings or another chat.
+  const mediaNotice = webrtc.mediaProblem && (
+    <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} of={webrtc.mediaProblemOf} />
   );
   /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
   const rarerRows = (close: () => void) => <>
@@ -865,7 +880,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
-    <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
+    <MessageAnnouncer chat={sessionId} linkId={paired ? chatLink?.id : undefined} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
@@ -876,10 +891,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {t("calls.noAnswer")}
         </div>
       )}
-      {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
-          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it.
-          A call refused again while it shows is a new alert, said again. */}
-      {webrtc.mediaProblem && <CallMediaProblem key={webrtc.mediaProblemId} problem={webrtc.mediaProblem} />}
+      {visible && mediaNotice}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
@@ -948,8 +960,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               {/* The one way to rename the chat: a button, so the keyboard reaches it too. Inside the screen's heading,
-                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab. */}
-              <h1 ref={headingRef} tabIndex={-1} className="m-0 flex min-w-0 text-[15px] font-normal leading-tight outline-none">
+                  as a menu page's title is (layout/Page.tsx), focusable by the page alone, never by Tab.
+                  On a phone the name has its room first: it does not shrink beside the status's emoji, which gives way
+                  (PeerPresenceLine's `emojiOnPhone`), and is cut only when it alone is wider than the row. */}
+              <h1 ref={headingRef} tabIndex={-1} className={`m-0 flex min-w-0 ${phoneHeader ? "shrink-0 max-w-full" : ""} text-[15px] font-normal leading-tight outline-none`}>
               <button
                 type="button"
                 ref={nameRef}
@@ -1129,7 +1143,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
-      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
@@ -1146,9 +1160,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
-            <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
+            <p data-testid="chat-created" className="mb-3 px-4 text-center chat-text-note text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
-                {t("common.chatCreated", {date: new Intl.DateTimeFormat(language, {dateStyle:"medium", timeStyle:"short"}).format(session.createdAt)})}
+                {t("common.chatCreated", {date: formatAt(session.createdAt, { dateStyle: "medium", timeStyle: "short" }, language)})}
               </time>
             </p>
           )}
@@ -1165,7 +1179,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {!inviteCode && !pairing.show && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
-                <p className="text-text-muted text-xs">
+                <p data-testid="chat-empty" className="text-text-muted chat-text-system">
                   {t("chat.empty")}
                 </p>
               </div>
@@ -1195,7 +1209,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
                 onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
-                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf, t) : undefined}
+                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf, t, appCards) : undefined}
                 // A press is a reply: only a paired chat carries one.
                 buttons={paired ? buttonsOf.get(row.message.id) : undefined}
                 compactPress={paired && presses.has(row.message.id)}
@@ -1309,6 +1323,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
+      {!visible && mediaNotice && !locked && createPortal(mediaNotice, callLayer ?? document.body)}
 
       {/* How the call ended, said once (`callEndSaid`): where the call's window hangs, since this chat may be off screen. */}
       {!locked && createPortal(<p role="status" className="sr-only" data-testid="call-end-spoken">{callEndSaid}</p>, callLayer ?? document.body)}

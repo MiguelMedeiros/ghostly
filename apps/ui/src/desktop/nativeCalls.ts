@@ -137,9 +137,9 @@ const DECODE_MS = 1000;
 let followingSight = false;
 
 /**
- * Tells Rust each time the window goes out of sight and back (`native_pictures_shown`), from the first picture on:
- * out of sight it makes no JPEG past each picture's first, rather than make 15 a second of each for a page that
- * draws none of them (`Picture.show`). Rust takes a new page as in sight.
+ * Tells Rust each time the window goes out of sight and back (`native_pictures_shown`), from the first picture or
+ * meter on: out of sight it makes no JPEG past each picture's first, rather than make 15 a second of each for a page
+ * that draws none of them (`Picture.show`), and says no level to Settings' meter. Rust takes a new page as in sight.
  */
 function followSight(): void {
   if (followingSight) return;
@@ -815,6 +815,7 @@ export const nativeDevices: DeviceSource = {
     for (const call of open) void call.playOn(device).catch(() => {});
   },
   async meter(id, level) {
+    followSight();
     let live = true;
     const levels = new Channel<unknown>();
     levels.onmessage = (message) => {

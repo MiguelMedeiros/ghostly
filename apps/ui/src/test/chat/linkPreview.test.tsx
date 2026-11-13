@@ -92,6 +92,19 @@ describe("a link preview in the composer", () => {
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
+
+  it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
+    const fetch = sites();
+    composer();
+    type("guess the ending: ||https://news.example/ending||");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
+    type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
 
 describe("a link preview in a message", () => {
@@ -151,6 +164,27 @@ describe("a link preview in a message", () => {
     }
   });
 
+  it("is not drawn for a link the text shows only inside a spoiler, as an older app still sends one", () => {
+    const secret: LinkPreview = { u: "https://news.example/ending||", t: "The butler did it", s: "Example News", i: thumbnail };
+    const view = renderApp(<MessageBubble message={{ id: "m10", text: "guess: ||https://news.example/ending||", sender: "peer", timestamp: 1_700_000_000_000, preview: secret }} />);
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    expect(document.body).not.toHaveTextContent("The butler did it");
+    view.unmount();
+    // A link whose words are a spoiler hides where it goes too.
+    renderApp(<MessageBubble message={{ id: "m11", text: "[||the ending||](https://news.example/ending)", sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { ...secret, u: "https://news.example/ending" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+  });
+
+  it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
+      expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
+      view.unmount();
+    }
+  });
+
   it("shows nothing extra for a message without a preview or a place", () => {
     renderApp(<MessageBubble message={{ id: "m3", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000 }} />);
     expect(screen.queryByTestId("message-link-cards")).toBeNull();
@@ -170,6 +204,19 @@ describe("a location card", () => {
     expect(tiles).toHaveLength(4);
     for (const tile of tiles) expect(tile.getAttribute("src")).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
+  });
+
+  it("is not drawn for a place the text names only inside a spoiler: its coordinates would say what the spoiler hides", () => {
+    for (const text of ["meet me at ||geo:48.8584,2.2945||", "||meet at https://www.google.com/maps/@48.8584,2.2945,15z tonight||",
+      "> the place: ||geo:48.8584,2.2945||", "- *||https://www.openstreetmap.org/#map=15/48.8584/2.2945||*", "[||guess||](https://www.google.com/maps/@48.8584,2.2945,15z)"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+      expect(screen.queryByTestId("location-card"), text).toBeNull();
+      expect(document.body, text).not.toHaveTextContent("48.85840");
+      view.unmount();
+    }
+    // The same place outside the spoiler too: the bubble shows it, so its card tells nothing hidden.
+    renderApp(<MessageBubble message={{ id: "m14", text: "geo:48.8584,2.2945 or is it ||geo:48.8584,2.2945||", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
   });
 
   const torre = "meet me at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)";

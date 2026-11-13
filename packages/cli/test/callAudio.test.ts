@@ -59,6 +59,29 @@ describe("the playback queue (program to call)", () => {
     expect(q.next().silent).toBe(true);
   });
 
+  // A program streams in chunks of any size (a TTS body piped through): a flush that dropped half a sample read every
+  // sample after it a byte off, loud noise until the call ended.
+  it("a flush with half a sample queued drops its other half too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, () => 0);
+    const stream = Buffer.alloc(2 * 400);
+    for (let i = 0; i < 400; i++) stream.writeInt16LE(1000 + i, i * 2);
+    q.push(stream.subarray(0, 3));
+    q.flush();
+    q.push(stream.subarray(3));
+    expect(q.next().frame.readInt16LE(0)).toBe(1002);
+  });
+
+  it("a full queue that drops an odd number of bytes drops the next byte too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, Date.now, 100);
+    q.push(Buffer.alloc(1600));
+    expect(q.push(Buffer.alloc(3))).toBe(3);
+    q.flush();
+    const rest = Buffer.alloc(2 * 160 + 1);
+    for (let i = 0; i < 160; i++) rest.writeInt16LE(-500, 1 + i * 2);
+    q.push(rest);
+    expect(q.next().frame.readInt16LE(0)).toBe(-500);
+  });
+
   it("drops what goes past its cap", () => {
     const q = new PlaybackQueue(8000, Date.now, 100);
     expect(q.push(Buffer.alloc(3000))).toBe(3000 - 1600);
@@ -517,6 +540,33 @@ describe("a call's audio through Opus", () => {
       expect(a.queue.queuedMs).toBe(queued - 20);
     } finally {
       a.stop(); b.stop();
+      loop.restore();
+    }
+  });
+
+  it("moves the RTP timestamp on by the time a stall too long to catch up skipped, the sequence still continuous", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const loop = handLoop();
+    const packets: RtpPacket[] = [];
+    const audio = new CallAudio({
+      rate: 48000, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+      encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {},
+    });
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) audio.queue.push(frame); }); };
+      audio.start();
+      turns(50, 20);
+      const before = packets.length;
+      turns(1, 2980);
+      turns(5, 20);
+      const steps = packets.slice(before - 1).map((p, i, all) => i && [sequenceDelta(p.sequence, all[i - 1].sequence), (p.timestamp - all[i - 1].timestamp) >>> 0]).slice(1);
+      // The timestamp is the sampling time (RFC 3550): the packet after the stall is 2980 ms after the one before it,
+      // and the contact's jitter buffer does not read the gap as seconds of jitter.
+      expect(steps).toEqual([[1, 2980 * 48], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME]]);
+    } finally {
+      audio.stop();
       loop.restore();
     }
   });

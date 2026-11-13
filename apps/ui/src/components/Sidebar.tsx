@@ -60,6 +60,7 @@ import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 import { useOpenRowInView } from "../hooks/useOpenRowInView";
+import { useKeptScroll } from "../hooks/useKeptScroll";
 import { useComposition } from "../hooks/useComposition";
 import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
@@ -393,6 +394,7 @@ export function Sidebar() {
       <ChatRow
         key={session.id}
         chatId={session.id}
+        paired={session.profile === "paired-chat/1"}
         density={density}
         active={isActive}
         label={peerLabel}
@@ -436,6 +438,8 @@ export function Sidebar() {
 
   // The list or the rail, whichever is drawn: the open chat's row is brought into sight in it (a reload, a link).
   const rowsRef = useRef<HTMLDivElement>(null);
+  // On a phone Back from a chat finds the list where it was, not at its top (hooks/useKeptScroll.ts).
+  useKeptScroll(rowsRef);
   useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
 
   return (

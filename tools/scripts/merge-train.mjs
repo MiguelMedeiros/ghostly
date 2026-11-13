@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The merge train: the only way pull requests land on `dev` (and on each `epic/*` branch). A reviewer adds the label
-// `queue` to an approved, green pull request; the train lines them up and lands them in batches, or alone when only one
+// `queue` to a ready and green pull request; the train lines them up and lands them in batches, or alone when only one
 // is in line.
 //
 // - The line, per base: `queue:priority` first (alone it is in the line too), then by the time each got `queue` (the
@@ -34,7 +34,9 @@
 //   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
 //     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
 //     the batch lands the old way with a warning: its own rebase merge, whose commits GitHub does not sign, and each
-//     original closes with "Merged via #<batch>".
+//     original closes with "Merged via #<batch>". Only a rule's refusal does that: one that left the line in the
+//     meantime (a draft, closed, new commits) stops the landing as above, and "not mergeable" or "Base branch was
+//     modified" is asked twice more, 5 s apart, then the batch closes with nothing landed.
 //   - A landing that a run left half done (a crash, the API budget) goes on in the next run from what GitHub shows:
 //     the first pull requests are merged at the heads the batch holds, and dev's tip still has the tree of the last of
 //     them in the batch. If dev holds anything else, the batch closes and the rest go back to the line.
@@ -70,7 +72,8 @@
 //   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
 //   fast-forward pushes commits as they are: a batch that fell back to the rebase merge and everything that lands on
 //   an epic stay unsigned.
-// - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd").
+// - Each queued pull request keeps one comment that says where it is ("In line for `dev`: 3rd"). Its hidden marks count
+//   only while the train's login wrote that comment last: one another login edited counts as queued again.
 //
 // The train keeps no state of its own: a batch's members (each with its head and the batch's commit of it) and the half
 // that waits after it live in a hidden mark in the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
@@ -105,6 +108,12 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
  */
 export const HOLD = "queue:hold";
 export const onHold = (p) => !!p?.labels?.includes(HOLD);
+/**
+ * GitHub's refusals of a batch's first squash merge that the batch's own rebase merge gets past: dev's rule (the queue
+ * app is not a bypass actor yet) and squash merges turned off. Not "not mergeable", a draft or "Base branch was
+ * modified": those say the pull request, or the moment, is the trouble, and the rebase merge would land it anyway.
+ */
+const WHOLE_WAY = /Repository rule violations|merges are not allowed/i;
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
@@ -655,6 +664,17 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
     else if (!p.sticky && said.truncated) p.unread = "comments";
+  }
+  // An account that may edit any comment can rewrite the train's own: its marks count only while the train wrote it
+  // last. GitHub names a comment's last editor over GraphQL only, so one read asks it for every position comment.
+  const writers = await gh.lastEditors(queued.map((p) => p.sticky?.node_id).filter(Boolean));
+  for (const p of queued) {
+    const events = p.events;
+    // Edited by another login: it speaks for nobody, and the pull request counts as queued again (as below).
+    if (p.sticky && writers.get(p.sticky.node_id) !== login) {
+      say(`#${p.number}: its position comment was last edited by ${writers.get(p.sticky.node_id) ?? "someone else"}, so its marks do not count.`);
+      [p.stale, p.sticky] = [p.sticky, undefined];
+    }
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
     const relabeled = vouchedAt(events, p.labels, null);
@@ -828,8 +848,17 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     return { number: pr.number, branch, sha: built.sha, members: aboard };
   };
 
-  // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now.
-  for (const b of (await gh.mergedPulls(base)).filter((p) => isBatch(p, base, login))) {
+  // A run that stopped after landing a batch (a crash, the API budget) left its originals open: close them now. Anyone
+  // who may edit a pull request can rewrite a merged batch's body (and so put it among the last updated): its mark
+  // counts only while the train wrote it last. Asked only of one that names a pull request still open at its head.
+  const named = (b) => readState(b.body).prs.some((s) => byNumber.get(s.number)?.sha === s.sha && !gone.has(s.number));
+  const stopped = (await gh.mergedPulls(base)).filter((p) => isBatch(p, base, login) && named(p));
+  const bodyWriters = stopped.length ? await gh.lastEditors(stopped.map((b) => b.nodeId).filter(Boolean)) : new Map();
+  for (const b of stopped) {
+    if (bodyWriters.get(b.nodeId) !== login) {
+      say(`#${b.number}: its body was last edited by ${bodyWriters.get(b.nodeId) ?? "someone else"}, so the pull requests its mark names are not closed as merged.`);
+      continue;
+    }
     for (const s of readState(b.body).prs) {
       const p = byNumber.get(s.number);
       if (p && p.sha === s.sha && !gone.has(p.number)) await landed(p, b.number);
@@ -972,14 +1001,25 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       for (; at < stop; at++) {
         const s = state.prs[at];
         let r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
-        // Right after dev moved, GitHub may refuse the next merge for a moment ("Base branch was modified").
-        for (let again = 0; !r.ok && r.status !== 409 && at > from && again < 2; again++) {
+        if (!r.ok && r.status !== 409 && at === from) {
+          // The first one refused: read it again (which also has GitHub work its mergeability out). Turned into a draft,
+          // closed or pushed to since the run read it, it left the line: nothing lands, nor by the rebase merge below.
+          const read = await gh.pull(s.number);
+          if (!read.open || read.draft || read.sha !== s.sha || onHold(read)) {
+            why = changedText([s]);
+            break;
+          }
+        }
+        // Right after dev moved, GitHub may refuse the next merge for a moment ("Base branch was modified", "not
+        // mergeable" while it works that out). A rule's refusal comes back every time: it is not asked again.
+        for (let again = 0; !r.ok && r.status !== 409 && !(at === from && WHOLE_WAY.test(r.message ?? "")) && again < 2; again++) {
           await pause(5000);
           r = await w.squash(s.number, s.sha, tested[at].title, tested[at].message);
         }
-        if (!r.ok && r.status !== 409 && at === 0 && stop === state.prs.length) {
-          // Nothing landed yet and the first is refused: most likely the queue app may not merge past dev's rule yet
-          // (a pull request in a batch is seldom up to date with dev by itself). The batch as a whole still can.
+        if (!r.ok && WHOLE_WAY.test(r.message ?? "") && at === 0 && stop === state.prs.length) {
+          // Nothing landed yet and a rule refuses the first: most likely the queue app may not merge past dev's rule yet
+          // (a pull request in a batch is seldom up to date with dev by itself), or squash merges are turned off. The
+          // batch as a whole still can. Any other refusal stops the landing below, and nothing lands.
           say(
             `::warning::GitHub refused the squash merge of #${s.number} (${r.message}), so batch #${batch.number} lands by the rebase merge and its commits will not be verified. The queue app must be a bypass actor (pull requests only) of \`${base}\`'s ruleset.`,
           );
@@ -1069,12 +1109,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         }
       }
     } else if (ci === "success") {
-      // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on.
-      const tested = bySquash ? await readTested() : null;
-      if (base === "dev" && !tested) {
-        const why = bySquash ? "GitHub does not list exactly the commits its mark names" : "its mark does not name the commits the train built for it";
+      // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on. An epic
+      // lands the whole batch and closes every pull request its mark names, so it too needs GitHub to list exactly the
+      // mark's commits: one written into the editable body, which the batch does not hold, must not close as merged.
+      const marked = state.prs.every((s) => typeof s.commit === "string") && state.prs.at(-1)?.commit === state.head;
+      const tested = bySquash || (base !== "dev" && marked) ? await readTested() : null;
+      if (!tested) {
+        const why = marked ? "GitHub does not list exactly the commits its mark names" : "its mark does not name the commits the train built for it";
         await retire(batch, `Merge train: this batch's branch does not hold just the commits the train built (${why}), so it closes; its pull requests go back to the line.`);
-      } else inFlight = tested ? await landEach(tested, 0) : await landWhole();
+      } else inFlight = bySquash ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
       inFlight = await board(members, next, { retried: state.retried });
@@ -1344,7 +1387,7 @@ export const appTrainIn = (jobs) =>
 export class BudgetLow extends Error {}
 
 /**
- * GitHub over REST (the shared GraphQL quota stays free). A request that fails to connect (a reset, DNS after a Mac
+ * GitHub over REST, so the GraphQL quota (a Mac's is shared) stays nearly free: only `lastEditors` asks it. A request that fails to connect (a reset, DNS after a Mac
  * wakes), a 5xx, a 429 or a rate-limited 403 (primary, or secondary with `Retry-After`) is retried with backoff;
  * below `budget` calls left the run stops. An attempt with no answer within `timeout` counts as one that failed to
  * connect; once `signal` aborts (the round's deadline), every request fails at once. A POST retried after a 5xx that
@@ -1356,7 +1399,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   let warnedActivity = false;
   let cancelDenied = null;
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
-  const api = async (method, path, body) => {
+  const api = async (method, path, body, root = `/repos/${repo}`) => {
     const named = (e) => (e?.name === "TimeoutError" ? new Error(`${method} ${path}: no answer within ${timeout / 1000} s`) : e);
     for (let attempt = 0; ; attempt++) {
       signal?.throwIfAborted();
@@ -1364,7 +1407,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       const cut = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
       let r;
       try {
-        r = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+        r = await fetchImpl(`https://api.github.com${root}${path}`, {
           method,
           headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
           body: body ? JSON.stringify(body) : undefined,
@@ -1439,6 +1482,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
+    nodeId: p.node_id,
     title: p.title,
     body: p.body,
     draft: p.draft,
@@ -1570,6 +1614,29 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       return moved && Date.parse(moved) > Date.parse(first) ? moved : first;
     },
     comments: (n) => all(`/issues/${n}/comments`),
+    /**
+     * Who last wrote each comment, or each pull request's body (by `node_id`): its last editor, else its author, by the
+     * login REST gives (a bot's with "[bot]"). One GitHub no longer has, or whose account is gone, is left out. One
+     * GraphQL request per 100 (REST does not say who edited one), none when there is none.
+     */
+    lastEditors: async (ids) => {
+      const out = new Map();
+      const name = (a) => (a?.login ? `${a.login}${a.__typename === "Bot" ? "[bot]" : ""}` : null);
+      const fields = "id author { __typename login } editor { __typename login } lastEditedAt";
+      for (let i = 0; i < ids.length; i += 100) {
+        const query = `query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { ${fields} } ... on PullRequest { ${fields} } } }`;
+        const r = await api("POST", "/graphql", { query, variables: { ids: ids.slice(i, i + 100) } }, "");
+        // A comment deleted since it was listed is a NOT_FOUND error beside a null node.
+        const error = r.data?.errors?.find((e) => e.type !== "NOT_FOUND");
+        if (!r.ok || error) throw new Error(`POST /graphql (comment editors): HTTP ${r.status} ${error?.message ?? r.data?.message ?? ""}`);
+        for (const c of r.data?.data?.nodes ?? []) {
+          // Edited by an account that is gone: nobody known wrote it last.
+          const who = c?.id && (c.editor ? name(c.editor) : c.lastEditedAt ? null : name(c.author));
+          if (who) out.set(c.id, who);
+        }
+      }
+      return out;
+    },
     branchSha: async (base) => (await must("GET", `/git/ref/heads/${base}`)).object.sha,
     comment: (n, body) => must("POST", `/issues/${n}/comments`, { body }),
     editComment: (id, body) => must("PATCH", `/issues/comments/${id}`, { body }),

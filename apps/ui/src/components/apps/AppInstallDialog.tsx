@@ -104,7 +104,7 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
 
 /** An error's line, with its ⓘ when it has a longer story (a browser that keeps no app files). */
 function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) {
-  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger whitespace-pre-line">{error.text}</InfoLine></div>;
+  return <div role="alert"><InfoLine testId={testId} info={error.info} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
 }
 
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
@@ -359,14 +359,20 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     if (was && !waits && (!active || active === document.body)) box.current?.focus({ preventScroll: true });
   }, [waits]);
   // Fetch files goes once the files are back, and the focus it had with it: Open takes its place and the focus, or the
-  // screen when the app still cannot run.
-  const open = useRef<HTMLButtonElement>(null), lacks = app.run.status === "needs-files", lacked = useRef(lacks);
+  // screen when the app still cannot run. The files come back while Fetch files is still busy, and Open stays disabled
+  // (it takes no focus) until it ends: the focus is owed until then.
+  const open = useRef<HTMLButtonElement>(null), lacks = app.run.status === "needs-files", lacked = useRef(lacks), owed = useRef(false);
   useEffect(() => {
     const was = lacked.current;
     lacked.current = lacks;
-    const active = document.activeElement;
-    if (was && !lacks && (!active || active === document.body)) (open.current ?? box.current)?.focus({ preventScroll: true });
+    if (was && !lacks) owed.current = true;
   }, [lacks]);
+  useEffect(() => {
+    if (!owed.current || busy) return;
+    owed.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
+  }, [lacks, busy]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
@@ -417,11 +423,13 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
+        {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update
+            ran it while its files were replaced, and the update's error then had no screen to show on. */}
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" disabled={busy} onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
-        {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
-        {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
-        {canRun && <Button ref={open} variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
+        {app.run.status === "removed" && <Button data-testid="app-run-anyway" disabled={busy} onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
+        {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" disabled={busy} onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
+        {canRun && <Button ref={open} variant="primary" data-testid="app-open" disabled={busy} onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
       </div>
     </Shell>
   );

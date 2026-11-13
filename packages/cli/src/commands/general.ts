@@ -11,11 +11,12 @@ const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
 /**
  * `status set --until`: a time to come, as long from now (30m, 2h, 1d) or as a card's time is written (milliseconds or a
  * date, local time when it names no zone), within a year. A time past is refused: the engine would take it as no status.
+ * One it cannot read names the three forms, as its help does: `--until 2y` named only milliseconds and dates.
  */
 function statusUntil(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim(), duration = DURATION.exec(text);
-  const ms = duration ? Date.now() + Number(duration[1]) * UNIT_MS[duration[2] as keyof typeof UNIT_MS] : cardTime(text, "until")!;
+  const ms = duration ? Date.now() + Number(duration[1]) * UNIT_MS[duration[2] as keyof typeof UNIT_MS] : cardTime(text, "until", `30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}`)!;
   if (duration && !(ms <= Date.now() + STATUS_CARD_LIMITS.nextRunMs)) throw new CliError("usage", `--until takes a time within a year from now, not ${JSON.stringify(value)}`);
   if (ms <= Date.now()) throw new CliError("usage", `--until takes a time to come, not ${JSON.stringify(value)}: a status that ended is none`);
   return ms;

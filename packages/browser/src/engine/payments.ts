@@ -187,8 +187,11 @@ export interface DeskSpark {
 class NoEcashError extends Error {
   declare readonly engineCode?: unknown;
   declare readonly values?: unknown;
+  /** The mint took the split and has not answered: the sats it set aside come back once it does (`SwapUnsettledError`). */
+  readonly unsettled: boolean;
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause));
+    this.unsettled = cause instanceof SwapUnsettledError;
     const { engineCode, values } = (cause ?? {}) as { engineCode?: unknown; values?: unknown };
     if (engineCode !== undefined) Object.assign(this, { engineCode });
     if (values !== undefined) Object.assign(this, { values });
@@ -337,6 +340,8 @@ const within = (now: number, at: number | undefined, ms: number): boolean => at 
  * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
  */
 export const RECEIPT_FRESH_MS = 7 * 86_400_000;
+/** What a contact reads about a request of ours closed for good (`close`), when it closes and each time their chat opens again. */
+const CLOSED_TOLD = "your contact removed the wallet it was paid to";
 /**
  * How often a wallet's own refresh asks about an open Ark request (at its server's indexer) or a contact's pending Ark
  * or USDT receipt (at the server or the chain) that has no answer yet (`AskBackoff`): at the wallet's pace while the
@@ -692,6 +697,8 @@ export class PaymentDesk {
     const lightning = !!request.invoice && link.allowsPayment("lightning");
     // The person reviewed a Lightning payment: that is what is paid, never ecash in its place.
     if (params.via === "lightning" && !lightning) throw new Error("This request cannot be paid over Lightning in this chat");
+    // Ecash whose mint has not answered yet: why the payment was not made when Lightning finds nothing to pay with either.
+    let unsettled: NoEcashError | undefined;
     // A Fedimint request names no mint: ecash of a shared federation goes through a review, anything else is its invoice.
     if (params.via !== "lightning" && link.allowsPayment("cashu") && !request.federations) {
       try {
@@ -707,11 +714,16 @@ export class PaymentDesk {
       } catch (error) {
         // Lightning only when no ecash left the wallet: a token that exists may already be the contact's.
         if (!lightning || !(error instanceof NoEcashError)) throw error;
+        if (error.unsettled) unsettled = error;
       }
     } else if (!lightning) throw new Error("No way of paying this request is allowed in this chat");
 
     // Through the Lightning card the person picked; the network's default one otherwise.
-    const quote = await this.lightning[network].quote(request.invoice!, params.card);
+    // Said as the mint that has not answered only when Lightning found nothing to pay with: any other reason is its own.
+    const quote = await this.lightning[network].quote(request.invoice!, params.card).catch((error: unknown) => {
+      const code = (error as { engineCode?: unknown } | undefined)?.engineCode;
+      throw unsettled && (code === "notEnoughSats" || code === "notEnoughForFee") ? unsettled : error;
+    });
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     // Never above the ceiling the person approved, when they set one.
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);
@@ -833,9 +845,11 @@ export class PaymentDesk {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/spent/i.test(message)) throw error;
-      // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled.
+      // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled, or one they
+      // refused while the automatic take back could not reach the mint (`failed` with its token) and redeemed anyway.
       const current = this.current(payment);
       if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
+      else if (current.state === "failed" && current.token) await this.save({ ...current, state: "settled", token: undefined, error: undefined });
       return undefined;
     }
   }
@@ -2001,17 +2015,17 @@ export class PaymentDesk {
   /**
    * A request of ours closed for good: the wallet it was paid through was removed. Nothing sends it again (replay,
    * a group edge opening), and the contact is told now when the chat is open (a request to a group: every member
-   * reachable), so their app stops offering to pay it. `reason`: shown here; `told`: what the contact reads. Returns
-   * whether it was open.
+   * reachable; one away is told when their chat opens, `replay`), so their app stops offering to pay it. `reason`: shown
+   * here. Returns whether it was open.
    */
-  async close(id: string, reason: string, told: string): Promise<boolean> {
+  async close(id: string, reason: string): Promise<boolean> {
     const request = this.payments.get(id);
     if (request?.kind !== "request" || request.direction !== "out" || request.state !== "pending") return false;
     await this.save({ ...request, state: "failed", closed: true, error: reason });
     const links = request.group ? this.host.groupLinks?.(request.group) ?? [] : [request.linkId];
     for (const linkId of links) {
       const link = this.host.getLink(linkId);
-      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: told, closed: true }); } catch { /* not reachable now */ } }
+      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: CLOSED_TOLD, closed: true }); } catch { /* not reachable now */ } }
     }
     return true;
   }
@@ -2028,6 +2042,9 @@ export class PaymentDesk {
       if (request.group !== group || request.kind !== "request" || request.direction !== "out") continue;
       if (request.state === "pending") await this.sendGroupRequest(linkId, request);
       else if (request.state === "settled" && Date.now() - request.createdAt < RECEIPT_FRESH_MS) link.sendPaymentResult({ id: request.id, ok: true });
+      // Closed while this member was away: their copy is still open, with a Pay that would pay a wallet that is gone.
+      // Said at every opening, whatever its age: only a wallet's removal closes one, so there are few.
+      else if (request.closed) link.sendPaymentResult({ id: request.id, ok: false, error: CLOSED_TOLD, closed: true });
     }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
@@ -2036,6 +2053,8 @@ export class PaymentDesk {
       // (a Fedimint request's invoice, an address paid from outside) has no token or receipt the payer says again, so
       // its copy would stay open with a Pay button that pays it twice.
       if (payment.kind === "request" && payment.state === "settled" && !payment.group && Date.now() - payment.createdAt < RECEIPT_FRESH_MS) { link.sendPaymentResult({ id: payment.id, ok: true }); continue; }
+      // One closed while the contact was away, as for a group's above.
+      if (payment.kind === "request" && payment.closed) { link.sendPaymentResult({ id: payment.id, ok: false, error: CLOSED_TOLD, closed: true }); continue; }
       if(payment.target?.method==='usdt') {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});

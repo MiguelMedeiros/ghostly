@@ -35,6 +35,30 @@ describe("ecash sent in a deleted chat, on the Wallet page", () => {
     expect(screen.getByTestId("wallet-card-cashu-testnet")).toHaveTextContent("100");
   });
 
+  it("keeps the keyboard focus as rows go: on the next row's Take it back, then on the total the sats came back to", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: testWallet(74, [
+      { type: "cashu", kind: "sent", amount: 13, paymentId: "p1", chatGone: true },
+      { type: "cashu", kind: "sent", amount: 13, paymentId: "p2", chatGone: true },
+    ]) });
+    engine.on("reclaimPayment", ({ paymentId }) => {
+      engine.update({ wallet: paymentId === "p1" ? testWallet(87, [{ type: "cashu", kind: "sent", amount: 13, paymentId: "p2", chatGone: true }]) : testWallet(100, []) });
+    });
+    const first = (await screen.findAllByTestId("wallet-sent-ecash-take-back"))[0]!;
+    first.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getAllByTestId("wallet-sent-ecash-item")).toHaveLength(1));
+    // On the next row's Take it back, or on the list while that is still disabled by the run: Tab goes on to it.
+    const second = screen.getByTestId("wallet-sent-ecash-take-back");
+    await waitFor(() => expect(screen.getByTestId("wallet-sent-ecash").parentElement!.contains(document.activeElement)).toBe(true));
+    if (document.activeElement !== second) await user.tab();
+    expect(second).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("wallet-sent-ecash")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("wallet-total-bitcoin")).toHaveFocus());
+    expect(screen.getByTestId("wallet-total-bitcoin-amount")).toHaveTextContent("100");
+  });
+
   it("is not listed while its chat is there: the chat's bubble offers it back", async () => {
     const { engine } = renderApp(<Wallet />);
     engine.update({ wallet: testWallet(87, [{ type: "cashu", kind: "sent", amount: 13, paymentId: "p1" }]) });

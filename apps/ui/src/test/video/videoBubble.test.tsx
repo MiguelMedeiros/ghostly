@@ -490,6 +490,43 @@ describe("a video in the chat", () => {
     callView.unmount();
   });
 
+  // Hung on the page's body at the menus' usual height, the call's Devices menu opened under the video and the call:
+  // its rows out of sight, the keys in it.
+  it("filling the window (Desktop on Linux), the Devices menu of a call over it opens over it too", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    const z = (element: Element) => Number(element.className.match(/\bz-\[?(\d+)\]?/)?.[1] ?? 0);
+    const devices = { list: { audioinput: [{ id: "usb", label: "USB mic" }], videoinput: [], audiooutput: [], defaults: {}, named: true },
+      current: { audioinput: "", videoinput: "", audiooutput: "" }, speaker: "", speakers: false, choose: vi.fn(), notice: null,
+      dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn() };
+    const call = (pinned: boolean) => (
+      <CallOverlay callState="connected" pinned={pinned} localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} devices={devices} />
+    );
+    const callView = renderApp(call(true));
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const frame = screen.getByTestId("video-frame");
+    expect(frame).toHaveAttribute("data-theater", "true");
+    for (const pinned of [true, false]) {
+      callView.rerender(call(pinned));
+      fireEvent.click(screen.getByTestId("call-devices"));
+      const menu = screen.getByTestId("call-devices-menu");
+      expect(z(menu)).toBeGreaterThan(z(frame));
+      expect(z(menu)).toBeGreaterThan(z(screen.getByTestId("call-window")));
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(screen.queryByTestId("call-devices-menu")).toBeNull();
+      expect(frame).toHaveAttribute("data-theater", "true");
+    }
+    // Out of full screen, it is a menu like the others again.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(frame).not.toHaveAttribute("data-theater");
+    fireEvent.click(screen.getByTestId("call-devices"));
+    expect(z(screen.getByTestId("call-devices-menu"))).toBe(50);
+    callView.unmount();
+  });
+
   // Fixed over the whole window, it left Tab to the page: from Exit full screen on to the message's ⋮, the composer, the
   // chat list, each under the video, and keys typed into a composer nobody saw.
   it("filling the window (Desktop on Linux), Tab goes round its own controls, not to the chat under it", async () => {

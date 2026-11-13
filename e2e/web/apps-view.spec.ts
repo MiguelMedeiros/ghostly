@@ -1,7 +1,8 @@
-import { chat, expect, test, type Peer } from "../support/fixtures";
+import { chat, expect, test, type Peer, type PeerOptions } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { choose } from "../support/select";
+import { iosKeyboard, keyboard } from "../support/keyboard";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -307,6 +308,60 @@ test("a full-screen app opens alone from the Apps page: modal, Close has the foc
   await expect(open).toBeFocused();
 });
 
+/*
+ * On an iPhone, iOS keeps the page's height under the keyboard (support/keyboard.ts). An app full screen, alone or in a
+ * chat, stayed the whole screen tall, so the app's own field at its bottom, the one the person typed in, was under it.
+ */
+const IPHONE = { width: 390, height: 844 }, KEYBOARD = 336;
+const NOTES_AT_BOTTOM = "<!doctype html><meta charset=utf-8><title>Notes</title><body style=margin:0>"
+  + "<textarea data-testid=notes style='position:fixed;bottom:0;left:0;width:100%;height:48px;box-sizing:border-box'></textarea>";
+
+/** Ana on an iPhone with its keyboard, the store's app installed from the Apps page (no account menu on a phone). */
+async function onIphone(peer: (name: string, options?: PeerOptions) => Promise<Peer>, store: TestStore): Promise<Peer> {
+  const ana = await peer("ana", { mobile: true, viewport: IPHONE });
+  await serveStore(ana.context, store);
+  await iosKeyboard(ana.page);
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(STORE_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  await ana.page.getByTestId("apps-add-store-confirm").click();
+  await ana.page.getByTestId("app-store").filter({ hasText: store.storeName }).getByTestId("app-listing-install").click();
+  await ana.page.getByTestId("app-install").getByTestId("app-install-confirm").click();
+  await expect(ana.page.getByTestId("installed-app")).toContainText(store.title);
+  return ana;
+}
+
+/** Typing in the app's bottom field: above the keyboard while it is up, back at the screen's bottom once it goes. */
+async function typesAboveKeyboard(ana: Peer): Promise<void> {
+  const notes = ana.page.getByTestId("mini-app").frameLocator("iframe").getByTestId("notes");
+  await notes.click();
+  const bottom = async () => { const box = (await notes.boundingBox())!; return Math.round(box.y + box.height); };
+  await keyboard(ana.page, KEYBOARD);
+  await expect.poll(bottom).toBeLessThanOrEqual(IPHONE.height - KEYBOARD);
+  await notes.pressSequentially("e4");
+  await expect(notes).toHaveValue("e4");
+  await keyboard(ana.page, 0);
+  await expect.poll(bottom).toBe(IPHONE.height);
+}
+
+test("on an iPhone, a full-screen app opened alone ends where the keyboard starts: a field at its bottom stays above it", { tag: ["@feature:apps.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const ana = await onIphone(peer, await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry: NOTES_AT_BOTTOM }));
+  await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+  await expect(ana.page.getByTestId("mini-app")).toHaveAttribute("data-place", "alone");
+  await typesAboveKeyboard(ana);
+});
+
+test("on an iPhone, an app in a chat ends where the keyboard starts: a field at its bottom stays above it", { tag: ["@feature:apps.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const ana = await onIphone(peer, await testStore({ title: "Notes", tagline: "A page to write on", entry: NOTES_AT_BOTTOM }));
+  const bob = await peer("bob");
+  await ana.page.goto("/#/");
+  await pair(ana, bob);
+  await openChess(ana);
+  await expect(ana.page.getByTestId("mini-app")).toHaveAttribute("data-place", "phone");
+  await typesAboveKeyboard(ana);
+});
+
 test("a full-screen app opened from a chat covers the whole chat on a wide screen, with Back to it, never beside it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana] = await setUp(peer, { view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   await ana.page.setViewportSize({ width: 1280, height: 800 });
@@ -475,7 +530,34 @@ test.describe("Open again after an app stopped responding", () => {
     expect(await app.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
   });
 
-  test("alone: offline the layer stays and says why under Open again", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+  test("on a phone after Back: the chat keeps the message field, and the way back says it stopped", { tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
+    test.setTimeout(180_000);
+    // Hangs once Ana is back in the chat.
+    const [ana] = await setUp(peer, { entry: HANGS.replace("1500", "4000") });
+    await ana.page.setViewportSize({ width: 375, height: 812 });
+    await openChess(ana);
+    const app = ana.page.getByTestId("mini-app");
+    await expect.poll(() => appHeading(ana)).toBe("Chess");
+    await app.getByTestId("mini-app-back").click();
+    await expect(app).toBeHidden();
+    const input = ana.page.getByPlaceholder("Message…");
+    await input.click();
+
+    const resume = ana.page.getByTestId("mini-app-resume");
+    await expect(resume.getByTestId("mini-app-resume-stopped")).toContainText("Stopped", { timeout: 60_000 });
+    await expect(app).toBeHidden();
+    await expect(input).toBeFocused();
+    await ana.page.keyboard.type("Still here");
+    await expect(input).toHaveValue("Still here");
+
+    // Back to it: why it stopped, and Open again.
+    await resume.click();
+    await expect(app).toBeVisible();
+    await expect(app.getByTestId("mini-app-stopped")).toBeVisible();
+    await expect(app.getByTestId("mini-app-open-again")).toBeVisible();
+  });
+
+  test("alone: offline the layer stays and says why under Open again",{ tag: ["@feature:apps.view", "@feature:apps.takedown"] }, async ({ peer }) => {
     test.setTimeout(180_000);
     const store = await testStore({ view: "full", title: "Chess", entry: HANGS });
     const ana = await peer("ana");

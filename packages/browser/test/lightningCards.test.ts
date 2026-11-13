@@ -8,6 +8,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { sealSeed, newDeviceKey } from "../src/engine/paymentAdapters/persistence";
 import { CASHU_MINT_SOURCE, cashuMint } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
+import { nwc } from "../src/engine/paymentAdapters/providers/nwcProvider";
 import { CASHU_CARD, LEGACY_CARD, LightningCards, cardsKey, loadLightningCards } from "../src/engine/paymentAdapters/providers/lightningCards";
 import type { LightningEvents, LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import { LIGHTNING_PROVIDERS } from "../src/engine/paymentAdapters/providers/registry";
@@ -142,6 +143,25 @@ describe("several cards on one network", () => {
     expect(registry.views()).toHaveLength(3);
   });
 
+  it("an NWC wallet is refused twice however its URI is spelled, and through another app connection; another wallet is not", async () => {
+    // The real NWC form, connecting to a fake: only the first card connects, the others are refused before.
+    const wallet = "ab".repeat(32), secret = "cd".repeat(32), relay = "wss%3A%2F%2Frelay.example";
+    const nwcFake: LightningProviderDescriptor = { ...nwc, create: async () => new FakeLightningProvider({ alias: "Hub via relay.example", settleMs: 600_000 }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, nwcFake], host: () => ({ platform: "web" }), events: { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() }, hasMints: () => true });
+    registries.push(registry);
+    await registry.start();
+    await registry.add("nwc", { uri: `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}` });
+    for (const uri of [
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}`,
+      `nostrwalletconnect://${wallet}?relay=${relay}&secret=${secret}`,
+      `nostr+walletconnect://${wallet.toUpperCase()}?relay=${relay}&secret=${secret}`,
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${secret}&lud16=hub%40example.com`,
+      `nostr+walletconnect://${wallet}?relay=${relay}&secret=${"ef".repeat(32)}`,
+    ]) await expect(registry.add("nwc", { uri }), uri.slice(0, 40)).rejects.toThrow("That wallet is already your card “Hub (NWC)”");
+    await registry.add("nwc", { uri: `nostr+walletconnect://${"12".repeat(32)}?relay=${relay}&secret=${secret}` });
+    expect(registry.views().map((v) => v.name)).toEqual(["Cashu", "Hub (NWC)", "Hub (NWC) 2"]);
+  });
+
   it("names: the source's short name, a number when taken, renamable, unique", async () => {
     const { registry } = cards();
     await registry.start();
@@ -155,6 +175,22 @@ describe("several cards on one network", () => {
     await expect(registry.rename(a, "home lnd")).rejects.toThrow("Another card has that name");
     await expect(registry.rename(a, " ")).rejects.toThrow("Enter a name");
     await expect(registry.rename(a, "x".repeat(33))).rejects.toThrow("At most 32 characters");
+  });
+
+  it("names: invisible and direction characters from the wallet or typed in do not make a name that reads like another", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const name = (card: string) => registry.views().find((v) => v.card === card)?.name;
+    const hub = await registry.add("fake-node", { alias: "Alby Hub" });
+    const twin = await registry.add("fake-node", { alias: "Alby\u200b Hub\ufeff" });
+    const flipped = await registry.add("fake-node", { alias: "\u202eHome\u2066" });
+    expect(name(hub)).toBe("Alby Hub (Fake node)");
+    expect(name(twin)).toBe("Alby Hub (Fake node) 2");
+    expect(name(flipped)).toBe("Home (Fake node)");
+    await expect(registry.rename(twin, "Alby\u200b Hub (Fake\u200d node)")).rejects.toThrow("Another card has that name");
+    await expect(registry.rename(twin, "\u200b\u202e\u200c")).rejects.toThrow("Enter a name");
+    await registry.rename(twin, "Office\u2067 LND\u061c");
+    expect(name(twin)).toBe("Office LND");
   });
 
   it("names: a long wallet name is cut after a whole word with …; only an NWC name loses its \" via \" part", async () => {

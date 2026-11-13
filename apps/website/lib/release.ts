@@ -3,7 +3,7 @@
  * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.11.1";
+export const VERSION = "1.11.2";
 
 /** The version an app screenshot's caption names ("Ghostly {n}"): that release without its patch, so it follows each bump. */
 export const SHOTS_VERSION = VERSION.split(".").slice(0, 2).join(".");
@@ -74,6 +74,12 @@ export type InstallerKey = "macArm" | "macIntel" | "windowsExe" | "linuxDeb" | "
 const LINUX_ARM = /\b(aarch64|arm(64|v\d\w*)?)\b/;
 
 /**
+ * An Android platform no arm64 code runs on: a 32-bit ARM kernel ("Linux armv7l"; a 32-bit browser on an arm64 phone
+ * says armv8l). Not x86: an emulator (and the site's phone tests) reports its host's "Linux x86_64".
+ */
+const ANDROID_32_BIT_ARM = /\barmv[67]\w*\b/;
+
+/**
  * Maps a browser's userAgent and platform strings to the installer most people
  * on that machine want. Pure, so it can be unit-tested and called during
  * hydration; `undefined` means "we cannot tell, show every platform".
@@ -90,12 +96,18 @@ const LINUX_ARM = /\b(aarch64|arm(64|v\d\w*)?)\b/;
  * says it is ARM gets none: neither file runs there.
  *
  * An Android phone or tablet gets the release's APK (arm64, which nearly every
- * one is); an iPhone or an iPad gets none.
+ * one is), unless its platform says it runs 32-bit ARM only or its userAgent
+ * names a version older than `ANDROID_MIN` (Chrome's reduced one always says
+ * "Android 10"); an iPhone or an iPad gets none.
  */
 export function defaultInstaller(userAgent: string, platform = "", arch?: string, maxTouchPoints = 0): InstallerKey | undefined {
   const ua = userAgent.toLowerCase();
   const pf = platform.toLowerCase();
-  if (/android/.test(ua)) return "androidApk";
+  if (/android/.test(ua)) {
+    const major = Number(/android (\d+)/.exec(ua)?.[1]);
+    if (ANDROID_32_BIT_ARM.test(pf) || major < Number(ANDROID_MIN.split(".")[0])) return undefined;
+    return "androidApk";
+  }
   if (/iphone|ipad|ipod/.test(ua)) return undefined;
   if (/windows/.test(ua) || pf.startsWith("win")) return "windowsExe";
   if (/macintosh|mac os x/.test(ua) || pf.startsWith("mac")) {

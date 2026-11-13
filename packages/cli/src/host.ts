@@ -11,6 +11,7 @@ import { sinceSeq, type Params } from "./apiKit";
 import { CallManager } from "./calls/manager";
 import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
+import { DaemonPresence } from "./daemonPresence";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { GroupAutoJoin } from "./groupAuto";
@@ -66,6 +67,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
+  let presence: DaemonPresence | undefined;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -100,6 +102,13 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
     joiner.check(node.getState());
+    // Presence (`settings set daemonPresence true`): only a daemon says it, while it runs.
+    if (mode === "daemon") {
+      const said = new DaemonPresence(node);
+      presence = said;
+      hub.onState((s) => said.check(s));
+      said.check(node.getState());
+    }
   } catch (error) {
     hub.release();
     await runtime.close().catch(() => {});
@@ -114,6 +123,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     close: () => (closing ??= (async () => {
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
+      presence?.stop();
       runtime.server.detach(hub.sink);
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
       hub.release();

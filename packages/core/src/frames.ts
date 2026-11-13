@@ -25,6 +25,12 @@ export const LIMITS = {
   maxPathBytes: 8 * 1024,
   /** Requests a host serves at once for one peer. */
   maxConcurrentRequestsPerPeer: 32,
+  /**
+   * Request-body bytes a host holds for one peer at once, from a body's first chunk until its local fetch settles.
+   * Past it a request is refused (`busy`). As much as a client's in-flight requests can carry, so only a peer that
+   * ignores that limit reaches it.
+   */
+  maxHostBodyBytesPerPeer: 16 * 8 * 1024 * 1024,
   /** Requests a client keeps in flight; the rest wait in a queue. */
   maxClientInFlight: 16,
   /**
@@ -41,6 +47,11 @@ export const LIMITS = {
   maxStoredIncomingBytesPerPeer: 500 * 1024 * 1024,
   requestTimeoutMs: 60_000,
   bodyIdleTimeoutMs: 30_000,
+  /**
+   * What a request body must bring in each `bodyIdleTimeoutMs` (unless it ends) to count as moving: a peer that sends a
+   * few bytes at a time is let go like one that stalls.
+   */
+  minRequestBodyBytesPerIdle: 16 * 1024,
   /** Stop writing to the channel above this many buffered bytes. */
   sendHighWaterMark: 1024 * 1024,
   sendLowWaterMark: 256 * 1024,

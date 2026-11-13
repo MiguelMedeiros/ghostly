@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 
+// The per-minute counts read a monotonic clock: a host clock set back (an NTP step, a resumed VM) would otherwise keep
+// every request before the step in its minute, refusing an address or subscription near its limit for the whole step.
+const monotonicNow = () => performance.now()
+
 /**
  * A push relay for Ghostly's wake-up push (WISP 401 § Wake-up push). A browser page may not post to a push
  * service itself (the services answer without CORS), so the app can hand the finished request to a relay the
@@ -44,6 +48,23 @@ const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), '
  */
 const asSent = url => { url.hash = ''; if (!url.search) url.search = ''; return url }
 
+/** Microsoft's push service, whose endpoints carry their subscription in a query: `/w/?token=…`. */
+const WNS = /(^|\.)notify\.windows\.com$/
+
+/**
+ * What the push service routes the endpoint on, or nothing for one the relay does not forward. A push service decodes
+ * the path before routing and reads no query, so a `%` in the path or a query would spell one subscription many ways,
+ * each a count of its own: refused (a real path is letters, digits, `-_:/.`). WNS reads one `token` from the query:
+ * that one alone, counted by its value.
+ */
+const routedOn = url => {
+  if (url.pathname.includes('%')) return
+  if (!url.search) return url.href
+  const params = [...url.searchParams]
+  if (!WNS.test(url.hostname) || params.length !== 1 || params[0][0] !== 'token' || !params[0][1]) return
+  return `${url.origin}${url.pathname}?token=${encodeURIComponent(params[0][1])}`
+}
+
 /** The request to forward, or a reason it is refused. */
 export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAULT_LIMITS.bodyBytes } = {}) {
   let request
@@ -52,6 +73,8 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   let url
   try { url = asSent(new URL(endpoint)) } catch { return { error: 'No endpoint' } }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
+  const routed = routedOn(url)
+  if (!routed) return { error: 'Not a push endpoint' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
   if (bytes.length > bodyBytes) return { error: 'Too large' }
@@ -71,7 +94,7 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
   // The subscription it wakes: a push service refuses a key the subscription was not made with, so another key wakes
   // nothing. Hashed, so the relay's table holds no endpoint and an entry weighs the same however long the URL.
-  const subscription = createHash('sha256').update(`${url.href} ${authorization.split('k=').pop()}`).digest('base64')
+  const subscription = createHash('sha256').update(`${routed} ${authorization.split('k=').pop()}`).digest('base64')
   return { endpoint: url.href, headers: forwarded, body: bytes, subscription }
 }
 
@@ -172,6 +195,7 @@ export function refusalLog (log) {
  * and says whether it was under its limit; a newcomer to a full table drops the idle (a scan at most once a second),
  * else the entry seen longest ago that is under its limit (the oldest of all only when every one is at it). Dropped at
  * its limit, a key would start its minute over: newcomers enough would buy it another `perMinute`.
+ * `now` is a monotonic time (monotonicNow), so a clock step neither extends nor shortens a minute.
  */
 function minuteCounts (perMinute, tracked) {
   const recent = new Map()
@@ -221,7 +245,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const flush = () => { refusals.flush(); forwards.flush(); failures.flush() }
   // Forwards waiting on the push service: counted once it answers, so the ones a stop cuts are said apart.
   let forwarding = 0
-  const pruning = setInterval(() => { prune(Date.now()); flush() }, 60_000)
+  const pruning = setInterval(() => { prune(monotonicNow()); flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
@@ -239,8 +263,9 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
     // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
     // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
-    // someone. The operator has them in the log.
-    if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
+    // someone. The operator has them in the log. A monitor's HEAD and its query string are read as the GET (Node
+    // sends no body for a HEAD), as the HyperDHT relay reads them: a HEAD refused here would count as a refused client.
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify({ ok: true }))
       return
@@ -256,7 +281,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
     }
-    if (!addresses.take(ip, Date.now())) return refuse('rate', 429, { error: 'Too many' })
+    if (!addresses.take(ip, monotonicNow())) return refuse('rate', 429, { error: 'Too many' })
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
@@ -272,7 +297,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       // Counted only for a request it would forward: a refused one wakes nobody.
-      const taken = Date.now()
+      const taken = monotonicNow()
       if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
       forwarding++
       try {
@@ -369,8 +394,32 @@ function setting (env, name, fallback, kind) {
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
 
 /**
+ * The GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables in `env` that are none of `known`, sorted, each with the known
+ * name at most 3 edits away when there is one (`GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?)`): a misspelt name was the
+ * default without a word, often the less safe one. Not a refusal: one env file may serve both relays.
+ */
+function ignoredSettings (env, known) {
+  return Object.keys(env).filter(name => /^GHOSTLY_(RELAY|HYPERDHT)_/.test(name) && !known.includes(name)).sort().map(name => {
+    const [closest] = known.map(other => ({ other, edits: editDistance(name, other) })).sort((a, b) => a.edits - b.edits)
+    return closest && closest.edits <= 3 ? `${name} (${closest.other}?)` : name
+  })
+}
+
+/** Levenshtein distance: the fewest characters to add, drop or change to turn `a` into `b`. */
+function editDistance (a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    row = next
+  }
+  return row[b.length]
+}
+
+/**
  * The relay's settings from its environment (server.mjs): PORT (49480), HOST (0.0.0.0; 127.0.0.1 behind proxies),
- * GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_PROXIES (0). Throws on one present but not of its kind.
+ * GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_PROXIES (0). Throws on one present but not of its kind. `ignored` names the
+ * other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
   const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
@@ -379,6 +428,7 @@ export function readSettings (env) {
     host: setting(env, 'HOST', proxies ? '127.0.0.1' : '0.0.0.0', 'text'),
     origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
     proxies,
+    ignored: ignoredSettings(env, ['GHOSTLY_RELAY_ORIGINS', 'GHOSTLY_RELAY_PROXIES']),
   }
 }
 

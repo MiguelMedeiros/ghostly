@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { previewImageSize, type LinkPreview } from "@ghostly/core";
-import { labelMisleads } from "../lib/parse";
-import { videoSite } from "../lib/parse/linkPreview";
+import { labelMisleads, unspoiledText } from "../lib/parse";
+import { shownPreview, videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
 import { useT } from "../contexts/I18nContext";
@@ -153,8 +153,11 @@ export function LocationCard({ place }: { place: Place }) {
  * What a text message shows under its words: the link preview the sender attached, and a location card for a
  * place its text names. Nothing when there is neither.
  */
-export function MessageLinkCards({ text, preview }: { text: string; preview?: LinkPreview }) {
-  const place = useMemo(() => locationIn(text), [text]);
+export function MessageLinkCards({ text, preview: sent }: { text: string; preview?: LinkPreview }) {
+  // A link or place the bubble keeps under a spoiler gets no card: its title, picture or coordinates would say what the
+  // spoiler hides.
+  const place = useMemo(() => locationIn(unspoiledText(text)), [text]);
+  const preview = useMemo(() => shownPreview(text, sent), [text, sent]);
   if (!preview && !place) return null;
   return (
     <div data-testid="message-link-cards">

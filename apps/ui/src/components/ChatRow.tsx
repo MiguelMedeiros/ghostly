@@ -14,7 +14,8 @@ import { PeerStatusMark, PresenceDot } from "./PresenceMarks";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, appCardsShown, cardLine, showsCard } from "../lib/statusCards";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
@@ -195,15 +196,21 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
  */
 function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
   return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
-    className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
+    className="current-mark pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
+/** `chat-list-row`: drawn only near the list's view (index.css), every row still in the page. */
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
+  `chat-list-row chat-list-row-${density} group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   /** The chat's session id: what its mute is kept under. */
   chatId: string;
+  /**
+   * A paired chat (`paired-chat/1`), whose bubbles draw an app card as a card where Apps shows; a v0.4 chat's show its
+   * text (`appCardsShown`), and so does its row.
+   */
+  paired?: boolean;
   density: ChatListDensity;
   active: boolean;
   /** What the contact goes by here (identities/contactFace.ts `shownContactName`), or the "Contact · xxxxxx" fallback when `named` is false. */
@@ -295,8 +302,11 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
   // A payment of the contact's this app refused: the app's line, in the app's language (not the stored English).
   const refused = p.lastMessage && refusedRowText(p.lastMessage, t);
-  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
-  const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
+  // An app card reads as its bubble shows it (appCardsShown): its card's line where the bubble draws the card, else its
+  // text. There, it names an app installed here as its bubble does (appCardLine): the list read, and the row drawn
+  // again. Elsewhere (Apps off, a v0.4 chat) nothing is asked of the engine.
+  const appCards = appCardsShown(p.paired ? p.chatId : undefined, useAppsAvailable());
+  const installed = useInstalledApps(appCards && p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
@@ -375,7 +385,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
                 : payment ?? (p.lastMessage.paymentId ? storedPaymentLine(t, p.lastMessage.text, p.lastMessage.sender === "me")
-                  : appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
+                  : appCardLine(p.lastMessage.card, appCards, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>

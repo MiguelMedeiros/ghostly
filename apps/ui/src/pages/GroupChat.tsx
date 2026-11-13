@@ -77,7 +77,7 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
-import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
+import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
@@ -145,23 +145,9 @@ function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
   return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
 }
 
-/** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
-function noteIdOf(payments: Payments, paymentId: string): string {
-  const payment = payments[paymentId];
-  return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
-}
-
-/**
- * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
- * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
- */
+/** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
 function captionOf(payments: Payments, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
-  const payment = payments[message.paymentId!];
-  // Said once, under the request (or the payment) itself: not again under a payment that answers it.
-  if (payment?.kind === "payment" && payment.requestId) return undefined;
-  const note = notes.get(noteIdOf(payments, message.paymentId!));
-  const starter = message.sender === "me" ? myKey : message.member;
-  return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
+  return groupPayCaption(message, payments[message.paymentId!], id => notes.get(id), myKey);
 }
 
 /** What the engine writes after "Group created. " and "You joined. ": who can read what (GROUP_READ_NOTE), in the interface's words. */
@@ -733,8 +719,7 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.filter(m => captionOf(payments, notes, m, group.myKey) || payments[m.paymentId!]?.requestId)
-    .map(m => noteIdOf(payments, m.paymentId!)));
+  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey, linkId => groupMemberOfLink(group, linkId)) ?? []));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
@@ -758,7 +743,7 @@ export function GroupChat() {
   const peerOf = (paymentId: string) => paymentPeers[paymentId] ?? "";
   // A row of the timeline: an event, a payment's note, or a message.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
-    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventLine(m, group, t)}</span></div>
+    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center chat-text-system text-text-muted">{eventLine(m, group, t)}</span></div>
     // A note about a payment this device is part of is shown under its own bubble instead.
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
@@ -846,7 +831,7 @@ export function GroupChat() {
     {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
     <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
-      <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
+      <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}

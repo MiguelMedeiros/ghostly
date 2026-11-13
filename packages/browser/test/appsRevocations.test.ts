@@ -142,6 +142,38 @@ describe("a revocation a store's index carries", () => {
     expect(await store.runCheck({ ref: v1.ref }), "added, then removed").toEqual({ status: "revoked", reason: "Leaked key" });
   });
 
+  it("of the update waiting, which the check then drops: the store's next index without it does not let that version install", async () => {
+    const SOURCE = `${REPO}/source.ghostlyapp`;
+    const v1 = await bundle({ sources: [SOURCE] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [SOURCE] });
+    net.put(BUNDLE_URL, v1.bytes);
+    // The publisher's file answers, with a revocation of another version: the check rewrites the kept ones from it.
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, ["A".repeat(43)])]));
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    net.put(SOURCE, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+
+    await net.putStore(await storeFiles({ revoked: [await revocation(v1.ref, [v2.digest])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome, "the waiting update dropped").toBe("none");
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    // A check that does not see that version (its source down): the record keeps only what stops the installed one.
+    net.files.delete(SOURCE);
+    await store.checkUpdates();
+    net.put(SOURCE, v2.bytes);
+
+    await net.putStore(await storeFiles({ sequence: 2 }));
+    await store.refreshStores();
+    expect((await store.checkUpdates())[0]!.outcome, "an index that dropped it").toBe("none");
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow();
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    // A new engine (the page reloaded) reads it back.
+    expect((await apps(net).checkUpdates())[0]!.outcome).toBe("none");
+  });
+
   it("of another app, or of a version not held here, is not kept", async () => {
     const v1 = await bundle();
     net.put(BUNDLE_URL, v1.bytes);

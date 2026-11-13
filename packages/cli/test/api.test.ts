@@ -196,6 +196,20 @@ describe("chats", () => {
     expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
     expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
     expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+    // What a script or a paste leaves on a key (a line break, a space, an invisible character, capitals) keeps it a key.
+    for (const ref of [`${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(findChat([mallory, alice], ref).id).toBe("chatAlice");
+      expect(() => findChat([mallory], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+  });
+
+  it("a contact's key with no chat is no group either, whatever a group's admin named it", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+    const named = { id: "g".repeat(22), name: KEY, members: [], status: "joined" } as unknown as GroupView;
+    for (const ref of [KEY, `${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(() => findChatOrGroup([], [named], ref)).toThrow(expect.objectContaining({ code: "not_found", message: expect.stringMatching(/^No chat with/) }));
+    }
+    expect(findChatOrGroup([], [named], `group:${KEY}`)).toEqual({ group: named });
   });
 
   it("a name is found by the string that set it: cleaned as the engine cleans a name it stores (agents#2907)", () => {
@@ -495,6 +509,18 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("group send says what a refused text looks like, as send does", async () => {
+    const { ctx, node } = fake();
+    const cashu = "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ";
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const cookie = `__cookie__:${"01".repeat(32)}`;
+    for (const text of [cashu, seed, cookie]) {
+      const said = await callApi(ctx, "chat.send", { chat: "Alice", text }).catch((error: Error) => error.message);
+      await expect(callApi(ctx, "group.send", { group: "Crew", text })).rejects.toMatchObject({ code: "confirm", message: said });
+    }
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+  });
+
   it("a text past 16 KiB is a bad request, never handed to the engine, in a chat or a group", async () => {
     const { ctx, node } = fake();
     // 8193 two-byte letters: 16386 bytes. It used to come back as "unavailable", which reads as "try again later".
@@ -506,6 +532,23 @@ describe("chats", () => {
     // Exactly the limit, spaces around it trimmed as the engine does: it goes.
     await callApi(ctx, "chat.send", { chat: "Alice", text: `  ${"é".repeat(8192)}\n` });
     expect(node.sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("an edit past 16 KiB is a bad request as a send is, refused before the secret guard reads it", async () => {
+    const { ctx, node } = fake([msg("me_1", 5, { sender: "me" })]);
+    const editMessage = vi.fn(async () => ({ error: null, messageId: "me_1" }));
+    Object.assign(node, { editMessage });
+    // A seed past the limit: the size is said, not the guard's "looks like a secret" (a --force would not send it either).
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow ";
+    const long = seed + "é".repeat(8193);
+    await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_1", text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/) });
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: "k:0:1", text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/) });
+    // 9 MiB of letters (`edit --stdin`, or the socket): the guard's rune pattern overflowed the stack on it, and the
+    // daemon answered `engine` "Maximum call stack size exceeded"; 15 MiB of prose held every other call ~1.7 s.
+    const huge = "a".repeat(9 * 1024 * 1024);
+    await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_1", text: huge })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: "k:0:1", text: huge })).rejects.toMatchObject({ code: "bad_request" });
+    expect(editMessage).not.toHaveBeenCalled();
   });
 
   it("a --timeout out of range is refused before anything is sent, edited or forwarded: a retry never sends it twice", async () => {
@@ -525,6 +568,21 @@ describe("chats", () => {
     for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
   });
 
+  // A message to a private group with nobody else in it reaches nobody, not even who joins later: `--wait sent` waited its
+  // whole time and said it goes when an edge opens.
+  it("group send in a private group with nobody else in it answers at once and says nobody gets it", async () => {
+    const alone = { ...group, profile: "mesh", members: [group.members[0]] } as GroupView;
+    const node = { getState: () => ({ links: [], groups: [alone] }), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:0" })), groupTaken: () => 0, setGroupTyping: vi.fn() };
+    const ctx = { runtime: { server: { node } }, mode: "one-shot" } as unknown as ApiContext;
+    const note = "Nobody else is in this group: nobody gets this message, not even someone who joins later";
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi", wait: "sent", timeout: 1 })).resolves.toEqual({ group: "g1", messageId: "mekey:0:0", sent: false, edges: 0, note });
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "hi" })).resolves.toMatchObject({ sent: false, edges: 0, note });
+    // Another member: no note, whether an edge took it yet or not.
+    const crew = { ...alone, members: group.members } as GroupView;
+    Object.assign(node, { getState: () => ({ links: [], groups: [crew] }) });
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "hi" })).not.toHaveProperty("note");
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
@@ -532,6 +590,17 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true })).toMatchObject({ typing: false });
     expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: false });
     await expect(callApi(ctx, "chat.typing", { chat: "zed" })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  // A one-shot opens the profile offline for it (`offlineCall`): it answered `live: false` and exit 0, and the contact saw nothing.
+  it("typing in a one-shot without --for says it reached nobody and how to make it reach the contact", async () => {
+    const { ctx } = fake();
+    Object.assign(ctx, { mode: "one-shot" });
+    for (const stop of [false, true]) {
+      expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop })).toMatchObject({ live: false, note: expect.stringContaining("reached nobody") });
+    }
+    Object.assign(ctx, { mode: "daemon" });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).not.toHaveProperty("note");
   });
 
   it("group typing says it in a private group, with the same checks, and refuses a community", async () => {
@@ -1283,6 +1352,19 @@ describe("a pending chat's invite code is a secret", () => {
     expect(JSON.stringify(printed)).not.toMatch(/ghostly1pendingsecret|ghostly-link|"SK"/);
     expect(printed.links.map((l) => l.inviteCode)).toEqual([undefined, "<hidden>", "<hidden>"]);
     expect(printed.groups[0]).toMatchObject({ entryLink: "<hidden>" });
+  });
+
+  it("engine getState hides another group's link under a held id and the wake-up tokens", () => {
+    const state = pending().node.getState();
+    const full = { ...state,
+      links: state.links.map((l, i) => (i === 0 ? { ...l, wakeToken: "wake-chat" } : l)),
+      groups: [{ ...group, wakeTokens: ["wake-group"], others: [{ link: "group1/g/entry-key" }, { linkId: "chat-zero", name: "Other", members: 2 }] }] };
+    const printed = hideStateSecrets(full);
+    expect(JSON.stringify(printed)).not.toMatch(/entry-key|wake-chat|wake-group/);
+    expect(printed.groups[0]).toMatchObject({ wakeTokens: ["<hidden>"], others: [{ link: "<hidden>" }, { linkId: "chat-zero", name: "Other", members: 2 }] });
+    expect(printed.links[0]).toMatchObject({ wakeToken: "<hidden>" });
+    // With --show-secret the state is printed as the engine gave it.
+    expect(JSON.stringify(full)).toMatch(/entry-key.*wake-group|wake-group.*entry-key/);
   });
 });
 

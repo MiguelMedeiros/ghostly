@@ -4,23 +4,37 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
 const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
-/** How a request reaches the contact: the engine's `request` for that contact and service. */
+/**
+ * How a request reaches the contact: the engine's `request` for that contact and service. Each chunk of the answer's
+ * `body` is handed over to `serve`: one that spans a whole buffer of its own goes to the services worker as it is (its
+ * buffer moves there, and reads empty here after), any other is copied first.
+ */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
+
+/**
+ * A chunk that is all of a plain buffer (the engine's `HttpClient` gives each one so, already copied out of the link's
+ * frame) is moved to the worker as it is. A view into a larger or shared buffer would move, or fail on, bytes that are
+ * not its own: that one is copied.
+ */
+function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
+  return chunk.buffer instanceof ArrayBuffer && chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength;
+}
 
 /**
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline. `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the
- * view's name and the line under the app's name.
+ * while the contact is offline. `blocked` and `unguarded`: the view's notice when the bridge shows no app
+ * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
+ * name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -66,12 +80,15 @@ export class CookieJar {
     const name = at > 0 ? pair!.slice(0, at).trim() : "";
     if (!name) return;
     const value = pair!.slice(at + 1).trim();
-    const gone = attributes.some((a) => {
+    // As RFC 6265 §5.3 reads them: the last of each that parses counts, and a Max-Age wins over an Expires.
+    let maxAge: number | undefined;
+    let expires: number | undefined;
+    for (const a of attributes) {
       const [key, v = ""] = a.split("=").map((s) => s.trim());
-      if (/^max-age$/i.test(key ?? "")) return Number(v) <= 0;
-      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); return Number.isFinite(when) && when <= Date.now(); }
-      return false;
-    });
+      if (/^max-age$/i.test(key ?? "") && /^-?\d+$/.test(v)) maxAge = Number(v);
+      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+    }
+    const gone = maxAge !== undefined ? maxAge <= 0 : expires !== undefined && expires <= Date.now();
     if (gone) { this.cookies.delete(name); return; }
     if (!this.cookies.has(name) && this.cookies.size >= CookieJar.MAX) return;
     this.cookies.set(name, value);
@@ -112,7 +129,6 @@ function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
  */
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
   const request = readRequest(data);
-  if (!request) { port.close(); return; }
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
   let ended = false;
   const post = (reply: ServiceReply, transfer: Transferable[] = []) => {
@@ -126,6 +142,13 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
+  // One this page does not take (a path past its length, a method it does not read) never goes on the link, and is
+  // answered now: left unanswered, the worker waited `HEAD_TIMEOUT_MS` and said so in its own English.
+  if (!request) {
+    post({ type: "error", status: 400, text: words.failed });
+    port.close();
+    return;
+  }
   const release = holdRoom(jar, request.body?.byteLength ?? 0);
   if (!release) {
     post({ type: "error", status: 503, text: words.failed });
@@ -173,7 +196,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     post({ type: "head", status: answer.status, headers: out });
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
-      const bytes = chunk.slice();
+      const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
       post({ type: "chunk", bytes }, [bytes.buffer]);
     }
     post({ type: "end" });
@@ -309,30 +332,48 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   notice.append(said, retry);
   view.append(bar, notice, frame);
   const src = `${origin}${BRIDGE_PAGE}`;
-  /** The notice while the contact is offline; once back, the app again, loaded anew (its last page may be stale). */
+  /** Why the bridge shows no app (`BRIDGE_REFUSED`), in the profile's words: said until Try again. */
+  let refused: string | null = null;
+  /** What the notice says now: null while the app is on screen. */
+  let shown: string | null = null;
+  /**
+   * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
+   * (its last page may be stale).
+   */
   const present = () => {
-    const offline = options.presence?.offline() ?? false;
-    if (offline === !notice.hidden) return;
-    if (offline) {
-      said.textContent = options.words.offline;
+    const text = options.presence?.offline() ? options.words.offline : refused;
+    if (text === shown) return;
+    shown = text;
+    if (text !== null) {
+      said.textContent = text;
       notice.hidden = false;
       notice.style.display = "flex";
       frame.style.display = "none";
       if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
     } else {
+      // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
+      const had = notice.contains(document.activeElement);
       notice.hidden = true;
       notice.style.display = "none";
       frame.style.display = "";
       frame.src = src;
+      if (had) frame.focus({ preventScroll: true });
     }
   };
-  retry.addEventListener("click", present);
+  retry.addEventListener("click", () => { refused = null; present(); });
 
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
   let bridge = new AbortController();
   const onMessage = (event: MessageEvent) => {
-    if (event.source !== frame.contentWindow || event.origin !== origin || (event.data as { type?: unknown } | null)?.type !== BRIDGE_READY) return;
+    if (event.source !== frame.contentWindow || event.origin !== origin) return;
+    const message = event.data as { type?: unknown; reason?: unknown } | null;
+    if (message?.type === BRIDGE_REFUSED) {
+      refused = message.reason === "blocked" ? options.words.blocked : options.words.unguarded;
+      present();
+      return;
+    }
+    if (message?.type !== BRIDGE_READY) return;
     // A new bridge (the frame loaded again): a new channel, and the old one's requests end.
     for (const old of ports) old.close();
     ports.clear();

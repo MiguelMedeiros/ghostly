@@ -231,3 +231,32 @@ test("a sign-in's deep link comes back to the running app and answers the sign-i
   expect(result).toEqual({ answer: `?code=a9&state=${state}` });
   expect(await page.evaluate(() => (window as unknown as { __a9: string }).__a9)).toBe("the same page");
 });
+
+test("a sign-in's answer that comes back after Android ended the app's process says the sign-in was interrupted", { tag: ["@feature:android.host.oidc-deep-link", "@gated"] }, async ({ app }) => {
+  const { page, adb, device } = app;
+  let port: unknown;
+  try { port = await app.invoke("oidc_loopback_start"); } catch (error) { skipUntilA1("The sign-in deep link", pending(error) ?? false); throw error; }
+  const state = `a.${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
+  await page.evaluate(([port, state]) => {
+    void (window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }).__TAURI_INTERNALS__
+      .invoke("oidc_loopback_wait", { port, url: "https://example.com/authorize?client_id=a9&redirect_uri=https%3A%2F%2Fapp.ghostly.tools%2Foidc-callback.html", expectedState: state })
+      .catch(() => {});
+  }, [port, state] as const);
+  await expect.poll(() => adb.shell("dumpsys activity activities").match(/topResumedActivity=\S+ \S+ (\S+)/)?.[1] ?? "", { timeout: 15_000, message: "the provider's page in the system browser" }).not.toContain("tools.ghostly.app");
+
+  // Android ends the app's process while the browser is in front (it may, for memory): the waiting sign-in goes with it.
+  for (let i = 0; i < 10 && adb.pid(); i++) {
+    adb.run("shell", "am", "kill", PKG);
+    await sleep(700);
+  }
+  expect(adb.pid(), "the app's process ended with the browser in front").toBe("");
+
+  // The person finishes signing in: the answer starts a new process, whose page never asked for it.
+  adb.run("shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", `'${OIDC_LINK}?code=a9&state=${state}'`);
+  await expect.poll(() => adb.pid(), { timeout: 30_000, message: "a new process for the answer" }).not.toBe("");
+  const again = await webViewPage(device, Number(adb.pid()));
+  const notice = again.getByTestId("sign-in-interrupted");
+  await expect(notice, "the page says so, not only the diagnostics log").toContainText("The sign-in was interrupted", { timeout: 120_000 });
+  await notice.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(again.getByTestId("add-identity")).toBeVisible();
+});

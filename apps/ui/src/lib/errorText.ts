@@ -2,6 +2,7 @@ import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
 import { formatAmount } from "./amount";
 import { english } from "./english";
+import { SERVICE_LOCKED } from "./serviceWindows";
 
 /*
  * An error said in the app's language. The engine, the platform layer and the extension throw plain English (they
@@ -562,6 +563,10 @@ const RULES: readonly Rule[] = [
   { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
   exact("It did not answer in time", "errors.wallet.didNotAnswer"),
   exact("No mint answered", "errors.wallet.noMintAnswered"),
+  // A mint that took a swap and has not answered (engine/wallet.ts SwapUnsettledError): nothing failed, and the next
+  // line says what comes back. Three sentences, so it read as "Something went wrong" (or in English) without these.
+  { match: new RegExp(`^${HOST} has not answered yet\\. The payment was not made\\. The sats set aside for it return to your wallet a few minutes after the mint answers\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentPayNext" },
+  { match: new RegExp(`^${HOST} has not answered yet\\. The ecash is added to your wallet as soon as it does\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentRedeemNext" },
   exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
   { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
   exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),
@@ -694,6 +699,9 @@ const RULES: readonly Rule[] = [
   // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
   { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
   { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
+  { match: /^This is an OpenPGP v(?<version>\d) key, which Ghostly does not accept\. Use a v4 key \(gpg makes Ed25519 ones\) or a v6 key\.$/, key: "errors.proof.pgpKeyVersion", next: "errors.proof.pgpKeyVersionNext" },
+  // A key from keys.openpgp.org that its owner has not confirmed an email for: served without the user IDs it is checked by.
+  exact("This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", "errors.proof.pgpNoUserIds", "errors.proof.pgpNoUserIdsNext"),
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
   exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),
@@ -730,6 +738,8 @@ const RULES: readonly Rule[] = [
   // apps/web/src/host.ts, RELAY_ONLY_REFUSED): one short line, and why, with the desktop app that opens it, behind the ⓘ.
   { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", info: "errors.relayOnly.appInBrowserInfo" },
   { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", info: "errors.relayOnly.appInBrowserInfo" },
+  // A contact's app the profile's lock overtook while it opened on the web (apps/web/src/host.ts): it showed nothing.
+  exact(SERVICE_LOCKED, "errors.services.lockedBeforeOpen", "errors.services.lockedBeforeOpenNext"),
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").

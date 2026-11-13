@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -15,14 +15,28 @@ import { groupJson } from "./views";
 /**
  * A member by key, unique key prefix or name; never this profile itself (`myName`: its name, which its own row lacks).
  * A whole key is that member, whatever another member calls itself; a prefix and a name stand side by side (two
- * members is an error, not a guess).
+ * members is an error, not a guess). For a grant (`byKeyOnly`: admin, a pinned hub) a member found only by the name it
+ * gave itself is refused, with its key: another member could call itself that name while the one meant is away, as
+ * `findOwnNamedChat` refuses a contact's own name.
  */
-export function findMember(group: GroupView, ref: string, myName?: string) {
+export function findMember(group: GroupView, ref: string, myName?: string, byKeyOnly = false) {
   const lower = ref.toLowerCase();
+  // A ref shaped as a key (a line break, a space or capitals left on it too) is only ever that key, never a name.
+  const asKey = contactKeyOf(ref);
+  if (asKey !== undefined) {
+    const member = group.members.find((m) => !m.me && m.key === asKey);
+    if (member) return member;
+    throw noMember(group, asKey, myName);
+  }
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
-  if (matches.length === 1) return matches[0];
+  if (matches.length === 1) {
+    if (byKeyOnly && !matches[0].key.startsWith(ref)) {
+      throw new CliError("bad_request", `${JSON.stringify(ref)} names a member only by the name it gave itself: use its key`, { member: matches[0].key, name: matches[0].nick ?? null });
+    }
+    return matches[0];
+  }
   throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
 }
 
@@ -68,38 +82,57 @@ async function picture(params: Params): Promise<string | null> {
   return pictureFrom(str(params, "path", true));
 }
 
-/** The member `params.member` names in `group`, this profile's own name said to be it. */
-const member = (ctx: ApiContext, group: GroupView, params: Params) => findMember(group, str(params, "member", true), state(ctx).settings.nick);
+/**
+ * A group this profile administers or is in, not only an invitation: before, the engine answered `group rename`,
+ * `picture`, `link`, `rotate` and `invite` on an invitation not yet joined with "Group not found" (engine, exit 1),
+ * while `group show` listed it, and `remove`/`admin` said "No member" of a member list it had not received yet.
+ */
+function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
+  const group = groupOf(ctx, params, twin);
+  if (group.status || !group.invitation) return group;
+  const ref = str(params, "group", true), shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+  throw new CliError("refused", group.invitation.accepted
+    ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
+    : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
+}
+
+/** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
+const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), state(ctx).settings.nick, grant);
 
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
     const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
   async "group.remove"(ctx, params) {
-    const group = groupOf(ctx, params);
-    await node(ctx).removeGroupMember({ groupId: group.id, key: member(ctx, group, params).key });
-    return view(ctx, group.id, params);
+    const group = joined(ctx, params);
+    const removed = member(ctx, group, params);
+    await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
+    // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
+    // app's Remove dialog says it.
+    const linkOn = !!(state(ctx).groups.find((g) => g.id === group.id) ?? group).entryLink;
+    return { ...view(ctx, group.id, params),
+      ...(linkOn && { warning: `${removed.nick ?? "They"} can still join again with the group's link: ghostly group link ${group.id} --reset gives it a new one and keeps them out` }) };
   },
   async "group.admin"(ctx, params) {
-    const group = groupOf(ctx, params);
-    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params).key });
+    const group = joined(ctx, params);
+    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params, true).key });
     return view(ctx, group.id, params);
   },
   async "group.hub"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
-    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role as "pin" | "exclude" });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
-    const group = groupOf(ctx, params, "chat rename <chat> <name...>");
+    const group = joined(ctx, params, "chat rename <chat> <name...>");
     const name = groupNameOf(params);
     // Every member reads it, and a community's anyone who opens its link (docs/CLI.md § Safety).
     guardText(name, bool(params, "force"), "group's name", "rename it");
@@ -107,12 +140,12 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return view(ctx, group.id, params);
   },
   async "group.rotate"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     await node(ctx).rotateGroup({ groupId: group.id });
     return view(ctx, group.id, params);
   },
   async "group.link"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     if (params.on === false) {
       await node(ctx).disableGroupLink({ groupId: group.id });
       return { group: group.id, link: null };
@@ -121,7 +154,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return { group: group.id, link };
   },
   async "group.picture"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = joined(ctx, params);
     await node(ctx).setGroupPicture({ groupId: group.id, picture: await picture(params) });
     return { group: group.id, picture: !bool(params, "clear") };
   },

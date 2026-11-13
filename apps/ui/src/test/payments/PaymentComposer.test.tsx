@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Language } from "../../lib/settings";
@@ -351,6 +351,27 @@ describe("the cards", () => {
     await user.keyboard("{Escape}");
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Escape drops an input method's candidate (Japanese, Chinese, Korean…): Chromium sends it while composing, WebKit
+  // right after the composition ended, as 229. It turned the card back, or closed the sheet, with the memo typed so far.
+  it("leaves an input method's Escape in the memo alone: the card stays turned, the sheet open", async () => {
+    rememberNetwork("peer", "testnet");
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    await waitFor(() => expect(amount()).toHaveFocus());
+    const memo = screen.getByRole("textbox", { name: "What for? (optional)" });
+    memo.focus();
+    fireEvent.compositionStart(memo);
+    fireEvent.keyDown(memo, { key: "Escape", isComposing: true });
+    fireEvent.compositionEnd(memo, { data: "" });
+    fireEvent.keyDown(memo, { key: "Escape", keyCode: 229 });
+    await act(async () => {});
+    expect(screen.queryByRole("radiogroup", { name: "Pay with" })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
   });
 
   it("never closes on a click inside, on the cards or on a turned card", async () => {

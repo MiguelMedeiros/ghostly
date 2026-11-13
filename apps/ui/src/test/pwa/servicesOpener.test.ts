@@ -3,8 +3,9 @@ import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from ".
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeControl, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { createHash } from "node:crypto";
+import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -74,6 +75,18 @@ describe("the cookies one opened app keeps", () => {
     jar.take("=nameless");
     expect(jar.header()).toBeNull();
   });
+  it("read Max-Age before Expires, and skip a Max-Age that is no number of seconds", () => {
+    const jar = new CookieJar();
+    const past = new Date(Date.now() - 3_600_000).toUTCString();
+    // What Express sends for `maxAge` when the contact's clock is behind this device's.
+    jar.take(`sid=abc; Max-Age=3600; Path=/; Expires=${past}; HttpOnly`);
+    jar.take("a=2; Max-Age=");
+    jar.take("b=3; Max-Age=soon");
+    expect(jar.header()).toBe("sid=abc; a=2; b=3");
+    jar.take(`sid=; Expires=${new Date(Date.now() + 3_600_000).toUTCString()}; Max-Age=-1`);
+    jar.take("a=; Max-Age=60; Max-Age=0");
+    expect(jar.header()).toBe("b=3");
+  });
   it("hold a bounded number of names", () => {
     const jar = new CookieJar();
     for (let i = 0; i < CookieJar.MAX + 10; i++) jar.take(`c${i}=1`);
@@ -97,7 +110,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -261,12 +274,135 @@ describe("one request from the app, over the contact's link", () => {
     }
   });
 
-  it("drops what is not a request, sending nothing", async () => {
-    const { port, replies, closed } = recorder();
-    let called = false;
-    await serve(port, { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null }, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
-    expect(called).toBe(false);
-    expect(replies).toEqual([]);
+  it("sends nothing on the link for what is not a request, and says it failed at once: the worker would wait for an answer", async () => {
+    // A path past what the page takes (a long query), a method it does not read, a full URL: none reaches the contact,
+    // and each is answered now, in the profile's words, never left to the worker's English after HEAD_TIMEOUT_MS.
+    for (const data of [
+      { type: "request", method: "GET", path: `/search?q=${"a".repeat(9000)}`, headers: [], body: null },
+      { type: "request", method: "patch", path: "/api", headers: [], body: null },
+      { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null },
+      null,
+    ]) {
+      const { port, replies, closed } = recorder();
+      let called = false;
+      await serve(port, data, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
+      expect(called).toBe(false);
+      expect(replies).toEqual([{ type: "error", status: 400, text: "Failed" }]);
+      expect(closed()).toBe(true);
+    }
+  });
+});
+
+/**
+ * A port as the browser's: what is posted reaches the worker by structured clone, and a transferred buffer moves (it
+ * reads empty on the page after), so a test sees what the worker gets and what the page copied to send it.
+ */
+function workerPort() {
+  const replies: ServiceReply[] = [];
+  const transfers: ArrayBuffer[][] = [];
+  let closed = false;
+  const port = {
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    postMessage: (reply: ServiceReply, transfer: Transferable[] = []) => {
+      transfers.push(transfer as ArrayBuffer[]);
+      replies.push(structuredClone(reply, { transfer }));
+    },
+    close: () => { closed = true; },
+  };
+  return { port: port as unknown as MessagePort, replies, transfers, closed: () => closed, cancel: () => port.onmessage?.({ data: { type: "cancel" } }) };
+}
+
+/** The engine's own client for one contact's link, with the link's side recorded: answers are fed as link frames. */
+function linkClient() {
+  const sent: (string | Uint8Array)[] = [];
+  const client = new HttpClient({ send: (data) => { sent.push(data); }, bufferedAmount: 0, drained: async () => {}, close: () => {}, onMessage: null, onClose: null });
+  const controls = () => sent.filter((d): d is string => typeof d === "string").map((d) => JSON.parse(d) as { t: string; id: number });
+  /** One body chunk as it comes off the link: its payload a view into the frame, as `decodeChunk` gives it. */
+  const chunk = (id: number, payload: Uint8Array, end: boolean) => client.handleChunk(decodeChunk(encodeChunk({ kind: CHUNK_KIND.responseBody, id, end, payload }))!);
+  return { client, controls, chunk };
+}
+
+/** Bytes copied by `Uint8Array.prototype.slice` while `run` runs. */
+async function bytesSliced(run: () => Promise<void>): Promise<{ calls: number; bytes: number }> {
+  const slice = Uint8Array.prototype.slice;
+  const counted = { calls: 0, bytes: 0 };
+  const spy = vi.spyOn(Uint8Array.prototype, "slice").mockImplementation(function (this: Uint8Array, ...args: [number?, number?]) {
+    const copy = slice.apply(this, args);
+    counted.calls++;
+    counted.bytes += copy.byteLength;
+    return copy;
+  });
+  try { await run(); } finally { spy.mockRestore(); }
+  return counted;
+}
+
+const sha256 = (parts: Uint8Array[]) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest("hex"); };
+
+describe("a contact's answer on its way to the services worker", () => {
+  it("copies each chunk once: a 10 MB answer costs 10 MB of copies, not 20, and reaches the worker byte for byte", async () => {
+    const size = 10_000_000;
+    const body = new Uint8Array(size);
+    for (let i = 0; i < size; i++) body[i] = (i * 31 + (i >>> 11)) & 0xff;
+    const link = linkClient();
+    const { port, replies, transfers, closed } = workerPort();
+    const copied = await bytesSliced(async () => {
+      const done = serve(port, { type: "request", method: "GET", path: "/big.bin", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+      await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+      link.client.handleResponse({ t: "res", id: 1, st: 200, h: [["content-type", "application/octet-stream"]], b: true });
+      for (let at = 0; at < size; at += MAX_CHUNK_PAYLOAD_BYTES) {
+        link.chunk(1, body.subarray(at, Math.min(size, at + MAX_CHUNK_PAYLOAD_BYTES)), at + MAX_CHUNK_PAYLOAD_BYTES >= size);
+      }
+      await done;
+    });
+    const chunks = replies.filter((r): r is Extract<ServiceReply, { type: "chunk" }> => r.type === "chunk");
+    const links = Math.ceil(size / MAX_CHUNK_PAYLOAD_BYTES);
+    expect(chunks).toHaveLength(links);
+    expect(replies).toHaveLength(links + 2);
+    expect(replies[0]).toMatchObject({ type: "head", status: 200 });
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    // One copy per chunk, out of the link's frame (`HttpClient`): none more on the page to send it on.
+    expect(copied).toEqual({ calls: links, bytes: size });
+    // Each chunk's own buffer moved to the worker, exactly its bytes: none left behind on the page.
+    for (const [i, transfer] of transfers.slice(1, -1).entries()) {
+      expect(transfer).toHaveLength(1);
+      expect(transfer[0]!.byteLength, `chunk ${i} left on the page`).toBe(0);
+      expect(chunks[i]!.bytes.byteLength).toBe(chunks[i]!.bytes.buffer.byteLength);
+    }
+    const received = chunks.map((c) => c.bytes);
+    expect(received.reduce((n, c) => n + c.byteLength, 0)).toBe(size);
+    expect(sha256(received)).toBe(sha256([body]));
+    expect(closed()).toBe(true);
+  });
+
+  it("copies a chunk that is only part of its buffer, and leaves that buffer whole", async () => {
+    const shared = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    const { port, replies, transfers } = workerPort();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, async () => ({
+      status: 200, headers: [], bytes: async () => new Uint8Array(),
+      body: (async function* () { yield shared.subarray(0, 3); yield shared.subarray(3); })(),
+    }), new CookieJar(), words);
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && [...r.bytes])).toEqual([[1, 2, 3], [4, 5, 6, 7, 8]]);
+    expect(transfers.slice(1, -1).map((t) => t.map((b) => b === shared.buffer))).toEqual([[false], [false]]);
+    expect([...shared]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("still stops the contact's answer when the page stops reading partway, sending nothing after", async () => {
+    const link = linkClient();
+    const { port, replies, cancel, closed } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let seen = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      sent(reply, transfer as Transferable[]);
+      if (reply.type === "chunk" && ++seen === 3) cancel();
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    for (let i = 0; i < 10; i++) link.chunk(1, new Uint8Array(1024).fill(i), false);
+    await done;
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && r.bytes[0])).toEqual([0, 1, 2]);
+    expect(replies.map((r) => r.type)).toEqual(["head", "chunk", "chunk", "chunk", "end"]);
+    expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 }));
     expect(closed()).toBe(true);
   });
 });
@@ -341,6 +477,53 @@ describe("a contact's app shown over the app", () => {
       stop();
       delete (navigator as { userActivation?: unknown }).userActivation;
     }
+  });
+
+  it("says why in the person's words when the bridge shows no app (the browser refused it its worker), until Try again loads it anew", async () => {
+    // Firefox blocking third-party cookies refuses the bridge its services worker: the services host is a site of its own.
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const first = frame.src;
+    const origin = new URL(first).origin;
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const refused = (reason: string, from: { origin: string; source: unknown } = { origin, source: inFrame }) =>
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_REFUSED, reason }, origin: from.origin, source: from.source as Window }));
+    // Only the bridge in the view's frame is heard.
+    refused("blocked", { origin: "https://other.example", source: inFrame });
+    refused("blocked", { origin, source: window });
+    expect(notice.hidden).toBe(true);
+    refused("blocked");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.style.display).toBe("none");
+    // The contact's presence changing leaves it said, and loads nothing.
+    frame.src = "about:blank";
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    // Offline goes first, and back online it is said again.
+    offline = true;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
+    offline = false;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.src).toBe("about:blank");
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    retry.focus();
+    retry.click();
+    expect(notice.hidden).toBe(true);
+    expect(frame.style.display).toBe("");
+    expect(frame.src, "the bridge is loaded anew").toBe(first);
+    expect(document.activeElement, "the focus goes to the app, not the page's body").toBe(frame);
+    // A page of the app the bridge would not show.
+    refused("unguarded");
+    expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
   });
 
   it("opens on the notice when the contact is already offline", async () => {

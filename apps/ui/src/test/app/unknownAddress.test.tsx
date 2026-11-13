@@ -11,7 +11,7 @@ import { Root } from "../../Root";
 
 afterEach(() => { window.location.hash = ""; });
 
-it.each(["#/wallets", "#/join", "#/nonsense", "#/wallet/x", "#/settings/a/b"])("%s goes home", async (address) => {
+it.each(["#/wallets", "#/join", "#/nonsense", "#/wallet/x", "#/settings/a/b", "#/chat", "#/chat/"])("%s goes home", async (address) => {
   window.location.hash = address;
   render(<Root />);
   expect(await screen.findByTestId("sidebar")).toBeInTheDocument();

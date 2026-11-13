@@ -540,7 +540,7 @@ pub struct Meter {
 
 impl Meter {
     /// The microphone named `wanted`, or the default one (the test tone with `fake`, as in a call). `levels`
-    /// gets its loudness, 0 to 1, as JSON (`{"level":0.4}`), about 12 times a second.
+    /// gets its loudness, 0 to 1, as JSON (`{"level":0.4}`), at most about 12 times a second ([`meter_says`]).
     pub fn open(fake: bool, wanted: Option<&str>, levels: Sink) -> Result<Meter, String> {
         let default = if fake { TONE } else { "autoaudiosrc" };
         let (pipeline, device) = start_with(
@@ -550,7 +550,7 @@ impl Meter {
             wanted,
             default,
             |pipeline| {
-                let levels = levels.clone();
+                let heard = meter_says(levels.clone(), &PAGE_HIDDEN);
                 // Read where `level` posts them; anything else (an error) stays on the bus for `start`.
                 pipeline
                     .bus()
@@ -559,11 +559,7 @@ impl Meter {
                         let Some(level) = loudness(message) else {
                             return gst::BusSyncReply::Pass;
                         };
-                        levels(
-                            serde_json::json!({ "level": level })
-                                .to_string()
-                                .into_bytes(),
-                        );
+                        heard(level);
                         gst::BusSyncReply::Drop
                     });
                 Ok(())
@@ -571,6 +567,28 @@ impl Meter {
         )?;
         Ok(Meter { pipeline, device })
     }
+}
+
+/// Where a meter's readings go on their way to the page: in hundredths, as the page draws them, and only when that
+/// changes, so silence is said once. None while the page is out of sight (`hidden`, [`PAGE_HIDDEN`]): each one is an
+/// eval in the page and a redraw of a meter nobody sees. Back in sight, the next reading is said.
+fn meter_says(levels: Sink, hidden: &'static AtomicBool) -> Heard {
+    let last = AtomicU64::new(u64::MAX);
+    Arc::new(move |level: f64| {
+        if hidden.load(Ordering::Relaxed) {
+            last.store(u64::MAX, Ordering::Relaxed);
+            return;
+        }
+        let hundredths = (level * 100.0).round() as u64;
+        if last.swap(hundredths, Ordering::Relaxed) == hundredths {
+            return;
+        }
+        levels(
+            serde_json::json!({ "level": hundredths as f64 / 100.0 })
+                .to_string()
+                .into_bytes(),
+        );
+    })
 }
 
 impl Drop for Meter {
@@ -2274,6 +2292,39 @@ mod tests {
         );
         assert_eq!(meter_level(0.0), 1.0);
         assert!(meter_level(-60.0) < 0.005);
+    }
+
+    /// Settings' meter says a reading in hundredths, as the page draws it, and only when that changes: a silent
+    /// microphone is said once, not 12 times a second. Out of sight, none at all (12 evals a second for a meter
+    /// nobody sees); back in sight the next reading is said, even one the same as the last said.
+    #[test]
+    fn the_meter_says_a_change_while_in_sight_and_nothing_out_of_it() {
+        static HIDDEN: AtomicBool = AtomicBool::new(false);
+        let told = Arc::new(Mutex::new(Vec::<String>::new()));
+        let into = told.clone();
+        let heard = meter_says(
+            Arc::new(move |bytes| into.lock().unwrap().push(String::from_utf8(bytes).unwrap())),
+            &HIDDEN,
+        );
+        for level in [0.0, 0.0, 0.0, 0.5653, 0.5665, 0.5643] {
+            heard(level);
+        }
+        HIDDEN.store(true, Ordering::Relaxed);
+        for level in [0.3, 0.5643, 0.0] {
+            heard(level);
+        }
+        HIDDEN.store(false, Ordering::Relaxed);
+        heard(0.0);
+        heard(0.0);
+        assert_eq!(
+            *told.lock().unwrap(),
+            [
+                r#"{"level":0.0}"#,
+                r#"{"level":0.57}"#,
+                r#"{"level":0.56}"#,
+                r#"{"level":0.0}"#
+            ]
+        );
     }
 
     /// Settings' meter on the test tone, then on a microphone that is not there (the default instead), and the

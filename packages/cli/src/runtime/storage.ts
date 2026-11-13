@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
 import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
-import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTree";
+import { handOut, openTreeFile, openTreeReader, rollback, SqlTree, type TreeFile } from "./sqlTree";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -14,7 +15,8 @@ import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTr
  *
  * - every committed read-write transaction appends its puts, deletes and clears to `journal.bin` and is fsynced
  *   before the transaction's `complete` event reaches the engine (a Cashu proof saved is a proof on disk); one opened
- *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second;
+ *   with `durability: "relaxed"` is appended at once and synced with the next one, or within a second. The sync runs
+ *   off the thread, and the transactions that commit while one runs share the next (`shareSync`);
  * - a schema change (an upgrade, a deleted database) writes a whole new `snapshot.bin` instead;
  * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
  *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
@@ -145,6 +147,8 @@ const FOLLOWS = "__ghostly_journal__";
 const SEQ = "__ghostly_entry__";
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
+/** Records of rows.db an export reads in one turn of the event loop: a few milliseconds' worth. */
+const EXPORT_PAGE = 256;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
 const RELAXED_SYNC_MS = 1_000;
 const BLOB = "__ghostlyBlob";
@@ -211,6 +215,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let unsaved = false;
   /** Set while the journal holds relaxed entries no sync has covered yet. */
   let relaxed: ReturnType<typeof setTimeout> | null = null;
+  /** The `complete`s of transactions whose entries the running sync does not cover: the next one does. */
+  let unsynced: (() => void)[] = [];
+  /** The syncs running off the thread, one after another, until no `complete` waits for one. */
+  let syncing: Promise<void> | null = null;
   /** The journal holds a chat's ratchet state, and with the next one it holds a key already used. */
   let holdsRatchet = false;
   /** The journal holds a delete of a chat or a message (or a settings write), and what came before it with it. */
@@ -320,19 +328,30 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const dispatch = txProto.dispatchEvent;
   txProto.dispatchEvent = function (this: RawTransaction, event: Event) {
     if (event.type === "complete" && writing) {
+      let entry = 0, waits = false;
       if (this.mode === "versionchange") {
         schemaDirty = true;
         // A schema change goes to a snapshot, not the journal: what it wrote in the trees (an index filled) goes now.
         if (trees) { trees.complete(this._rollbackLog, ++seq); written(seq); }
       } else {
         const ops = pending.get(this._rollbackLog);
-        if (ops?.length) {
-          const refused = append(ops, this.durability === "relaxed", ++seq, this._rollbackLog);
-          if (refused) return refuse(this, refused.error, event);
-        }
+        // Nothing journaled, yet its trees' layer may be open: a put a unique index refused, written and undone. Left
+        // open, it stays this transaction's, and every later write to the store would throw.
+        if (!ops?.length) trees?.abort(this._rollbackLog);
+        if (ops?.length) entry = ++seq;
+        const appended = ops?.length ? append(ops, this.durability === "relaxed", entry, this._rollbackLog) : null;
+        if (appended && appended !== "unsynced") return refuse(this, appended.error, event);
+        waits = appended === "unsynced";
       }
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
+      if (waits) {
+        // Its entry is in the journal, not yet on the disk: the engine hears `complete` once a sync covers it. The store
+        // has its writes already, so the transactions waiting for this one start now, and their entries share that sync.
+        shareSync(() => { written(entry); dispatch.call(this, event); });
+        (this.db._rawDatabase as unknown as SchedulingDatabase).processTransactions(event);
+        return true;
+      }
     } else if (event.type === "abort") {
       pending.delete(this._rollbackLog);
       trees?.abort(this._rollbackLog);
@@ -354,20 +373,22 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   /**
    * A committed transaction's entry, numbered `entry` (its first op says so, where there are trees), from the
    * transaction whose rollback log is `owner`. Written at once, it may fail (a full disk): the reason is given back,
-   * and the transaction is to be refused, not completed.
+   * and the transaction is to be refused, not completed. "unsynced": written, and its `complete` waits for a sync.
    */
-  function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[]): { error: unknown } | null {
+  function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[]): { error: unknown } | "unsynced" | null {
     holdsDelete ||= ops.some(deletes);
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
       let done: boolean;
-      try { done = writeEntry(serialize(ops), lazy); } catch (error) { return { error }; }
+      try { done = writeEntry(serialize(ops), lazy ? "lazy" : "shared"); } catch (error) { return { error }; }
       trees?.complete(owner, entry);
+      // SQLite takes its writes once the journal's sync covers them (`shareSync`).
+      if (done && !lazy) return "unsynced";
       if (done) written(entry);
       return null;
     }
     trees?.complete(owner, entry);
-    void enqueue(async () => { if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy)) written(entry); });
+    void enqueue(async () => { if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy ? "lazy" : "now")) written(entry); });
     return null;
   }
 
@@ -453,11 +474,13 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   }
 
   /**
-   * `lazy`: a relaxed transaction's entry. A sync blocks the whole process for milliseconds, and what such a
-   * transaction wrote can be made again (the event set's note of a message it already reported): written, it outlives
-   * the process; a power cut may take its last second.
+   * `sync`: "now", synced before this returns; "shared", synced by the caller through `shareSync`; "lazy", a relaxed
+   * transaction's entry. A sync blocks the whole process for milliseconds, and what such a transaction wrote can be
+   * made again (the event set's note of a message it already reported): written, it outlives the process; a power cut
+   * may take its last second.
    */
-  function writeEntry(entry: Buffer, lazy = false): boolean {
+  function writeEntry(entry: Buffer, sync: "now" | "shared" | "lazy" = "now"): boolean {
+    const lazy = sync === "lazy";
     if (!writing) return false;
     let whole = -1;
     try {
@@ -466,7 +489,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (snapshotName !== undefined && whole === 0) writeAll(journalFd, framed(serialize([{ db: FOLLOWS, store: "", kind: "clear", snapshot: snapshotName }])));
       marked = false;
       writeAll(journalFd, framed(entry));
-      if (!lazy) sync();
+      if (sync === "now") syncNow();
     } catch (error) {
       // What this entry said is not on disk. The part of it that is goes: what is appended behind a cut entry is not
       // read back, and the next entry (once there is room) must be.
@@ -474,15 +497,51 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       if (journalFd !== null && whole >= 0) try { ftruncateSync(journalFd, whole); } catch { /* the snapshot at close makes it whole */ }
       throw error;
     }
-    if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
+    if (lazy) relaxed ??= setTimeout(() => { try { syncNow(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
     holdsRatchet ||= entry.includes(RATCHET);
     if (statSync(journalPath).size > COMPACT_BYTES || ratchetDue() || deleteDue()) void enqueue(writeSnapshot);
     return true;
   }
 
-  function sync() {
+  function syncNow() {
     if (relaxed) { clearTimeout(relaxed); relaxed = null; }
     if (journalFd !== null) fsyncSync(journalFd);
+  }
+
+  /**
+   * `done` (a transaction's `complete`) once a sync covers what the journal has now. A sync blocked the whole process
+   * (5 ms on a Mac's SSD, where it flushes the drive's cache), one per transaction: 8 sends at once went no faster than
+   * 1, and every other call waited behind them. It runs off the thread now, and every entry written while it runs
+   * goes with the next one. One that fails leaves what the journal has unsure: the store is folded into a whole
+   * snapshot before the `complete`s go (they go even if that fails, as a Blob's entry written late does).
+   */
+  function shareSync(done: () => void) {
+    unsynced.push(done);
+    syncing ??= (async () => {
+      while (unsynced.length) {
+        const batch = unsynced;
+        unsynced = [];
+        if (relaxed) { clearTimeout(relaxed); relaxed = null; }
+        const fd = journalFd;
+        try {
+          if (fd !== null) await new Promise<void>((resolve, reject) => fsync(fd, (error) => (error ? reject(error) : resolve())));
+        } catch (error) {
+          failed(error);
+          // The entries written while it ran are no surer: they go with the fold too. None is written straight to the
+          // journal while the fold waits in the queue, so none is left for another sync.
+          const folded = [...batch, ...unsynced.splice(0)];
+          void enqueue(writeSnapshot).then(() => { for (const complete of folded) complete(); });
+          continue;
+        }
+        for (const complete of batch) complete();
+      }
+      syncing = null;
+    })();
+  }
+
+  /** Resolves once no sync runs: a snapshot or a close may take the journal's place. */
+  async function synced() {
+    while (syncing) await syncing;
   }
 
   async function writeSnapshot() {
@@ -500,32 +559,54 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    */
   async function capture(journalName: string | undefined, inline: boolean): Promise<Snapshot> {
     const snapshot: Snapshot = { format: 1, ...(journalName !== undefined && { journal: journalName }), databases: [] };
-    for (const db of raw._databases.values()) {
-      if (db.name === PROBE) continue;
-      const stores: SnapshotStore[] = [];
-      for (const store of db.rawObjectStores.values()) {
-        if (store.deleted) continue;
-        const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
-        const meta = {
-          name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
-          indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
-        };
-        if (!inline && disk(store)) {
-          if (!onTrees(store)) toDisk(store);
-          stores.push({ ...meta, records: [], onDisk: true });
-          snapshot.format = 3;
-          continue;
+    // Everything is taken in this turn, one point in time: the records held in memory (their Blobs read after), and
+    // the stores in rows.db as a reader of it now with their finished transactions' layers, read a page at a time after.
+    // An export of 100,000 messages read them all in one turn: the daemon answered nothing for 1.1-1.7 s.
+    const held: SnapshotStore[] = [];
+    const later: [SnapshotStore, SqlTree][] = [];
+    let reader: TreeFile | null = null;
+    try {
+      for (const db of raw._databases.values()) {
+        if (db.name === PROBE) continue;
+        const stores: SnapshotStore[] = [];
+        for (const store of db.rawObjectStores.values()) {
+          if (store.deleted) continue;
+          const live = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+          const meta = {
+            name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
+            indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
+          };
+          if (!inline && disk(store)) {
+            if (!onTrees(store)) toDisk(store);
+            stores.push({ ...meta, records: [], onDisk: true });
+            snapshot.format = 3;
+            continue;
+          }
+          const saved: SnapshotStore = { ...meta, records: [] };
+          stores.push(saved);
+          if (onTrees(store)) {
+            reader ??= openTreeReader(sqlite!, rowsPath, classes.constraintError);
+            later.push([saved, (store.records.records as unknown as SqlTree).at(reader)]);
+          } else {
+            for (const record of store.records.values()) saved.records.push([record.key, record.value]);
+            held.push(saved);
+          }
         }
-        const records: [Key, unknown][] = [];
-        for (const record of store.records.values()) records.push([record.key, await blobsToDisk(record.value)]);
-        stores.push({ ...meta, records });
+        snapshot.databases.push({ name: db.name, version: db.version, stores });
       }
-      snapshot.databases.push({ name: db.name, version: db.version, stores });
-    }
+      for (const store of held) for (const record of store.records) record[1] = await blobsToDisk(record[1]);
+      for (const [saved, tree] of later) {
+        for (const record of tree.getAllRecords()) {
+          if (saved.records.push([record.key, record.value]) % EXPORT_PAGE === 0) await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+    } finally { reader?.db.close(); }
     return snapshot;
   }
 
   async function snapshotToDisk() {
+    // The journal is closed and removed below: not while a sync runs on it.
+    await synced();
     const name = randomBytes(8).toString("hex");
     const snapshot = await capture(name, false);
     if (trees) {
@@ -554,6 +635,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
 
   /** What `close` leaves: a short journal with the mark at its end, synced (its relaxed entries too), or a fresh snapshot. */
   async function leave() {
+    await synced();
     if (schemaDirty || unsaved || journalBytes() > KEEP_BYTES || ratchetDue() || deleteDue()) return writeSnapshot();
     if (marked) return;
     writeEntry(serialize([{ db: CLOSED, store: "", kind: "clear" }] satisfies Op[]));
@@ -578,9 +660,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     }
   }
 
-  /** Whether a transaction is running or waiting to. */
+  /** Whether a transaction is running or waiting to, or for the sync that tells the engine it completed. */
   function busy() {
-    return [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
+    return syncing !== null || [...raw._databases.values()].some((db) => db.transactions.some((transaction) => (transaction as RawTransaction)._state !== "finished"));
   }
 
   const installed = globalThis as unknown as Record<string, unknown>;
@@ -622,8 +704,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           return [key, link];
         });
       }
-      const fd = openSync(path, "w", 0o600);
-      try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+      // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
+      const file = await open(path, "w", 0o600);
+      try { await file.writeFile(serialize(snapshot)); await file.sync(); } finally { await file.close(); }
     },
   };
 }

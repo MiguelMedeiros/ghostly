@@ -6,7 +6,8 @@ push services answer without CORS. For those senders, a person may set a relay i
 Push relay**; the app then hands it the finished request, already encrypted and signed.
 
 This is that relay: one Node file, no dependencies, nothing stored. It only posts to the big push
-services (Google, Apple, Mozilla, Microsoft) on their default port, only forwards a request signed for Web Push
+services (Google, Apple, Mozilla, Microsoft) on their default port, at an endpoint with no `%` in its path and no
+query (but Microsoft's single `token`), only forwards a request signed for Web Push
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
 requests a minute, and each subscription (an endpoint with its VAPID key) to 30 forwards a minute from all
 addresses together; a forward the push service refuses (a 4xx other than 429) counts against the sender's address only. When its table of addresses, or of subscriptions, is full it forgets the one seen longest ago. A client has 15 seconds
@@ -25,8 +26,8 @@ PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
 curl -s http://127.0.0.1:49480/healthz           # {"ok":true}
 ```
 
-`GET /healthz` answers 200 `{"ok":true}` while the relay runs. Point a monitor at it; any other `GET` is refused
-(405). Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
+`GET /healthz` answers 200 `{"ok":true}` while the relay runs. Point a monitor at it: `HEAD` and a query string
+(`/healthz?x=1`) answer the same, and are not logged as refusals; any other `GET` is refused (405). Anyone who reaches the relay may read it, so it carries no count: pushes forwarded, failed and refused are in
 the log (below).
 
 A port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of
@@ -52,7 +53,10 @@ seconds), `ENOTFOUND` (no DNS), `ECONNREFUSED` or `ETIMEDOUT` (no way out to por
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
 line that names it; leave a setting out for its default. The start line says how many proxies it counts, where it
-listens and which origins it serves (`any origin` when none is set).
+listens and which origins it serves (`any origin` when none is set). Before it, a line names each `GHOSTLY_RELAY_*` or
+`GHOSTLY_HYPERDHT_*` variable the push relay does not read, with the closest name it does
+(`GHOSTLY_RELAY_ORIGIN (GHOSTLY_RELAY_ORIGINS?) is not a setting of this relay; ignored`). It has no Cloudflare mode
+and no limit variables, so the HyperDHT relay's `GHOSTLY_RELAY_CLOUDFLARE` and `GHOSTLY_RELAY_<LIMIT>` show there too.
 
 The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed <cause>`, and
 each refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the

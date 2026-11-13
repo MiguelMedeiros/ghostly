@@ -12,7 +12,7 @@
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
-import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
 
@@ -56,6 +56,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
+    // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
+    const gone = takenDownSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
@@ -66,6 +68,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (policy === null) throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
+    gone(ref, entry.digest, options?.runAnyway === true);
     replace?.();
 
     const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };
@@ -81,6 +84,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
       const there = chatApp(linkId);
+      // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
+      if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");
       if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;
@@ -97,8 +102,10 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
           unregister();
           const mine = !running || chatApp(linkId)?.running === running;
           const why = takenDown ?? warnStop(entry.title, reason);
-          // Taken down, or stopped on its own: the panel stays, shown, and says why until the person closes it.
-          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, runAnyway, stopped: why });
+          // Taken down, or stopped on its own: the panel stays and says why until the person closes it. One the person
+          // went Back from stays behind Back (its way back says it stopped): over the chat, it took the message field's focus.
+          const was = chatApp(linkId);
+          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: was?.shown ?? true, wide: was?.wide ?? false, view: entry.view ?? "chat", running: running!, runAnyway, stopped: why });
           else if (mine) setChatApp(linkId, null);
           onStop?.(ref, reason);
         },
@@ -120,7 +127,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     overlay.setAttribute("aria-label", entry.title);
     overlay.setAttribute("data-testid", "mini-app");
     overlay.setAttribute("data-place", "alone");
-    overlay.className = "fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
+    // `app-alone`: on a touch screen it ends where the keyboard starts (index.css), or the app's field is under it.
+    overlay.className = "app-alone fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
     const bar = document.createElement("div");
     // `alone-bar`: on a phone the layer covers the whole screen, status bar included, so the bar starts below the clock
     // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).

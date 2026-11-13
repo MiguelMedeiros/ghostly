@@ -204,6 +204,15 @@ async function program(path: string, halfOpen = false): Promise<{ socket: Socket
   return { socket, heard: () => Buffer.concat(chunks), ended };
 }
 
+/** Where the first 20 ms frame (`frame` bytes) with sound in it starts in `pcm`, or -1 before there is one. */
+function firstSound(pcm: Buffer, frame: number): number {
+  for (let at = 0; at + frame <= pcm.length; at += frame) if (level(pcm.subarray(at, at + frame)) > 0.05) return at;
+  return -1;
+}
+
+/** A side's call's counters (`call list`'s stats): frames received and sent, and the program's audio still queued. */
+const statsOf = (side: Side) => (side.calls.list()[0] as { stats: { framesIn: number; framesOut: number; queuedMs: number } }).stats;
+
 describe("the audio socket", () => {
   it("serves one program at a time, owner-only, and ends it with EOF", async () => {
     const path = audioSocketPath(tmp(), "abc");
@@ -353,24 +362,45 @@ describe("two call managers", { timeout: 60_000 }, () => {
       until(() => b.events.find((e) => e.type === "call.connected")),
     ]);
     expect(connectedB).toMatchObject({ direction: "in", audio: { rate: 16000 } });
+    // The frames Bob's call received before his program took the socket, which no program hears: read before it
+    // connects, so never more than there were.
+    const unheard = statsOf(b).framesIn;
     const bob = await program((connectedB.audio as { socket: string }).socket);
     expect(connectedA).toMatchObject({ direction: "out", audio: { socket: placed.audio.socket } });
 
-    // Each program speaks faster than real time; the other hears it at its own rate.
+    // Each program speaks faster than real time; the other hears it at its own rate. Frames 20 to 60 of each tone,
+    // counted from the first frame with sound in it: the silence before it lasts as long as the event loop took to send
+    // the tone. Measured once the call is over: the DFT (`dominantHz`) is seconds of CPU on a slow runner, and run here
+    // it held the event loop both calls run on past MAX_CATCH_UP_MS, so the call dropped the clip written next as a
+    // stall's audio, and the flush below found less than 8 s of it queued.
     alice.socket.write(tone(440, 48000, 1500));
     bob.socket.write(tone(660, 16000, 1500));
-    await until(() => bob.heard().length >= 640 * 60 && alice.heard().length >= 1920 * 60, 20_000);
-    expect(dominantHz(bob.heard().subarray(640 * 20, 640 * 60), 16000)).toBeCloseTo(440, -1);
-    expect(dominantHz(alice.heard().subarray(1920 * 20, 1920 * 60), 48000)).toBeCloseTo(660, -1);
+    const toneHeard = (heard: () => Buffer, frame: number) => until(() => {
+      const pcm = heard(), at = firstSound(pcm, frame);
+      return at >= 0 && pcm.length >= at + frame * 60 && pcm.subarray(at + frame * 20, at + frame * 60);
+    }, 20_000);
+    const [bobHeard, aliceHeard] = await Promise.all([toneHeard(bob.heard, 640), toneHeard(alice.heard, 1920)]);
 
-    // Barge-in: a long sentence queued, then flushed; silence follows at once.
+    // Barge-in: a long sentence queued, then flushed; silence follows at once. Flushed once the call has all of it and
+    // has sent 15 frames of it, not after a fixed 300 ms: on a slow runner the rest of the clip was still being read
+    // from the socket then, and played after the flush.
+    const ahead = statsOf(a);
     alice.socket.write(tone(440, 48000, 10_000));
-    await new Promise((r) => setTimeout(r, 300));
+    await until(() => {
+      const now = statsOf(a), sent = now.framesOut - ahead.framesOut;
+      return sent >= 15 && now.queuedMs + sent * 20 >= ahead.queuedMs + 10_000;
+    });
+    const { queuedMs, framesOut: sentBeforeFlush } = statsOf(a);
     const { flushedMs } = a.calls.flush(undefined) as { flushedMs: number };
+    expect(flushedMs).toBe(queuedMs);
     expect(flushedMs).toBeGreaterThan(8000);
-    const mark = bob.heard().length;
-    await until(() => bob.heard().length >= mark + 640 * 25);
-    expect(level(bob.heard().subarray(mark + 640 * 10, mark + 640 * 25))).toBeLessThan(0.01);
+    // Silence follows at once: frames 10 to 25 of those Alice's call sent after the flush are silent. Counted from the
+    // flush's frame (`framesOut`), not from what Bob had heard by then: frames sent before it may still be on their way
+    // (a burst of them, after a busy event loop). Her frame n reaches Bob's program as his frame n - unheard or later:
+    // the frames lost on the way, and those before his program came, were never his.
+    const afterFlush = 640 * (sentBeforeFlush - unheard);
+    await until(() => bob.heard().length >= afterFlush + 640 * 25);
+    expect(level(bob.heard().subarray(afterFlush + 640 * 10, afterFlush + 640 * 25))).toBeLessThan(0.01);
 
     // Where the call runs, for a person reading `call list` when one does not connect.
     expect(a.calls.list()).toMatchObject([{ state: "connected", stats: { programConnected: true, ice: { state: expect.stringMatching(/^(connected|completed)$/), pair: expect.stringMatching(/:\d+ host <-> .+:\d+ (host|prflx)$/) } } }]);
@@ -382,6 +412,9 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "hangup" });
     expect(a.calls.list()).toEqual([]);
     expect(existsSync(placed.audio.socket)).toBe(false);
+    // Each heard the other's tone (see above: measured with no call left to hold up).
+    expect(dominantHz(bobHeard, 16000)).toBeCloseTo(440, -1);
+    expect(dominantHz(aliceHeard, 48000)).toBeCloseTo(660, -1);
   });
 
   it("a hang-up reaches the contact at once when the programs keep their sockets open after EOF", async () => {

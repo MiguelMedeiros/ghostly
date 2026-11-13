@@ -342,18 +342,26 @@ export class LightningService {
     paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
-      // The source answered: a card that could not read its balance reads it now (the payment changed it).
-      this.sources.answered(quote.provider);
+      // The source answered: a card that could not read its balance reads it now; one paid reads it now anyway (it changed).
+      if (result.state === "paid") this.sources.balanceChanged(quote.provider); else this.sources.answered(quote.provider);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
-      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
+      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); await this.showRecent(); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
     } finally { paying -= 1; }
     await this.put(op);
+    await this.showRecent();
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
     return op.state === "paid";
   }
+
+  /**
+   * A payment ended (paid, refused, or left to be checked): the recent list says so now. It was read again only by a
+   * later pass, which a balance that changed brought: one refused right after a paid one kept the paid one first. A
+   * read that fails leaves it to the next pass: the payment's own outcome is what the caller hears.
+   */
+  private async showRecent() { if (await this.loadRecent().catch(() => false)) this.events.changed(); }
 
   /** The Cashu wallet settled a melt it had left pending. */
   async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string } = {}) {
@@ -427,6 +435,7 @@ export class LightningService {
             // Written only over the state that was asked about: the source's own report wins.
             if ((await this.get("out", op.paymentHash))?.state !== "unknown") continue;
             await this.put({ ...op, state: outcome, error: outcome === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (outcome === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, outcome === "paid");
           } catch { missed(op); }
           continue;
@@ -451,7 +460,7 @@ export class LightningService {
             this.invoiceAsk.forget(op.paymentHash);
             this.sources.answered(provider);
             if (!(await unchanged())) continue;
-            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
+            if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.sources.balanceChanged(provider); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
             else invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
           } else {
@@ -462,6 +471,7 @@ export class LightningService {
             // Written only over the state that was asked about: anything newer wins.
             if (!(await unchanged())) continue;
             await this.put({ ...op, state: status.state, fee: status.fee ?? op.fee, error: status.state === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            if (status.state === "paid") this.sources.balanceChanged(provider);
             this.events.resolved(op, status.state === "paid");
           }
         } catch {

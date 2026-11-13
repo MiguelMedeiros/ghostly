@@ -4,6 +4,7 @@ import type { PersonStatus } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals, takesText } from "../src/commands";
+import { CARD_TIME_FORMS } from "../src/commands/shared";
 import { error, ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.cli
 
@@ -49,7 +50,10 @@ describe("status set's line", () => {
     expect(usage("hi", "--until", "2020-01-01")).toBe('--until takes a time to come, not "2020-01-01": a status that ended is none');
     expect(usage("hi", "--until", "0m")).toMatch(/^--until takes a time to come/);
     expect(usage("hi", "--until", "400d")).toBe('--until takes a time within a year from now, not "400d"');
-    expect(usage("hi", "--until", "soon")).toMatch(/^--until takes a time in milliseconds or a date/);
+    // A time it cannot read names every form it takes, as its help does: before, only milliseconds and dates.
+    for (const until of ["soon", "2y", "30s", "1.5h", "-1h"]) {
+      expect(usage("hi", "--until", until)).toBe(`--until takes 30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(until)}`);
+    }
     expect(usage()).toBe("Nothing to set: give a <text>, --emoji or --availability");
     expect(usage("--until", "1h")).toBe("Nothing to set: give a <text>, --emoji or --availability");
   });
@@ -90,11 +94,29 @@ describe("the socket's status.set|clear|get", () => {
     await expect(callApi(ctx, "status.set", { text: "hi", emoji: "a" })).rejects.toMatchObject({ code: "bad_request", message: 'emoji takes one emoji, not "a"' });
     await expect(callApi(ctx, "status.set", { text: "hi", until: Date.now() - 1 })).rejects.toMatchObject({ code: "bad_request", message: "until is a time to come: a status that ended is none" });
     await expect(callApi(ctx, "status.set", { text: "hi", until: "tomorrow" })).rejects.toMatchObject({ code: "bad_request" });
+    // Within a year, as the command line's --until: past the last time a Date holds, the picker read "Invalid Date".
+    for (const until of [Date.now() + 400 * 86_400_000, 8.64e15 + 1, Number.MAX_SAFE_INTEGER]) {
+      await expect(callApi(ctx, "status.set", { text: "hi", until })).rejects.toMatchObject({ code: "bad_request", message: "until is a time within a year from now" });
+    }
     await expect(callApi(ctx, "status.set", {})).rejects.toMatchObject({ code: "bad_request", message: "Nothing to set: give a text, emoji or availability" });
     const seed = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
     await expect(callApi(ctx, "status.set", { text: seed })).rejects.toMatchObject({ code: "confirm" });
     expect(node.setOwnStatus).not.toHaveBeenCalled();
     expect(await callApi(ctx, "status.set", { text: seed, force: true })).toMatchObject({ status: { text: seed } });
+  });
+
+  it("holds a secret on the engine's own setOwnStatus too, unless force", async () => {
+    const { ctx, node } = fake();
+    const seed = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
+    const nsec = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+    for (const text of [seed, nsec]) {
+      await expect(callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text } } }))
+        .rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/looks like a secret.*call setOwnStatus with --force/) });
+    }
+    expect(node.setOwnStatus).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text: "At lunch" } } });
+    await callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text: seed } }, force: true });
+    expect(node.setOwnStatus).toHaveBeenLastCalledWith({ status: { text: seed } });
   });
 });
 
@@ -121,7 +143,7 @@ describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {
     expect(error(await ghostly(["--home", dir, "status", "set", "x".repeat(61)]), "usage", 2).message).toBe("<text> is up to 60 characters, not 61 characters");
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--until", "yesterday"]), "usage", 2).message).toMatch(/^--until takes/);
     expect(error(await ghostly(["--home", dir, "status", "set", "hi", "--availability", "lunch"]), "usage", 2).message).toMatch(/^--availability takes/);
-    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Too many arguments: ghostly status");
+    expect(error(await ghostly(["--home", dir, "status", "frob"]), "usage", 2).message).toBe("Unknown command: status frob: ghostly status takes clear, set or show (ghostly help status)");
     expect(ok(await ghostly(["--home", dir, "status", "show"]))).toMatchObject({ status: { text: "Here" } });
   });
 

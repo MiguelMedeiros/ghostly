@@ -61,6 +61,7 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     const { user, onClose } = await dialog();
     await user.click(screen.getByTestId("chat-app-open"));
     expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Its files are not on this device yet.");
+    expect(screen.getByTestId("chat-apps-error")).toHaveClass("text-danger-ink");
     expect(onClose).not.toHaveBeenCalled();
     expect(sent).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("chat-app-open")).toBeEnabled());

@@ -36,6 +36,7 @@
     "stopped": "Detenido"
   },
   "window": {
+    "blocked": "Este navegador bloquea lo que {{app}} necesita para abrirse aquí: almacenamiento para un sitio dentro de otro. Permítelo para este sitio, o abre {{app}} en la app de escritorio de Ghostly o en la extensión.",
     "busy": "{{app}} está cargando demasiadas páginas a la vez en la máquina de tu contacto. Vuelve a intentarlo en un momento.",
     "callOn": "Hay una llamada en curso. Termínala para abrir {{app}}.",
     "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
@@ -46,6 +47,7 @@
     "owner": "App de {{contact}}, que se ejecuta en su equipo. No es Ghostly: nunca escribas aquí tus palabras de recuperación ni contraseñas.",
     "retry": "Reintentar",
     "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
+    "unguarded": "Esta página de {{app}} no se puede mostrar aquí: impide que las protecciones de Ghostly se ejecuten en ella. Pide a tu contacto que lo revise.",
     "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea.",
     "unshared": "{{app}} ya no se comparte contigo."
   },

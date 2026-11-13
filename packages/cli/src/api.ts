@@ -2,7 +2,9 @@ import { AWAITING_PEER_MS, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayU
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
+import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
+import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
@@ -12,10 +14,10 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { nobodyElseIn, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
-import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
+import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
@@ -30,7 +32,7 @@ import { WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState } from "./waitNotice";
-import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -45,15 +47,25 @@ function checkTextSize(text: string): void {
 
 /**
  * The engine's state as `engine getState` prints it without `--show-secret`: the settings' credentials, a group's
- * entry link (anyone who reads it can join) and a pending chat's invite code (whoever reads it can take the chat)
- * are `<hidden>`.
+ * entry link and the link of another group kept under its id (anyone who reads one can join), a pending chat's
+ * invite code (whoever reads it can take the chat) and this side's wake-up tokens are `<hidden>`.
  */
-export function hideStateSecrets<T extends { settings: Settings; groups?: { entryLink?: string }[]; links?: { inviteCode?: string }[] }>(state: T) {
+export function hideStateSecrets<T extends {
+  settings: Settings;
+  groups?: { entryLink?: string; others?: unknown[]; wakeTokens?: string[] }[];
+  links?: { inviteCode?: string; wakeToken?: string }[];
+}>(state: T) {
+  const hideOther = (o: unknown) => (o && typeof o === "object" && "link" in o ? { ...o, link: "<hidden>" } : o);
   return {
     ...state,
     settings: redactSettings(state.settings),
-    ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}),
-    ...(state.links ? { links: state.links.map((l) => (l.inviteCode ? { ...l, inviteCode: "<hidden>" } : l)) } : {}),
+    ...(state.groups ? { groups: state.groups.map((g) => ({ ...g,
+      ...(g.entryLink ? { entryLink: "<hidden>" } : {}),
+      ...(g.others ? { others: g.others.map(hideOther) } : {}),
+      ...(g.wakeTokens ? { wakeTokens: g.wakeTokens.map(() => "<hidden>") } : {}) })) } : {}),
+    ...(state.links ? { links: state.links.map((l) => ({ ...l,
+      ...(l.inviteCode ? { inviteCode: "<hidden>" } : {}),
+      ...(l.wakeToken ? { wakeToken: "<hidden>" } : {}) })) } : {}),
   };
 }
 
@@ -75,7 +87,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 const SETTABLE_KINDS = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
-  autoDownloads: "boolean", serveFiles: "boolean",
+  autoDownloads: "boolean", serveFiles: "boolean", daemonPresence: "boolean",
 } as const satisfies Partial<Record<keyof Settings, "strings" | "string" | "boolean" | "ice">>;
 export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = SETTABLE_KINDS;
 
@@ -88,6 +100,7 @@ type Settable = keyof typeof SETTABLE_KINDS;
 const SETTING_DEFAULTS: { [K in Settable as undefined extends Settings[K] ? K : never]-?: () => NonNullable<Settings[K]> } = {
   irohRelays: () => [...DEFAULT_IROH_RELAYS], hyperdhtRelay: () => DEFAULT_HYPERDHT_RELAY,
   publicProfiles: () => true, shareProfile: () => true, sendTyping: () => true, autoDownloads: () => true, serveFiles: () => true,
+  daemonPresence: () => false,
 };
 
 /**
@@ -218,6 +231,9 @@ function inviteNotOut(detail: string): string {
 
 /** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
 const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
+
+/** A one-shot's typing without `--for` (it opens the profile offline, `offlineCall`): said on no live session. */
+const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
 
 // ---------- methods ----------
 
@@ -378,7 +394,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group history");
-    return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
+    return historyOf(ctx, link.id, params, async () => (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group send", "[text...]");
@@ -421,6 +437,8 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "group edit", "<message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
+    // Before the guard: it read megabytes whole (`edit --stdin`), holding the daemon, for the engine to refuse them after.
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
@@ -457,6 +475,7 @@ const METHODS: Record<string, Method> = {
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
     };
   },
   /**
@@ -538,9 +557,19 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.forward"(ctx, params) {
     const from = chatOrGroup(ctx, str(params, "chat", true));
-    const messageIds = list(params, "messages");
+    // Each id once, and the engine's bounds before any row is read: one id given 50,000 times was read and guarded as
+    // often (a minute of the daemon's thread) for the one message the engine forwarded.
+    const messageIds = [...new Set(list(params, "messages"))];
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
-    const to = list(params, "to").map((ref) => chatOrGroup(ctx, ref));
+    if (messageIds.length > FORWARD_MESSAGES) throw new CliError("bad_request", `Forward at most ${FORWARD_MESSAGES} messages at once, not ${messageIds.length}`);
+    // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
+    const to: ReturnType<typeof chatOrGroup>[] = [];
+    for (const ref of new Set(list(params, "to"))) {
+      const target = chatOrGroup(ctx, ref);
+      if (to.some((t) => t.linkId === target.linkId)) continue;
+      if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
+      to.push(target);
+    }
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
     // Each by its id here, one row each: never the whole history of the chat or group.
     const chosen: StoredMessage[] = [];
@@ -651,6 +680,7 @@ const METHODS: Record<string, Method> = {
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
+    await forgetHold(ctx, link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -754,7 +784,10 @@ const METHODS: Record<string, Method> = {
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params, "chat history <chat>");
-    return historyOf(ctx, `group:${group.id}`, params, (m) => groupMessageJson(m, group));
+    return historyOf(ctx, `group:${group.id}`, params, async (page) => {
+      const twins = await groupPayTwinsOf(ctx, group, page);
+      return (m) => groupMessageJson(m, group, twins.get(m.id));
+    });
   },
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params, "send <chat> [text...]");
@@ -762,7 +795,7 @@ const METHODS: Record<string, Method> = {
     checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
-      if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
+      if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
@@ -780,7 +813,10 @@ const METHODS: Record<string, Method> = {
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
+    return {
+      group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}),
+      ...(messageId && nobodyElseIn(ctx, group.id) ? { note: "Nobody else is in this group: nobody gets this message, not even someone who joins later" } : {}),
+    };
   },
   /**
    * WISP 902 § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -791,6 +827,7 @@ const METHODS: Record<string, Method> = {
     const group = groupOf(ctx, params, "edit <chat> <message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
@@ -850,6 +887,7 @@ const METHODS: Record<string, Method> = {
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
       reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      ...(!kept && ctx.mode === "one-shot" && { note: ONE_SHOT_TYPING }),
     };
   },
   async "group.leave"(ctx, params) {
@@ -973,11 +1011,13 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   // A group's name, the name contacts see and a file's name, as `group create`, `group rename`, `profile set` and
   // `file send` guard them.
   "createGroup", "renameGroup", "updateSettings", "sendFile",
+  // The status every contact reads, as `status set` guards it.
+  "setOwnStatus",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name")];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text")];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
@@ -1102,7 +1142,8 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
   try {
     if ((await Promise.race([dial, late])) !== "late") return;
   } catch (error) {
-    if (asCliError(error).code !== "timeout") throw error;
+    // A DHT only learned while it dialled (the contact's, read from the DHT up to 30 s later) is said as before the dial.
+    if (asCliError(error).code !== "timeout") { dhtOnly(findChat(state(ctx).links, link.id)); throw error; }
   } finally { clearTimeout(timer); }
   const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
   throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${ctx.mode === "one-shot"
@@ -1126,9 +1167,11 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
 
 /**
  * A page of a chat's or a group's history: only that page is read from the store (the newest, those before `before`,
- * or the oldest after `after`), so a long chat's is as quick as a short one's.
+ * or the oldest after `after`), so a long chat's is as quick as a short one's. `linesOf`: how the page's messages are
+ * printed, once the page is read.
  */
-async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
+type LinesOf = (page: readonly StoredMessage[]) => Promise<(message: StoredMessage) => MessageJson>;
+async function historyOf(ctx: ApiContext, chat: string, params: Params, linesOf: LinesOf = async () => messageJson) {
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const bound = (side: "before" | "after"): string | number | undefined => {
     const value = params[side] ?? undefined;
@@ -1143,7 +1186,25 @@ async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (m
     throw noMessage(String(missing), { group, ref: str(params, group ? "group" : "chat", true) });
   });
   const originals = await originalsNow(ctx, chat, page.messages);
+  const json = await linesOf(page.messages);
   return { messages: page.messages.map((m) => quoteChecked(json(m), m, originals)), more: page.more };
+}
+
+/**
+ * The payment lines of a group's history page that are twins of a payment note's line (`groupPayTwins`), as the app
+ * tells them. A note whose line is not on the page is read as its one row, as the originals of replies are.
+ */
+async function groupPayTwinsOf(ctx: ApiContext, group: GroupView, page: readonly StoredMessage[]): Promise<ReadonlyMap<string, string>> {
+  const rows = page.filter((m) => m.paymentId && !m.groupPay);
+  if (!rows.length) return new Map();
+  const payments = state(ctx).payments ?? {};
+  const notes = new Map(page.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : [])));
+  for (const id of new Set(rows.map((m) => groupPayNoteId(m.paymentId!, payments[m.paymentId!])))) {
+    if (notes.has(id)) continue;
+    const note = (await node(ctx).getMessage(`group:${group.id}`, groupPayLineId(id)))?.groupPay;
+    if (note) notes.set(note.id, note);
+  }
+  return groupPayTwins(rows, notes, payments, group);
 }
 
 /** Past this many originals outside a page, its history is read once instead of row by row. */

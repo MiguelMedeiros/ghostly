@@ -6,7 +6,7 @@ import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
-import { TreeFile } from "../src/runtime/sqlTree";
+import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
 /** Every disk sync the store asks for. */
@@ -15,7 +15,13 @@ vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
   return {
     ...fs,
-    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); },
+    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); disk.synced++; },
+    fsync: (fd: number, done: (error: NodeJS.ErrnoException | null) => void) => {
+      syncs.count++;
+      if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
+      const end = (error: NodeJS.ErrnoException | null) => { disk.synced++; done(error); };
+      fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
+    },
     renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
     writeSync: (fd: number, bytes: Buffer, at = 0) => {
       if (faults.full) {
@@ -30,8 +36,13 @@ vi.mock("node:fs", async (original) => {
   };
 });
 
-/** What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full disk. */
-const faults = vi.hoisted(() => ({ rename: false, short: false, full: false }));
+/**
+ * What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full
+ * disk, a sync off the thread that fails.
+ */
+const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false }));
+/** How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is). And the syncs done. */
+const disk = vi.hoisted(() => ({ syncMs: 0, synced: 0 }));
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -125,6 +136,47 @@ describe("persistent IndexedDB", () => {
     expect(await read(again.transaction("settings").objectStore("settings").get("seen:m1"))).toBe("delivered");
     expect(await read(again.transaction("settings").objectStore("settings").get("seen:m2"))).toBe("yes");
     expect(await read(again.transaction("messages").objectStore("messages").get(["a", "m1"]))).toMatchObject({ text: "hello" });
+  });
+
+  it("lets the transactions that commit while a sync runs share the next one, each `complete` after its entry is synced", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    // A disk that takes 10 ms a sync (#597's): one per transaction, one after another, held 8 sends in flight to the pace of 1.
+    disk.syncMs = 10;
+    const before = syncs.count, done = disk.synced;
+    // The syncs finished when each transaction's `complete` came: never before the one that covers it.
+    const heard: number[] = [];
+    try {
+      await Promise.all(Array.from({ length: 8 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
+        .then(() => { heard.push(disk.synced - done); })));
+    } finally { disk.syncMs = 0; }
+    expect(syncs.count - before).toBeLessThanOrEqual(2);
+    expect(heard[0]).toBeGreaterThanOrEqual(1);
+    expect(heard[heard.length - 1]).toBe(syncs.count - before);
+
+    // Crash: all of it is there.
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("messages").objectStore("messages").count())).toBe(8);
+  });
+
+  it("folds the store into a snapshot before the `complete`s go when a sync fails", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    await tx(d, ["settings"], (s) => { s.settings.put("before", "a"); });
+    const lines: string[] = [];
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation((line) => { lines.push(String(line)); return true; });
+    // A slow sync that fails, and a second transaction that commits while it runs: neither hears `complete` before the
+    // snapshot holds it (the journal it took the place of is gone by then).
+    const journalAt: boolean[] = [];
+    faults.sync = true;
+    disk.syncMs = 10;
+    try {
+      await Promise.all(["b", "c"].map((key) => tx(d, ["settings"], (s) => { s.settings.put("after", key); }).then(() => { journalAt.push(existsSync(join(dir, "journal.bin"))); })));
+    } finally { faults.sync = false; disk.syncMs = 0; errors.mockRestore(); }
+    expect(lines).toEqual([expect.stringContaining("EIO: i/o error, fsync")]);
+    expect(journalAt).toEqual([false, false]);
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("settings").objectStore("settings").getAll())).toEqual(["before", "after", "after"]);
   });
 
   it("drops an aborted transaction", async () => {
@@ -227,7 +279,7 @@ describe("persistent IndexedDB", () => {
 
   it("ignores a torn last journal entry (the process died mid-write)", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
     const header = Buffer.alloc(4); header.writeUInt32BE(1000);
@@ -238,7 +290,7 @@ describe("persistent IndexedDB", () => {
 
   it("stores Blobs as their bytes and gives them back as Blobs", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); });
     await store.flush();
@@ -251,7 +303,7 @@ describe("persistent IndexedDB", () => {
 
   it("keeps an upgrade and a deleted database", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory, "ghostly", 1);
     first.close();
     const upgraded = await new Promise<IDBDatabase>((resolve) => {
@@ -1239,6 +1291,26 @@ describe("messages kept in rows.db", () => {
     expect(held(close)).toEqual([]);
   });
 
+  it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
+    const dir = folder();
+    const factory = await open(dir);
+    const d = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("messages").createIndex("byU", "u", { unique: true }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 1 }, "a"); });
+    // Refused, and the transaction goes on (`preventDefault`): it commits having written nothing.
+    const refused = d.transaction("messages", "readwrite");
+    refused.objectStore("messages").put({ u: 1 }, "b").onerror = (event) => event.preventDefault();
+    await new Promise<void>((resolve, reject) => { refused.oncomplete = () => resolve(); refused.onabort = () => reject(refused.error); });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 2 }, "c"); });
+
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("messages").objectStore("messages").getAllKeys())).toEqual(["a", "c"]);
+  });
+
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
@@ -1308,6 +1380,67 @@ describe("messages kept in rows.db", () => {
       request.onerror = () => reject(request.error);
     });
     expect(links).toEqual([{ id: "chat", seedB64: "seed" }]);
+  });
+
+  it("a backup's export leaves the event loop turns while it reads rows.db, and holds the store as it was when it began", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["messages", "settings"], (s) => { for (let i = 0; i < 3000; i++) s.messages.put(message(i)); s.settings.put("before", "mark"); });
+    const before = await all(store.factory);
+    // The export's first read of rows.db: from then on, each turn of the event loop is one the export left to others,
+    // and the first of them writes both kinds of store (one kept in rows.db, one in memory).
+    const range = vi.spyOn(TreeFile.prototype, "range");
+    let turns = 0, done = false, landed = false, wrote: Promise<void> | undefined;
+    const spin = () => {
+      if (done) return;
+      if (range.mock.calls.length > 0) {
+        turns++;
+        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }).then(() => { landed = true; });
+      }
+      setImmediate(spin);
+    };
+    setImmediate(spin);
+    const exported = join(folder(), "store.bin");
+    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); }
+    const landedDuring = landed;
+    await wrote;
+    expect(turns).toBeGreaterThan(5);
+    expect(landedDuring).toBe(true);
+    expect(await all(store.factory)).toHaveLength(3000);
+
+    // The export holds neither half of the write that landed while it ran.
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    expect(await all(elsewhere.factory)).toEqual(before);
+    const there = await db(elsewhere.factory);
+    expect(await read(there.transaction("settings").objectStore("settings").get("mark"))).toBe("before");
+    there.close();
+    d.close();
+  });
+
+  it("a fold while a backup's export reads rows.db syncs what the export's reader held back in the WAL", async () => {
+    const sqlite = await import("node:sqlite");
+    const path = join(folder(), "rows.db");
+    const trees = openTreeFile(sqlite, path, Error);
+    const tree = trees.tree(trees.treeId("ghostly", "messages"), true, false);
+    tree.put({ key: "a", value: 1 });
+    trees.complete(null, 1);
+    trees.apply(1);
+    const reader = openTreeReader(sqlite, path, Error);
+    try {
+      tree.put({ key: "b", value: 2 });
+      trees.complete(null, 2);
+      trees.apply(2);
+      // The checkpoint stops at the reader's point: the entry after it is only in the WAL, which must be on disk.
+      const before = syncs.count;
+      trees.sync();
+      expect(syncs.count).toBe(before + 1);
+      expect([...tree.at(reader).getAllRecords()]).toEqual([{ key: "a", value: 1 }]);
+    } finally { reader.db.close(); trees.db.close(); }
   });
 
   describe("a chat's old ratchet states (WISP 4xx) do not stay on the disk", () => {

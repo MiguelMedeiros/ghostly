@@ -4,6 +4,7 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { composingKey } from "../../hooks/useComposition";
 import { androidApp } from "../../lib/touchOnly";
 import { openAppSettings } from "../../desktop/androidCameraRefusal";
 
@@ -338,10 +339,16 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
   // panels (Message details, the connection panel) are a `role="dialog"` box, not a `<dialog>`, and a menu (a message's
   // ⋮) is a group of buttons: Enter there presses its row. The bar's own "discard?" is an alertdialog in the bar, and its
-  // keys stay the bar's.
+  // keys stay the bar's. Nor the keys of an input method composing in a field (chat search in Japanese): its Enter
+  // picks a candidate and its Escape drops one.
   useEffect(() => {
     if (mode === "idle") return;
+    let composedAt: number | null = null;
+    const onCompositionEnd = (event: CompositionEvent) => { composedAt = event.timeStamp; };
     const onKey = (event: globalThis.KeyboardEvent) => {
+      const ended = composedAt;
+      composedAt = null;
+      if (composingKey(event, ended)) return;
       if (sendingRef.current || lockedRef.current) return;
       const dialog = event.target instanceof Element ? event.target.closest("dialog, [role=dialog], [role=alertdialog], [data-menu]") : null;
       if (dialog && !dialog.contains(buttonRef.current) && !barRef.current?.contains(dialog)) return;
@@ -352,8 +359,12 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       if (event.key === "Escape") { event.preventDefault(); askDiscard(); }
       else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked" && !keyboardOnBarButton(event.target)) { event.preventDefault(); void send(); }
     };
+    document.addEventListener("compositionend", onCompositionEnd, true);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("compositionend", onCompositionEnd, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [mode, askDiscard, keep, send]);
 
   const lock = useCallback(() => {

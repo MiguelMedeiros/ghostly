@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { STATUS_TEXT_MAX, type PersonStatus, type StatusAvailability } from "@ghostly/core";
+import { STATUS_TEXT_MAX, sanitizeDisplayText, sanitizeStatusText, type PersonStatus, type StatusAvailability } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
@@ -89,6 +89,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   const [end, setEnd] = useState<StatusEnd>(status ? (kept ? "keep" : "never") : "today");
   const [at, setAt] = useState(() => localDateTime((status?.until ?? Date.now() + 3_600_000)));
   const [past, setPast] = useState(false);
+  const [linkLike, setLinkLike] = useState(false);
   const [moreEmoji, setMoreEmoji] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -102,6 +103,8 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
     // A kept end can pass while the picker is open: the engine would clear the status rather than set it.
     if ((end === "keep" || end === "custom") && !(until && until > Date.now())) { setPast(true); return; }
     const words = text.trim();
+    // Words the engine would leave out of the status ("data:", "www.", a link): said here, not dropped unseen.
+    if (words && !sanitizeStatusText(words) && sanitizeDisplayText(words, STATUS_TEXT_MAX)) { setLinkLike(true); return; }
     void run(() => engine.call("setOwnStatus", { status: { availability, ...(emoji ? { emoji } : {}), ...(words ? { text: words } : {}), ...(until ? { until } : {}) } }));
   };
 
@@ -156,8 +159,9 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-1">
-          <input dir="auto" aria-label={t("status.text")} aria-describedby={`${id}-count`} placeholder={t("status.placeholder")} className={input}
-            value={text} onChange={(e) => setText(capStatusText(e.target.value))} />
+          <input dir="auto" aria-label={t("status.text")} aria-describedby={linkLike ? `${id}-link ${id}-count` : `${id}-count`} placeholder={t("status.placeholder")} className={input}
+            aria-invalid={linkLike || undefined} value={text} onChange={(e) => { setText(capStatusText(e.target.value)); setLinkLike(false); }} />
+          {linkLike && <p id={`${id}-link`} role="alert" className="text-xs text-danger">{t("status.linkLike")}</p>}
           <p id={`${id}-count`} data-testid="status-count" className="text-end text-[11px] text-text-muted tabular-nums">{statusTextLength(text)}/{STATUS_TEXT_MAX}</p>
         </div>
 

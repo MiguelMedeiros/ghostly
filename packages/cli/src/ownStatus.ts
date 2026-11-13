@@ -1,10 +1,12 @@
 import { reactionEmoji, sanitizeDisplayText, sanitizeStatusText, STATUS_AVAILABILITIES, STATUS_TEXT_MAX, type PersonStatus, type StatusAvailability } from "@ghostly/core";
+import { STATUS_CARD_LIMITS } from "@ghostly/core/statusCards";
 import { CliError, type ErrorCode } from "./errors";
 
 /**
  * This profile's status (WISP 401 § Presence and status): a text, one emoji, an availability and when it ends, said to
  * every paired contact whose app offers `status/1`: `status set|clear|show`, and the socket's `status.set|clear|get`.
- * The CLI never says presence (active or idle): a headless profile never reads as online.
+ * These never say presence (active or idle): only a daemon does, and only with `settings set daemonPresence true`
+ * (daemonPresence.ts); otherwise a headless profile never reads as online.
  */
 
 /** What `status set` was given, before it is checked. */
@@ -43,6 +45,8 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
   }
   if (input.until !== undefined) {
     if (!Number.isSafeInteger(input.until) || input.until <= now) throw fail("until", "is a time to come: a status that ended is none");
+    // As the command line's --until, so the socket cannot keep an end past the last time a Date holds.
+    if (input.until > now + STATUS_CARD_LIMITS.nextRunMs) throw fail("until", "is a time within a year from now");
     status.until = input.until;
   }
   return status;

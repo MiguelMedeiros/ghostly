@@ -20,7 +20,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { CardTime, StatusCardView } from "./chat/StatusCard";
-import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
+import { STATUS_TONE, appCardsShown, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { ConverterNotLoaded, downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
@@ -311,7 +311,7 @@ function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage[
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`text-[11px] leading-none italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`chat-text-tag italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -939,9 +939,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   // Its row stays in the page while its details are open, however many messages come meanwhile.
   useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
-  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
+  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it. The
+  // same rule (`appCardsShown`) says what its quote, the pinned bar, the chat list, Saved and the screen reader read.
   const appsOn = useAppsAvailable();
-  const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  const appCard = message.card?.kind === "app" && appCardsShown(linkId, appsOn) ? message.card : undefined;
   // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
   const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -1036,7 +1037,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
   const refusal = isMe && refused && refused.on === shown && (
-    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 chat-text-note" />
   );
   // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" && !fileUnsent ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
@@ -1197,11 +1198,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
   // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
   const nickRun = <bdi>{nick}</bdi>;
+  const opensAuthor = !!author && !!onOpenAuthor && !choosing;
   const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px]`}>
-      {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
+    // One line, cut with an ellipsis inside the bubble, the whole name in the tooltip (as a chat's row and header do):
+    // a long one-word name ran past the bubble and off a phone's screen. The box that cuts it takes the name's own
+    // direction (as the header and a reply's quote do), on the side the app's language puts it: in Arabic a Latin
+    // name's ellipsis was on its left, where the name starts, and the bubble showed only its end.
+    <div data-testid="message-nick" data-key={author?.key} title={nick} dir={opensAuthor ? undefined : "auto"} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px] min-w-0 truncate [text-align:match-parent]`}>
+      {opensAuthor
+        ? <button type="button" data-testid="message-nick-open" dir="auto" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="block max-w-full truncate cursor-pointer [text-align:match-parent] hover:underline">{nickRun}</button>
         : nickRun}
     </div>
   ) : null;

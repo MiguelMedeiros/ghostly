@@ -9,6 +9,7 @@
   "downloading": "Downloading... {{percent}}%",
   "errorDetails": "What the updater said",
   "failed": "Could not check for updates",
+  "installFailed": "The update did not install. Try again.",
   "installing": "Updating...",
   "lastChecked": "Last checked at {{when}}",
   "later": "Later",

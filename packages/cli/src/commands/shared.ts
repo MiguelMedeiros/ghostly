@@ -433,13 +433,14 @@ function writtenDay(text: string): [number, number, number] | undefined {
  * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1. A time more than a year
  * ahead is a usage error that names the flag and the last time it takes: before, it reached the card's check and failed
  * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken.
+ * `forms` is what a time it cannot read is told to be, for a flag that takes more (`status set --until 2h`).
  */
-export function cardTime(value: unknown, flag: string): number | undefined {
+export function cardTime(value: unknown, flag: string, forms = `a time in milliseconds or a date: ${CARD_TIME_FORMS}`): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
   const day = ISO_DAY.exec(text);
   const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes ${forms}, not ${JSON.stringify(value)}`);
   const written = writtenDay(text);
   if (written) {
     const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();

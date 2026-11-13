@@ -47,6 +47,24 @@ describe('DNS TXT through DNS over HTTPS', () => {
     expect(net.calls.map(c => new URL(c.url).host)).toEqual(['cloudflare-dns.com']);
   });
 
+  it("asks every resolver not to pass this device's subnet on, for the TXT record and for a host's addresses", async () => {
+    // An EDNS0 OPT record holding one Client Subnet option of family 1, source and scope prefix 0 (RFC 7871 §7.1.2).
+    const optOut = ['00', '0029', '04d0', '00000000', '0008', '0008', '0004', '0001', '00', '00'].join('');
+    for (const resolver of ['quad9', 'cloudflare', 'google'] as const) {
+      clearDomainCache();
+      const net = network({ txt: { '_ghostly.example.com': [domainTxtRecord(mine)] }, a: { 'example.com': ['93.184.216.34'] } },
+        { 'https://example.com/.well-known/ghostly.json': { body: domainWellKnownFile([mine]) } });
+      await assertDomainRecord('example.com', 'dns', mine, { fetch: net.fetch, resolver });
+      await assertDomainRecord('example.com', 'https', mine, { fetch: net.fetch, resolver });
+      const queries = net.calls.filter(c => c.url.includes('/dns-query?')).map(c => queryFromUrl(c.url));
+      expect(queries.length).toBeGreaterThanOrEqual(3);
+      for (const q of queries) {
+        expect(hex(q.subarray(10, 12))).toBe('0001');
+        expect(hex(q.subarray(-optOut.length / 2))).toBe(optOut);
+      }
+    }
+  });
+
   it('says why a record does not confirm the proof', async () => {
     const reused = { ...mine, proof: other.proof };
     const net = network({ txt: { '_ghostly.replaced.com': [domainTxtRecord(other)], '_ghostly.reused.com': [domainTxtRecord(reused)], '_ghostly.empty.com': ['v=spf1 -all'] } });

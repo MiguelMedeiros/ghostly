@@ -456,6 +456,46 @@ describe("app verify <url>", () => {
     expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
   }, 60_000);
 
+  it("reads the ghostly-revoke.json beside each of the manifest's sources too, as a client does, each once", async () => {
+    const { manifest, files } = chess();
+    const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const dir = appFolder({ ...manifest, sources: [head, `${head}?again=1`] }, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--reason", "Leaked a test move list"]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const list = readFileSync(join(dir, "ghostly-revoke.json"));
+    // The store's URL is pinned to a commit made before the revocation: only the sources' HEAD has the list.
+    const pinned = "https://cdn.jsdelivr.net/gh/ana/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(url);
+      if (url === pinned) return new Response(stream([new Uint8Array(published)]), { status: 200 });
+      if (url === "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json") return new Response(stream([new Uint8Array(list)]), { status: 200 });
+      return new Response("no", { status: 404 });
+    });
+    await expect(verifyApp(pinned)).rejects.toMatchObject({
+      code: "refused", details: { reason: "revoked", detail: "Leaked a test move list", file: "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json" },
+    });
+    expect(seen).toEqual([pinned, pinned.replace("app.ghostlyapp", "ghostly-revoke.json"), "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+  }, 60_000);
+
+  it("reads beside the manifest's sources only on the hosts a client reads from, not a host or port the publisher names", async () => {
+    const { manifest, files } = chess();
+    const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const dir = appFolder({ ...manifest, sources: ["https://10.0.0.5:8443/x/app.ghostlyapp", "https://localhost/app.ghostlyapp", "https://raw.githubusercontent.com:8443/ana/chess/HEAD/app.ghostlyapp", head] }, files);
+    ok(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher")]));
+    const published = readFileSync(join(dir, "app.ghostlyapp"));
+    const url = "https://example.com/chess/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (at: string) => {
+      seen.push(at);
+      return at === url ? new Response(stream([new Uint8Array(published)]), { status: 200 }) : new Response("no", { status: 404 });
+    });
+    expect(await verifyApp(url)).toMatchObject({ valid: true });
+    expect(seen).toEqual([url, "https://example.com/chess/ghostly-revoke.json", "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+  }, 60_000);
+
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "not_found" });

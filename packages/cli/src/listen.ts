@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
@@ -83,7 +83,8 @@ export class Allowlist {
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
+    const key = contactKeyOf(ref);
+    if (key !== undefined) { keys.add(key); continue; }
     const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
     // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
     if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
@@ -114,7 +115,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
-  source: "message.received" | "group.message" | "group.mentioned";
+  source: "message.received" | "group.message" | "group.mentioned" | "button.pressed";
   chat?: string;
   group?: string;
   /** A group's author (their key). */
@@ -142,7 +143,7 @@ const forMe = (message: TurnMessage): boolean => !!message.mentioned || !!messag
 
 /**
  * The turn an event starts, or null: only a contact's message, and a group message that mentions this profile or
- * presses a button of its question.
+ * presses a button of its question (or the `group.mentioned`, `button.pressed` that says so later).
  */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
   const message = event.message as TurnMessage | undefined;
@@ -151,6 +152,9 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
   if (event.type === "group.message" && typeof event.group === "string" && forMe(message)) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
   if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  // A press learned after its reply was reported (that `group.message` pressed nothing): the turn it did not start then.
+  // Only such a `button.pressed` carries the reply.
+  if (event.type === "button.pressed" && typeof event.group === "string" && message.press) return turn(event, "button.pressed", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
 }
 
@@ -171,14 +175,17 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   };
 }
 
-/** Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). */
-export function checkWebhook(url: string): URL {
+/**
+ * Only loopback: events carry message text, and a webhook is a local bridge (WISP 1100 § Security). `from` names where
+ * the URL came from; what is not a URL is not repeated: a bridge's token is in it.
+ */
+export function checkWebhook(url: string, from = "--webhook"): URL {
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }
+  try { parsed = new URL(url); } catch { throw new CliError("usage", `${from} is not a URL`); }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new CliError("usage", "The webhook must be http:// or https://");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new CliError("usage", "The webhook must be on this machine (127.0.0.1, localhost or [::1])");
   // fetch refuses a URL with credentials: every event was held as "not answering" for good, the password on stderr.
-  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query");
+  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query, the URL in GHOSTLY_WEBHOOK");
   return parsed;
 }
 

@@ -1293,9 +1293,44 @@ html .toast-place.toast-place-page[data-at="top"] {
 .chat-text-preview-site { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-title { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
 .chat-text-preview-description { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+/* An app's card (apps/AppCardView.tsx): its title, its lines under it, the publisher's fingerprint. Its icon, buttons
+   and time keep their size. */
+.chat-text-card-title { font-size: calc(14rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-note { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+/* A file, voice note, audio or video in a chat: its name, its lines under it (size, state, free space), an offer or a
+   problem. Only their size: each keeps its own line height. Buttons, icons and what is drawn on a video keep theirs. */
+.chat-text-media-name { font-size: calc(14rem / 16 * var(--chat-text-scale)); }
+.chat-text-audio-name { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-media-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-media-meta { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A person's, a Nostr profile's or an invite's card, a task's, a routine's or a usage card (chat/EntityCardFrame.tsx,
+   StatusCard.tsx, RoutineCard.tsx, UsageMeter.tsx): only their size; a line of a set height takes chat-text-leading-*.
+   Their icons, buttons, badges and time keep theirs. */
+.chat-text-card-heading { font-size: calc(13.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-name { font-size: calc(13rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-nick { font-size: calc(12.8rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-mono { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-small { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-meta { font-size: calc(11.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-card-label { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A card's line of a set height (Tailwind's leading-4 and leading-5), growing with its words. */
+.chat-text-leading-4 { line-height: calc(16rem / 16 * var(--chat-text-scale)); }
+.chat-text-leading-5 { line-height: calc(20rem / 16 * var(--chat-text-scale)); }
+/* A payment, an invoice, a token or a payment request in a chat (InvoiceBubble, MoneyFormatsBubble, PaymentBubble,
+   GroupPaymentNote): its label, a memo, an address, its lines and its state. Only their size: each keeps its own line
+   height. The amount, its unit, the network's tag, the buttons and a form to pay keep theirs. */
+.chat-text-pay-title { font-size: calc(15rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-memo { font-size: calc(13rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-detail { font-size: calc(12.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-line { font-size: calc(12rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-mono { font-size: calc(11.5rem / 16 * var(--chat-text-scale)); }
+.chat-text-pay-label { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
 /* A system line (a contact joined, a call, a refused payment) and a day's date over its messages. */
 .chat-text-system { font-size: calc(12rem / 16 * var(--chat-text-scale)); line-height: calc(16rem / 16 * var(--chat-text-scale)); }
 .chat-text-day { font-size: calc(11rem / 16 * var(--chat-text-scale)); }
+/* A word on a single line of its own height: "edited" in a bubble, a reaction's count. */
+.chat-text-tag { font-size: calc(11rem / 16 * var(--chat-text-scale)); line-height: 1; }
 /* The chat list's rows (ChatRow.tsx). */
 .chat-text-row-name { font-size: calc(15rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
 .chat-text-row-preview { font-size: calc(13rem / 16 * var(--chat-text-scale)); line-height: calc(20rem / 16 * var(--chat-text-scale)); }
@@ -1327,6 +1362,23 @@ html .toast-place.toast-place-page[data-at="top"] {
   [data-message-row]:nth-last-child(n + 11 of [data-message-row]):not(:has([data-theater])) {
     content-visibility: auto;
   }
+}
+
+/*
+ * The chat list's rows (ChatRow.tsx `rowClass`) off screen are left out of its style, layout and paint: everything that
+ * restyles the whole page (Light/Dark, a color theme, a Text size step, a language, the window crossing a width
+ * breakpoint) paid for every chat in the list, ~0.75 s of the main thread at 300 chats. Every row stays in the page, so
+ * Tab, find in page, a screen reader, putting rows in order and bringing the open chat's row into view reach each one,
+ * and a scroll costs no script. A row never drawn takes a typical row's height: its two lines at the Text size, and the
+ * key's line of a chat in the comfortable density (the padding and the density's least height, min-h, come on top); one
+ * drawn keeps its last real one (`auto`). Nothing in a row is painted past its edges (its menus are portals).
+ */
+.chat-list-row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(0.125rem + 2.5rem * var(--chat-text-scale));
+}
+.chat-list-row-comfortable[data-chat] {
+  contain-intrinsic-block-size: auto calc(1.125rem + 2.5rem * var(--chat-text-scale));
 }
 
 /* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
@@ -1519,6 +1571,17 @@ html .toast-place.toast-place-page[data-at="top"] {
 .message-button:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-received-bg)); }
 .message-button[data-style="primary"]:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-received-bg)); }
 
+/*
+ * For the one style change that switches the theme (contexts/ThemeContext.tsx): every row, button and list item with
+ * transition-colors faded from the old theme's colors, hundreds of transitions each restyled every frame.
+ */
+:root[data-theme-switch],
+:root[data-theme-switch] *,
+:root[data-theme-switch] *::before,
+:root[data-theme-switch] *::after {
+  transition: none !important;
+}
+
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
 :root[data-reduce-motion="true"] *::before,
@@ -1659,6 +1722,15 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (prefers-reduced-motion: reduce) {
   .connection-switch-track, .connection-switch-track::after { transition: none; }
 }
+/* Forced colors replace the track's and the knob's backgrounds with the page's: an empty outline, on and off alike. In
+   system colours instead, as Settings' switches (wallet/ui.tsx): off a ButtonText knob, on a Highlight track. */
+@media (forced-colors: active) {
+  .connection-switch-track { forced-color-adjust: none; border-color: ButtonText; background: Canvas; }
+  .connection-switch-track::after { background: ButtonText; }
+  .connection-switch input:checked + .connection-switch-track { border-color: Highlight; background: Highlight; }
+  .connection-switch input:checked + .connection-switch-track::after { background: HighlightText; }
+  .connection-switch input:focus-visible + .connection-switch-track { outline-color: Highlight; }
+}
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
    it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
    placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
@@ -1712,11 +1784,41 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 }
 [dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
 
+/* A panel from the end edge on a wide screen (a message's details, a wallet total's breakdown) is a portal on the body
+   too: an iPhone on its side or an installed iPad keeps its close button and its last row clear of the notch, the
+   status bar and the home indicator. The end inset is added to its width, so the content keeps its 400px. */
+.end-panel {
+  width: min(calc(400px + env(safe-area-inset-right)), 100vw);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline-end: env(safe-area-inset-right);
+}
+[dir="rtl"] .end-panel {
+  width: min(calc(400px + env(safe-area-inset-left)), 100vw);
+  padding-inline-end: env(safe-area-inset-left);
+}
+
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
   padding-top: max(0.5rem, env(safe-area-inset-top));
   padding-inline-start: max(0.75rem, env(safe-area-inset-left));
   padding-inline-end: max(0.75rem, env(safe-area-inset-right));
+}
+
+/* With the keyboard up it ends where the keyboard starts: iOS keeps the page's height, and the field the person types
+   in, at the app's bottom, was under the keyboard. So does an app in a chat on a phone, which covers the whole screen
+   (components/apps/chat-app-panel.css). */
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .fixed.inset-0.app-alone {
+    bottom: calc(100% - var(--app-height, 100%));
+  }
+}
+@media (pointer: coarse) and (max-width: 767px) {
+  /* Its `height: 100%` would win over `bottom`. */
+  html[data-keyboard="true"] .chat-app-panel {
+    bottom: calc(100% - var(--app-height, 100%));
+    height: auto;
+  }
 }
 
 /* Forced colors (Windows Contrast themes, Edge and Chrome's forced colors): the keyboard focus's mark. Most controls
@@ -1730,4 +1832,36 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   /* A field whose frame draws the focus (the chat list's search, `has-[input:focus-visible]:outline-2`): one mark, the frame's. */
   :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
   [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
+}
+
+/* Forced colors: the place you are on (`aria-current`) in the chat list, on the rail, Saved and Tasks above the list,
+   the account bar and the phone's tab bar. Its background and accent colour were all that marked it, and forced colors
+   replace both, so it looked like every other place. One mark for all of them: a bar in Highlight, the bar the rail
+   already draws in the accent beside its open chat. At the start side of a place stacked in a column; under a place in
+   a row (`current-mark-under`: the tab bars), where a start-side bar would sit between two neighbours. Not a Highlight
+   fill (it needs `forced-color-adjust: none`, which keeps a row's muted line in its theme colour on Highlight), nor an
+   outline (the keyboard focus's mark). A ::before inside the place (which is positioned), so nothing moves; only the
+   bar itself keeps its colour. Logical sides: the start is the right in Arabic. Only the place's mark here. */
+@media (forced-colors: active) {
+  .current-mark[aria-current]:not([aria-current="false"])::before {
+    content: "";
+    position: absolute;
+    inset-block: 0.5rem;
+    inset-inline-start: 0;
+    inline-size: 0.25rem;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 9999px;
+    background: Highlight;
+    forced-color-adjust: none;
+    pointer-events: none;
+  }
+  .current-mark.current-mark-under[aria-current]:not([aria-current="false"])::before {
+    inset-block: auto 0;
+    inset-inline: 25%;
+    inline-size: auto;
+    block-size: 0.25rem;
+    border-start-start-radius: 9999px;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 0;
+  }
 }

@@ -3,7 +3,7 @@ import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -785,13 +785,19 @@ export class EventHub {
     this.reactions(chat, group, messages, quiet);
     const files: [string, string][] = [];
     const cutoff = this.now() - SEEN_KEEP_MS;
+    // A group's payment lines that say a payment note again (`groupPayTwins`), worked out once, when an event needs them.
+    let twinLines: ReadonlyMap<string, string> | undefined;
+    const twins = () => twinLines ??= group
+      ? groupPayTwins(messages, new Map(messages.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : []))), this.state?.payments ?? {},
+        this.state?.groups.find((g) => g.id === group))
+      : new Map();
     for (const message of messages) {
       present.add(message.id);
       if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
       let state = stateOf(message);
       const note = known.get(message.id), before = note === undefined ? undefined : stateIn(note);
       const at = activityOf(message);
-      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
+      const json = () => group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group), twins().get(message.id)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
       if (before === undefined && cameAt(message) < cutoff) {
         // Came here longer ago than `SEEN_KEEP_MS`, with no note: its note was dropped (or it came, that long ago, while
         // nothing ran). No news, and no note again, unless it was active since: then an edit since is reported, once.
@@ -834,12 +840,14 @@ export class EventHub {
       }
       // A press the engine learned after the reply was first seen here: a group reply first held from a copy a member
       // handed on without its reply box, which its author's whole copy completes (WISP 902 · Group Mesh § Catch-up).
-      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json());
+      // It carries the reply, as `group.message` gives it: its turn (`listen --turns`), which that event did not start,
+      // unless a mention learned with it says the reply too.
+      const mentioned = !!group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted;
+      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json(), !!group && !mentioned);
       // A mention of me learned after the message was reported: a group message first held from a copy a member handed
       // on without its author's whole signature, which the whole copy completes (WISP 902 · Group Mesh § Catch-up), or
       // an edit that names me. Its `group.message` said no mention; this says it, once.
-      if (group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted)
-        this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json() });
+      if (mentioned) this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json() });
       if (group) {
         // A new text in a group (WISP 902 § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
@@ -885,16 +893,16 @@ export class EventHub {
    * profile gave the chat, as `chat list` gives it; null without one, and in a group) and the reply (`replyId`).
    * `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so data, never
    * instructions, and under `untrusted` only. The engine marks a reply a press only while the buttons were open for
-   * that person.
+   * that person. `message` (the reply, as `group.message` gives it) only on a group press learned after its reply's event.
    */
-  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
+  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }, withReply = false): void {
     const press = message.press!;
     const link = group ? undefined : this.state?.links.find((l) => l.id === chat);
     const name = link ? chatJson(link).label : null;
     this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
       ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
       by: group ? message.member ?? null : chat, name, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
-      untrusted: { name: json.nick ?? null },
+      untrusted: { name: json.nick ?? null }, ...(withReply ? { message: json } : {}),
     });
   }
 

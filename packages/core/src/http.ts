@@ -279,17 +279,35 @@ export function viewerServicePolicy(relayOnly: boolean): string {
 }
 
 /**
+ * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
+ * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
+ * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ */
+export const VIEWER_PERMISSIONS_POLICY = [
+  "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
+  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+].map((feature) => `${feature}=()`).join(", ");
+
+/** A contact's headers that would set the page's features: the viewer's own policy takes their place. */
+const VIEWER_FEATURE_HEADERS = ["permissions-policy", "feature-policy"];
+
+/**
  * `headers` with Ghostly's policy after the contact's own, all in one `content-security-policy` joined by commas: a
- * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it.
+ * browser enforces every policy of the list, so the contact's can narrow Ghostly's but never widen it. The page's
+ * features are Ghostly's alone (`VIEWER_PERMISSIONS_POLICY`): a contact's permissions policy could allow them, and one
+ * the browser cannot read would void the whole header, Ghostly's part with it.
  */
 export function withViewerPolicy(headers: HeaderList, relayOnly = false): HeaderList {
   const policies: string[] = [];
   const out: HeaderList = [];
   for (const [name, value] of headers) {
-    if (name.toLowerCase() === "content-security-policy") policies.push(value);
-    else out.push([name, value]);
+    const lower = name.toLowerCase();
+    if (lower === "content-security-policy") policies.push(value);
+    else if (!VIEWER_FEATURE_HEADERS.includes(lower)) out.push([name, value]);
   }
   out.push(["content-security-policy", [...policies, viewerServicePolicy(relayOnly)].join(", ")]);
+  out.push(["permissions-policy", VIEWER_PERMISSIONS_POLICY]);
   return out;
 }
 
@@ -363,9 +381,11 @@ interface HostStream {
   url: string;
   body: Uint8Array[];
   bodyBytes: number;
+  /** Body bytes since the pace was last checked. */
+  movedBytes: number;
   abort: AbortController;
   started: boolean;
-  idleTimer?: ReturnType<typeof setTimeout>;
+  paceTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class HttpHost {
@@ -376,6 +396,8 @@ export class HttpHost {
    * so a stream counts toward the limit until its fetch has settled.
    */
   private readonly live = new Set<HostStream>();
+  /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
+  private heldBodyBytes = 0;
 
   constructor(
     private readonly channel: FrameChannel,
@@ -406,13 +428,14 @@ export class HttpHost {
       url,
       body: [],
       bodyBytes: 0,
+      movedBytes: 0,
       abort: new AbortController(),
       started: false,
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
 
-    if (frame.b && !BODYLESS_METHODS.has(method)) this.armIdleTimer(stream);
+    if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
   }
 
@@ -420,14 +443,20 @@ export class HttpHost {
     const stream = this.streams.get(chunk.id);
     if (!stream || stream.started) return;
 
-    stream.bodyBytes += chunk.payload.length;
-    if (stream.bodyBytes > LIMITS.maxRequestBodyBytes) {
+    const bytes = chunk.payload.length;
+    if (stream.bodyBytes + bytes > LIMITS.maxRequestBodyBytes) {
       this.end(stream);
       return this.fail(chunk.id, 413, "request-too-large", "Request body too large.");
     }
+    if (this.heldBodyBytes + bytes > LIMITS.maxHostBodyBytesPerPeer) {
+      this.end(stream);
+      return this.fail(chunk.id, 503, "busy", "Too many request bodies at once.");
+    }
+    stream.bodyBytes += bytes;
+    this.heldBodyBytes += bytes;
+    stream.movedBytes += bytes;
     if (chunk.payload.length > 0) stream.body.push(chunk.payload.slice());
     if (chunk.end) void this.run(stream);
-    else this.armIdleTimer(stream);
   }
 
   handleReset(frame: ResetFrame): void {
@@ -439,9 +468,13 @@ export class HttpHost {
     for (const stream of [...this.streams.values()]) this.end(stream);
   }
 
-  private armIdleTimer(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
-    stream.idleTimer = setTimeout(() => {
+  /** A body that brings less than `minRequestBodyBytesPerIdle` in a `bodyIdleTimeoutMs` is let go, even if it trickles. */
+  private watchPace(stream: HostStream): void {
+    stream.paceTimer = setTimeout(() => {
+      if (stream.movedBytes >= LIMITS.minRequestBodyBytesPerIdle) {
+        stream.movedBytes = 0;
+        return this.watchPace(stream);
+      }
       this.end(stream);
       this.fail(stream.frame.id, 408, "request-timeout", "Request body timed out.");
     }, LIMITS.bodyIdleTimeoutMs);
@@ -453,10 +486,17 @@ export class HttpHost {
   }
 
   private end(stream: HostStream): void {
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
-    if (!stream.started) this.live.delete(stream);
+    if (!stream.started) this.release(stream);
+  }
+
+  /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */
+  private release(stream: HostStream): void {
+    this.live.delete(stream);
+    this.heldBodyBytes -= stream.bodyBytes;
+    stream.bodyBytes = 0;
   }
 
   private fail(id: number, status: number, code: string, message: string): void {
@@ -482,20 +522,22 @@ export class HttpHost {
 
   private async run(stream: HostStream): Promise<void> {
     stream.started = true;
-    clearTimeout(stream.idleTimer);
+    clearTimeout(stream.paceTimer);
     const { frame, service } = stream;
     const timeout = setTimeout(() => stream.abort.abort(), LIMITS.requestTimeoutMs);
     let headersSent = false;
+    // The chunks go once joined, so a body is held once while the local service reads it.
+    const body = stream.body.length > 0 ? concatBytes(...stream.body) : null;
+    stream.body = [];
 
     try {
       const response = await this.localFetch({
         url: stream.url,
         method: frame.m,
         headers: sanitizeRequestHeaders(frame.h),
-        body: stream.body.length > 0 ? concatBytes(...stream.body) : null,
+        body,
         signal: stream.abort.signal,
       });
-      stream.body = [];
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
 
@@ -551,7 +593,7 @@ export class HttpHost {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
       }
     } finally {
-      this.live.delete(stream);
+      this.release(stream);
     }
   }
 }

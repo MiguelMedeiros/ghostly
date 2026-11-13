@@ -71,6 +71,35 @@ describe("a navigation the services worker hands to the contact", () => {
     await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(4));
   });
 
+  it("with no referrer and no client (Firefox's every one), goes on through a page that renders only inside Ghostly, as it was made", async () => {
+    const { GO_KEY, GO_SCRIPT } = await import("../../../../web/src/svc/worker");
+    const page = await fetchThrough({ method: "POST", path: "/api/save?x=1", mode: "navigate", destination: "iframe", referrer: "" })!;
+    expect(page.status).toBe(200);
+    expect(page.headers.get("referrer-policy")).toBe("same-origin");
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT)));
+    expect(page.headers.get("content-security-policy"))
+      .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src 'sha256-${btoa(String.fromCharCode(...digest))}'`);
+    const token = /<script data-go="([0-9a-f-]+)">/.exec(await page.text())?.[1];
+    expect(token).toBeTruthy();
+    // Nothing reached the contact: in another site's frame the page never renders, and no one asks again.
+    expect(bridge.postMessage).not.toHaveBeenCalled();
+    // Its script asks again, its token in the referrer: the kept POST goes, body and all, once.
+    const again = { path: "/api/save?x=1", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/api/save?x=1&${GO_KEY}=${token}` };
+    void fetchThrough(again);
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(1));
+    const [message] = bridge.postMessage.mock.calls[0] as [{ method: string; path: string; body: ArrayBuffer }];
+    expect([message.method, message.path, new TextDecoder().decode(message.body)]).toEqual(["POST", "/api/save?x=1", "a=1"]);
+    void fetchThrough(again);
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(2));
+    expect((bridge.postMessage.mock.calls[1]![0] as { method: string }).method).toBe("GET");
+    // A token goes only with the address it was kept for.
+    const other = await fetchThrough({ method: "POST", path: "/api/delete", mode: "navigate", destination: "iframe", referrer: "" })!;
+    const otherToken = /data-go="([^"]+)"/.exec(await other.text())![1];
+    void fetchThrough({ path: "/account", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/?${GO_KEY}=${otherToken}` });
+    await vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalledTimes(3));
+    expect((bridge.postMessage.mock.calls[2]![0] as { method: string; path: string }).method).toBe("GET");
+  });
+
   it("is never another site's: its form POST at the top or into a frame of its own, or a window it opens", async () => {
     const tries = [
       { method: "POST", path: "/api/delete", mode: "navigate", destination: "document", referrer: `${OTHER}/` },
@@ -96,7 +125,7 @@ describe("an answer of the contact's app the worker passes on", () => {
   it("carries Ghostly's viewer policy after the app's own, Hide my IP on or off, whatever policy the app sends", async () => {
     const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
     const { VIEWER_GUARD_CSP, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
-    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", label: "", owner: "", hostError: () => null };
+    const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", hostError: () => null };
     for (const own of [null, "connect-src *"]) {
       for (const relayOnly of [false, true]) {
         // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
@@ -135,6 +164,38 @@ describe("a request the app's page could not get an answer to", () => {
     });
     const html = await (await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!).text();
     expect(html).toContain("<html><head>");
+  });
+
+  it("ends at a status a Response takes, whatever status the app's error comes with: never left waiting", async () => {
+    // As Chromium and Firefox build a Response (the test DOM's takes anything): refused outside 200-599, and with a
+    // body at a status that carries none.
+    const Native = globalThis.Response;
+    class BrowserResponse extends Native {
+      constructor(body?: BodyInit | null, init?: ResponseInit) {
+        const status = init?.status ?? 200;
+        if (status < 200 || status > 599) throw new RangeError(`The status provided (${status}) is outside the range [200, 599].`);
+        if (body != null && [101, 103, 204, 205, 304].includes(status)) throw new TypeError("Response with null body status cannot have body");
+        super(body, init);
+      }
+    }
+    vi.stubGlobal("Response", BrowserResponse);
+    const statuses: [number, number][] = [[204, 204], [205, 205], [304, 304], [0, 502], [99, 502], [600, 502], [700, 502], [502, 502]];
+    for (const [sent, kept] of statuses) {
+      for (const lang of [undefined, "en"]) {
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          (transfer[0] as MessagePort).postMessage({ type: "error", status: sent, text: "Not here", lang });
+        });
+        const waiting = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000));
+        const response = await Promise.race([fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!, waiting]);
+        const label = `${sent} ${lang ?? "plain"}`;
+        expect(response, label).not.toBeNull();
+        expect(response!.status, label).toBe(kept);
+        expect(response!.headers.get("content-security-policy"), label).toMatch(/^frame-ancestors 'self' https:\/\/app\.ghostly\.example(;|$)/);
+        const text = await response!.text();
+        if ([204, 205, 304].includes(kept)) expect(text, label).toBe("");
+        else expect(text, label).toContain("Not here");
+      }
+    }
   });
 
   it("passes a fetch the app gives up on before any answer on as cancelled: the page lets go of it, and its body", async () => {

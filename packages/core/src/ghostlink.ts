@@ -250,6 +250,12 @@ const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paire
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
   "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack", CONTACT_ASKER_FRAME]);
 /**
+ * What a session a move replaced still reads while its channel retires (`SWITCH_RETIRE_MS`): the contact's texts,
+ * reactions, pins and edits, and its receipts of this side's, which it sends on that session until its own side moves.
+ * Its files/3 frames too (a cancel, a pause, a file's check): `ChatFiles` answers them on the session now.
+ */
+const RETIRING_FRAMES = new Set(["paired-message", "paired-received", REACTION_FRAME, REACTED_FRAME, PIN_FRAME, PINNED_FRAME, EDIT_FRAME, EDITED_FRAME, ...FILE_FRAMES]);
+/**
  * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
  * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
  * They are read now. Nothing more: the session is let go only by `LIVENESS_MISSED_PINGS`, or by the contact's offer
@@ -335,6 +341,13 @@ const APP_IN_FLIGHT = 64 * 1024;
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
+
+/**
+ * Texts a contact's link takes: a burst per short window (a reconnect flushes every queued text at once) and a total
+ * per hour, both well above what a person or a bot sends. The rest go unconfirmed and come again (the sender's outbox
+ * resends with backoff), so a catch-up only slows.
+ */
+export const MESSAGE_RECEIVE_LIMITS = { burst: 200, burstWindowMs: 10_000, hourly: 1_800, hourWindowMs: 3_600_000 } as const;
 
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
@@ -948,6 +961,11 @@ export class GhostLink {
   private readonly pinsReceived = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
+  /** Text frames the contact may send per window (`MESSAGE_RECEIVE_LIMITS`); the rest go unconfirmed and come again. */
+  private readonly messagesReceived = [
+    new RateWindow(MESSAGE_RECEIVE_LIMITS.burst, MESSAGE_RECEIVE_LIMITS.burstWindowMs),
+    new RateWindow(MESSAGE_RECEIVE_LIMITS.hourly, MESSAGE_RECEIVE_LIMITS.hourWindowMs),
+  ];
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
@@ -1910,6 +1928,18 @@ export class GhostLink {
     const done = new Promise<void>(resolve => { closed = resolve; });
     const close = () => { this.retiring.delete(old); old.close(); also(); closed(); };
     this.retiring.set(old, { close, timer: setTimeout(close, SWITCH_RETIRE_MS), rtc, closed: done });
+  }
+  /**
+   * Where the receipt of a frame read on `channel` goes: that session while it carries the chat, the one now when a move
+   * replaced it (or moved while the frame was shown), or nowhere.
+   */
+  private answerOn(channel: FrameChannel): FrameChannel | null {
+    const live = this.channel;
+    return live && (live === channel || this.retiring.has(channel)) && this.isDataLinkOpen ? live : null;
+  }
+  /** Counts one text the contact sent; false (and not counted) when either of `messagesReceived` is full. */
+  private takeMessage(): boolean {
+    return this.messagesReceived.every(window => window.wait() === 0) && this.messagesReceived.every(window => window.take());
   }
   /**
    * The WebRTC session a switch moved off is still retiring (`SWITCH_RETIRE_MS`): its data link is open, and a new offer
@@ -4380,6 +4410,9 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) && !this.pinnedSince(channel, paired) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
+          // A session a move replaced, still reading while its channel retires: it says nothing of the one now.
+          const retiring = this.channel !== channel ? this.retiring.get(channel) : undefined;
+          if (retiring) { clearTimeout(retiring.timer); retiring.close(); return; }
           // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
           if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
           // Dialled in and unproven, started before a pin made by another path, a connection that carried nothing in
@@ -4417,12 +4450,14 @@ export class GhostLink {
             if (files && migration.plan && paired.supports("files/2")) { files.rebind(channel); carried = files; } else files?.closeAll();
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
-            oldPaired?.stop();
             // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then. Only
             // that connection: the contact's offer back to WebRTC can be under way on the link by then (its own old
             // session retired first), and closing it left the move to its 8 s and the 20 s retry (bh-zero43).
             const oldRtc = oldBinding ? null : this.dataLink.connection;
-            if (oldChannel) this.retire(oldChannel, () => { if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
+            // The old session reads on while its channel retires: a text or a receipt the contact sent on it before its
+            // own side moved still arrives (`onApplication`). Stopped here, it dropped those of the move's moment.
+            if (oldChannel) this.retire(oldChannel, () => { oldPaired?.stop(); if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
+            else oldPaired?.stop();
             // A move that lands on a native transport while its own WebRTC try still connects (the contact's app ended
             // and is back over the chat's native transport, which the move allows): that try goes to the app that
             // ended, and held the data link until it failed (30 s on the CLI's WebRTC), so the next move to WebRTC
@@ -4492,9 +4527,12 @@ export class GhostLink {
           if (replaced) { this.options.events?.onDataLinkState?.("open"); this.emitFilesSession(true); }
         },
         onApplication: async data => {
-          if (this.channel !== channel) return;
+          // A session a move replaced, while its channel retires: only what `RETIRING_FRAMES` names is read on it.
+          const retired = this.channel !== channel;
+          if (retired && !this.retiring.has(channel)) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++;
+          if (!retired) { this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++; }
+          else if (typeof data !== "string") return;
           if (typeof data !== "string") {
             // app-ranges/1 beside files/4: a served file's bytes, for a request of this side's.
             if (data[0] === APP_RANGE_DATA_KIND) {
@@ -4512,6 +4550,7 @@ export class GhostLink {
           if (data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
+          if (retired && !RETIRING_FRAMES.has(String(frame?.t))) return;
           // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.
           if (frame && typeof frame === "object" && !QUIET_FRAMES.has(String(frame.t))) this.activityAt = Date.now();
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
@@ -4618,8 +4657,8 @@ export class GhostLink {
             if (!this.supportsReactions || !this.reactionsReceived.take()) return;
             const reaction = parseReactionFrame(frame);
             if (!reaction) return;
-            if (await this.options.events?.onReaction?.(reaction) && this.channel === channel && this.isDataLinkOpen)
-              try { channel.send(reactedFrame(reaction.n)); } catch { /* it comes again */ }
+            const reacted = await this.options.events?.onReaction?.(reaction), live = this.answerOn(channel);
+            if (reacted && live) try { live.send(reactedFrame(reaction.n)); } catch { /* it comes again */ }
             return;
           }
           if (frame?.t === REACTED_FRAME) {
@@ -4632,8 +4671,8 @@ export class GhostLink {
             if (!this.supportsPins || !this.pinsReceived.take()) return;
             const pin = parsePinFrame(frame);
             if (!pin) return;
-            if (await this.options.events?.onPin?.(pin) && this.channel === channel && this.isDataLinkOpen)
-              try { channel.send(pinnedFrame(pin.n)); } catch { /* it comes again */ }
+            const pinned = await this.options.events?.onPin?.(pin), live = this.answerOn(channel);
+            if (pinned && live) try { live.send(pinnedFrame(pin.n)); } catch { /* it comes again */ }
             return;
           }
           if (frame?.t === PINNED_FRAME) {
@@ -4646,8 +4685,8 @@ export class GhostLink {
             if (!this.supportsEdits || !this.editsReceived.take()) return;
             const edit = parseEditFrame(frame);
             if (!edit) return;
-            if (await this.options.events?.onMessageEdit?.(edit) && this.channel === channel && this.isDataLinkOpen)
-              channel.send(editedFrame(edit.id, edit.e));
+            const edited = await this.options.events?.onMessageEdit?.(edit), live = this.answerOn(channel);
+            if (edited && live) live.send(editedFrame(edit.id, edit.e));
             return;
           }
           if (frame?.t === EDITED_FRAME) {
@@ -4736,6 +4775,8 @@ export class GhostLink {
             return;
           }
           if (!frame || typeof frame.id !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(frame.id)) return;
+          // Counted before it is read; one past the window is not confirmed, so the contact's app sends it again.
+          if (frame.t === "paired-message" && !this.takeMessage()) return;
           if (frame.t === "paired-message" && typeof frame.m === "string" &&
             utf8Encode(frame.m).length <= LIMITS.maxChatMessageBytes &&
             typeof frame.ts === "number" && Number.isSafeInteger(frame.ts) && frame.ts > 0) {
@@ -4750,8 +4791,8 @@ export class GhostLink {
             // A card that does not hold is left out: the message shows its text, as an older app shows it.
             const card = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
             await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }), ...(card && { card }) });
-            if (this.channel === channel && this.isDataLinkOpen)
-              channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
+            const live = this.answerOn(channel);
+            if (live) live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {
@@ -5204,6 +5245,7 @@ export class GhostLink {
         break;
       }
       case "m":
+        if (!this.takeMessage()) break;
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
       case "call":

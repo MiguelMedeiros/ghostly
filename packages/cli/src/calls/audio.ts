@@ -238,11 +238,13 @@ export class CallAudio {
    * slower than a frame for a while (every 40 ms under a large file) keeps up, and a program writing at real time
    * stays there. The contact's jitter buffer takes the short burst. A stall past MAX_CATCH_UP_MS is not replayed: the
    * clock starts again and what the program wrote during it is dropped, or it would be heard that much late for the
-   * rest of the call.
+   * rest of the call. The frames it skipped still move the RTP timestamp on (the sampling time, RFC 3550), so the
+   * contact's jitter buffer does not take the gap for seconds of jitter.
    */
   private catchUp(late: number): void {
     const now = this.options.now ?? monotonic;
     if (late > MAX_CATCH_UP_MS) {
+      this.writer.skip(Math.round(late / FRAME_MS));
       this.owed = late;
       this.kept = this.ahead;
       this.owedUntil = now() + MAX_CATCH_UP_MS;

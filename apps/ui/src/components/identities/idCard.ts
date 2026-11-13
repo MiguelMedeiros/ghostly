@@ -30,6 +30,8 @@ export interface IdCardContent {
   /** The identity in full, and as short as the provider writes it (npub1ab…yz, a domain, a login). */
   subject: string;
   short: string;
+  /** The subject is words in the app's language (the Ghostly card's "One key per chat"), not a key or a handle. */
+  subjectWords?: boolean;
   /** What the statement names, which picks the provider's mark: for an account, the provider it was made at. */
   bound: string;
   /** A name the evidence carried (a Nostr profile's), and its picture: a sanitized data URL, never a remote one. */
@@ -236,6 +238,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
     label: t("identities.ghostly.provider"),
     subject,
     short: place.chat ? shortKey(place.chat.key) : subject,
+    subjectWords: !place.chat,
     bound: GHOSTLY,
     name,
     photo,

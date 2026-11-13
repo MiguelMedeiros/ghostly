@@ -314,7 +314,7 @@
   "online": "在线",
   "options": "选项",
   "payments": {
-    "needLive": "付款需要直连",
+    "needLive": "发送需要联系人在线：ecash 从不排队等待。请求可以等到对方回来。",
     "noWallet": "你的联系人还没有钱包",
     "off": "此聊天已关闭：在“接收”中开启一种方式",
     "offOrOld": "你的联系人在此聊天中关闭了付款，或需要更新 Ghostly"
@@ -394,6 +394,7 @@
     "copyCode": "复制代码",
     "hiddenChars": "这段代码包含隐藏字符或改变文字方向的字符，显示为 {{marker}}。复制代码时也会一并复制它们。",
     "localTime": "你的时间 {{time}}",
+    "notCopied": "未复制",
     "showAll": "显示全部",
     "showLess": "收起",
     "spoiler": "隐藏的文字。点按显示",
