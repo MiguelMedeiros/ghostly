@@ -47,7 +47,7 @@ import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
-import { keepSentOriginal } from "../lib/sentOriginals";
+import { forgetSentOriginal, keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -91,6 +91,7 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
+import { copySecret } from "../lib/shareLink";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, type VoiceMeta } from "@ghostly/core";
@@ -123,6 +124,7 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { TasksButton } from "../components/chat/TasksButton";
 import { cardEntries, goingCardCount } from "../lib/statusCards";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -341,7 +343,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // are not read out (MessageAnnouncer). Not what a notice of its own says: No answer, the no-path note, a media problem.
   const [callEndSaid, setCallEndSaid] = useState("");
   const callEnd = useRef({ t, notice: false });
-  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || !!webrtc.mediaProblem };
+  // The camera's own notice (a video call that went on as a voice call) is not why the call ended: its end is said.
+  const cameraOff = webrtc.mediaProblemOf === "camera" && (webrtc.mediaProblem === "denied" || webrtc.mediaProblem === "unavailable");
+  callEnd.current = { t, notice: webrtc.noAnswer || webrtc.noPath || (!!webrtc.mediaProblem && !cameraOff) };
   useEffect(() => {
     if (!callEndSaid) return;
     const timer = setTimeout(() => setCallEndSaid(""), CALL_END_SAID_MS);
@@ -470,9 +474,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (waiting) {
       if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
+      forgetSentOriginal(sessionId, messageId);
       return;
     }
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
     if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
   });
 
@@ -530,6 +536,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
     deleteMessage(messageId);
+    forgetSentOriginal(sessionId, messageId);
   });
 
   // Saved messages: kept on this device, never sent; the Saved view lists them.
@@ -645,16 +652,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     window.dispatchEvent(new Event("session-updated"));
   };
 
+  // The invite is a secret: copied marked, as the invite card's Copy. A refused copy shows the link (the invite's QR
+  // dialog) to copy by hand, never copied unmarked.
   const handleCopyCode = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copySecret(text);
     } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+      setShowInviteQr(true);
+      return;
     }
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 2000);
@@ -1142,8 +1147,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {/* Our call found no path to the contact (a VPN or firewall that blocks UDP, on either side): where a TURN server
           is set, and the guide. It stays until closed, so it is a line under the header, never over its controls. */}
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (

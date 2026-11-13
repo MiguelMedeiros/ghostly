@@ -349,6 +349,11 @@ describe("imports by package name", () => {
     expect(packageImports(`import "@ghostly/browser/engine/node.ts";\nimport x from "@ghostly/core/miniApp";\nimport y from "@ghostly/core/nope";\nimport z from "react";`, packages)).toEqual(["packages/browser/src/engine/node", "packages/core/src/miniApp"]);
   });
 
+  it("fills every * of an exports target, as Node does", () => {
+    const pkgs = { "@ghostly/x": [["./*", "packages/x/src/*/*.ts"]] };
+    expect(packageImports(`import "@ghostly/x/a";`, pkgs)).toEqual(["packages/x/src/a/a"]);
+  });
+
   it("a rebuilt packages/iroh-web/pkg runs the browser tests that load it, directly or through the engine", () => {
     const browser = (file: string) => byName(plan({ changed: changed(file), inventory, e2eFiles, codeFiles, packages }).unit).browser;
     expect(browser("packages/iroh-web/pkg/ghostly_iroh_web.js")).toMatchObject({ mode: "related", files: ["packages/browser/test/engine.test.ts", "packages/browser/test/irohWeb.test.ts"] });

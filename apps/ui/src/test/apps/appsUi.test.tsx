@@ -399,6 +399,8 @@ describe("with the apps flag on", () => {
     const said = [
       ["unlisted: The store no longer lists this update", "This store no longer lists this update."],
       ["needs-files: The update's files are gone; it is fetched again at the next check", "The update's files are gone."],
+      // Installed or dropped meanwhile: said of the update, not "Ghostly won't install it" with the engine's English.
+      ["no-update: This update can no longer be installed", "This update no longer waits."],
     ] as const;
     function Shown() {
       const shown = useInstalledApps(true)?.find((a) => a.ref === REF);
@@ -413,7 +415,8 @@ describe("with the apps flag on", () => {
       await user.click(await screen.findByTestId("app-update-accept"));
       const error = await screen.findByTestId("app-details-error");
       expect(error).toHaveTextContent(words);
-      expect(error).not.toHaveTextContent(/link|not on this device yet/);
+      expect(error).not.toHaveTextContent(/link|not on this device yet|won't install/);
+      expect(within(error).queryByRole("button")).toBeNull();
       await waitFor(() => expect(screen.queryByTestId("app-update")).not.toBeInTheDocument());
       expect(screen.getByTestId("app-open")).toBeEnabled();
       unmount();
@@ -765,6 +768,23 @@ describe("with the apps flag on", () => {
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     expect(await screen.findByTestId("app-install-blocked")).toHaveTextContent("Removed by Ghostly: Malware");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+  });
+
+  it("breaks a store's removal reason with no space anywhere on the install and details screens, each store's line in its own direction", async () => {
+    // A reason may be 200 characters on one line: "Malware build sha256:" and a digest pushed both screens 700 px sideways.
+    const reason = `Malware build sha256:${"0123456789abcdef".repeat(10)}`;
+    const by = [{ store: "k", name: "Ghostly", reason, at: 1 }, { store: "a", name: "متجر", reason: "برمجية خبيثة", at: 2 }];
+    const lines = (line: HTMLElement) => {
+      expect(line.className).toContain("[overflow-wrap:anywhere]");
+      const spans = line.querySelectorAll("span[dir=auto]");
+      expect([...spans].map((s) => s.textContent)).toEqual([`Removed by Ghostly: ${reason}`, "Removed by متجر: برمجية خبيثة"]);
+    };
+    fakeEngine.on("appPreview", () => preview({ run: { status: "removed", by } }));
+    const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    lines(await screen.findByTestId("app-install-blocked"));
+    install.unmount();
+    renderApp(<InstalledAppDialog app={installed({ run: { status: "removed", by } })} onClose={() => {}} onOpen={() => {}} />);
+    lines(await screen.findByTestId("app-run-line"));
   });
 
   it("a github.com page that is not an app says so, and asks for a repository or file link, never that GitHub is off the list", async () => {

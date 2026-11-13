@@ -92,6 +92,7 @@
     "tooLarge": "Troppo grande.",
     "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora.",
     "updateFilesGone": "I file dell'aggiornamento non ci sono più. Ghostly li scarica di nuovo al prossimo controllo.",
+    "updateGone": "Questo aggiornamento non è più in attesa. La versione installata è quella mostrata sopra.",
     "updateUnlisted": "Questo store non elenca più questo aggiornamento. Ghostly guarda cosa elenca al prossimo controllo."
   },
   "files": {

@@ -56,6 +56,8 @@ const STORE_KEYS: Record<string, TranslationKey> = {
 const UPDATE_KEYS: Record<string, TranslationKey> = {
   unlisted: "apps.errors.updateUnlisted",
   "needs-files": "apps.errors.updateFilesGone",
+  // Installed or dropped meanwhile (another tab, a check): nothing was refused, the screen shows what is installed now.
+  "no-update": "apps.errors.updateGone",
 };
 
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */

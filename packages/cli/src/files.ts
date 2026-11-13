@@ -340,7 +340,9 @@ export const FILE_METHODS: Record<string, Method> = {
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
-    if (!link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
+    // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
+    // as files/3 on the next one (the engine's `sendWaitingFile`), as the app's composer sends it.
+    if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"));
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
@@ -446,6 +448,11 @@ export const FILE_METHODS: Record<string, Method> = {
         || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
       if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
       if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
+    }
+    // Paused by the contact: only their resume moves it. The engine takes these and does nothing, and it stays paused.
+    const view = state(ctx).transfers[fileId];
+    if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
+      throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };

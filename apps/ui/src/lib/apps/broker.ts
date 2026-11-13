@@ -106,7 +106,8 @@ interface BrokerOptions {
    * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
    * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
    * the box they type in, and name an app they cannot see. On Desktop the sheet is in the Ghostly window, so an app
-   * whose own window does not have the focus would pull that window over what the person is doing.
+   * whose own window does not have the focus would pull that window over what the person is doing. A `files.list` from
+   * one that is not answers the links without asking the person again about kept picks.
    */
   shown?: () => boolean | Promise<boolean>;
   /**
@@ -560,8 +561,10 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
       case "files.list": {
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
+        // Asking the person again about kept picks is a sheet, as a pick's: only for an app on screen.
+        const ask = await shown();
         // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
-        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes) as unknown as MiniAppJson };
+        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal, ask), listBytes) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();

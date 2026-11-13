@@ -242,7 +242,6 @@
     "newOne": "1 nuovo messaggio, scorri in fondo"
   },
   "keyChanged": "Questa chat si è fermata: la chiave del tuo contatto è cambiata.",
-  "lastSeen": "Ultimo accesso {{time}}",
   "listTime": {
     "days": "{{count}} g",
     "hours": "{{count}} h",
@@ -395,6 +394,7 @@
     "copyCode": "Copia codice",
     "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come {{marker}}. Copia codice copia anche quelli.",
     "localTime": "{{time}} nel tuo fuso orario",
+    "notCopied": "Non copiato",
     "showAll": "Mostra tutto",
     "showLess": "Mostra meno",
     "spoiler": "Testo nascosto. Tocca per mostrarlo",
@@ -484,7 +484,6 @@
     "showTranslation": "Mostra traduzione",
     "translate": "Traduci"
   },
-  "typeMessage": "Scrivi un messaggio...",
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",
   "typingThinking": "sta pensando…",

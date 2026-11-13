@@ -241,7 +241,6 @@
     "newOne": "新着メッセージ 1 件、最下部へ移動"
   },
   "keyChanged": "このチャットは停止しました。相手の鍵が変わりました。",
-  "lastSeen": "最終オンライン {{time}}",
   "listTime": {
     "days": "{{count}}日",
     "hours": "{{count}}時間",
@@ -394,6 +393,7 @@
     "copyCode": "コードをコピー",
     "hiddenChars": "このコードには、{{marker}} と表示される不可視の文字や文字の向きを変える文字が含まれています。「コードをコピー」ではそれらもコピーされます。",
     "localTime": "あなたの時刻で {{time}}",
+    "notCopied": "コピーされませんでした",
     "showAll": "すべて表示",
     "showLess": "折りたたむ",
     "spoiler": "非表示のテキスト。タップして表示",
@@ -483,7 +483,6 @@
     "showTranslation": "翻訳を表示",
     "translate": "翻訳する"
   },
-  "typeMessage": "メッセージを入力...",
   "typing": "入力中…",
   "typingRecording": "録音中…",
   "typingThinking": "考え中…",

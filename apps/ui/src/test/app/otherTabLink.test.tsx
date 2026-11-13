@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { OtherTab } from "../../components/OtherTab";
 import { translatorFor } from "../../locales";
-import { forwardLink, linkInAddress, takeLinks } from "../../lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../lib/otherTabLink";
 
 // covers: app.single-peer-per-browser
 
@@ -61,6 +61,17 @@ describe("a link handed to the tab that holds the profile", () => {
     stops.push(takeLinks("ghostly-peer", open));
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(open).not.toHaveBeenCalled();
+    expect(taken).not.toHaveBeenCalled();
+  });
+});
+
+describe("a link handed to a tab on standby", () => {
+  it("is refused at once, so the waiting tab drops it, and is never said to have opened", async () => {
+    stops.push(dropLinks("ghostly-peer"));
+    const taken = vi.fn();
+    const dropped = vi.fn();
+    stops.push(forwardLink("ghostly-peer", CODE, taken, 20, dropped));
+    await vi.waitFor(() => expect(dropped).toHaveBeenCalledTimes(1));
     expect(taken).not.toHaveBeenCalled();
   });
 });
