@@ -459,6 +459,23 @@ describe("a profile made for a code", () => {
     expect(sessionStorage.getItem(JOIN_REQUEST)).toBeNull();
   });
 
+  it("a screen reader hears the digits once, one by one, from a line there before they come", async () => {
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    renderApp(<JoinHost />);
+    await screen.findByTestId("device-join-connecting");
+    // A live region is read out when its text changes, not when it comes with the step: the line is there, empty, first.
+    const spoken = screen.getByTestId("device-join-spoken");
+    expect(spoken).toHaveAttribute("role", "status");
+    expect(spoken).toHaveTextContent(/^$/);
+    fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "confirm", digits: "482913" }));
+    await waitFor(() => expect(spoken).toHaveTextContent("Check that your other device shows the same digits. 4 8 2 9 1 3"), { timeout: 3_000 });
+    expect(screen.getByTestId("device-join-spoken")).toBe(spoken);
+    // Said once: no other live region holds them.
+    const regions = screen.getAllByRole("status").filter((region) => /4\s*8\s*2/.test(region.textContent ?? ""));
+    expect(regions).toEqual([spoken]);
+  });
+
   it("once added, opens the standby screen by itself, the lock handed over across that reload", async () => {
     const hash = await hashPassword("a long lock password");
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
