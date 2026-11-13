@@ -1091,24 +1091,30 @@ const SEQ_START = Buffer.from('{"seq":');
  */
 function journalAfter(path: string, since: number): string[] {
   const fd = openSync(path, "r");
+  const read = (from: number, to: number) => {
+    const bytes = Buffer.alloc(to - from);
+    let done = 0;
+    while (done < bytes.length) {
+      const n = readSync(fd, bytes, done, bytes.length - done, from + done);
+      if (!n) break;
+      done += n;
+    }
+    return bytes.subarray(0, done);
+  };
   try {
     const size = fstatSync(fd).size;
     // From one byte before the cut, as `journalWindow` reads: a line that begins exactly at it is kept whole.
     const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    // A cursor before the journal's first event (`listen --since 0`, `events`): all of it, with nothing to look for.
+    if (cut === 0 && (seqAt(read(0, Math.min(size, SEQ_PREFIX)), 0) ?? -1) > since) return journalTail(path).lines;
     // Where the earliest line checked begins in the file: it and every line after it are past `since`, or have no seq.
     let after = size, found = false, from = size, chunk = REPLAY_CHUNK;
     // What was read, the earliest first. Each chunk reads the start of the one after it too: a line that begins near
     // its end has its seq there.
     const chunks: Buffer[] = [];
     while (from > cut && !found) {
-      const next = Math.max(cut, from - chunk), bytes = Buffer.alloc(Math.min(size, from + SEQ_PREFIX) - next);
-      let done = 0;
-      while (done < bytes.length) {
-        const n = readSync(fd, bytes, done, bytes.length - done, next + done);
-        if (!n) break;
-        done += n;
-      }
-      chunks.unshift(bytes.subarray(0, Math.min(done, from - next)));
+      const next = Math.max(cut, from - chunk), bytes = read(next, Math.min(size, from + SEQ_PREFIX));
+      chunks.unshift(bytes.subarray(0, Math.min(bytes.length, from - next)));
       for (let newline = bytes.lastIndexOf(0x0a, from - next - 1); newline !== -1; newline = newline > 0 ? bytes.lastIndexOf(0x0a, newline - 1) : -1) {
         const seq = seqAt(bytes, newline + 1);
         if (seq !== undefined && seq <= since) { found = true; break; }
