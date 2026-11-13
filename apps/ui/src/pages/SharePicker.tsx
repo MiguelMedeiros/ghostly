@@ -159,7 +159,7 @@ export function SharePicker() {
           )}
 
           <button type="button" onClick={cancel} data-testid="share-cancel"
-            className="px-4 py-2 min-h-10 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
+            className="px-4 py-2 min-h-10 max-md:min-h-11 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
             {t("common.cancel")}
           </button>
         </>
