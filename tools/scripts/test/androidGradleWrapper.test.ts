@@ -38,3 +38,12 @@ it("downloads that version's distribution from Gradle, pinned by its checksum", 
   expect(distributionUrl).toBe(`https://services.gradle.org/distributions/gradle-${GRADLE}-bin.zip`);
   expect(distributionSha256Sum).toBe(DISTRIBUTION_SHA256);
 });
+
+it("waits out a slow services.gradle.org and tries again, instead of failing the build at its first 10 s", () => {
+  // The wrapper's defaults are a 10 s timeout and one attempt: a slow minute there failed CI's APK builds, merge train
+  // batches included. The wrapper reads these three from its properties (WrapperConfiguration).
+  const { networkTimeout, retries, retryBackOffMs } = properties();
+  expect(Number(networkTimeout)).toBeGreaterThanOrEqual(60_000);
+  expect(Number(retries)).toBeGreaterThanOrEqual(3);
+  expect(Number(retryBackOffMs)).toBeGreaterThanOrEqual(5_000);
+});
