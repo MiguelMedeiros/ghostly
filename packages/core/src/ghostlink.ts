@@ -4210,7 +4210,8 @@ export class GhostLink {
     if (this.options.params.profile) throw new Error("This experimental paired profile supports chat only.");
   }
 
-  private cancelCandidate(): void {
+  /** `closeRtc`: a WebRTC attempt under way beside a native session is this change's, and ends with it. */
+  private cancelCandidate(closeRtc = true): void {
     this.candidateEpoch++;
     const candidate = this.candidate;
     this.candidate = null;
@@ -4219,7 +4220,7 @@ export class GhostLink {
     candidate?.channel.close();
     this.rtcCandidateWaiter?.reject(new Error("Transport change cancelled"));
     this.rtcCandidateWaiter = null;
-    if (this.activeBinding) this.dataLink.close();
+    if (this.activeBinding && closeRtc) this.dataLink.close();
   }
 
   private async prepareSwitch(plan: SwitchPlan): Promise<void> {
@@ -5260,7 +5261,10 @@ export class GhostLink {
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
     // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one. Its
     // target goes too, or the chat's native listeners are held (`canReleaseEndpoint`) until the contact is back.
-    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
+    // With no change under way, a WebRTC attempt beside the native session is the contact's offer answered over the
+    // session it held (`rtcOverHeld`), back after a crash: it carries the chat once open. Closed with the dead session,
+    // the contact's app waited out its offer's 90 s.
+    if (!this.candidate) { this.cancelCandidate(!!this.switcher.pending || !!this.rtcCandidateWaiter); this.switcher.stop(); this.transitionTarget = this.transitionError = undefined; }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;
