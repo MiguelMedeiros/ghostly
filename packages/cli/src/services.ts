@@ -144,6 +144,9 @@ export function withoutReports(value: string): string {
 /** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
 export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
 
+/** `service open` or `service close` in a one-shot: only the daemon keeps a contact's app open on a port. */
+export const SERVICE_NEEDS_DAEMON = "An opened service lives in the daemon: start `ghostly daemon --detach` first";
+
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(text);
@@ -322,7 +325,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
-    if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
     // (a STUN server the contact names would see this machine's address), so none opens while it is on.
     if (settingsOf(ctx).relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
@@ -351,6 +354,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { chat: link.id, service, url: opened.url };
   },
   async "service.close"(ctx, params) {
+    // A one-shot has none open: it said "not open here" of one the daemon has.
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     const link = chatOf(ctx, params);
     const key = `${link.peerPubKeyZ32}/${str(params, "service", true)}`;
     const pending = open.get(key);
