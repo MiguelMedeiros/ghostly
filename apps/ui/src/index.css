@@ -1224,11 +1224,12 @@ html .toast-place.toast-place-page[data-at="top"] {
 /* Forced colors (Windows Contrast themes) replace a bubble's background with the page's, and it was all that drew the
    bubble: the wallpaper's pattern ran under the words, and the tail (an SVG fill, kept in the theme's colour) hung on
    its own. There the wallpaper is plain, the tail is not drawn and the bubble has an edge in the theme's text colour,
-   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. */
+   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. Settings'
+   Text size preview draws its messages the same way (`data-preview-bubble`). */
 @media (forced-colors: active) {
   .chat-wallpaper, [data-theme] .chat-wallpaper { background-image: none; }
   .bubble-tail { display: none; }
-  [data-message-bubble]:not([class~="outline-2"]) { outline: 1px solid CanvasText; outline-offset: -1px; }
+  [data-message-bubble]:not([class~="outline-2"]), [data-preview-bubble] { outline: 1px solid CanvasText; outline-offset: -1px; }
 }
 
 /*

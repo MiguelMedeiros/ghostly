@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -42,6 +45,18 @@ describe("Settings → Text size", () => {
     expect(stored()).toBe("small");
     expect(scale()).toBe("0.9");
     page.unmount();
+  });
+
+  it("in forced colors, its messages have the edge the chat's bubbles have", () => {
+    // Forced colors drop the bubbles' backgrounds; index.css gives a message bubble an outline in the theme's text colour.
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const forced = css.slice(css.indexOf("@media (forced-colors: active)"));
+    const edge = [...forced.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, , body]) => /outline:\s*1px solid CanvasText/.test(body));
+    expect(edge, "the bubbles' forced-colors outline").toBeDefined();
+    settingsPage();
+    const bubbles = screen.getByTestId("settings-text-size-preview").querySelectorAll("p");
+    expect(bubbles).toHaveLength(2);
+    for (const bubble of bubbles) expect(bubble.matches(edge![1].trim()), bubble.textContent!).toBe(true);
   });
 
   it("is applied as the app starts, from what was stored", () => {
