@@ -3054,6 +3054,9 @@ export class GhostlyNode implements EngineImplementation {
   appDataExport(params: { ref: string }): Promise<AppDataExport[]> { return this.appStore.exportData(params); }
   appDataExportText(params: { ref: string }): Promise<AppDataExportText[]> { return this.appStore.exportDataText(params); }
 
+  /** The settings `getState` gives, without the view of every chat it builds (a host reading one setting). */
+  getSettings(): Settings { return this.settings; }
+
   getState(): EngineState {
     const groups = this.groups.views();
     const edges = this.edgesByMember();
