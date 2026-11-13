@@ -342,8 +342,8 @@ export interface AppsHost {
    */
   readBuiltIn?(app: BuiltInApp): Promise<Uint8Array>;
   /**
-   * After every update check (the scheduled one included), and once an app's damaged files were dropped (it needs its
-   * files now): the pages read the installed apps again.
+   * After every update check (the scheduled one included), once an app's damaged files were dropped (it needs its
+   * files now), and once its missing files were fetched back: the pages read the installed apps again.
    */
   checked?(results: AppCheckResult[]): void;
 }
@@ -2118,15 +2118,7 @@ export class Apps {
     const carried = this.builtIn(app.ref);
     if (carried && carried.digest === app.digest) {
       const held = await this.bundled(carried).catch(() => null);
-      if (held) {
-        const kind = await this.writeBundle(app.digest, held.bytes);
-        const now = await this.app(app.ref);
-        if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
-          await this.removeBundle(kind, app.digest);
-          fail("not-installed", "This app is not installed");
-        }
-        return this.runCheckOf({ ...now, bytes: kind }, stores);
-      }
+      if (held) return this.filesBack(app, held.bytes, stores);
     }
     // An app installed from a store asks only that store's listing (and the URL it came from), never its sources.
     const urls = [app.from];
@@ -2142,16 +2134,24 @@ export class Apps {
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;
-      const kind = await this.writeBundle(app.digest, fetched.bytes);
-      // Uninstalled meanwhile: its files go again.
-      const now = await this.app(app.ref);
-      if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
-        await this.removeBundle(kind, app.digest);
-        fail("not-installed", "This app is not installed");
-      }
-      return this.runCheckOf({ ...now, bytes: kind }, stores);
+      return this.filesBack(app, fetched.bytes, stores);
     }
     return { status: "needs-files" };
+  }
+
+  /** The installed version's files, fetched again, written back. */
+  private async filesBack(app: InstalledApp, bytes: Uint8Array, stores: AddedAppStore[]): Promise<AppRunStatus> {
+    const kind = await this.writeBundle(app.digest, bytes);
+    // Uninstalled meanwhile: its files go again.
+    const now = await this.app(app.ref);
+    if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
+      await this.removeBundle(kind, app.digest);
+      fail("not-installed", "This app is not installed");
+    }
+    // Every page reads the list again, as when Open drops them: an Open from a chat's card (or another tab) fetched
+    // them, and every card and row still said they were missing, its icon unread, until the next update check.
+    try { this.host.checked?.([]); } catch { /* a page's listener */ }
+    return this.runCheckOf({ ...now, bytes: kind }, stores);
   }
 
   // ---------- running ----------
