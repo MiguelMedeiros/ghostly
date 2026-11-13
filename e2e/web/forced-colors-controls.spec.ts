@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { pasteInvite } from "../support/clipboard";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 import { pair } from "../support/paired";
 
@@ -399,6 +399,78 @@ test("forced colors keep the connection panel's Fallback switch drawn, on and of
   await expect(ring).toHaveCount(1);
   const dot = await drawn(ring.locator("span"));
   expect.soft(dot.bg, "the chosen transport's dot against its ring").not.toBe(dot.around);
+});
+
+/**
+ * A private group's reach dots (the members panel, the header's connection button, its panel's rows) were drawn by
+ * their fill alone and took the page's colour: reachable and not reachable looked the same. In forced colors a member
+ * reached is a filled dot, one who is not a ring, and the header's dot a thicker ring while only some are reached.
+ */
+test("forced colors keep a group's reach dots drawn, a member reached unlike one who is not", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.connection"] }, async ({ peer }) => {
+  test.setTimeout(6 * 60_000);
+  const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
+  for (const [p, name] of [[alice, "Alice"], [bob, "Bob"], [carol, "Carol"]] as const) {
+    await openProfilePage(p.page);
+    await p.page.getByTestId("account-nickname").fill(name);
+    await expect(p.page.getByTestId("account-nickname")).toHaveValue(name);
+    await p.page.goBack();
+  }
+  const { page } = alice;
+  await page.getByTestId("sidebar-new-more").click();
+  await page.getByTestId("new-group").click();
+  await page.getByTestId("new-group-name").fill("Mesh");
+  await page.getByTestId("new-group-kind-mesh").click();
+  await page.getByTestId("new-group-create").click();
+  const url = await page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
+  await page.getByTestId("group-share-done").click();
+  for (const p of [bob, carol]) {
+    await p.page.goto(url);
+    await expect(p.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 120_000 });
+  }
+  const trigger = page.getByTestId("group-connection-options");
+  await expect(trigger).toHaveAttribute("data-state", "connected", { timeout: 120_000 });
+  // Carol's app closes: Bob reached, Carol not, and the header's dot says only some are.
+  await carol.page.close();
+  await expect(trigger).toHaveAttribute("data-state", "partial", { timeout: 120_000 });
+  await still(page);
+
+  // Normal colours: the dots are what they were, with no border.
+  const headerDot = page.getByTestId("group-connection-dot");
+  const normalBox = await headerDot.boundingBox();
+  expect((await drawn(headerDot)).border, "the header's dot in normal colours").toBe(0);
+
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  expect(await headerDot.boundingBox(), "the header's dot does not move in forced colors").toEqual(normalBox);
+  const header = await drawn(headerDot);
+  expect.soft(header.border, `the header's dot (some reached) is a ring ${JSON.stringify(header)}`).toBeGreaterThanOrEqual(2);
+  expect.soft(header.borderColor, "the header's ring against the header").not.toBe(header.around);
+
+  /** A reached dot is filled against what it sits on; one not reached is a ring that shows there, and unlike it. */
+  const differ = (name: string, reached: Awaited<ReturnType<typeof drawn>>, not: Awaited<ReturnType<typeof drawn>>) => {
+    expect.soft(reached.bg, `${name}: the reached dot ${JSON.stringify(reached)} against what it sits on`).not.toBe(reached.around);
+    expect.soft(not.border, `${name}: the dot not reached is a ring ${JSON.stringify(not)}`).toBeGreaterThanOrEqual(1);
+    expect.soft(not.borderColor, `${name}: its ring against what it sits on`).not.toBe(not.around);
+    expect.soft(not.bg, `${name}: reached and not reached look alike`).not.toBe(reached.bg);
+  };
+
+  // The connection panel's rows.
+  await trigger.click();
+  const panelDot = (name: string) => page.getByTestId("group-connection-member").filter({ hasText: name }).locator(".rounded-full").first();
+  await expect(page.getByTestId("group-connection-member").filter({ hasText: "Carol" })).not.toHaveAttribute("data-state", "open");
+  differ("the connection panel", await drawn(panelDot("Bob")), await drawn(panelDot("Carol")));
+  await page.screenshot({ path: test.info().outputPath("forced-group-connection.png") });
+  await page.keyboard.press("Escape");
+
+  // The members panel: my own row and Bob's filled, Carol's a ring.
+  await page.getByTestId("group-members").click();
+  const memberDot = (name: string) => page.getByTestId("group-member").filter({ hasText: name }).getByRole("img").first();
+  await expect(memberDot("Carol")).toHaveAttribute("aria-label", "not reachable");
+  await expect(memberDot("Bob")).toHaveAttribute("aria-label", "reachable");
+  differ("the members panel", await drawn(memberDot("Bob")), await drawn(memberDot("Carol")));
+  // The rows come in the members' order, not mine first: my own is the one named "You".
+  const mine = await drawn(page.getByTestId("group-member").filter({ has: page.getByText("You", { exact: true }) }).getByRole("img").first());
+  expect.soft(mine.bg, "my own row's dot").not.toBe(mine.around);
+  await page.screenshot({ path: test.info().outputPath("forced-group-members.png") });
 });
 
 /**
