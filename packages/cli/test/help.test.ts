@@ -296,6 +296,9 @@ describe("help", () => {
     expect(first.code).toBe(0);
     expect(first.stdout).toMatch(/^First steps:\n {2}\$ ghostly invite create/m);
     expect(first.stdout).toContain("$ ghostly daemon --detach");
+    // The join pipes the invite in: `invite join -` typed at a terminal is refused, the secret kept off a TTY.
+    expect(first.stdout).toContain(`$ printf '%s' "$INVITE" | ghostly invite join `);
+    expect(first.stdout).not.toContain("invite join -");
     expect(first.stdout).toContain("Usage: ghostly <command>");
     expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
     expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);
