@@ -498,8 +498,9 @@ Its `AGENTS.md` is the guide for an AI agent that sets it up.
 with no framing:
 
 - First, the call's token: `audio.token` (64 hex digits, new for every call, in the same answers and events as the
-  socket) and a line feed. Required on Windows: until a connection sends it, it gets no audio and replaces no program,
-  and a wrong one is closed. On Linux and macOS a program that does not send it still works.
+  socket) and a line feed. Required on Windows and in a shared folder (below): until a connection sends it, it gets
+  no audio and replaces no program, and a wrong one is closed. Otherwise on Linux and macOS a program that does not
+  send it still works.
 - s16le, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 with `--rate`. Opus runs at that
   rate itself, so nothing is resampled.
 - From the call: the contact's audio in 20 ms frames (1920 bytes at 48 kHz, 640 at 16 kHz), as they are decoded.
@@ -518,6 +519,13 @@ with no framing:
   removed.
 - Added latency inside the CLI: at most one 20 ms frame going out; coming in, a frame as soon as its packet is
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
+
+**A shared folder.** For a voice program that runs as another user (a Ghostly OS node's assistant), start the daemon
+with `GHOSTLY_CALL_SOCKET_DIR=<folder>`: each call's socket is then `<folder>/<call>.sock`, 0660, and the program
+must send the token first. Make the folder before the daemon starts, the daemon's user's, with the program user's
+group, `chmod 2750` (setgid, so the sockets take that group); the daemon refuses to start when the folder is missing,
+a link, another user's, writable by anyone else or open to anyone outside its group. An absolute path of at most 82
+bytes, one profile's daemon per folder (a starting daemon removes the sockets there); not on Windows.
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
 `call.connected` `{call, chat, direction, audio: {socket, token, rate, channels, format, frameMs}}`, `call.stalled`

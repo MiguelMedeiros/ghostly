@@ -5,7 +5,7 @@ import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
-import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue } from "./audioSocket";
+import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 
@@ -30,6 +30,8 @@ export interface CallHost {
   engine: CallEngine;
   emit(type: string, id: string, fields: Record<string, unknown>): void;
   profileDir: string;
+  /** GHOSTLY_CALL_SOCKET_DIR (`callSocketDir`): the folder for the calls' sockets, shared with another user's group. */
+  socketDir?: string;
   /** Whether this host answers and places calls: a daemon does; a one-shot command leaves, so it only reports. */
   answers?: boolean;
   /** The media stack (tests give their own). */
@@ -176,7 +178,9 @@ export class CallManager {
     this.configPath = join(host.profileDir, "calls.json");
     this.auto = readAuto(this.configPath);
     // A daemon starts with no call: a socket left in its folder is one a daemon that crashed during a call never closed.
-    if (host.answers !== false) clearAudioSockets(host.profileDir);
+    // A shared folder is checked at the start too: a daemon refuses it then, not at its first call.
+    if (host.answers !== false && host.socketDir) sharedFolder(host.socketDir);
+    if (host.answers !== false) clearAudioSockets(host.profileDir, host.socketDir);
   }
 
   private get now(): number { return (this.host.now ?? Date.now)(); }
@@ -584,7 +588,7 @@ export class CallManager {
    */
   private async attach(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<void> {
     const queue = (call.queue = new PlaybackQueue(call.rate));
-    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, feedQueue(queue));
+    const socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id, this.host.socketDir), call.rate, feedQueue(queue), { shared: !!this.host.socketDir });
     if (call.ended) { await socket.close(); return; }
     call.socket = socket;
     await this.connect(call, create);

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createSocket } from "node:dgram";
 import { connect, Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BURST_RING_MS, buildSdpFromSignal, heardCallSignal, parseCallSignal, QUICK_REDIAL_MS } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
-import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
+import { AudioSocket, audioSocketPath, callSocketDir } from "../src/calls/audioSocket";
 import { CALL_PACE_MS, CallManager, MAX_EARLY_ANSWERS, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
 import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
@@ -354,6 +354,83 @@ describe("the audio socket", () => {
       expect(existsSync(join(left, "..", "notes.txt"))).toBe(true);
       rmSync(join(left, ".."), { recursive: true, force: true });
     }
+  });
+
+  it("GHOSTLY_CALL_SOCKET_DIR: an absolute folder of at most 82 bytes, unset by default", () => {
+    expect(callSocketDir(undefined)).toBeUndefined();
+    expect(callSocketDir("/run/ghostly/calls/")).toBe("/run/ghostly/calls");
+    expect(() => callSocketDir("")).toThrow(/absolute path/);
+    expect(() => callSocketDir("run/calls")).toThrow(/absolute path/);
+    expect(() => callSocketDir(`/${"x".repeat(82)}`)).toThrow(/too long/);
+    expect(callSocketDir(`/${"x".repeat(81)}`)).toBe(`/${"x".repeat(81)}`);
+    expect(audioSocketPath("/home/bot/.ghostly/profiles/p", "abc", "/run/ghostly/calls")).toBe("/run/ghostly/calls/abc.sock");
+  });
+
+  it("in a shared folder: 0660 for the folder's group, and only a program with the call's token hears it", async () => {
+    const shared = join(tmp(), "calls");
+    mkdirSync(shared, { mode: 0o750 });
+    chmodSync(shared, 0o750);
+    const path = audioSocketPath(tmp(), "abc", shared);
+    const got: Buffer[] = [];
+    const socket = await AudioSocket.open(path, 16000, { onAudio: (c) => got.push(c) }, { shared: true, proveMs: 300 });
+    expect(path).toBe(join(shared, "abc.sock"));
+    expect(statSync(path).mode & 0o777).toBe(0o660);
+    // The folder is the machine's: kept as it was made.
+    expect(statSync(shared).mode & 0o777).toBe(0o750);
+    // Another user of the group that sends no token: no audio, and it is closed.
+    const reader = await program(path);
+    reader.socket.write(Buffer.from([1, 2]));
+    socket.write(Buffer.alloc(640, 7));
+    await reader.ended;
+    expect(reader.heard().length).toBe(0);
+    expect(got).toEqual([]);
+    const assistant = await program(path);
+    assistant.socket.write(Buffer.concat([Buffer.from(`${socket.token}\n`), Buffer.from([3])]));
+    await until(() => Buffer.concat(got).length === 1);
+    await socket.close();
+    await assistant.ended;
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("refuses a shared folder that is missing, a link, or one others may write or anyone outside its group enter", async () => {
+    const base = tmp();
+    const shared = join(base, "calls");
+    const open = () => AudioSocket.open(join(shared, "abc.sock"), 16000, { onAudio: () => {} }, { shared: true });
+    await expect(open()).rejects.toThrow(/is not there/);
+    mkdirSync(shared);
+    for (const mode of [0o770, 0o755, 0o751, 0o752]) {
+      chmodSync(shared, mode);
+      await expect(open()).rejects.toThrow(/chmod 2750/);
+    }
+    // Never made into another mode by the CLI: the machine chose it.
+    expect(statSync(shared).mode & 0o777).toBe(0o752);
+    rmSync(shared, { recursive: true });
+    const real = join(base, "real");
+    mkdirSync(real, { mode: 0o750 });
+    symlinkSync(real, shared);
+    await expect(open()).rejects.toThrow(/not a folder of this user's/);
+  });
+
+  it("a daemon's manager with a shared folder refuses a wrong one at the start, clears it, and puts its calls' sockets there", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: null } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const profileDir = tmp(), socketDir = join(tmp(), "calls");
+    mkdirSync(socketDir, { mode: 0o770 });
+    chmodSync(socketDir, 0o770);
+    expect(() => new CallManager({ engine, emit: () => {}, profileDir, socketDir, answers: true })).toThrow(/chmod 2750/);
+    // A one-shot opens no socket: it does not look.
+    new CallManager({ engine, emit: () => {}, profileDir, socketDir, answers: false });
+    chmodSync(socketDir, 0o750);
+    const left = join(socketDir, "0123456789ab.sock");
+    writeFileSync(left, "");
+    const calls = new CallManager({ engine, emit: () => {}, profileDir, socketDir, answers: true });
+    expect(existsSync(left)).toBe(false);
+    const started = await calls.start("bia", {}) as { audio: { socket: string } };
+    expect(started.audio.socket).toMatch(new RegExp(`^${socketDir}/[0-9a-f]{12}\\.sock$`));
+    expect(statSync(started.audio.socket).mode & 0o777).toBe(0o660);
+    expect(existsSync(join(profileDir, "calls"))).toBe(false);
+    await calls.stopAll();
+    expect(existsSync(started.audio.socket)).toBe(false);
   });
 });
 
