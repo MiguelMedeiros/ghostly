@@ -195,8 +195,13 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")
       : profile ? t(titles.named, { profile }) : t(titles.yours);
+  // The digits to check are plain lines: a screen reader hears them, one by one, from a line that is there from the
+  // dialog's start and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role === "joiner" && view.step === "confirm"
+    ? <>{t("devices.join.check")} <span dir="ltr">{view.digits.split("").join(" ")}</span></> : "";
   return (
     <DeviceDialog title={title} onClose={close} testId="device-join">
+      <p role="status" className="sr-only" data-testid="device-join-spoken">{spoken}</p>
       {step === "choose" && <>
         {tab ? <HomeScreenSteps code={false} />
           : <button type="button" data-testid="device-join-add" onClick={() => { fromChoose.current = true; setStep("scan"); }} className={primaryButton}>{t("devices.join.addThis")}</button>}
