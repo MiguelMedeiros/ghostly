@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { openServiceView } from "../../../../web/src/svc/opener";
@@ -25,13 +25,18 @@ it("Escape on a contact's app closes the app alone, not the Shared services dial
   const onClose = vi.fn();
   renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={onClose} />);
   expect(screen.getByTestId("chat-services")).toBeInTheDocument();
+  // The dialog's own history entry is there before the person can tap Open in it.
+  await waitFor(() => expect(typeof (history.state as Record<string, unknown> | null)?.ghostlyLayer).toBe("number"));
   await openServiceView({ host: parseServicesHost("https://*.svc.ghostly.example")!, tag: "ybndrfg8ejkmcpqx", peer: "o".repeat(52), service: "demo", title: "Demo", send: () => new Promise(() => {}), words });
   const close = screen.getByTestId("service-view-close");
   expect(document.activeElement).toBe(close);
 
   fireEvent.keyDown(close, { key: "Escape" });
   expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+  // Nor once the view's history entry is left, back on the dialog's.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
   expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByTestId("chat-services")).toBeInTheDocument();
 
   // The next Escape is the dialog's.
   fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
