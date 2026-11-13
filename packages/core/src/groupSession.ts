@@ -42,6 +42,12 @@ export const GROUP_LIMITS = {
   /** Own messages kept for catch-up: count and total ciphertext bytes. */
   outlog: 32,
   outlogBytes: 128 * 1024,
+  /**
+   * Own messages past that log that members may not have taken (`GroupState.owed`): count and total ciphertext bytes.
+   * With the log, the 256 a member takes in one answer.
+   */
+  owed: 224,
+  owedBytes: 512 * 1024,
   /** Frames waiting for an epoch (or its secret) that has not arrived yet. */
   waiting: 64,
   waitingBytes: 1024 * 1024,
@@ -199,6 +205,12 @@ export interface GroupState {
   /** My own frames, newest last, for members who missed them. */
   sent: GroupMessageFrame[];
   /**
+   * My own frames that fell out of `sent` though members may not have taken them (said past the pace they apply,
+   * `AuthorPace`), oldest first, until a sync of each other member of their epoch shows it holds them. At most
+   * `GROUP_LIMITS.owed` and `owedBytes`. Absent in states from before they were kept.
+   */
+  owed?: GroupMessageFrame[];
+  /**
    * Other members' frames, in the order they arrived, for members who missed them. Absent in states from before revision
    * 0.9. With an app that keeps each frame with its message (`GroupSession`'s `onRows`), only the ones from before it
    * did, until newer ones take their place.
@@ -331,6 +343,7 @@ const UNNAMED_KEPT_MS = 60_000;
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
  * One not taken is neither seen nor kept nor passed on, so a sync still names it (`miss`) and a catch-up hands it again.
+ * Every member refuses the same live frames, so only the author holds them: past its log, it keeps them (`owed`).
  * What another member hands on in its answer to my sync (or what waited for a secret) is counted too, and may run the
  * author's allowance below nothing by one answer's worth (`AUTHOR_OWED`): a catch-up holds more than a burst, and lands
  * at once; the author's next frames wait until the pace pays it back. Not counted, a member at the other end of my sync
@@ -342,21 +355,35 @@ const AUTHOR_OWED = {
   messages: { frames: GROUP_LIMITS.relay, bytes: GROUP_LIMITS.relayBytes },
   edits: { frames: GROUP_LIMITS.handOnEdits, bytes: GROUP_LIMITS.relayEditBytes },
 } as const;
+/**
+ * The pace my own frames go at, as members count it, with half their burst and the room left spent on a frame it does
+ * not take (one a member may take still): an edge opening hands my log again, and frames arrive closer together than I
+ * said them, so a frame members refuse is never one this takes.
+ */
+const OWN_BURST = { frames: GROUP_LIMITS.outlog, bytes: GROUP_LIMITS.outlogBytes };
 class AuthorPace {
-  private frames: number = AUTHOR_BURST.frames;
-  private bytes: number = AUTHOR_BURST.bytes;
+  private frames: number;
+  private bytes: number;
   private at: number | undefined;
 
-  constructor(private readonly owed: { frames: number; bytes: number }) {}
+  constructor(private readonly owed: { frames: number; bytes: number }, private readonly burst = AUTHOR_BURST) {
+    this.frames = burst.frames; this.bytes = burst.bytes;
+  }
 
-  /** `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`). */
-  take(bytes: number, now: number, answer = false): boolean {
+  /**
+   * `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`).
+   * `spend`: one not taken still spends what is left of the allowance.
+   */
+  take(bytes: number, now: number, answer = false, spend = false): boolean {
     const elapsed = Math.max(0, now - (this.at ?? now)) / GROUP_LIMITS.messageWindowMs;
     this.at = now;
-    this.frames = Math.min(AUTHOR_BURST.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
-    this.bytes = Math.min(AUTHOR_BURST.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
+    this.frames = Math.min(this.burst.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
+    this.bytes = Math.min(this.burst.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
     const floor = answer ? this.owed : { frames: 0, bytes: 0 };
-    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) return false;
+    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) {
+      if (spend) { this.frames = Math.max(0, this.frames - 1); this.bytes = Math.max(0, this.bytes - bytes); }
+      return false;
+    }
     this.frames -= 1; this.bytes -= bytes;
     return true;
   }
@@ -489,6 +516,22 @@ function missingIn(frame: GroupSyncFrame, from: string): (f: GroupMessageFrame) 
 }
 
 /**
+ * Whether a member's sync shows it holds my frame `f`: it has seen up to it, and does not name it missing among all its
+ * gaps, or among the newest it names when they are more than a sync holds (`GROUP_LIMITS.miss`).
+ */
+function heldIn(frame: GroupSyncFrame): (f: GroupMessageFrame) => boolean {
+  const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+  const miss = frame.miss && typeof frame.miss === "object" ? frame.miss as Record<string, Record<string, unknown>> : {};
+  return f => {
+    const high = have[f.s]?.[f.e];
+    if (!Number.isSafeInteger(high) || (high as number) < f.n) return false;
+    const gaps = miss[f.s]?.[f.e];
+    if (!Array.isArray(gaps)) return true;
+    return !gaps.includes(f.n) && (gaps.length < GROUP_LIMITS.miss || gaps.some(n => typeof n === "number" && n < f.n));
+  };
+}
+
+/**
  * My own messages and the ones I kept of other members, as one list for a member catching up: each log keeps its own
  * order (mine as I sent them, the others' as they reached me, which no member's clock can change), and the two are
  * merged by the time each frame says, mine first when they say the same. A member whose clock is off moves only
@@ -581,6 +624,14 @@ export class GroupSession {
   private namesTaken = new Map<string, RateWindow>();
   /** Messages, and apart from them edits, taken per author (`AuthorPace`). In memory only. */
   private messagePace = new Map<string, AuthorPace>();
+  /**
+   * My own frames as members pace them (`OWN_BURST`), and those of mine in `sent` it did not take: one of them that falls
+   * out of `sent` goes to `owed`. Then, per frame of `owed`, the members whose sync showed they hold it. In memory only:
+   * after a start, each owed frame waits for a sync of every member.
+   */
+  private ownPace = new AuthorPace({ frames: 0, bytes: 0 }, OWN_BURST);
+  private overPace = new Set<string>();
+  private owedHeld = new Map<string, Set<string>>();
   private editPace = new Map<string, AuthorPace>();
   private queue = Promise.resolve();
   /** Metadata frames that name a commit or an epoch I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain moves. */
@@ -1176,6 +1227,7 @@ export class GroupSession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.sent = [];
+    delete this.state.owed;
     delete this.state.unsaid;
     this.state.relay = [];
     if (this.onRows) this.onRows = [];
@@ -1229,6 +1281,7 @@ export class GroupSession {
       this.state.unsaid = [...(this.state.unsaid ?? []), ownKey(frame)];
       const unsend = async (free: boolean) => {
         this.state.sent = this.state.sent.filter(f => f !== frame);
+        this.overPace.delete(ownKey(frame));
         this.state.unsaid = (this.state.unsaid ?? []).filter(key => key !== ownKey(frame));
         if (free && this.state.seqEpoch === epoch && this.state.seq === n + 1) this.state.seq = n;
         await this.persist().catch(() => {});
@@ -1328,11 +1381,45 @@ export class GroupSession {
       ...(nk ? { nk, ns: toBase64Url(sign(nickSigned(header, nk), this.identity.seed)) } : {}) };
   }
 
-  /** Into my bounded log, for members who missed it. */
+  /** Into my bounded log, for members who missed it; one said past the pace members apply goes on to `owed` when it falls out. */
   private logOwn(frame: GroupMessageFrame): void {
+    if (!this.ownPace.take(frameBytes(frame), this.now(), false, true)) this.overPace.add(ownKey(frame));
     this.state.sent.push(frame);
     let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
-    while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+    while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) {
+      const out = this.state.sent.shift()!;
+      bytes -= out.c.length;
+      if (this.overPace.delete(ownKey(out))) this.owe(out);
+    }
+  }
+
+  private owe(frame: GroupMessageFrame): void {
+    const owed = [...this.state.owed ?? [], frame];
+    let bytes = owed.reduce((sum, f) => sum + f.c.length, 0);
+    while (owed.length > GROUP_LIMITS.owed || bytes > GROUP_LIMITS.owedBytes) {
+      const gone = owed.shift()!;
+      bytes -= gone.c.length;
+      this.owedHeld.delete(ownKey(gone));
+    }
+    this.state.owed = owed;
+  }
+
+  /** Drops from `owed` each frame every other member of its epoch has shown, in a sync, that it holds. */
+  private owedTaken(from: string, frame: GroupSyncFrame): void {
+    if (!this.state.owed?.length) return;
+    const holds = heldIn(frame);
+    const owed = this.state.owed.filter(f => {
+      const key = ownKey(f);
+      let held = this.owedHeld.get(key);
+      if (holds(f)) { if (!held) this.owedHeld.set(key, held = new Set()); held.add(from); }
+      const readers = this.state.chain[f.e]?.m;
+      const waits = !!readers && this.others.some(k => rosterHas(readers, k) && !held?.has(k));
+      if (!waits) this.owedHeld.delete(key);
+      return waits;
+    });
+    if (owed.length === this.state.owed.length) return;
+    this.state.owed = owed;
+    this.persistSoon();
   }
 
   /**
@@ -2186,6 +2273,7 @@ export class GroupSession {
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
     this.hear(frame);
+    this.owedTaken(from, frame);
     if (frame.e > this.epoch) {
       this.syncedEpoch.set(from, frame.e);
       if (!this.awaitsAnswer(from)) this.ask(from);
@@ -2269,13 +2357,13 @@ export class GroupSession {
    */
   private handOut(to: string, frames: GroupEdgeFrame[]): void { this.answers.handOut(to, frames); }
 
-  /** My own messages a member's sync says it lacks, from my bounded log, for the epochs it was a member of. */
+  /** My own messages a member's sync says it lacks, from my bounded log (and `owed`), for the epochs it was a member of. */
   private handOwn(to: string, frame: GroupSyncFrame): void {
     for (const sent of this.ownLacked(to, frame)) this.hooks.send(to, sent);
   }
   private ownLacked(to: string, frame: GroupSyncFrame): GroupMessageFrame[] {
     const lacks = missingIn(frame, to);
-    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
+    return [...this.state.owed ?? [], ...this.state.sent].filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
   /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
   private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
