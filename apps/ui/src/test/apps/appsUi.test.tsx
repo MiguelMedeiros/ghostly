@@ -371,6 +371,58 @@ describe("with the apps flag on", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("while a waiting Update runs, Open, Keep it stopped and Run anyway do not leave the screen, and a failed update shows why", async () => {
+    const removedRun = { status: "removed" as const, by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] };
+    for (const run of [undefined, removedRun]) {
+      let fail: (e: Error) => void = () => {};
+      fakeEngine.on("appList", () => []).on("appUpdateAccept", () => new Promise<InstalledAppView>((_, reject) => { fail = reject; }));
+      const onClose = vi.fn(), onOpen = vi.fn();
+      const { user, unmount } = renderApp(<InstalledAppDialog onClose={onClose} onOpen={onOpen}
+        app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] }, ...(run && { run }) })} />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      const leaving = run ? ["app-run-anyway", "app-keep-stopped"] : ["app-open"];
+      for (const id of leaving) await user.click(screen.getByTestId(id));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+      for (const id of [...leaving, "app-uninstall-open"]) expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId("app-details")).toBeInTheDocument();
+      await act(async () => fail(new Error("The host answered 503")));
+      expect(await screen.findByTestId("app-details-error")).toBeInTheDocument();
+      // Once the update is over, they work again.
+      await user.click(screen.getByTestId(leaving[0]!));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it("an Update refused as unlisted or for its gone files says it of the update, never of a link or of the app's files; the dropped update's Update goes", async () => {
+    const said = [
+      ["unlisted: The store no longer lists this update", "This store no longer lists this update."],
+      ["needs-files: The update's files are gone; it is fetched again at the next check", "The update's files are gone."],
+      // Installed or dropped meanwhile: said of the update, not "Ghostly won't install it" with the engine's English.
+      ["no-update: This update can no longer be installed", "This update no longer waits."],
+    ] as const;
+    function Shown() {
+      const shown = useInstalledApps(true)?.find((a) => a.ref === REF);
+      return shown ? <InstalledAppDialog app={shown} onClose={() => {}} onOpen={() => {}} /> : null;
+    }
+    for (const [refusal, words] of said) {
+      forgetInstalledApps();
+      // As the engine does: the refused update no longer waits.
+      let list = [installed({ pending: { sequence: 8, version: "1.3.0", added: ["name"] } })];
+      fakeEngine.on("appList", () => list).on("appUpdateAccept", () => { list = [installed()]; throw new Error(refusal); });
+      const { user, unmount } = renderApp(<Shown />);
+      await user.click(await screen.findByTestId("app-update-accept"));
+      const error = await screen.findByTestId("app-details-error");
+      expect(error).toHaveTextContent(words);
+      expect(error).not.toHaveTextContent(/link|not on this device yet|won't install/);
+      expect(within(error).queryByRole("button")).toBeNull();
+      await waitFor(() => expect(screen.queryByTestId("app-update")).not.toBeInTheDocument());
+      expect(screen.getByTestId("app-open")).toBeEnabled();
+      unmount();
+    }
+  });
+
   it("while Add store runs, the store's Cancel, Escape and the backdrop do not close Add: no Cancel the store is added after all", async () => {
     const LINK = "https://raw.githubusercontent.com/ana/store/HEAD/ghostly-store.json";
     let finish: () => void = () => {};
@@ -581,6 +633,7 @@ describe("with the apps flag on", () => {
     shown = preview({ install: "new", asks: all, manifest });
     await user.click(screen.getByTestId("app-install-confirm"));
     expect(await screen.findByTestId("app-install-error")).toHaveTextContent("What this app asks for changed. Look at it again before you install it.");
+    expect(screen.getByTestId("app-install-error").firstElementChild).toHaveClass("text-danger-ink");
     expect(onInstalled).not.toHaveBeenCalled();
     expect(screen.getByTestId("app-permissions")).toHaveTextContent("See your name in this chat");
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Install");
@@ -715,6 +768,23 @@ describe("with the apps flag on", () => {
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
     expect(await screen.findByTestId("app-install-blocked")).toHaveTextContent("Removed by Ghostly: Malware");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+  });
+
+  it("breaks a store's removal reason with no space anywhere on the install and details screens, each store's line in its own direction", async () => {
+    // A reason may be 200 characters on one line: "Malware build sha256:" and a digest pushed both screens 700 px sideways.
+    const reason = `Malware build sha256:${"0123456789abcdef".repeat(10)}`;
+    const by = [{ store: "k", name: "Ghostly", reason, at: 1 }, { store: "a", name: "متجر", reason: "برمجية خبيثة", at: 2 }];
+    const lines = (line: HTMLElement) => {
+      expect(line.className).toContain("[overflow-wrap:anywhere]");
+      const spans = line.querySelectorAll("span[dir=auto]");
+      expect([...spans].map((s) => s.textContent)).toEqual([`Removed by Ghostly: ${reason}`, "Removed by متجر: برمجية خبيثة"]);
+    };
+    fakeEngine.on("appPreview", () => preview({ run: { status: "removed", by } }));
+    const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    lines(await screen.findByTestId("app-install-blocked"));
+    install.unmount();
+    renderApp(<InstalledAppDialog app={installed({ run: { status: "removed", by } })} onClose={() => {}} onOpen={() => {}} />);
+    lines(await screen.findByTestId("app-run-line"));
   });
 
   it("a github.com page that is not an app says so, and asks for a repository or file link, never that GitHub is off the list", async () => {
@@ -871,6 +941,18 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-keep-stopped")).toBeInTheDocument();
   });
 
+  it("a revocation's reason is said, as its publisher's text isolated from the line around it", async () => {
+    // Untrusted text: a right-to-left reason or one with its own direction marks must not reorder the line's words.
+    const reason = "‮مفتاح مسرّب";
+    const { unmount } = renderApp(<InstalledAppDialog app={installed({ run: { status: "revoked", reason } })} onClose={() => {}} onOpen={() => {}} />);
+    expect((await screen.findByTestId("app-run-line")).textContent).toBe(`Its publisher revoked this version: ⁨${reason}⁩`);
+    unmount();
+    fakeEngine.on("appPreview", () => preview({ run: { status: "revoked", reason: "Leaked key" } }));
+    renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    expect((await screen.findByTestId("app-install-blocked")).textContent).toBe("Its publisher revoked this version: ⁨Leaked key⁩");
+    expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
+  });
+
   it("the card of a removed app says so when Open is refused, and Run anyway opens it in that chat", async () => {
     // The card read the list before the store's removal: Open is refused, and the list read again says so.
     let run: InstalledAppView["run"] = { status: "ok" };
@@ -1016,6 +1098,22 @@ describe("with the apps flag on", () => {
     expect(await screen.findByTestId("app-open")).toBeInTheDocument();
   });
 
+  it("Get its files that finds no copy says so on the screen, and offline says offline", async () => {
+    fakeEngine.on("appList", () => [installed({ view: "full", run: { status: "needs-files" } })]).on("appStoreList", () => []).on("appCheckUpdates", () => [])
+      .on("appFetchFiles", () => ({ status: "needs-files" as const }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByRole("button", { name: detailsOf("Chess") }));
+    await user.click(await screen.findByTestId("app-fetch-files"));
+    expect(await screen.findByTestId("app-details-error")).toHaveTextContent("Couldn't get its files: none of the links it came from has this version now");
+    expect(screen.getByTestId("app-fetch-files")).toBeInTheDocument();
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      await user.click(screen.getByTestId("app-fetch-files"));
+      await waitFor(() => expect(screen.getByTestId("app-details-error")).toHaveTextContent("You are offline."));
+    } finally { online.mockRestore(); }
+    expect(fakeEngine.callsTo("appFetchFiles")).toHaveLength(2);
+  });
+
   it("lists installed apps and stores; uninstall offers an export first", async () => {
     fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Ghostly", kind: "curated" }] })])
       .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
@@ -1093,6 +1191,25 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("app-store-remove-confirm"));
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+  });
+
+  it("an app uninstalled in another tab while its screen is open here closes that screen, which does not open again once it is back", async () => {
+    let apps = [installed()];
+    fakeEngine.on("appList", () => apps).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: detailsOf("Chess") }));
+    expect(screen.getByTestId("app-details")).toBeInTheDocument();
+    // Another tab uninstalls it: the engine tells every page, and this one reads the list again.
+    apps = [];
+    act(() => fakeEngine.emit({ kind: "apps-checked" }));
+    await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+    // Installed again (here or in another tab): its row comes back, its screen does not open by itself.
+    apps = [installed()];
+    act(() => fakeEngine.emit({ kind: "apps-checked" }));
+    expect(await screen.findByTestId("installed-app")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
   });
 
   it("a store's Remove asks first, names the installed apps it lists, and Cancel gives the focus back to Remove", async () => {
@@ -1249,6 +1366,28 @@ describe("with the apps flag on", () => {
     const store = await screen.findByTestId("apps-add-store");
     wraps(within(store).getByText(`${long}5`));
     wraps(within(store).getByText(`${long}6`));
+  });
+
+  it("keeps a publisher's, a store's or a contact's name in its own direction inside a line, so its end stays at its end", async () => {
+    // Shared with the line's words, "Chess!" read "!Chess" in Arabic ("إلغاء تثبيت Chess!؟"), "Ana :)" read "(: Ana",
+    // and an Arabic title in English had its "!" at its other end.
+    const own = (line: HTMLElement, name: string) => {
+      expect(within(line).getByText(name)).toMatchObject({ tagName: "BDI" });
+      expect(line).toHaveTextContent(name);
+    };
+    const app = installed({ title: "Chess!" });
+    const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    await details.user.click(screen.getByTestId("app-uninstall-open"));
+    own(within(screen.getByTestId("app-uninstall")).getByRole("heading"), "Chess!");
+    details.unmount();
+    const picker = renderApp(<AppChatPicker app={app} onClose={() => {}} />);
+    own(within(screen.getByTestId("app-chat-picker")).getByRole("heading"), "Chess!");
+    picker.unmount();
+    const listedBy = [{ key: "s", name: "Ana's store :)", kind: "curated" as const }];
+    fakeEngine.on("appPreview", () => preview({ listedBy, unknownPublisher: false }));
+    renderApp(<AppInstallDialog source={{ url: URL_ }} sentBy="Ana :)" onClose={() => {}} />);
+    own(await screen.findByTestId("app-sent-by"), "Ana :)");
+    own(screen.getByTestId("app-store-line"), "Ana's store :)");
   });
 
   it("names a store not read yet by its whole link, over two lines on a phone, so the part after the host that names it shows", async () => {

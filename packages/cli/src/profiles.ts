@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, type Stats } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync, type Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -41,8 +41,10 @@ export function userPath(path: string, home = false): string {
   return resolve(path);
 }
 
+const isProfileName = (name: string): boolean => NAME.test(name) && !name.includes("..");
+
 export function checkProfileName(name: string): string {
-  if (!NAME.test(name) || name.includes("..")) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
+  if (!isProfileName(name)) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
   return name;
 }
 
@@ -80,9 +82,26 @@ export function currentProfile(home: string, option?: string): string {
   const file = join(home, "current");
   if (existsSync(file)) {
     const name = readFileSync(file, "utf8").trim();
-    if (name) return checkProfileName(name);
+    // Nobody typed it: refused naming the file and the way out, not a usage error of a name the command never had.
+    if (name && !isProfileName(name)) {
+      throw new CliError("refused", `${file} names no profile (${JSON.stringify(name)}): ghostly profile use <name> or ghostly profile create <name> --use replaces it, or delete the file`, { file });
+    }
+    if (name) return name;
   }
   return DEFAULT_PROFILE;
+}
+
+/**
+ * The current profile, or null when `<home>/current` names none: for the commands that list profiles or replace that
+ * file (`profile list`, `use`, `create`, `restore`), which a bad name there would otherwise block.
+ */
+export function currentProfileOrNone(home: string, option?: string): string | null {
+  try {
+    return currentProfile(home, option);
+  } catch (error) {
+    if (error instanceof CliError && error.details?.file) return null;
+    throw error;
+  }
 }
 
 export function profileDir(home: string, name: string): string {
@@ -117,6 +136,67 @@ export function startingDaemon(paths: ProfilePaths): number | null {
   try { pid = Number(readFileSync(startingPath(paths.dir), "utf8").trim()); } catch { return null; }
   // Alive, and this profile's: the lock's holder is.
   return Number.isInteger(pid) && pid > 0 && pid === lockOwner(paths) ? pid : null;
+}
+
+/**
+ * The file in which `daemon restart` or `daemon --detach` keeps the profile for the daemon it starts (`claimForDaemon`):
+ * its pid, the file touched every CLAIM_TOUCH_MS while it waits.
+ */
+export function claimPath(dir: string): string {
+  return join(dir, "daemon.claim");
+}
+
+const CLAIM_TOUCH_MS = 1_000;
+/** A claim not touched for that long is a start that ended without removing it (killed): none. */
+const CLAIM_FRESH_MS = 10_000;
+
+/**
+ * The pid of the `daemon restart` or `daemon --detach` that keeps the profile for the daemon it starts, from the stop
+ * of the old one until the new one holds the profile: the lock is free in between, and one-shot commands that kept
+ * taking it in turn (a bot's typing indicator every few seconds) left the new daemon, seconds to boot, never finding
+ * it free. Null when no live start claims it.
+ */
+export function daemonClaim(paths: ProfilePaths): number | null {
+  const file = claimPath(paths.dir);
+  let pid: number;
+  try {
+    if (Date.now() - statSync(file).mtimeMs > CLAIM_FRESH_MS) return null;
+    pid = Number(readFileSync(file, "utf8").trim());
+  } catch { return null; }
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM") return null; }
+  return pid;
+}
+
+/**
+ * Keeps the profile for the daemon this process starts (`daemonClaim`): until the function it returns is called, only
+ * this process and its children take the profile's lock; any other command waits for the daemon's socket instead.
+ * Another live start's claim stands (its daemon is the one that comes up); a claim that cannot be written is none.
+ */
+export function claimForDaemon(paths: ProfilePaths): () => void {
+  if (daemonClaim(paths) !== null) return () => {};
+  const mine = String(process.pid), file = claimPath(paths.dir), draft = `${file}.${mine}`;
+  try {
+    writeFileSync(draft, mine, { mode: 0o600 });
+    renameSync(draft, file);
+  } catch {
+    rmSync(draft, { force: true });
+    return () => {};
+  }
+  const ours = () => { try { return readFileSync(file, "utf8").trim() === mine; } catch { return false; } };
+  const touch = setInterval(() => {
+    if (!ours()) return;
+    const now = new Date();
+    try { utimesSync(file, now, now); } catch { /* removed meanwhile */ }
+  }, CLAIM_TOUCH_MS);
+  touch.unref();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    clearInterval(touch);
+    if (ours()) rmSync(file, { force: true });
+  };
 }
 
 /**
@@ -186,8 +266,14 @@ export function selectProfile(home: string, name: string): void {
  * reboot) whose pid now belongs to another process is then stale too: it held the profile for good, every command busy
  * until someone found the file. It is written before the lock is placed, so a lock of this release never lacks it for
  * a moment; one without it (an older release's) is held while its pid is alive, as before.
+ *
+ * While a `daemon restart` or `daemon --detach` keeps the profile for the daemon it starts (`daemonClaim`), it is busy
+ * for every other process: a one-shot then waits for that daemon's socket (`openOneShot`).
  */
 export function acquireLock(paths: ProfilePaths): () => void {
+  // Kept for the daemon a start brings up (`daemonClaim`): its own process and the daemon it spawns take it, no other.
+  const claim = daemonClaim(paths);
+  if (claim !== null && claim !== process.pid && claim !== process.ppid) throw new CliError("busy", `Profile ${paths.name} is kept for the daemon that process ${claim} starts`, { pid: claim });
   const mine = String(process.pid);
   const draft = `${paths.lock}.${mine}`;
   const start = startPath(paths.lock, process.pid);

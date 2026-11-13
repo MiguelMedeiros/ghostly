@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
-import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
+import { ERROR_RULES, errorText, knownErrorParts, knownErrorText, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemLine, problemText, sentences } from "../../lib/problemText";
@@ -279,6 +279,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["No mint could create an invoice: mint.example did not answer", `${BROWSER}/engine/wallet.ts`, "No mint could create an invoice: "],
   ["This wallet has no test mint to ask for test coins", `${BROWSER}/engine/wallet.ts`],
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
+  ["mint.example has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."],
+  ["mint.example:3338 has not answered yet. The ecash is added to your wallet as soon as it does.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The ecash is added to your wallet as soon as it does."],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
   // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
@@ -331,6 +333,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact does not accept Ark in this chat", `${BROWSER}/engine/payments.ts`, "Your contact does not accept "],
   ["This request cannot be paid from another wallet", `${BROWSER}/engine/payments.ts`],
   ["You are offline", `${BROWSER}/engine/payments.ts`],
+  // What a payee's app sends back for a payment it did not take, shown on the payer's bubble after its state.
+  ["Too many payments at once: send it again in a minute", `${BROWSER}/engine/payments.ts`],
+  ["This ecash does not pay the request: the amount or the mint differs", `${BROWSER}/engine/payments.ts`],
+  ["This transaction already paid another request", `${BROWSER}/engine/payments.ts`],
+  ["Too many open USDT requests of this amount: wait for one to be paid", `${BROWSER}/engine/payments.ts`],
+  ["The mint quoted another amount than this invoice's. Nothing was paid.", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/paymentAdapters/providers/webln.ts`],
+  // A group's pay to one member, refused when the member list was stale.
+  ["Payments are turned off in this group.", `${BROWSER}/engine/communityPay.ts`],
+  ["They are no longer in this group", `${BROWSER}/engine/communityPay.ts`],
+  ["They take no way of paying this device allows.", `${BROWSER}/engine/communityPay.ts`],
   ["This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "payment (${"],
   ["This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "wallet never pays it. Use a "],
   ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
@@ -381,6 +395,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["This member has left the group. Make someone else the admin.", `${CORE}/groupCommunity.ts`],
+  ["Not a member", `${CORE}/groupCommunity.ts`, "throw new Error(\"Not a member\")"],
+  ["Not a member", `${CORE}/groupSession.ts`, "throw new Error(\"Not a member\")"],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
   ["Only the admin can rename the group", `${CORE}/groupSession.ts`],
   ["Only the admin can choose the group's hubs", `${CORE}/groupSession.ts`],
@@ -464,13 +480,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Unknown payment", `${BROWSER}/engine/payments.ts`],
   ["The mint did not confirm the ecash", `${BROWSER}/engine/payments.ts`],
   ["your contact closed it", `${BROWSER}/engine/payments.ts`],
-  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/node.ts`],
+  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/payments.ts`],
   ["Fedimint is off in this chat", `${BROWSER}/engine/payments.ts`],
   ["This app has no Fedimint wallet", `${BROWSER}/engine/payments.ts`],
   ["Unsupported amount", `${BROWSER}/engine/payments.ts`],
   ["These notes are from a federation I have not joined", `${BROWSER}/engine/payments.ts`],
   ["These notes are worth less than a sat", `${BROWSER}/engine/payments.ts`],
   ["These notes were already redeemed", `${BROWSER}/engine/payments.ts`],
+  // The same notes again under another id, while the first payment of them is still being redeemed or is in.
+  ["These notes were already received", `${BROWSER}/engine/payments.ts`],
   ["The server took too long to answer", `${CORE}/lnurl.ts`],
   ["No way to reach the network here", `${CORE}/lnurl.ts`],
   ["shop.example refused: amount too small", `${CORE}/lnurl.ts`, " refused: "],
@@ -653,6 +671,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // An OpenPGP key of a kind or size the Add dialog refuses.
   ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
   ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
+  ["This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.", `${BROWSER}/proofs/openpgp.ts`, " key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key."],
+  ["This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", `${BROWSER}/proofs/openpgp.ts`, "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -797,6 +817,15 @@ describe("errors in the app's language", () => {
     }
     const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
     expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
+    const v5 = "This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.";
+    expect(problemText(new Error(v5), t)).toEqual({ tone: "error", title: t("errors.proof.pgpKeyVersion", { version: "5" }), next: t("errors.proof.pgpKeyVersionNext") });
+  });
+
+  it.each(LANGUAGES)("a key keys.openpgp.org serves without its user IDs says why it cannot be checked and what to do in %s", (language) => {
+    const t = translators[language];
+    const raw = "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.pgpNoUserIds"), next: t("errors.proof.pgpNoUserIdsNext") });
+    expect(problemText(new Error(raw), t, "proof").title).not.toBe(t("errors.proof.checkFailed"));
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
@@ -944,6 +973,29 @@ describe("errors in the app's language", () => {
     expect(problemLine("The Nostr event id does not match its content", t, "proof")).toBe(t("errors.proof.checkFailed"));
   });
 
+  // A refusal written in a chat's or a group's payments reached the bubble and the composer in English in every language.
+  it.each(["pt", "ar"] as const)("every refusal a chat's or a group's payments throw, refuse or store reads in %s, not in English", (language) => {
+    const t = translators[language];
+    // Never shown to a person: a check of the engine's own state, or a line whose bubble is gone with it.
+    const INTERNAL = new Set([
+      "Cashu chat recipient missing", "Cashu outbox does not match the reviewed payment", "Fedimint ecash goes to a contact in a chat",
+      "The Fedimint payment is not in the journal", "Unsupported payment method", "Removed here", "Choose one member to pay",
+    ]);
+    // Also a ternary's other line after a first one (`error: a ? "…" : "…"`).
+    const said = ["payments.ts", "communityPay.ts"].flatMap((file) => [...source(`${BROWSER}/engine/${file}`)
+      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = |["'] : )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
+    expect(said.length).toBeGreaterThan(40);
+    expect([...new Set(said)].filter((raw) => !INTERNAL.has(raw) && knownErrorText(raw, t) === null)).toEqual([]);
+  });
+
+  it("a payee's refusal on the payer's bubble says what to do next, in the language", () => {
+    const pt = translators.pt;
+    expect(problemLine("Too many payments at once: send it again in a minute", pt)).toBe("Muitos pagamentos ao mesmo tempo. Envie de novo daqui a um minuto.");
+    expect(problemLine("Too many open USDT requests of this amount: wait for one to be paid", pt)).toBe("Muitos pedidos de USDT abertos com este valor. Espere um deles ser pago.");
+    expect(problemLine("The mint quoted another amount than this invoice's. Nothing was paid.", english)).toBe("The mint quoted another amount than the invoice. Nothing was paid.");
+    expect(problemLine("They take no way of paying this device allows.", english)).toBe(english("payments.group.why.noWay"));
+  });
+
   it.each(LANGUAGES)("a contact's proof check that could not run never reads as a bad proof in %s, and the host stays a value (agents#3781)", (language) => {
     const t = translators[language];
     const bad = PROOF_UNAVAILABLE.map(([raw]) => raw).filter((raw) => problemText(raw, t, "proof").title === t("errors.proof.checkFailed"));
@@ -1037,6 +1089,18 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
     expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
     for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {
+    const pay = "testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.";
+    const redeem = "testnut.cashu.space has not answered yet. The ecash is added to your wallet as soon as it does.";
+    expect(problemText(new Error(pay), english)).toEqual({ tone: "error", title: "testnut.cashu.space hasn't answered yet", next: "The payment wasn't made. The sats set aside for it come back to your wallet a few minutes after the mint answers." });
+    expect(problemText(new Error(redeem), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space ainda não respondeu", next: "O ecash entra na sua carteira assim que ele responder." });
+    for (const language of LANGUAGES) for (const raw of [pay, redeem]) {
+      const { title, next } = problemText(new Error(raw), translators[language]);
+      expect(title, language).toContain("testnut.cashu.space");
+      expect(next, language).toBeTruthy();
+    }
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {

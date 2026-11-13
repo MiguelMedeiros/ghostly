@@ -14,7 +14,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
-import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
@@ -294,7 +294,7 @@ const backInWallet = (lost: number) => lost > 0
 
 /** A mint's own words for a refusal, as one short line: the reason at the end of `lightningRefused`. */
 const mintReason = (error: unknown) =>
-  (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
+  stripHidden((error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ")).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
 
 /** Every proof and swap stored, as `CashuWallet.readStored` read them. */
 export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }
@@ -944,7 +944,22 @@ export class CashuWallet {
       if (sent) return sent;
     }
     if (room > 0) throw engineError("notEnoughForFee", { amount: room });
+    // The sats are there, only set aside by a split the mint has not answered: said as the first attempt said it.
+    const held = await this.heldBySilentSplit(candidates, amount);
+    if (held) throw new SwapUnsettledError(held);
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
+  }
+
+  /** An open send swap at one of `mints` whose reserved inputs, with the coins free there, would cover `amount`. */
+  private async heldBySilentSplit(mints: string[], amount: number): Promise<PendingSwap | undefined> {
+    for (const mint of mints) {
+      const open = (await this.swapsAt(mint)).filter((s) => s.kind === "send" && !s.released && !s.finished);
+      if (open.length === 0) continue;
+      const held = await Promise.all(open.map((s) => this.storedInputs(s)));
+      const swap = open.find((_, i) => held[i].length > 0);
+      if (swap && total(await this.proofsAt(mint)) + total(held.flat()) >= amount) return swap;
+    }
+    return undefined;
   }
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {
@@ -952,7 +967,22 @@ export class CashuWallet {
     if(!this.getKnownMints().includes(mint))throw new Error("Select a configured mint");
     return this.locked(mint,async()=>{
       const wallet=await this.wallet(mint);
-      const preview=await wallet.ops.send(amount,asProofLike(await this.proofsAt(mint))).includeFees(true).prepare();
+      const proofs=await this.proofsAt(mint);
+      const prepare=(sats:number)=>wallet.ops.send(sats,asProofLike(proofs)).includeFees(true).prepare();
+      const preview=await prepare(amount).catch(async(error:unknown)=>{
+        // Coins that cannot cover the amount and its fees are refused in cashu-ts' own English words: said as a send
+        // says it instead, with how much fits. Its coins are not split's, so `roomAt` would claim more than fits here.
+        if(!/^Not enough funds available/.test(error instanceof Error?error.message:""))throw error;
+        const fits=(sats:number)=>prepare(sats).then(()=>true,()=>false);
+        // Below the amount asked, and at most what every coin brings in past its fee (all of it, at a mint that charges none).
+        let low=0,high=Math.min(amount-1,total(proofs)-wallet.getFeesForProofs(asProofLike(proofs)).toNumber());
+        while(low<high){
+          const middle=Math.ceil((low+high)/2);
+          if(await fits(middle))low=middle;
+          else high=middle-1;
+        }
+        throw low>0?engineError("notEnoughForFee",{amount:low}):engineError("notEnoughSats");
+      });
       return {fee:await reviewedCashuFee(preview),prepared:{mint,swap:(await loadCashu()).serializeSwapPreview(preview)}};
     });
   }
@@ -1171,7 +1201,7 @@ export class CashuWallet {
         const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
-          amount: Number(metadata.amount),
+          amount: metadata.amount.toNumber(),
           unit: metadata.unit,
           mint,
           memo: metadata.memo || undefined,
@@ -1183,7 +1213,7 @@ export class CashuWallet {
         const request = decodePaymentRequest(value);
         return {
           kind: "request",
-          amount: request.amount === undefined ? null : Number(request.amount),
+          amount: request.amount === undefined ? null : request.amount.toNumber(),
           unit: request.unit ?? UNIT,
           mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
@@ -1214,7 +1244,7 @@ export class CashuWallet {
       unit = metadata.unit;
       // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
       mint = mintUrlSpelling(metadata.mint);
-      faceValue = Number(metadata.amount);
+      faceValue = metadata.amount.toNumber();
     } catch {
       throw new Error("That is not a valid ecash token");
     }

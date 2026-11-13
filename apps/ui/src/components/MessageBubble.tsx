@@ -20,7 +20,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { CardTime, StatusCardView } from "./chat/StatusCard";
-import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
+import { STATUS_TONE, appCardsShown, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { ConverterNotLoaded, downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
@@ -31,7 +31,8 @@ import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
-import { useTransfer } from "../hooks/useServicesPlatform";
+import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -465,7 +466,7 @@ function isOnlyEmojis(text: string): boolean {
 function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
-      <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+      <span className="bubble-tail absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
         <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
@@ -473,7 +474,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
     );
   }
   return (
-    <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+    <span className="bubble-tail absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
       <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
@@ -939,9 +940,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   // Its row stays in the page while its details are open, however many messages come meanwhile.
   useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
-  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
+  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it. The
+  // same rule (`appCardsShown`) says what its quote, the pinned bar, the chat list, Saved and the screen reader read.
   const appsOn = useAppsAvailable();
-  const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  const appCard = message.card?.kind === "app" && appCardsShown(linkId, appsOn) ? message.card : undefined;
   // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
   const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -995,12 +997,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The original in place of the sent text, with its own mention places: the message's are the translation's.
   const original = sent && showingOriginal ? sent.original.trim() : undefined;
   const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
-  const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
-  const fileRetry = !!message.file && canRetryFile(message.file, transfer, platform);
-  const fileUnsent = !!message.file && fileNeverSent(transfer);
+  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
+  // message again (its mark, reactions and menu), up to 20 a second.
+  const failedTransfer = useTransferValue(isMe ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
+  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
@@ -1014,7 +1018,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
    */
   const retry = async () => {
     setRefused(null);
-    if (fileRetry) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
+    if (fileRetry) { await servicesPlatform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (!link) return;
     await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
@@ -1197,13 +1201,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
   // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
   const nickRun = <bdi>{nick}</bdi>;
+  const opensAuthor = !!author && !!onOpenAuthor && !choosing;
   const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
     // One line, cut with an ellipsis inside the bubble, the whole name in the tooltip (as a chat's row and header do):
-    // a long one-word name ran past the bubble and off a phone's screen.
-    <div data-testid="message-nick" data-key={author?.key} title={nick} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px] min-w-0 truncate`}>
-      {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="block max-w-full truncate cursor-pointer text-start hover:underline">{nickRun}</button>
+    // a long one-word name ran past the bubble and off a phone's screen. The box that cuts it takes the name's own
+    // direction (as the header and a reply's quote do), on the side the app's language puts it: in Arabic a Latin
+    // name's ellipsis was on its left, where the name starts, and the bubble showed only its end.
+    <div data-testid="message-nick" data-key={author?.key} title={nick} dir={opensAuthor ? undefined : "auto"} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px] min-w-0 truncate [text-align:match-parent]`}>
+      {opensAuthor
+        ? <button type="button" data-testid="message-nick-open" dir="auto" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="block max-w-full truncate cursor-pointer [text-align:match-parent] hover:underline">{nickRun}</button>
         : nickRun}
     </div>
   ) : null;
@@ -1356,7 +1363,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.paymentId ? (
           <div className="clearfix">
-            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} />
+            {/* Whom a payment of mine went to is the chat's contact; my own name is over mine in a group. */}
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} contact={(isMe ? contactName : own) || undefined} />
             {timestampEl}
           </div>
         ) : message.file?.voice ? (

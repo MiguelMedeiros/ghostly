@@ -1062,11 +1062,6 @@ html[data-standalone="true"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
 .animate-fade-in {
   animation: fade-in 0.2s ease-out forwards;
 }
@@ -1187,10 +1182,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   max-width: calc(100% - 2rem);
 }
 
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
 /*
  * A call ringing in: its avatar pulses a few times, then rests fully shown. A pulse for the whole ring redrew the
  * window every frame (a core of the GPU process); the ring sound says it goes on.
@@ -1228,6 +1219,17 @@ html .toast-place.toast-place-page[data-at="top"] {
 
 [data-theme="light"] .chat-wallpaper {
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5c6c8' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Forced colors (Windows Contrast themes) replace a bubble's background with the page's, and it was all that drew the
+   bubble: the wallpaper's pattern ran under the words, and the tail (an SVG fill, kept in the theme's colour) hung on
+   its own. There the wallpaper is plain, the tail is not drawn and the bubble has an edge in the theme's text colour,
+   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. Settings'
+   Text size preview draws its messages the same way (`data-preview-bubble`). */
+@media (forced-colors: active) {
+  .chat-wallpaper, [data-theme] .chat-wallpaper { background-image: none; }
+  .bubble-tail { display: none; }
+  [data-message-bubble]:not([class~="outline-2"]), [data-preview-bubble] { outline: 1px solid CanvasText; outline-offset: -1px; }
 }
 
 /*
@@ -1364,6 +1366,23 @@ html .toast-place.toast-place-page[data-at="top"] {
   }
 }
 
+/*
+ * The chat list's rows (ChatRow.tsx `rowClass`) off screen are left out of its style, layout and paint: everything that
+ * restyles the whole page (Light/Dark, a color theme, a Text size step, a language, the window crossing a width
+ * breakpoint) paid for every chat in the list, ~0.75 s of the main thread at 300 chats. Every row stays in the page, so
+ * Tab, find in page, a screen reader, putting rows in order and bringing the open chat's row into view reach each one,
+ * and a scroll costs no script. A row never drawn takes a typical row's height: its two lines at the Text size, and the
+ * key's line of a chat in the comfortable density (the padding and the density's least height, min-h, come on top); one
+ * drawn keeps its last real one (`auto`). Nothing in a row is painted past its edges (its menus are portals).
+ */
+.chat-list-row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(0.125rem + 2.5rem * var(--chat-text-scale));
+}
+.chat-list-row-comfortable[data-chat] {
+  contain-intrinsic-block-size: auto calc(1.125rem + 2.5rem * var(--chat-text-scale));
+}
+
 /* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
    so it also selected a word and put its own Copy, Look Up, Translate menu over the bar. Links keep their own callout. */
 @media (pointer: coarse) {
@@ -1426,7 +1445,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
  * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
  */
-:root[data-away] :is(.animate-spin, .animate-pulse, .animate-pulse-dot, .typing-dots > span, .profile-switch-badge,
+:root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
 :root[data-away] .new-wallet-shimmer::after { animation-play-state: paused !important; }
 
@@ -1468,13 +1487,6 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-repeat: no-repeat;
   animation: sats-shine 0.9s ease-out 0.1s both;
 }
-
-@keyframes bolt-pop {
-  0% { transform: scale(0.4) rotate(-20deg); opacity: 0; }
-  60% { transform: scale(1.35) rotate(6deg); opacity: 1; }
-  100% { transform: none; }
-}
-.animate-bolt-pop { display: inline-block; animation: bolt-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
 @keyframes nudge {
   0%, 100% { transform: none; }
@@ -1705,6 +1717,15 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (prefers-reduced-motion: reduce) {
   .connection-switch-track, .connection-switch-track::after { transition: none; }
 }
+/* Forced colors replace the track's and the knob's backgrounds with the page's: an empty outline, on and off alike. In
+   system colours instead, as Settings' switches (wallet/ui.tsx): off a ButtonText knob, on a Highlight track. */
+@media (forced-colors: active) {
+  .connection-switch-track { forced-color-adjust: none; border-color: ButtonText; background: Canvas; }
+  .connection-switch-track::after { background: ButtonText; }
+  .connection-switch input:checked + .connection-switch-track { border-color: Highlight; background: Highlight; }
+  .connection-switch input:checked + .connection-switch-track::after { background: HighlightText; }
+  .connection-switch input:focus-visible + .connection-switch-track { outline-color: Highlight; }
+}
 /* A thumb's 44px on a phone, for a control drawn smaller there: where a tap lands grows past its box, centred on it, and
    it looks the same. Its own box must not clip (no overflow-hidden, no ::after of its own), nor what holds it. One
    placed with `absolute` (a × in a tile's corner) stays where it is: it already holds its ::after. */
@@ -1758,6 +1779,20 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 }
 [dir="rtl"] .picture-viewer-close { right: auto; left: max(0.75rem, env(safe-area-inset-left)); }
 
+/* A panel from the end edge on a wide screen (a message's details, a wallet total's breakdown) is a portal on the body
+   too: an iPhone on its side or an installed iPad keeps its close button and its last row clear of the notch, the
+   status bar and the home indicator. The end inset is added to its width, so the content keeps its 400px. */
+.end-panel {
+  width: min(calc(400px + env(safe-area-inset-right)), 100vw);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline-end: env(safe-area-inset-right);
+}
+[dir="rtl"] .end-panel {
+  width: min(calc(400px + env(safe-area-inset-left)), 100vw);
+  padding-inline-end: env(safe-area-inset-left);
+}
+
 /* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
 .alone-bar {
   padding-top: max(0.5rem, env(safe-area-inset-top));
@@ -1792,4 +1827,45 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   /* A field whose frame draws the focus (the chat list's search, `has-[input:focus-visible]:outline-2`): one mark, the frame's. */
   :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
   [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
+}
+
+/* Forced colors: the place you are on (`aria-current`) in the chat list, on the rail, Saved and Tasks above the list,
+   the account bar and the phone's tab bar. Its background and accent colour were all that marked it, and forced colors
+   replace both, so it looked like every other place. One mark for all of them: a bar in Highlight, the bar the rail
+   already draws in the accent beside its open chat. At the start side of a place stacked in a column; under a place in
+   a row (`current-mark-under`: the tab bars), where a start-side bar would sit between two neighbours. Not a Highlight
+   fill (it needs `forced-color-adjust: none`, which keeps a row's muted line in its theme colour on Highlight), nor an
+   outline (the keyboard focus's mark). A ::before inside the place (which is positioned), so nothing moves; only the
+   bar itself keeps its colour. Logical sides: the start is the right in Arabic. Only the place's mark here. */
+@media (forced-colors: active) {
+  .current-mark[aria-current]:not([aria-current="false"])::before {
+    content: "";
+    position: absolute;
+    inset-block: 0.5rem;
+    inset-inline-start: 0;
+    inline-size: 0.25rem;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 9999px;
+    background: Highlight;
+    forced-color-adjust: none;
+    pointer-events: none;
+  }
+  .current-mark.current-mark-under[aria-current]:not([aria-current="false"])::before {
+    inset-block: auto 0;
+    inset-inline: 25%;
+    inline-size: auto;
+    block-size: 0.25rem;
+    border-start-start-radius: 9999px;
+    border-start-end-radius: 9999px;
+    border-end-end-radius: 0;
+  }
+}
+
+/* Forced colors: a progress bar (a file on its way, a backup or a restore, a task card). Its track and its fill were
+   backgrounds alone, which forced colors replace with the page's: an empty strip. A CanvasText frame on the page's
+   colour and a Highlight fill instead, both kept as drawn; at least 6px tall, so the frame leaves the fill room. Only
+   the bars here. */
+@media (forced-colors: active) {
+  .progress-track { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; min-block-size: 6px; }
+  .progress-fill { forced-color-adjust: none; background: Highlight; }
 }

@@ -7,12 +7,13 @@ import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
 import { invoiceNetwork, paymentJson } from "../src/wallets";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
 function fake() {
   const node = {
-    getState: () => ({
+    chatView: chatViewOf, getState: () => ({
       links: [
         { id: "chat-one", label: "Alice", peerPubKeyZ32: "p", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1" },
         // An invite nobody took yet.
@@ -424,6 +425,14 @@ describe("real money", () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ code: "refused" });
     expect(node.walletPayQuote).not.toHaveBeenCalled();
+  });
+
+  it("an invoice for another amount than --amount is refused before paying", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 5 })).rejects.toMatchObject({ code: "refused", message: expect.stringMatching(/10 sats.*5/) });
+    expect(node.walletPayQuote).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 10 })).resolves.toMatchObject({ amount: 10, paid: true });
+    expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
   });
 });
 

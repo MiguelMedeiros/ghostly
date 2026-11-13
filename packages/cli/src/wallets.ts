@@ -2,7 +2,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, findOwnNamedChat, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { CliError, type ErrorCode } from "./errors";
@@ -362,7 +362,7 @@ const WALLETS: Record<string, Method> = {
     // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
     if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
     // Its contact is told it was paid: a contact's own name or a prefix of its id never names the chat.
-    const chat = params.chat === undefined ? undefined : findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const chat = params.chat === undefined ? undefined : ownChatOf(ctx, params);
     if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
@@ -382,6 +382,9 @@ const WALLETS: Record<string, Method> = {
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
+    // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
+    const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
+    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
@@ -392,7 +395,7 @@ const WALLETS: Record<string, Method> = {
   async "chat.pay"(ctx, params) {
     const memo = memoOf(params, "pay");
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
@@ -424,9 +427,10 @@ const WALLETS: Record<string, Method> = {
   /** Pays a request the contact made in a chat. */
   async "chat.payRequest"(ctx, params) {
     // Money moves: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const s = state(ctx);
+    const link = ownChatOf(ctx, params, s);
     const paymentId = str(params, "payment", true);
-    const request = state(ctx).payments[paymentId];
+    const request = s.payments[paymentId];
     if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
     const n = paymentNetwork(request);
@@ -460,14 +464,16 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "payment.list"(ctx, params) {
-    const chat = params.chat === undefined ? null : chatOf(ctx, params).id;
-    const payments = Object.values(state(ctx).payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
+    const s = state(ctx);
+    const chat = params.chat === undefined ? null : chatOf(ctx, params, s).id;
+    const payments = Object.values(s.payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
     return { payments };
   },
 
   async "payment.check"(ctx, params) {
-    const link = chatOf(ctx, params);
-    const p = state(ctx).payments[str(params, "payment", true)];
+    const s = state(ctx);
+    const link = chatOf(ctx, params, s);
+    const p = s.payments[str(params, "payment", true)];
     if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
     // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
     if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);

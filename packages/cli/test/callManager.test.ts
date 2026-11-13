@@ -143,6 +143,32 @@ function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean
   return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
+/**
+ * The real media stack, but its connection fails where it would have connected (a path that never comes up: ICE that
+ * finds no pair, a DTLS handshake that does not finish): "failed" in place of the first "connected", and nothing after.
+ */
+function failingStack(): () => Promise<CallStack | string> {
+  return async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const listen = pc.onStateChange.bind(pc);
+      let failed = false;
+      Object.defineProperty(pc, "onStateChange", {
+        value: (cb: Parameters<typeof listen>[0]) => listen((state) => {
+          if (failed) return;
+          if (state === "connected") { failed = true; cb("failed"); return; }
+          cb(state);
+        }),
+      });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+}
+
 /** The real media stack, counting the connections it made and the ones still open (not closed), and the most open at once. */
 function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number; peak: () => number } {
   let made = 0, peak = 0;
@@ -203,6 +229,15 @@ async function program(path: string, halfOpen = false): Promise<{ socket: Socket
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   return { socket, heard: () => Buffer.concat(chunks), ended };
 }
+
+/** Where the first 20 ms frame (`frame` bytes) with sound in it starts in `pcm`, or -1 before there is one. */
+function firstSound(pcm: Buffer, frame: number): number {
+  for (let at = 0; at + frame <= pcm.length; at += frame) if (level(pcm.subarray(at, at + frame)) > 0.05) return at;
+  return -1;
+}
+
+/** A side's call's counters (`call list`'s stats): frames received and sent, and the program's audio still queued. */
+const statsOf = (side: Side) => (side.calls.list()[0] as { stats: { framesIn: number; framesOut: number; queuedMs: number } }).stats;
 
 describe("the audio socket", () => {
   it("serves one program at a time, owner-only, and ends it with EOF", async () => {
@@ -330,7 +365,30 @@ describe("a one-shot's call", () => {
     const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
     await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
     // A daemon still says why the chat cannot call.
-    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Calls need a live connection" });
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: expect.stringMatching(/^Calls need a live connection/) });
+  });
+});
+
+describe("a call to a contact who is away", () => {
+  // Found in a bug hunt: the daemon's `call start` to a contact whose app was closed answered only "Calls need a live
+  // connection", where `chat connect` and `send --wait` say what comes next.
+  it("says what comes next: wait for the chat to be live, then call again", async () => {
+    const away = (label: string) => ({ id: "chat-ab", label, profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" }) as unknown as LinkView;
+    for (const [label, ref] of [["bia", "bia"], ["Bia Souza", "chat-ab"]]) {
+      const engine: CallEngine = { getState: () => ({ links: [away(label)] }) as unknown as EngineState, setCallSignal: () => {} };
+      const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
+      await expect(calls.start("chat-ab", {})).rejects.toMatchObject({
+        code: "unavailable",
+        message: `Calls need a live connection, and your contact's app is not connected now: ghostly chat wait ${ref} --until live waits for it, then call again`,
+        details: { chat: "chat-ab" },
+      });
+    }
+  });
+
+  it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Your contact's app cannot take calls" });
   });
 });
 
@@ -353,24 +411,45 @@ describe("two call managers", { timeout: 60_000 }, () => {
       until(() => b.events.find((e) => e.type === "call.connected")),
     ]);
     expect(connectedB).toMatchObject({ direction: "in", audio: { rate: 16000 } });
+    // The frames Bob's call received before his program took the socket, which no program hears: read before it
+    // connects, so never more than there were.
+    const unheard = statsOf(b).framesIn;
     const bob = await program((connectedB.audio as { socket: string }).socket);
     expect(connectedA).toMatchObject({ direction: "out", audio: { socket: placed.audio.socket } });
 
-    // Each program speaks faster than real time; the other hears it at its own rate.
+    // Each program speaks faster than real time; the other hears it at its own rate. Frames 20 to 60 of each tone,
+    // counted from the first frame with sound in it: the silence before it lasts as long as the event loop took to send
+    // the tone. Measured once the call is over: the DFT (`dominantHz`) is seconds of CPU on a slow runner, and run here
+    // it held the event loop both calls run on past MAX_CATCH_UP_MS, so the call dropped the clip written next as a
+    // stall's audio, and the flush below found less than 8 s of it queued.
     alice.socket.write(tone(440, 48000, 1500));
     bob.socket.write(tone(660, 16000, 1500));
-    await until(() => bob.heard().length >= 640 * 60 && alice.heard().length >= 1920 * 60, 20_000);
-    expect(dominantHz(bob.heard().subarray(640 * 20, 640 * 60), 16000)).toBeCloseTo(440, -1);
-    expect(dominantHz(alice.heard().subarray(1920 * 20, 1920 * 60), 48000)).toBeCloseTo(660, -1);
+    const toneHeard = (heard: () => Buffer, frame: number) => until(() => {
+      const pcm = heard(), at = firstSound(pcm, frame);
+      return at >= 0 && pcm.length >= at + frame * 60 && pcm.subarray(at + frame * 20, at + frame * 60);
+    }, 20_000);
+    const [bobHeard, aliceHeard] = await Promise.all([toneHeard(bob.heard, 640), toneHeard(alice.heard, 1920)]);
 
-    // Barge-in: a long sentence queued, then flushed; silence follows at once.
+    // Barge-in: a long sentence queued, then flushed; silence follows at once. Flushed once the call has all of it and
+    // has sent 15 frames of it, not after a fixed 300 ms: on a slow runner the rest of the clip was still being read
+    // from the socket then, and played after the flush.
+    const ahead = statsOf(a);
     alice.socket.write(tone(440, 48000, 10_000));
-    await new Promise((r) => setTimeout(r, 300));
+    await until(() => {
+      const now = statsOf(a), sent = now.framesOut - ahead.framesOut;
+      return sent >= 15 && now.queuedMs + sent * 20 >= ahead.queuedMs + 10_000;
+    });
+    const { queuedMs, framesOut: sentBeforeFlush } = statsOf(a);
     const { flushedMs } = a.calls.flush(undefined) as { flushedMs: number };
+    expect(flushedMs).toBe(queuedMs);
     expect(flushedMs).toBeGreaterThan(8000);
-    const mark = bob.heard().length;
-    await until(() => bob.heard().length >= mark + 640 * 25);
-    expect(level(bob.heard().subarray(mark + 640 * 10, mark + 640 * 25))).toBeLessThan(0.01);
+    // Silence follows at once: frames 10 to 25 of those Alice's call sent after the flush are silent. Counted from the
+    // flush's frame (`framesOut`), not from what Bob had heard by then: frames sent before it may still be on their way
+    // (a burst of them, after a busy event loop). Her frame n reaches Bob's program as his frame n - unheard or later:
+    // the frames lost on the way, and those before his program came, were never his.
+    const afterFlush = 640 * (sentBeforeFlush - unheard);
+    await until(() => bob.heard().length >= afterFlush + 640 * 25);
+    expect(level(bob.heard().subarray(afterFlush + 640 * 10, afterFlush + 640 * 25))).toBeLessThan(0.01);
 
     // Where the call runs, for a person reading `call list` when one does not connect.
     expect(a.calls.list()).toMatchObject([{ state: "connected", stats: { programConnected: true, ice: { state: expect.stringMatching(/^(connected|completed)$/), pair: expect.stringMatching(/:\d+ host <-> .+:\d+ (host|prflx)$/) } } }]);
@@ -382,6 +461,9 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "hangup" });
     expect(a.calls.list()).toEqual([]);
     expect(existsSync(placed.audio.socket)).toBe(false);
+    // Each heard the other's tone (see above: measured with no call left to hold up).
+    expect(dominantHz(bobHeard, 16000)).toBeCloseTo(440, -1);
+    expect(dominantHz(aliceHeard, 48000)).toBeCloseTo(660, -1);
   });
 
   it("a hang-up reaches the contact at once when the programs keep their sockets open after EOF", async () => {
@@ -558,6 +640,77 @@ describe("two call managers", { timeout: 60_000 }, () => {
     a.calls.onSignal("chat-ab", JSON.stringify({ t: "h", ts: Date.now() + 1, r: "u" }));
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(a.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  // It ended on its own with nothing said: the contact's app went on "Connecting..." (up to 45 s) or "Reconnecting...",
+  // where an app whose connection fails hangs up (WISP 601 "Couldn't connect").
+  it("a call whose connection fails ends as failed, and the contact is told", async () => {
+    const { a, b } = pairOfManagers({ b: failingStack() });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await b.calls.answer(undefined, {});
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(signalsOf(b, "h")).toHaveLength(1);
+    await until(() => a.events.find((e) => e.type === "call.ended"));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an answer that cannot go out ends the call that rang with call.ended (failed), as the program waiting on it expects", async () => {
+    const { a, b } = pairOfManagers();
+    // The chat's connection goes as the answer is sent: the engine refuses it.
+    const engine = (b.calls as unknown as { host: { engine: CallEngine } }).host.engine;
+    const setCallSignal = engine.setCallSignal;
+    engine.setCallSignal = async (input) => {
+      if (input.signal?.includes('"t":"a"')) throw new Error("Calls need a live connection");
+      return setCallSignal(input);
+    };
+    await a.calls.start("chat-ab", {});
+    const incoming = await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
+    expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ call: incoming.call, reason: "failed" });
+    expect(b.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an answer that fails tells the caller it could not connect: the caller's call ends as failed, not declined", async () => {
+    // A callee whose connections cannot be made (its early answer's either): its answer throws.
+    const broken = async (): Promise<CallStack | string> => {
+      const real = await loadCallStack();
+      if (typeof real === "string") return real;
+      const PeerConnection = function () { throw new Error("no connection here"); };
+      return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+    };
+    const { a, b } = pairOfManagers({ b: broken });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow("no connection here");
+    // What an app sends when its answer could not use the microphone (useWebRTC, WISP 601 "Couldn't connect").
+    expect(signalsOf(b, "h").map((s) => JSON.parse(s!))).toEqual([expect.objectContaining({ t: "h", r: "u" })]);
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("an answer that cannot go out hangs up saying it could not connect: the caller's call failed, it was not declined", async () => {
+    const { a, b } = pairOfManagers();
+    const engine = (b.calls as unknown as { host: { engine: CallEngine } }).host.engine;
+    const setCallSignal = engine.setCallSignal;
+    const sent: string[] = [];
+    engine.setCallSignal = async (input) => {
+      if (input.signal?.includes('"t":"a"')) throw new Error("Calls need a live connection");
+      if (input.signal) sent.push(input.signal);
+      return setCallSignal(input);
+    };
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
+    // What an app sends when its answer fails (WISP 601 "Couldn't connect"): read as a decline, it was not one.
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual(expect.objectContaining({ t: "h", r: "u" }));
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
@@ -1321,7 +1474,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
-    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    // Told it could not connect (`r: "u"`): the contact's call never connected either.
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(signalsOf(a, "o")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(b, "a")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(a, "h")).toHaveLength(1);

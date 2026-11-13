@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "パスワードが正しくありません",
   "language": "言語",
+  "languageNeedsUpdate": "{{language}} には Ghostly の新しいバージョンが必要です。",
   "languageNotLoaded": "{{language}} を読み込めませんでした。接続を確認してください。",
   "languageRetry": "もう一度試す",
   "license": "ライセンス",
@@ -117,6 +118,7 @@
   "noticesMisplaced": "許可するには Ghostly をアプリケーションに移動してください",
   "noticesOpenSettings": "設定を開く",
   "noticesRunning": "Ghostlyの起動中",
+  "noticesRunningExtension": "ブラウザの起動中（Ghostlyのタブがなくても）",
   "noticesUnavailable": "ここでは使えません",
   "notificationSounds": "サウンド",
   "notificationSoundsDescription": "メッセージ、通話、確定した支払い",
@@ -187,7 +189,6 @@
   "sharePresenceHint": "Ghostly を使っている間、連絡先に点が表示されます。設定したステータスはどちらの場合も表示されます。",
   "shareProfile": "名前と写真を連絡先と共有",
   "shareProfileHint": "連絡先にはこのプロフィールの名前と写真が表示されます。オフにすると「連絡先」と模様が代わりに表示されます。",
-  "sourceCode": "ソースコード",
   "stayConnected": "バックグラウンドで接続を維持",
   "stayConnectedHint": "Ghostly が画面に出ていない間も、控えめな通知とともにチャットとグループの接続を保ちます。バッテリーの消費が増えます。",
   "stayConnectedStopped": "Android がバックグラウンドで Ghostly を停止しました",
@@ -230,12 +231,6 @@
     "large": "大",
     "larger": "さらに大",
     "small": "小"
-  },
-  "theme": "テーマ",
-  "themes": {
-    "dark": "ダーク",
-    "light": "ライト",
-    "system": "システム"
   },
   "timeout": "ロックまでの時間",
   "timeoutOptions": {

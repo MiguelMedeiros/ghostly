@@ -6,7 +6,7 @@
 | Status | Draft |
 | Kind | Adapter |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
-| Implementation | Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. New makes a Mainnet wallet on `arkade.computer` or a Testnet one on Mutinynet, in one click. |
+| Implementation | Experimental browser adapter, Arkade SDK 0.5.4; regtest evidence below. New makes a Mainnet wallet on `arkade.computer` or a Testnet one on Mutinynet, in one click. |
 | Summary | Review and approve an exact Ark payment through a pinned operator. |
 | Availability | Available |
 | Notes | Experimental. New makes a Mainnet wallet or a Testnet one in one click; payment flows were exercised only on a local regtest network. There is no unilateral exit yet. |
@@ -14,7 +14,7 @@
 
 ## Scope and provider choice
 
-This adapter implements Ark payments using `@arkade-os/sdk` 0.4.74. Ark is the payment method; Arkade is the selected provider implementation. [Bark](204-bark.md) is a second, separate Ark provider: not a separate currency, and not compatible with this one (a Bark wallet cannot pay an Arkade address). Arkade was selected because its TypeScript wallet, transaction preparation, operator/indexer clients and browser repositories fit the existing browser engine. That choice does not establish parity across native, extension, mobile or hardware signers.
+This adapter implements Ark payments using `@arkade-os/sdk` 0.5.4. Ark is the payment method; Arkade is the selected provider implementation. [Bark](204-bark.md) is a second, separate Ark provider: not a separate currency, and not compatible with this one (a Bark wallet cannot pay an Arkade address). Arkade was selected because its TypeScript wallet, transaction preparation, operator/indexer clients and browser repositories fit the existing browser engine. That choice does not establish parity across native, extension, mobile or hardware signers.
 
 New makes an Ark wallet per network in one click: Mainnet on Bitcoin (`https://arkade.computer`, Esplora `https://mempool.space/api`), Testnet on Mutinynet (`https://mutinynet.arkade.sh`, Esplora `https://mutinynet.com/api`). A Testnet wallet's page can switch it to Signet or a local regtest server while it is empty and has no payments (the replaced wallet is archived, never deleted). Each network's wallet is stored on its own (`arkWallet-mode-<network>`, see [200](200-payments.md#wallet-networks-mainnet-and-testnet)). Each wallet pins an operator URL, operator signing key, network and Esplora URL. Outside regtest the SDK's background settlement is on: VTXOs are renewed before expiry and on-chain deposits to the boarding address are settled into Ark, which can cost operator/chain fees without a per-renewal approval; it only runs while Ghostly is open. On local regtest settlement stays manual because batches expire within minutes. Financial flows were exercised only on local regtest; mainnet was checked for wallet creation, address and balance, never with funds. Unilateral exits and operator loss remain release gates, not completed features.
 

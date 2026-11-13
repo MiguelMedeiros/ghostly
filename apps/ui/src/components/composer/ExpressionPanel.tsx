@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEve
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useLockScreen } from "../../contexts/LockScreenContext";
-import { useOutsideDismiss } from "../../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { getPrefix } from "../../lib/storage";
 import { EmojiTab } from "./EmojiTab";
@@ -63,6 +63,8 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   const [switched, setSwitched] = useState(false);
   const [compact, setCompact] = useState(false);
   useOutsideDismiss(ref, !isLocked, onClose, dismissRef);
+  // On a phone it is a sheet over a backdrop, as the composer's + and the message menus: Tab stays in it.
+  useTabTrap(ref, phone && !isLocked);
 
   useLayoutEffect(() => {
     const bounds = boundsRef.current;
@@ -147,14 +149,16 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   // A portal keeps it clear of the composer's and the sidebar's clipping. The app is inert under the lock
   // screen, but a portal is outside the app: it stays closed while locked.
   if (isLocked) return null;
+  // Hidden until placed, and a browser focuses nothing hidden: a search takes the focus only from then on.
+  const placed = position !== undefined;
   return createPortal(<>
     {phone && <div className="sheet-backdrop" />}
     <div ref={ref} role="dialog" aria-label={t("composer.expressions")} data-testid="expression-panel" data-tab={tab}
       className={`expression-panel ${phone ? "sheet expression-sheet" : "expression-popover"}`} data-compact={compact || undefined}
       style={position ?? { visibility: "hidden" }}>
       {tab === "emoji"
-        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={(switched || focusOnOpen) && !phone} />
-        : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone} />}
+        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={(switched || focusOnOpen) && !phone && placed} />
+        : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone && placed} />}
       <div role="tablist" aria-label={t("composer.expressions")} className="expression-switch" onKeyDown={tabKeys}>
         {TABS.map((id) => (
           <button key={id} type="button" role="tab" className="tap-target" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}

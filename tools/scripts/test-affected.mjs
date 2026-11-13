@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Run only the checks a change can affect, with few workers, so parallel sessions do not starve each other.
-// CI runs everything on every push; this is what to run locally before pushing.
+// CI runs everything once a pull request leaves draft (a draft gets this, unit tests only); run it locally before pushing.
 //
 //   npm run test:affected                        # vs origin/dev: unit, lint, typecheck, Rust; e2e only with a port
 //   npm run test:affected -- --port 50310        # also build the web app, serve it on 50310, run the e2e picked
@@ -321,5 +321,8 @@ for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.label}  ${mi
 for (const s of skipped) console.log(`  · skipped ${s}`);
 if (e2eRuns && stack.lines.length && !skipped.some((s) => s.startsWith("gated:"))) console.log(`  · gated: ${stack.lines[0]}`);
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length ? `\n${failed.length} step(s) failed. CI runs the full suite on every push.` : "\nAll affected checks passed. CI runs the full suite on every push.");
+// In CI this is the draft tier's job (ci.yml, affected-tests): the full suite waits for the pull request to leave draft.
+const full = process.env.GITHUB_ACTIONS === "true" ? "Leaving draft runs the full suite." : "CI runs the full suite once the pull request leaves draft.";
+const verdict = failed.length ? `${failed.length} step(s) failed.` : results.length ? "All affected checks passed." : "Nothing ran: every step was skipped (see above).";
+console.log(`\n${verdict} ${full}`);
 process.exit(failed.length ? 1 : 0);

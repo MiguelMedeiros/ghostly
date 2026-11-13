@@ -52,12 +52,22 @@ export function useViewportHeight() {
     document.documentElement.dataset.standalone = String(isStandalone());
     const viewport = window.visualViewport;
     if (!viewport) return;
+    // No touch screen, no keyboard on it: a laptop or desktop window made shorter while a field has the focus (another
+    // window stacked under it, at 200 % zoom in the phone layout) hid the tab bar until the window was resized again.
+    const touch = (navigator.maxTouchPoints ?? 0) > 0;
 
     let width = viewport.width;
-    let tallest = viewport.height;
+    // The tallest visible height seen at each width: turned back to a width, the keyboard is measured against the
+    // whole height seen there, not the one it left.
+    const tallest = new Map([[width, viewport.height]]);
     // The shortcut bar seen while this field has had the focus, and whether the screen has turned since.
     let bar = 0;
     let turned = false;
+    // Whether a keyboard (not the shortcut bar alone) was up.
+    let up = false;
+    // The height at a turn with the keyboard up, where the page shrinks with it, to a width with no taller height seen:
+    // nothing measures the keyboard there, so it stays up until the height grows or the field loses the focus.
+    let carried = 0;
     let visible = viewport.height;
     let written = "";
     const write = (element: Element) => (element as HTMLElement).style.setProperty("--app-height", written);
@@ -70,19 +80,33 @@ export function useViewportHeight() {
       }
     });
     appeared.observe(document.body, { childList: true, subtree: true });
-    const update = () => {
+    const update = (event?: Event) => {
       const typing = typedInto(document.activeElement);
+      // A field in an app's frame has the focus as the frame itself.
+      const mayType = typing || document.activeElement instanceof HTMLIFrameElement;
       if (!typing) { bar = 0; turned = false; }
-      // A new width is a rotation (or a resized window): what was tallest before says nothing now.
+      if (!mayType) carried = 0;
+      // A new width is a rotation (or a resized window): what was tallest at another width says nothing now.
       if (viewport.width !== width) {
         width = viewport.width;
-        tallest = viewport.height;
         if (bar) turned = true;
+        carried = mayType && up && (tallest.get(width) ?? 0) <= viewport.height ? viewport.height : 0;
         // And a panel can become a sheet at the new width (the emoji panel does) with the same height: written again.
         written = "";
       }
-      tallest = Math.max(tallest, viewport.height);
-      const measured = Math.max(window.innerHeight - viewport.height, tallest - viewport.height);
+      if (viewport.height > carried) carried = 0;
+      // No keyboard comes up with nothing to type into: a window made shorter (split screen, a quarter of the
+      // screen, devtools docked) is the whole height there now, or the phone tab bar stayed hidden under 768px.
+      const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
+      tallest.set(width, whole);
+      // A touch laptop with its keyboard (a 2-in-1, a Chromebook: the touchpad the primary pointer) has no keyboard that
+      // shrinks the page: there a shorter height is the window made shorter, and the tab bar stayed hidden after the
+      // field lost the focus. Safari's gap, `innerHeight` kept, still says an iPad's keyboard or shortcut bar.
+      const shrinks = !window.matchMedia?.("(pointer: fine)").matches;
+      const measured = touch ? Math.max(window.innerHeight - viewport.height, shrinks ? whole - viewport.height : 0) : 0;
+      // Measured at this width now: Android gives the whole height first at a turn and lays the keyboard out after it,
+      // so the height carried was that whole one, and the keyboard down again there did not grow past it.
+      if (measured > KEYBOARD) carried = 0;
       let covered = measured;
       if (typing && measured > SHORTCUT_BAR && measured <= KEYBOARD) bar = measured;
       // Once the screen has turned with the bar up, iOS reports the whole height again a moment later and keeps it,
@@ -93,7 +117,8 @@ export function useViewportHeight() {
         written = `${visible}px`;
         document.querySelectorAll(APP_HEIGHT_READERS).forEach(write);
       }
-      const keyboard = covered > KEYBOARD || (covered > SHORTCUT_BAR && typing);
+      up = covered > KEYBOARD || carried > 0;
+      const keyboard = up || (covered > SHORTCUT_BAR && typing);
       // With the keyboard up the home indicator is covered, so its inset must not pad the input.
       document.documentElement.dataset.keyboard = String(keyboard);
       // iOS scrolls the page to reveal the focused input; the shell already fits.

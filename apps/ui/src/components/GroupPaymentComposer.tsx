@@ -7,6 +7,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { edgeDot, memberName, sameNamed } from "../lib/groups";
+import { reachDot } from "../lib/connection";
 import { useEngineValue } from "../lib/engineState";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
@@ -31,6 +32,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const wallet = useWalletPlatform();
   const [to, setTo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Escape too, spent there: a key handler of its own closed it once more and left the key to a notice behind.
   useOutsideDismiss(ref, to === null, onClose);
   // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
   useTabTrap(ref, useIsMobile() && to === null);
@@ -89,7 +91,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
 
   return <>
     <div className="sheet-backdrop" />
-    <div ref={ref} data-testid="group-pay-recipients" onKeyDown={e => e.key === "Escape" && onClose()}
+    <div ref={ref} data-testid="group-pay-recipients"
       className="sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">{t("payments.mode.pay")}</p>
       <p className="m-0 px-1 text-xs text-text-muted">{community
@@ -101,7 +103,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
           return <li key={m.key}>
             <button type="button" data-testid="group-pay-recipient" data-key={m.key} disabled={!!reason} title={reason} onClick={() => setTo(m.key)}
               className="flex w-full min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50">
-              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
+              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${reachDot(edgeDot(m))}`} />
               {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
                   keeps its start, and a short one stays at the line's start. */}
               <span className="min-w-0 flex-1 flex flex-col items-start">

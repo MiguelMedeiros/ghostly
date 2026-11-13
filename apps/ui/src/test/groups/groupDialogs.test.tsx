@@ -135,6 +135,28 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
+  // The ask stays open while the member's leave arrives: the engine then refuses with core's "Not a member", which read
+  // in English in every language.
+  it.each(["mesh", "community"] as const)("a Hand over admin or Remove confirmed after the member left says so in the language (%s)", async profile => {
+    const group = groupView({ status: "active", isAdmin: true, profile, members });
+    fakeEngine.update({ groups: [group], links: [] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={group} onClose={vi.fn()} />, { language: "pt" });
+    engine.on("makeGroupAdmin", () => Promise.reject(new Error("Not a member"))).on("removeGroupMember", () => Promise.reject(new Error("Not a member")));
+    const gone = { ...group, members: members.filter(m => m.key !== BOB) };
+    await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-make-admin-confirm"));
+    expect(await screen.findByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
+    act(() => { fakeEngine.update({ groups: [group] }); });
+    await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-remove-confirm"));
+    expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
+    expect(screen.getByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
+  });
+
   it("gives the focus back to the Remove or Hand over admin that asked, and to the list once a removed row is gone", async () => {
     const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
     let removed!: () => void;
@@ -222,6 +244,27 @@ describe("GroupMembersDialog", () => {
     await user.click(within(row(ALICE)).getByTestId("group-member-hub-role"));
     await user.click(screen.getByRole("option", { name: "Hub if always on" }));
     expect(engine.callsTo("setGroupHub")).toEqual([{ groupId: "group-1", key: many[0].key, role: "pin" }, { groupId: "group-1", key: ALICE, role: null }]);
+  });
+
+  it("keeps the keyboard on a hub choice while the engine takes it, and takes no other until it answers", async () => {
+    const many = Array.from({ length: 16 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), online: true }));
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, hubs: { hub: false }, members: [members[0], ...many] }));
+    let answer!: () => void;
+    engine.on("setGroupHub", () => new Promise<void>(resolve => { answer = resolve; }));
+    const choice = within(row(many[0].key)).getByTestId("group-member-hub-role");
+    choice.focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(engine.callsTo("setGroupHub")).toEqual([{ groupId: "group-1", key: many[0].key, role: "pin" }]);
+    // Busy, not disabled: a disabled control drops the focus to the page, and the next Tab starts from the dialog's top.
+    expect(choice).toHaveFocus();
+    expect(choice).toBeEnabled();
+    expect(choice).toHaveAttribute("aria-busy", "true");
+    expect(within(row(many[1].key)).getByTestId("group-member-hub-role")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await act(async () => answer());
+    expect(choice).not.toHaveAttribute("aria-busy");
+    expect(choice).toHaveFocus();
   });
 
   it("offers no hub choice in a group of 16 or fewer", () => {

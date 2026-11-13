@@ -490,7 +490,10 @@ export class CallManager {
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
       await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
-      await this.end(call, "failed", true, false);
+      // Its call.incoming went out: call.ended does too, for the program (or hook) waiting on that call. The contact's
+      // app still rings: the hang-up says this side could not connect (`r: "u"`), as an app's whose microphone was
+      // refused does, so the contact's chat says the call failed, not that it was declined.
+      await this.end(call, "failed", "unreachable");
       throw error;
     } finally {
       // Unused (the call ended first): closed. Nothing once its connection is the call's.
@@ -619,8 +622,9 @@ export class CallManager {
         }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
-        // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
-        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", false);
+        // contact closed was still a hang-up; one that failed ends the call, and the contact is told, as the apps tell
+        // it: its side may still say "Connecting..." or "Reconnecting..." (WISP 601 "Couldn't connect").
+        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", state !== "closed");
       },
     });
     if (call.ended || attempt !== call.attempt) {
@@ -682,7 +686,8 @@ export class CallManager {
     call.watcher.unref?.();
   }
 
-  private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
+  /** `tell`: the contact is sent a hang-up; `"unreachable"`, one that says this side could not connect (`r: "u"`, WISP 601). */
+  private async end(call: Call, reason: EndReason, tell: boolean | "unreachable", report = true): Promise<void> {
     if (call.ended) return;
     call.ended = true;
     call.reason = reason;
@@ -708,7 +713,11 @@ export class CallManager {
     // stopping daemon waits for it, below).
     const closing = call.socket?.close();
     if (tell) {
-      await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
+      // A call that failed before it ever connected says so too (`r: "u"`, WISP 601 "Couldn't connect"), as the apps do:
+      // a plain hang-up reaches a caller that still rings as a decline.
+      const unreachable = tell === "unreachable" || (reason === "failed" && call.connectedAt === null);
+      const hangUp: CallSignal = unreachable ? { t: "h", ts: this.stamp(call.chat), r: "u" } : { t: "h", ts: this.stamp(call.chat) };
+      await this.send(call.chat, hangUp).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
           this.clearing.delete(call.chat);
@@ -836,6 +845,11 @@ export class CallManager {
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
+    // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
+    if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
+      throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
+    }
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
     if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
@@ -847,6 +861,8 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/** The engine's `callsUnavailable` for a chat with no live session (ghostlink's, or node.ts's with no link running). */
+const CALLS_NEED_LIVE = "Calls need a live connection";
 /**
  * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
  * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct

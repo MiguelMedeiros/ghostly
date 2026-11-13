@@ -358,9 +358,10 @@ export interface EngineApi {
   /**
    * The person is using the app (`active`, on input: a key, a click, a touch), or a page knows they left (`idle`). The
    * engine says `idle` by itself 10 minutes after the last `active` (WISP 401 § Presence and status). Nothing is said
-   * before a page's first word, nor while Settings `sharePresence` is off.
+   * before a page's first word, nor while Settings `sharePresence` is off. `null` takes it back: frames say no
+   * presence again (a headless daemon whose `daemonPresence` was turned off).
    */
-  setPresence(params: { presence: Presence }): void;
+  setPresence(params: { presence: Presence | null }): void;
   /**
    * This profile's status (availability, one emoji, a text of 60 characters, `until` in Unix ms), checked, kept and said
    * to every paired 1:1 contact whose app offers `status/1`, now or on its next session. While its availability is
@@ -746,16 +747,17 @@ export interface KeptPictures {
 }
 
 /**
- * The chats (`links`) and groups a posted state left out as the ones that client was sent last: each list here is every
- * id of the state's list, in its order, and the state's list holds only the views that changed or are new. An id the
- * state's list lacks is the page's view from the state before (its pictures with it); an id no longer here is gone.
+ * The chats (`links`), group edges (`edges`) and groups a posted state left out as the ones that client was sent last:
+ * each list here is every id of the state's list, in its order, and the state's list holds only the views that changed
+ * or are new. An id the state's list lacks is the page's view from the state before (its pictures with it); an id no
+ * longer here is gone.
  */
-export interface KeptViews { links?: string[]; groups?: string[] }
+export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[] }
 
 /**
  * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
- * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`) and each chat's
- * and group's view (`keptViews`); the page keeps those.
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`) and each chat's,
+ * group edge's and group's view (`keptViews`); the page keeps those.
  */
 export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures; keptViews?: KeptViews };
 /** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */

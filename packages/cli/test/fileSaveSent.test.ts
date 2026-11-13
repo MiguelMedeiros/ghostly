@@ -24,7 +24,7 @@ beforeAll(async () => {
 function world() {
   const transfers: Record<string, FileTransferView> = {};
   const node = {
-    getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
+    getState: () => ({ links: [link], groups: [{ id: "team" }], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
     sendFile: vi.fn(async () => {}),
@@ -51,9 +51,41 @@ describe("file save of a sent file", () => {
     expect(readFileSync(restored, "utf8")).toBe("quarterly data");
   });
 
+  it("with --wait, saves at once whatever the contact does with it", async () => {
+    const { ctx, transfers } = world();
+    const path = join(dir, "notes.txt");
+    writeFileSync(path, "meeting notes!");
+    const sent = await callApi(ctx, "file.send", { chat: "Alice", path }) as { file: { id: string } };
+    // Still offered: before, --wait waited for the contact to take it, then failed with timeout.
+    transfers[sent.file.id] = { state: "transferring", transferred: 0, size: 14, direction: "out", stage: "asking" } as unknown as FileTransferView;
+    const waiting = join(dir, "waiting.txt");
+    expect(await callApi(ctx, "file.save", { file: sent.file.id, path: waiting, wait: true, timeout: 1 })).toMatchObject({ size: 14 });
+    expect(readFileSync(waiting, "utf8")).toBe("meeting notes!");
+    // Declined: before, --wait failed with the contact's "Declined by the contact" (exit 1).
+    transfers[sent.file.id] = { state: "failed", error: "Declined by the contact", transferred: 0, size: 14, direction: "out" } as unknown as FileTransferView;
+    const declined = join(dir, "declined.txt");
+    expect(await callApi(ctx, "file.save", { file: sent.file.id, path: declined, wait: true })).toMatchObject({ size: 14 });
+    expect(readFileSync(declined, "utf8")).toBe("meeting notes!");
+  });
+
   it("a received file part way in is still not all here", async () => {
     const { ctx } = world();
     await fileStore.put({ id: "chat-one-in-x", linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "in.txt", size: 10, mime: "text/plain", timestamp: 1 }, transfer: { state: "transferring", transferred: 4, size: 10 } } as never);
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-x", path: join(dir, "in.txt") })).rejects.toMatchObject({ code: "unavailable", message: "The file is not all here yet (4 of 10 bytes)" });
+  });
+
+  it("a received file that waits for file accept names the command, as --wait does", async () => {
+    const { ctx, transfers } = world();
+    // A chat's offer over the automatic download's size: before, "not all here yet (0 of 40000000 bytes)", exit 1.
+    await fileStore.put({ id: "chat-one-in-big", linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "big.bin", size: 40_000_000, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 40_000_000 } } as never);
+    transfers["chat-one-in-big"] = { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" } as unknown as FileTransferView;
+    const confirm = { code: "confirm", message: "big.bin (40 MB) waits for you to take it: ghostly file accept chat-one-in-big (or file decline)", details: { file: "chat-one-in-big", chat: "chat-one", size: 40_000_000, stage: "asking" } };
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-big", path: join(dir, "big.bin") })).rejects.toMatchObject(confirm);
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-big", timeout: 1 })).rejects.toMatchObject(confirm);
+    // A group's file this device did not fetch: no transfer in the engine's state, its record says it waits.
+    await fileStore.put({ id: "group-team-in-m", linkId: "group:team", group: "team", createdAt: 1, direction: "in", metadata: { name: "minutes.bin", size: 50_000, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 50_000 } } as never);
+    await expect(callApi(ctx, "file.save", { file: "group-team-in-m", path: join(dir, "minutes.bin") })).rejects.toMatchObject({
+      code: "confirm", message: expect.stringContaining("waits for you to take it: ghostly file accept group-team-in-m"), details: { file: "group-team-in-m", group: "team", stage: "asking" },
+    });
   });
 });

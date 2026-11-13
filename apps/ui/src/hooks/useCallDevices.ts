@@ -136,40 +136,39 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       offered.current.add(`${kind}:missing`);
       setNotice({ kind, type: "lost", name });
     };
-    /** The default takes over from a device that went; when it cannot be opened (it was the only one), that is said instead. */
-    const fallBack = (kind: DeviceKind, name: string, to: () => Promise<void>) => {
-      lost(kind, name);
-      return run(async () => {
-        try {
-          await to();
-        } catch (error) {
-          setNotice({ kind, type: "gone", name });
-          throw error;
-        }
-      });
-    };
-
-    if (audio && gone("audioinput", mic, audio)) {
-      await fallBack("audioinput", audio.label, () => call.switchMicrophone(null));
-      return;
-    }
-    if (showing && video && gone("videoinput", camera, video)) {
-      await fallBack("videoinput", video.label, () => call.switchCamera(null));
-      return;
-    }
-    if (sink && !next.audiooutput.some((d) => d.id === sink)) {
+    // Devices that went together (a webcam's camera and microphone, a headset's microphone and speaker) all fall back
+    // in this one check: the next one, while the first switches, would find it busy, and a gone device says no more.
+    // The notice names the first; when the default cannot be opened (it was the only one), that is said instead.
+    const falls: { kind: DeviceKind; name: string; to: () => Promise<void> }[] = [];
+    if (audio && gone("audioinput", mic, audio)) falls.push({ kind: "audioinput", name: audio.label, to: () => call.switchMicrophone(null) });
+    if (showing && video && gone("videoinput", camera, video)) falls.push({ kind: "videoinput", name: video.label, to: () => call.switchCamera(null) });
+    const sinkGone = !!sink && !next.audiooutput.some((d) => d.id === sink);
+    if (sinkGone) {
       // The chosen speaker under the id it was saved with, which the browser no longer uses: found by its name, it
       // is still there, and the call plays on it with nothing to tell.
       const chosen = loadDeviceChoices().audiooutput;
       const found = chosen?.id === sink ? resolveDevice("audiooutput", next).id : undefined;
-      if (found && found !== sink) {
-        setSpeaker(found);
-        return;
+      if (found && found !== sink) setSpeaker(found);
+      else {
+        lost("audiooutput", chosen?.label ?? "");
+        setSpeaker(undefined);
       }
-      lost("audiooutput", chosen?.label ?? "");
-      setSpeaker(undefined);
-      return;
     }
+    for (const fall of [...falls].reverse()) lost(fall.kind, fall.name);
+    if (falls.length) {
+      let failed = false;
+      await run(async () => {
+        for (const fall of falls) {
+          try {
+            await fall.to();
+          } catch {
+            if (!failed) setNotice({ kind: fall.kind, type: "gone", name: fall.name });
+            failed = true;
+          }
+        }
+      });
+    }
+    if (sinkGone || falls.length) return;
 
     const choices = loadDeviceChoices();
     // The chosen device was not there when the call started: it began on the default, and says so once.

@@ -14,14 +14,14 @@ import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/v
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
-import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const linkButton = "text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
 const OUT_OF_VIEW_MS = 1500;
@@ -372,7 +372,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     data-testid="video-accept"
                     disabled={noRoom}
                     onClick={() => act("accept")}
-                    className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}
@@ -417,7 +417,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         )}
       </div>
       {offered && typeof transfer.room === "number" && (
-        <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
+        <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="video-room">
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
         </p>
       )}
@@ -431,7 +431,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
           ) : null}
           {status && (
-            <p className={`flex items-center gap-1 min-w-0 chat-text-media-meta m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
+            <p className={`flex items-center gap-1 min-w-0 chat-text-media-meta m-0 ${failed ? "text-danger-ink" : "text-text-primary/75"}`}>
               {/* Wraps, as a file's line: cut, it lost its speed and time left. */}
               <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
@@ -448,7 +448,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="video-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
-        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
+        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/75" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
             <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer">{t("chat.message.download")}</button>

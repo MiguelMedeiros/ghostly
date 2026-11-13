@@ -23,6 +23,7 @@ import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate, useLimited } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
+import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
@@ -38,6 +39,7 @@ import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import { watchAppInSight } from "./lib/appInSight";
 import { guardContextMenu } from "./lib/contextMenu";
+import { linkInAddress } from "./lib/otherTabLink";
 import { isDesktopApp } from "./lib/externalLink";
 import "./index.css";
 
@@ -56,9 +58,25 @@ const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
 function namedDeviceLink(pathname: string, hash: string): string | null {
-  const named = `#${pathname.replace(/^\//, "")}${hash}`;
+  const named = `#${pathname.replace(/^\//, "")}${hash.replace(/\/+$/, "")}`;
   const link = readDeviceLink(named);
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
+}
+
+/**
+ * A link one intake took (`invite`: an invite's or a device code's, `group`: a group's), good or refused: it answers
+ * for itself, so the other intake's refusal, kept until closed, goes. Left there, it would read as the refusal of the
+ * chat or group that opened, or sit over the new refusal (they share the top notice's place) and hide it.
+ */
+type LinkKind = "invite" | "group";
+const linksTaken = new EventTarget();
+const linkTaken = (kind: LinkKind) => linksTaken.dispatchEvent(new Event(kind));
+function useOtherLink(kind: LinkKind, drop: () => void) {
+  useEffect(() => {
+    const other = kind === "invite" ? "group" : "invite";
+    linksTaken.addEventListener(other, drop);
+    return () => linksTaken.removeEventListener(other, drop);
+  }, [kind, drop]);
 }
 
 /**
@@ -116,15 +134,16 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { setInvalid(null); offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { setInvalid(null); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
       // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
       setInvalid(null);
+      linkTaken("invite");
       if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
       else open(reading.keys);
       return;
@@ -135,8 +154,10 @@ function ChatLinkIntake() {
     // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
     // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
     setInvalid(chatAddress && reading.reason === "not-ghostly" ? "join.chatGone" : INVITE_REFUSAL_MESSAGE[reading.reason]);
+    linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
+  useOtherLink("invite", useCallback(() => setInvalid(null), []));
 
   useEffect(() => {
     if (!held || waits) return;
@@ -238,6 +259,12 @@ function GroupLinkIntake() {
   const [problem, setProblem] = useState<Problem | null>(null);
   /** The groups this intake is joining, until the engine answers: links that come together count each other. */
   const joining = useRef(new Set<string>());
+  /**
+   * Bumped each time the other intake takes a link, and what it was when the held link came: a refusal that comes later
+   * (a join still on its way, or held until the unlock) belongs to a link that no longer answers for itself.
+   */
+  const otherLinks = useRef(0);
+  const codeAfter = useRef(0);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -246,23 +273,27 @@ function GroupLinkIntake() {
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
-    else { setProblem(null); setCode(link); }
+    else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
+    linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
+  useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
     setCode("");
+    const after = codeAfter.current;
+    const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
     const groups = engine.state?.groups ?? [];
     const id = linkGroupId(code);
     if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
       && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
-      setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+      refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       return;
     }
     if (id) joining.current.add(id);
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
+      .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
       .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, isLocked, hasUnlocked, groupsLoaded]);
@@ -280,6 +311,22 @@ function isIntake(pathname: string): boolean {
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
   const session = rest === undefined ? null : decodePart(rest);
   return !!rest && (rest.includes("/") || session === null || !loadSession(session));
+}
+
+/**
+ * On standby no intake runs, so nothing would take an invite's keys or a group's link out of the address: they leave it
+ * here, as the page starts and as the address changes, dropped rather than held (a standby takes nothing in). The
+ * entry is replaced, so neither the address bar nor Back keeps them.
+ */
+function dropLinksFromAddress(): () => void {
+  const drop = () => {
+    const route = window.location.hash.replace(/^#/, "");
+    if (linkInAddress(route) === null && !isIntake(route.split(/[?#]/)[0])) return;
+    window.history.replaceState(null, "", "#/");
+  };
+  drop();
+  window.addEventListener("hashchange", drop);
+  return () => window.removeEventListener("hashchange", drop);
 }
 
 function HomeAnchor() {
@@ -320,6 +367,15 @@ function LockGate({ children }: { children: ReactNode }) {
 }
 
 /**
+ * The visible height and whether a keyboard is up (`useViewportHeight`) on the standby screen, which is drawn in place
+ * of the app that keeps them otherwise: on a phone, Use here, Take over and Remove from this device stayed under the keyboard.
+ */
+function StandbyViewport() {
+  useViewportHeight();
+  return null;
+}
+
+/**
  * The app's router. A move to another page is drawn at once, not as a transition: the engine's state comes several
  * times a second, each time a sync render, and each one started a transition's render over. Leaving a long chat still
  * drawing its older rows (transitions too, before the row window) waited behind them: seconds on a slow machine.
@@ -343,6 +399,8 @@ export function Root() {
   const standby = useDeviceGate();
   // Device-link-only mode starts as the engine does, before the lock is passed; it is what the screen hears from.
   useEffect(() => { if (standby) void engine.connect().catch(() => {}); }, [standby]);
+  const onStandby = !!standby;
+  useEffect(() => (onStandby ? dropLinksFromAddress() : undefined), [onStandby]);
   return (
     <SettingsProvider>
       <ThemeProvider>
@@ -350,7 +408,7 @@ export function Root() {
           <LockScreenProvider>
             <LockScreen />
             <ProfileSwitchSplash />
-            {standby ? <LockGate><DeviceStandby gate={standby} /></LockGate> : (
+            {standby ? <LockGate><StandbyViewport /><DeviceStandby gate={standby} /></LockGate> : (
             <AppRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
@@ -374,7 +432,8 @@ export function Root() {
                     <Route path="*" element={<NoPage />} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
-                      <Route path="/chat/*" element={<ChatRoute />} />
+                      {/* A chat named in it: `#/chat` alone opens none, and goes home as any address no page answers. */}
+                      <Route path="/chat/:id/*" element={<ChatRoute />} />
                       <Route path="/group/:groupId" element={<GroupChat />} />
                       {/* One route for the menu and its sections, so moving between them keeps the page as it is. */}
                       <Route path="/settings/:section?" element={<Settings />} />

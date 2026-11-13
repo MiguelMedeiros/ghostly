@@ -3,7 +3,9 @@
 Browsers have no UDP, so they cannot run HyperDHT (WISP 103) themselves. This relay runs the UDP half for them
 and talks to each browser over one WebSocket, with Holepunch's
 [`@hyperswarm/dht-relay`](https://github.com/holepunchto/hyperswarm-dht-relay) protocol. The web app and the
-extension use it when a relay is set in **Settings → Network → HyperDHT relay** (`packages/browser/src/platform/hyperdhtRelay.ts`).
+extension use it when a relay is set in **Settings → Network → HyperDHT relay** (`packages/browser/src/platform/hyperdhtRelay.ts`),
+and so does the Desktop while **Hide my IP from contacts** is on: its own HyperDHT is off then, and its webview dials
+through the relay as a browser does.
 
 ## What it sees, and what it doesn't
 
@@ -64,8 +66,10 @@ start, as any other value not of its kind does.
 Other settings:
 
 - `GHOSTLY_RELAY_ORIGINS` lists the allowed origins, comma-separated, each as a browser sends it: scheme, host and a
-  port only (`https://app.ghostly.tools`, `chrome-extension://<id>`). Case, a default port (`:443`) and a trailing `/`
-  do not matter; an entry with a path, a query or no scheme stops the start. Left out, any origin may connect. A
+  port only (`https://app.ghostly.tools`, `chrome-extension://<id>`). The Desktop's webview sends `tauri://localhost`
+  (macOS, Linux) or `http://tauri.localhost` (Windows, Android): list both for Desktops with Hide my IP on. Case, a
+  default port (`:443`) and a trailing `/` do not matter; an entry with a path, a query or no scheme stops the start.
+  Left out, any origin may connect. A
   refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
   an hour. It keeps other websites from using the relay; it is no defence against other programs.
 - `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
@@ -103,18 +107,21 @@ a port another program holds or one below 1024 this user may not take (`PORT`), 
 machine or no name at all: one line names the setting instead of a stack trace, and nothing is left running.
 
 `docker-compose.yml` is set up for one server, "zero" behind the Cloudflare tunnel: it counts each client by
-`CF-Connecting-IP` and lets in only Ghostly's own app and extension. Anywhere else, set two variables (in the shell or
-an `.env` file next to it):
+`CF-Connecting-IP` and lets in only Ghostly's own app, extension and Desktop. Anywhere else, set two variables (in the
+shell or an `.env` file next to it):
 
 - `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
   `GHOSTLY_RELAY_PROXIES=1`;
-- `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, or every browser on it is refused (403).
+- `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, and `tauri://localhost,http://tauri.localhost`
+  for the Desktop, or every browser on it is refused (403), and so is every Desktop with Hide my IP on.
 
 `GET /healthz` answers with the HyperDHT node's state: `nodes` in its routing table and `firewalled`
 (`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
 clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
+says `bootstrap reached no node` then. While the relay stops (up to a second, until each client has answered its
+going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
+and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.
 
 ## Cost, measured
@@ -136,6 +143,6 @@ Nobody runs a public dht-relay for Ghostly.
 
 - **Proposal:** this container on "zero" behind the Cloudflare tunnel, as `wss://hyperdht-relay.ghostly.tools`
   (`HYPERDHT_RELAY_BIND=<LAN address>:49443`).
-- **Origins:** the app's origin and the extension's.
+- **Origins:** the app's origin, the extension's and the Desktop's two.
 - **App default:** it stays off (`DEFAULT_HYPERDHT_RELAY` in `packages/browser/src/shared/hyperdhtRelay.ts`)
   until the relay runs.

@@ -320,7 +320,13 @@ describe("Settings → Audio & video", () => {
       await user.click(await screen.findByTestId("settings-microphone-test"));
       expect(meter).toHaveBeenCalledWith("Mic A", expect.any(Function));
       act(() => level(0.42));
-      expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("aria-valuenow", "42");
+      const meterShown = await screen.findByTestId("settings-microphone-level");
+      expect(meterShown).toHaveAttribute("aria-valuenow", "42");
+      // Each reading is drawn as it comes, not animated to: a 75 ms width transition after every reading was 60% of
+      // the shown meter's CPU on the Linux Desktop (WebKitGTK laid out and painted each of its frames).
+      const bar = meterShown.firstElementChild as HTMLElement;
+      expect(bar.style.width).toBe("42%");
+      expect(bar.className).not.toMatch(/\btransition/);
       expect(devices.getUserMedia, "the page's own microphone stays shut").not.toHaveBeenCalled();
 
       await user.click(screen.getByTestId("settings-microphone-test"));

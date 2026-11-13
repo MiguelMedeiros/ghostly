@@ -5,7 +5,8 @@ import { CliError, type ErrorCode } from "./errors";
 /**
  * This profile's status (WISP 401 § Presence and status): a text, one emoji, an availability and when it ends, said to
  * every paired contact whose app offers `status/1`: `status set|clear|show`, and the socket's `status.set|clear|get`.
- * The CLI never says presence (active or idle): a headless profile never reads as online.
+ * These never say presence (active or idle): only a daemon does, and only with `settings set daemonPresence true`
+ * (daemonPresence.ts); otherwise a headless profile never reads as online.
  */
 
 /** What `status set` was given, before it is checked. */
@@ -35,7 +36,8 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
     const length = [...shown].length;
     if (length > STATUS_TEXT_MAX) throw fail("text", `is up to ${STATUS_TEXT_MAX} characters, not ${length} characters`);
     if (!shown) throw fail("text", "needs a character that shows");
-    const text = sanitizeStatusText(oneLine);
+    // The text as counted: the raw one could lose characters that fit to the engine's cut of invisible padding.
+    const text = sanitizeStatusText(shown);
     if (!text) throw fail("text", "is plain text: no link or markup");
     status.text = text;
   }

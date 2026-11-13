@@ -364,10 +364,10 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 | 400 | `bad-path` | path did not resolve inside the target |
 | 404 | `unknown-service` | id not shared (anymore) |
 | 405 | `method-not-allowed` | |
-| 408 | `request-timeout` | request body stalled for 30 s |
+| 408 | `request-timeout` | request body brought less than 16 KiB in 30 s without ending (stalled or trickling) |
 | 413 | `request-too-large` | request body above 8 MiB |
 | 502 | `unreachable`, `redirect-blocked` | local service down, or it redirected off the target |
-| 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it) |
+| 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it), or more than 128 MiB of its request bodies held at once (a body counts from its first chunk until the local service has answered it) |
 | 504 | `timeout` | local service did not answer within 60 s |
 
 **What the host guarantees**
@@ -377,9 +377,9 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 3. The request URL is `target origin + base path + p`. `p` must start with a single `/` and contain no whitespace, control characters or backslashes, and its path part (before `?`) no encoded `/`, `\` or `.` (`%2f`, `%5c`, `%2e`), which some servers decode before routing. After URL normalization the result must still have the target's origin and sit under its base path, otherwise the request is refused without touching the network.
 4. Hop-by-hop headers, `Host`, `Origin`, `Referer`, `Content-Length`, `Accept-Encoding`, `Sec-*`/`Proxy-*`, forwarding and client-address headers (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `True-Client-IP`, …), and URL and method overrides (`X-Original-URL`, `X-Rewrite-URL`, `X-HTTP-Method-Override`, …) are removed from requests. Header names and values are validated.
 5. Requests are made without the host user's cookies or HTTP credentials, so a peer never inherits the session the host has with its own application.
-6. Redirects never leave the target for the client. A redirect whose `Location` is on the target origin and under its base path is handed to the client with that `Location` made relative; any other is answered with 502 `redirect-blocked` and its `Location` is not disclosed. Off-target `Location`/`Content-Location` headers on other responses are dropped. A Desktop host never follows redirects. A browser host has to (its fetch hides where a manual redirect goes) and checks where it ended afterwards, so an open redirect in the shared application can still make the host send one request elsewhere on the machine, whose response is discarded.
+6. Redirects never leave the target for the client. A redirect whose `Location` is on the target origin and under its base path is handed to the client with that `Location` made relative (a relative one is read against the URL of the request it answers, as a browser reads it); any other is answered with 502 `redirect-blocked` and its `Location` is not disclosed. Off-target `Location`/`Content-Location` headers on other responses are dropped. A Desktop host never follows redirects. A browser host has to (its fetch hides where a manual redirect goes) and checks where it ended afterwards, so an open redirect in the shared application can still make the host send one request elsewhere on the machine, whose response is discarded.
 7. From responses, hop-by-hop headers, `Content-Encoding`, `Content-Length`, HSTS, `Alt-Svc` are removed (the body is forwarded decoded), and `Domain` is stripped from `Set-Cookie`.
-8. Limits: 8 MiB request bodies, 32 concurrent requests per peer, 60 s for the local service to answer, 30 s body idle time. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
+8. Limits: 8 MiB request bodies, 32 concurrent requests and 128 MiB of request bodies held per peer, 60 s for the local service to answer, a request body must bring 16 KiB every 30 s until it ends. Clients cap responses at 64 MiB (the browser viewer at 32 MiB), reset one that holds 4 MiB its reader has not taken once that reader takes nothing for 2 s (at once while all of a client's responses hold 64 MiB their readers have not taken), and keep at most 16 requests in flight.
 
 ### 6.5 Private groups (`group-mesh/1`)
 

@@ -65,6 +65,7 @@
     "damaged": "I suoi file su questo dispositivo sono danneggiati. Scarica di nuovo i suoi file.",
     "equivocation": "Questo link contiene un'altra copia di una versione che hai. Ghostly ha tenuto la tua.",
     "expired": "Ci è voluto troppo. Controlla di nuovo l'app.",
+    "filesNotFound": "Impossibile recuperare i suoi file: nessuno dei link da cui proviene ha ora questa versione, o nessuno ha risposto. Riprova più tardi.",
     "githubLink": "Questa pagina di GitHub non è un'app. Incolla il link del repository o quello del file dell'app.",
     "host": "Le app arrivano solo da GitHub (raw.githubusercontent.com) o da jsDelivr a un commit.",
     "hostProblem": "Il server ha avuto un problema (errore {{status}}). Riprova più tardi.",
@@ -89,7 +90,10 @@
     "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce.",
     "storeKey": "Quello store è firmato con un'altra chiave.",
     "tooLarge": "Troppo grande.",
-    "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora."
+    "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora.",
+    "updateFilesGone": "I file dell'aggiornamento non ci sono più. Ghostly li scarica di nuovo al prossimo controllo.",
+    "updateGone": "Questo aggiornamento non è più in attesa. La versione installata è quella mostrata sopra.",
+    "updateUnlisted": "Questo store non elenca più questo aggiornamento. Ghostly guarda cosa elenca al prossimo controllo."
   },
   "files": {
     "allow": "Consenti",
@@ -130,6 +134,7 @@
     "publisher": "Editore",
     "removed": "Rimossa da {{store}}: {{reason}}",
     "revoked": "Il suo editore ha revocato questa versione.",
+    "revokedReason": "Il suo editore ha revocato questa versione: {{reason}}",
     "rollback": "Hai una versione più recente.",
     "same": "Già installata.",
     "sentBy": "Inviata da {{name}}",

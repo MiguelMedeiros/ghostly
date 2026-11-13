@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Add",
     "addMintPlaceholder": "Add a mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Asking the mint…",
     "backupCopied": "Backup copied. Whoever has these tokens has the sats.",
     "contactHint": "Paying a contact? Use ⚡ in the chat.",
@@ -192,7 +191,7 @@
       "perProofTest": "{{fee}} test sat per proof (about 1 test sat a payment)"
     },
     "history": {
-      "fee": "fee {{amount}}",
+      "fee": "fee {{amount}} {{unit}}",
       "feesPaid": "Fees paid: {{amount}} {{unit}}",
       "movements": "{{count}} movements",
       "movementsOne": "1 movement",
@@ -384,7 +383,7 @@
     "cashuMints": "the Cashu mints",
     "cashuSettings": "Cashu settings",
     "commentFor": "A comment for {{to}} (optional)",
-    "confirmWhat": "{{amount}} sats (plus a fee of up to {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (plus a fee of up to {{fee}} {{feeUnit}})",
     "connecting": "Connecting to the source…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Done",

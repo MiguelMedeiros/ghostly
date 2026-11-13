@@ -14,6 +14,7 @@ import type { ChatMessage, ChatSession } from "../../lib/types";
 import { Settings } from "../../pages/Settings";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "../apps/showApps";
 
 // covers: chats.list.rows, settings.chat-list-density
 
@@ -76,6 +77,18 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(markOf("Gus")).toHaveAccessibleName("Waiting for your contact to be online");
   });
 
+  it("marks my last text of a compatibility chat delivered once the contact's acknowledgement covers it, as its bubble does", () => {
+    saveSession(chat("k", { profile: undefined, nick: "Kim", messages: [message({ sender: "me", text: "on my way", timestamp: 5000 })] }));
+    const { engine } = list();
+    const markOf = () => within(rowOf("Kim")).getByTestId("chat-row-delivery");
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 4999 })] }));
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 5000 })] }));
+    expect(markOf()).toHaveAccessibleName("Delivered");
+    expect(markOf()).toHaveAttribute("data-delivery", "delivered");
+  });
+
   it("puts no delivery mark on the contact's message, and counts what is unread beside it", () => {
     saveSession(chat("e", { nick: "Eve", messages: [message({ text: "one" }), message({ text: "two" }), message({ text: "three" })] }));
     list();
@@ -125,8 +138,13 @@ describe("the chat list's rows (compact, the default)", () => {
     const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
     const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } as const;
     saveSession(chat("a", { nick: "Ana", messages: [message({ text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, card })] }));
-    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
-    expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+    // A 1:1 chat where Apps shows: its bubble draws the card (elsewhere both say its text, appCardLineWhereShown.test.tsx).
+    showApps();
+    fakeEngine.on("appList", () => []);
+    try {
+      renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
+      expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+    } finally { hideApps(); }
   });
 
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {

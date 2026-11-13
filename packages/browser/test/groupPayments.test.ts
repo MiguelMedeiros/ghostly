@@ -164,6 +164,8 @@ describe("authoredNote: what this device says about its own payments", () => {
     expect(paid).toMatchObject({ r: "lightning", st: "paid" });
     expect(paid!.by).toBeUndefined();
     expect(authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [C, D] } as GroupPayNote)!.by).toBeUndefined();
+    // Its invoice paid in through a Cashu mint's Lightning (`onLightningPaid` keeps the mint): still asked over Lightning.
+    expect(authoredNote({ ...invoice, mint: "https://mint.real" }, { groupId: "g1", me: A }, [invoice])).toMatchObject({ r: "lightning", st: "paid" });
   });
   it("paying someone's request: nothing until paid, sent once paid, taken back when the ecash came back", () => {
     const atB: Placement = { groupId: "g1", me: B, peer: A };

@@ -157,6 +157,33 @@ describe("paying a contact's request, never twice", () => {
     await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "noSharedMint" });
   });
 
+  // A mint that took the split and never answered holds the sats until it does: the fallback finding nothing else to pay
+  // the invoice with said "Not enough sats in your wallet", to a payer with the sats, who was never told they come back.
+  it("ecash whose mint has not answered, with no Lightning to fall back on, says the mint has not answered", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    const unsettled = new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 });
+    wallet.createToken.mockRejectedValue(unsettled);
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughSats"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow(unsettled.message);
+    expect(state("r1")).toMatchObject({ state: "pending" });
+    // Another mint with the sats still pays it over Lightning.
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    expect(lightning.pay).toHaveBeenCalledOnce();
+    expect(state("r1")?.state).toBe("settled");
+  });
+
+  it("ecash whose mint has not answered does not hide why Lightning could not pay when that is not a lack of sats", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    wallet.createToken.mockRejectedValue(new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 }));
+    lightning.quote.mockRejectedValueOnce(engineError("mintsNoAnyAmount"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "mintsNoAnyAmount" });
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughForFee", { amount: 5 }));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("has not answered yet");
+    expect(state("r1")).toMatchObject({ state: "pending" });
+  });
+
   it("pays an invoice only for the amount asked, and for at most 3% in fees (10 sats at least)", async () => {
     const { desk, lightning, allowed, state } = setup([record({ id: "r1", amount: 1_000, invoice: INVOICE })]);
     await desk.start();
@@ -629,6 +656,18 @@ describe("what the contact answers about our payments", () => {
     expect(state("p")).toMatchObject({ state: "failed", error: "The payment was refused", token: "cashuBp" });
     await desk.forgetLink("l");
     expect(state("p")?.token).toBe("cashuBp");
+  });
+
+  it("refused ecash the contact redeemed anyway is settled at its Take it back, and offered back no more", async () => {
+    const { desk, wallet, state } = setup([record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" })]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValueOnce(new Error("mint offline"));
+    await desk.onPaymentResult("l", { id: "p", ok: false, error: "No thanks" });
+    expect(state("p")).toMatchObject({ state: "failed", token: "cashuBp" });
+    wallet.receiveToken.mockRejectedValueOnce(new Error("Token already spent"));
+    await expect(desk.reclaim("p")).resolves.toBeUndefined();
+    expect(state("p")).toMatchObject({ state: "settled", token: undefined, error: undefined });
+    await expect(desk.reclaim("p")).rejects.toThrow("Nothing to reclaim");
   });
 
   it("a payment with a target, one we received, or one already over is never changed by the contact's word", async () => {
@@ -1239,15 +1278,17 @@ describe("a request closed because its wallet was removed", () => {
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id).sort()).toEqual(["ark", "ln"]);
 
     sent.length = 0;
-    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to", "your contact removed the wallet it was paid to")).toBe(true);
-    expect(await desk.close("done", "x", "y"), "a paid request stays paid").toBe(false);
+    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to")).toBe(true);
+    expect(await desk.close("done", "x"), "a paid request stays paid").toBe(false);
     expect(state("ark")).toMatchObject({ state: "failed", closed: true, error: "you removed the Mainnet Ark wallet it was paid to" });
     expect(state("done")?.state).toBe("settled");
     expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
 
+    // The chat opening again says it closed once more: a contact away when it closed still had it open, with Pay.
     sent.length = 0;
     await desk.replay("l");
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id)).toEqual(["ln"]);
+    expect(sent.filter((s) => s.kind === "res")).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
   });
 
   it("on the payer's side it closes too, unless a Lightning payment for it is already in flight; nobody else can close it", async () => {

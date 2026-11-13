@@ -6,9 +6,9 @@ import {
   APP_PERMISSIONS, APP_STORE_LIMITS, appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft,
   type AppPermission, type AppStoreIndex, type Signer,
 } from "@ghostly/core";
-import { APP_FETCH_HOSTS, APP_FETCH_LIMITS } from "../src/engine/appFetch";
+import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, besideUrl } from "../src/engine/appFetch";
 import { DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
-import { STORE_HOSTS, STORE_KEY, STORE_LIMITS, STORE_URL, readStore, slugOf, type StoreBytes } from "../../../apps/website/lib/storeRead";
+import { STORE_HOSTS, STORE_KEY, STORE_LIMITS, STORE_URL, besideUrl as siteBesideUrl, readStore, slugOf, type StoreBytes } from "../../../apps/website/lib/storeRead";
 import { APPS_RELEASE, versionAtLeast } from "../../../apps/website/lib/appsGate";
 import * as sync from "../../../apps/website/scripts/sync-store.mjs";
 import { RELEASE_GUARDS } from "../../../tools/scripts/changes.mjs";
@@ -290,4 +290,171 @@ describe("the site reads a store as the app does", () => {
     expect(versionAtLeast("1.2.0-rc.1", APPS_RELEASE)).toBe(false);
     expect(versionAtLeast("", APPS_RELEASE)).toBe(false);
   });
+});
+
+describe("the site leaves out a version its publisher revoked, as the app does before Install", () => {
+  const a = signerOf("publisher a");
+  const STORE = keyOf("store");
+  const at = (name: string) => `${RAW}/${name}/HEAD/app.ghostlyapp`;
+  const revokeAt = (name: string) => `${RAW}/${name}/HEAD/ghostly-revoke.json`;
+  const ref = (name: string) => appRef(keyOf("publisher a"), name);
+  const fileOf = (entries: unknown[]) => utf8Encode(canonicalJson(entries as never));
+
+  /**
+   * Five apps of one publisher, each at its own folder: `kept` (no revocation file), `listed` (revoked beside its URL),
+   * `sourced` (revoked beside the source its manifest names), `forged` (a file whose second entry does not verify) and
+   * `large` (revoked by a file over the app's bound).
+   */
+  async function world() {
+    const bundles: Record<string, Awaited<ReturnType<typeof buildAppBundle>>> = {};
+    for (const name of ["kept", "listed", "sourced", "forged", "large"]) {
+      bundles[name] = await buildAppBundle({ ...base(name, name), ...(name === "sourced" && { sources: [at("sourced-repo")] }) }, [page(name)], a);
+    }
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: STORE, name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: Object.entries(bundles).map(([name, b]) => ({ ref: ref(name), sequence: 1, digest: b.digest, urls: [at(name)], title: name, tagline: name })),
+      removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const upTo = (name: string) => signAppRevocation({ ghostlyRevoke: 1, app: ref(name), upTo: 1 }, a);
+    const forged = await upTo("forged");
+    const files: Record<string, Uint8Array> = {
+      [revokeAt("listed")]: fileOf([await upTo("listed")]),
+      [revokeAt("sourced-repo")]: fileOf([await upTo("sourced")]),
+      // One entry that verifies and one whose statement changed after signing: the app refuses the whole file.
+      [revokeAt("forged")]: fileOf([forged, { ...forged, statement: { ...forged.statement, upTo: 2 } }]),
+      [revokeAt("large")]: fileOf([await upTo("large")]),
+    };
+    return { bundles, indexBytes, sigBytes, files };
+  }
+
+  it("reads the files where the app does, within its bound", () => {
+    expect(STORE_LIMITS.revocationsBytes).toBe(APP_FETCH_LIMITS.revocationsBytes);
+    expect(sync.LIMITS.revocationsBytes).toBe(APP_FETCH_LIMITS.revocationsBytes);
+    for (const url of [at("chess"), `${PINNED}/notes.ghostlyapp?x=1#y`]) {
+      expect(siteBesideUrl(url, "ghostly-revoke.json")).toBe(besideUrl(url, "ghostly-revoke.json"));
+      expect(sync.besideUrl(url, "ghostly-revoke.json")).toBe(besideUrl(url, "ghostly-revoke.json"));
+    }
+  });
+
+  it("leaves out a version a file beside a listing URL or a source revokes, and keeps it when the file is missing or does not verify", async () => {
+    const { bundles, indexBytes, sigBytes, files } = await world();
+    // Over the bound, the build keeps no copy of the large app's file (the next test).
+    delete files[revokeAt("large")];
+    const view = readStore({
+      index: indexBytes, sig: sigBytes,
+      bundles: Object.fromEntries(Object.entries(bundles).map(([name, b]) => [at(name), b.bytes])),
+      revocations: files,
+    }, NOW, STORE);
+    if (!view.ok) throw new Error(view.reason);
+    expect(Object.fromEntries(view.skipped.map((s) => [s.ref.slice(53), s.reason]))).toEqual({ listed: "revoked", sourced: "revoked" });
+    expect(view.apps.map((x) => x.name)).toEqual(["kept", "forged", "large"]);
+    // A snapshot written before the build read these files has none: nothing is revoked by them.
+    const old = readStore({ index: indexBytes, sig: sigBytes, bundles: Object.fromEntries(Object.entries(bundles).map(([name, b]) => [at(name), b.bytes])) }, NOW, STORE);
+    expect(old.ok && old.apps.length).toBe(5);
+  });
+
+  it("the build reads each file beside the listing URLs and the manifests' sources, with no file or one over the bound revoking nothing", async () => {
+    const { bundles, indexBytes, sigBytes, files } = await world();
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: indexBytes,
+      [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes,
+      ...Object.fromEntries(Object.entries(bundles).map(([name, b]) => [at(name), b.bytes])),
+      ...files,
+    };
+    const asked: string[] = [];
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      const bytes = served[url];
+      if (!bytes) return new Response("Not Found", { status: 404 });
+      // The large app's file says it is one byte over the app's bound.
+      const length = url === revokeAt("large") ? APP_FETCH_LIMITS.revocationsBytes + 1 : bytes.length;
+      return new Response(bytes, { headers: { "content-length": String(length) } });
+    };
+    const snap = await sync.fromStore(fetcher) as { bundles: Record<string, string>; revocations: Record<string, string>; problems: string[]; index: string; sig: string };
+    for (const name of ["kept", "listed", "sourced-repo", "sourced", "forged", "large"]) expect(asked, name).toContain(revokeAt(name));
+    expect(Object.keys(snap.revocations).sort()).toEqual([revokeAt("forged"), revokeAt("listed"), revokeAt("sourced-repo")]);
+    // A missing file is no problem (most publishers have none); one over the bound is.
+    expect(snap.problems).toEqual([`${revokeAt("large")}: larger than ${APP_FETCH_LIMITS.revocationsBytes} bytes`]);
+    const decode = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).map(([u, b]) => [u, new Uint8Array(Buffer.from(b, "base64"))]));
+    const view = readStore({ index: indexBytes, sig: sigBytes, bundles: decode(snap.bundles), revocations: decode(snap.revocations) }, NOW, STORE);
+    if (!view.ok) throw new Error(view.reason);
+    expect(view.apps.map((x) => x.name)).toEqual(["kept", "forged", "large"]);
+    expect(view.skipped.map((x) => [x.ref.slice(53), x.reason])).toEqual([["listed", "revoked"], ["sourced", "revoked"]]);
+  });
+
+  it("the build keeps no file whose body runs over the bound", async () => {
+    const { bundles, indexBytes, sigBytes } = await world();
+    const big = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes + 1);
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: indexBytes, [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes, [at("kept")]: bundles.kept!.bytes, [revokeAt("kept")]: big,
+    };
+    const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
+    const snap = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
+    expect(snap.revocations).toEqual({});
+    expect(snap.problems.some((p) => p.startsWith(`${revokeAt("kept")}: larger than`))).toBe(true);
+  });
+
+  it("the build bounds each publisher's files apart: one listed ahead that fills its share leaves another's revocation read", async () => {
+    // Two publishers share the total evenly. `mal` names one source: two files of 16 MiB beside its URLs, any bytes. `vic` comes after.
+    const m = signerOf("publisher m");
+    const mal = await buildAppBundle({ ...base("mal", "mal"), sources: [at("mal-1")] }, [page("mal")], m);
+    const vic = await buildAppBundle(base("vic", "vic"), [page("vic")], a);
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: STORE, name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: [
+        { ref: appRef(keyOf("publisher m"), "mal"), sequence: 1, digest: mal.digest, urls: [at("mal")], title: "mal", tagline: "mal" },
+        { ref: ref("vic"), sequence: 1, digest: vic.digest, urls: [at("vic")], title: "vic", tagline: "vic" },
+      ],
+      removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const filler = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes);
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: indexBytes, [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes, [at("mal")]: mal.bytes, [at("vic")]: vic.bytes,
+      ...Object.fromEntries(["mal", "mal-1"].map((name) => [revokeAt(name), filler])),
+      [revokeAt("vic")]: fileOf([await signAppRevocation({ ghostlyRevoke: 1, app: ref("vic"), upTo: 1 }, a)]),
+    };
+    const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
+    const snap = await sync.fromStore(fetcher) as { bundles: Record<string, string>; revocations: Record<string, string>; problems: string[] };
+    expect(snap.problems).toEqual([]);
+    expect(Object.keys(snap.revocations)).toContain(revokeAt("vic"));
+    const decode = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).map(([u, b]) => [u, new Uint8Array(Buffer.from(b, "base64"))]));
+    const view = readStore({ index: indexBytes, sig: sigBytes, bundles: decode(snap.bundles), revocations: decode(snap.revocations) }, NOW, STORE);
+    if (!view.ok) throw new Error(view.reason);
+    expect(view.apps.map((x) => x.name)).toEqual(["mal"]);
+    expect(view.skipped.map((x) => [x.ref.slice(53), x.reason])).toEqual([["vic", "revoked"]]);
+
+    // Past its own share, a publisher's next file is left out, and only its own.
+    served[revokeAt("mal-2")] = filler;
+    const more = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
+    served[at("mal")] = more.bytes;
+    const again = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
+    expect(again.problems).toEqual([`${revokeAt("mal-2")}: over the ${sync.LIMITS.revocationsTotalBytes / 2} bytes one publisher's revocation files may take`]);
+    expect(Object.keys(again.revocations)).toContain(revokeAt("vic"));
+  });
+
+  it("the build keeps all publishers' files under one total, however many keys list apps", async () => {
+    // Three publishers, each naming three sources: four files of 16 MiB each, 192 MiB in all, any bytes.
+    const names = ["p1", "p2", "p3"];
+    const signed = await Promise.all(names.map((n) => buildAppBundle({ ...base(n, n), sources: [1, 2, 3].map((k) => at(`${n}-${k}`)) }, [page(n)], signerOf(`publisher ${n}`))));
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: STORE, name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: names.map((n, i) => ({ ref: appRef(keyOf(`publisher ${n}`), n), sequence: 1, digest: signed[i]!.digest, urls: [at(n)], title: n, tagline: n })),
+      removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const filler = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes);
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: indexBytes, [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes,
+      ...Object.fromEntries(names.map((n, i) => [at(n), signed[i]!.bytes])),
+      ...Object.fromEntries(names.flatMap((n) => [n, `${n}-1`, `${n}-2`, `${n}-3`]).map((name) => [revokeAt(name), filler])),
+    };
+    const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
+    const snap = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
+    const kept = Object.values(snap.revocations).reduce((sum, b64) => sum + Buffer.from(b64, "base64").length, 0);
+    expect(kept).toBeLessThanOrEqual(64 * 1024 * 1024);
+    // An even share each: one file of each publisher, none left out for another's.
+    expect(Object.keys(snap.revocations).sort()).toEqual(names.map((n) => revokeAt(n)).sort());
+  }, 60_000);
 });

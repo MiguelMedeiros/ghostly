@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { identityStatement, newIdentityBinding, parseSshPublicKey, type IdentityStatement } from "@ghostly/core";
 import type { ExternalToolSigner, IdentityFetch, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -66,6 +67,14 @@ describe("SSH identity proofs", () => {
   it("takes a .pub line or a fingerprint as the subject", () => {
     expect(ssh.subject.normalize(`  ${mine.publicKey} me@laptop \n`)).toBe(fingerprint);
     expect(ssh.subject.normalize(fingerprint)).toBe(fingerprint);
+    // What `ssh-keygen -l -f key.pub` prints, "256 SHA256:… me@laptop (ED25519)", pasted as is.
+    for (const key of [mine, other, rsa]) {
+      const listed = execFileSync("ssh-keygen", ["-l", "-f", "-"], { input: `${key.publicKey} me and my laptop\n` }).toString();
+      expect(listed).toMatch(/^\d+ SHA256:\S{43} me and my laptop \((ED25519|ECDSA|RSA)\)\n$/);
+      expect(ssh.subject.normalize(listed)).toBe(parseSshPublicKey(key.publicKey).fingerprint);
+    }
+    const md5 = execFileSync("ssh-keygen", ["-l", "-E", "md5", "-f", "-"], { input: mine.publicKey }).toString();
+    expect(() => ssh.subject.normalize(md5)).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("-----BEGIN OPENSSH PRIVATE KEY-----")).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("ssh-dss AAAAB3NzaC1kc3MAAAA=")).toThrow(/Unsupported SSH key type "ssh-dss"/);
     expect(ssh.subject.short!(fingerprint)).toMatch(/^SHA256:.{8}….{4}$/);
@@ -83,6 +92,13 @@ describe("SSH identity proofs", () => {
     expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text), s))).subject).toBe(fingerprint);
   }, 20_000);
 
+  it("verifies the file route when the editor ended the statement with a Windows line ending, and nothing else added", async () => {
+    const s = statementFor(ssh, fingerprint);
+    expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, "\r\n"), s))).subject).toBe(fingerprint);
+    for (const ending of ["\n\n", "\r", " \n", "\r\n\r\n"])
+      await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, ending), s)), JSON.stringify(ending)).rejects.toThrow(/not over this statement/);
+  }, 20_000);
+
   it("refuses another namespace, another statement and another key, with a message a person can act on", async () => {
     const s = statementFor(ssh, fingerprint), paste = (text: string) => signer(ssh).parse(text, s);
     await expect(Promise.resolve().then(() => paste(mine.sign(s.text, "git")))).rejects.toThrow(/for "git", not "ghostly"/);
@@ -95,6 +111,21 @@ describe("SSH identity proofs", () => {
     // A pasted signature re-wrapped by a chat app or Windows still verifies.
     const messy = mine.sign(s.text).replace(/\n/g, "\r\n  ");
     expect(await verify(ssh, s, await paste(messy))).toMatchObject({ subject: fingerprint });
+  });
+
+  it("takes the signature copied from the terminal with what ssh-keygen printed around it", async () => {
+    const s = statementFor(ssh, fingerprint), signature = mine.sign(s.text);
+    // In a terminal, ssh-keygen's own lines (stderr) come before the armor (stdout); a security key adds two more.
+    for (const around of [
+      `Signing data on standard input\n${signature}`,
+      `$ printf '%s' '…' | ssh-keygen -Y sign -n ghostly -f ~/.ssh/id_ed25519\nSigning data on standard input\n${signature}$ `,
+      `Confirm user presence for key ED25519-SK ${fingerprint}\r\nUser presence confirmed\r\n${signature.replace(/\n/g, "\r\n")}`,
+    ]) {
+      const evidence = await signer(ssh).parse(around, s);
+      expect(evidence.signature).toBe((await signer(ssh).parse(signature, s)).signature);
+      expect(await verify(ssh, s, evidence)).toMatchObject({ subject: fingerprint });
+    }
+    await expect(Promise.resolve().then(() => signer(ssh).parse(`Signing data on standard input\n${signature.split("\n").slice(0, -2).join("\n")}`, s))).rejects.toThrow(/whole signature/);
   });
 
   it("links a GitHub account only while it publishes the signing key, asking api.github.com alone", async () => {

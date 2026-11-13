@@ -5,6 +5,13 @@ const R = 16.5;
 const AROUND = 2 * Math.PI * R;
 
 /**
+ * A media bubble's pill button (Accept, Download <size>, Pause, the speed) is drawn by its fill alone, and in forced
+ * colors (Windows Contrast themes) every fill is the page's: there it keeps a ButtonText edge. Solid, since the pills'
+ * `border-none` leaves the border style at none, under which a width alone draws nothing.
+ */
+export const FORCED_EDGE = "forced-colors:border forced-colors:border-solid forced-colors:border-[color:ButtonText]";
+
+/**
  * A ring around a round 36 px control: how much of a file has gone (`fraction`), or a turning arc while an action
  * waits for its answer (`busy`). Drawn in the text's colour, which reads on both bubbles in every theme.
  */

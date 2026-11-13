@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Language } from "../../lib/settings";
@@ -62,6 +62,8 @@ const request = () => screen.getByTestId("payment-request");
 /** A card by its type and network: `card("cashu-mainnet")`. */
 const card = (id: string) => screen.getByTestId(`payment-card-${id}`);
 const hint = () => screen.getByText((_, el) => !!el?.classList.contains("payment-back-hint"));
+/** The card back's line under its name: what it holds, and whom with. */
+const meta = () => screen.getByTestId("payment-back").querySelector(".payment-back-meta");
 /** The sheet's Mainnet | Testnet tab. */
 const tab = (network: WalletNetwork) => screen.getByTestId(`payment-tab-${network}`);
 /** The ids of the cards the deck shows. */
@@ -183,7 +185,7 @@ describe("the cards", () => {
     expect(card("lightning-mainnet")).not.toHaveTextContent("1,000");
     await user.click(card("lightning-mainnet"));
     // Turned over, it is the only card shown: what it can spend, as before.
-    expect(within(screen.getByTestId("payment-back")).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
   });
 
   it("starts on the card used last time, on its network's tab", () => {
@@ -243,7 +245,7 @@ describe("the cards", () => {
     expect(card("bark-testnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toBeDisabled();
     act(() => fakeEngine.update({ wallet: { ...fakeEngine.state.wallet, ark: arkReady() } }));
-    expect(await screen.findByText("Use Ark")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("payment-use")).toHaveTextContent("Use Ark"));
     expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
   });
 
@@ -263,7 +265,7 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-composer")).toHaveAttribute("data-network", "testnet");
     expect(within(back).getByText("Ark · Testnet")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Test money");
-    expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("5,000 test sats · with Alice");
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
 
@@ -274,7 +276,7 @@ describe("the cards", () => {
     expect(back).toHaveAttribute("data-network", "mainnet");
     expect(within(back).getByText("Cashu")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Real money");
-    expect(within(back).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
   });
 
   it("moves along the cards with the arrow keys and turns the chosen one over with Enter", async () => {
@@ -351,6 +353,27 @@ describe("the cards", () => {
     await user.keyboard("{Escape}");
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Escape drops an input method's candidate (Japanese, Chinese, Korean…): Chromium sends it while composing, WebKit
+  // right after the composition ended, as 229. It turned the card back, or closed the sheet, with the memo typed so far.
+  it("leaves an input method's Escape in the memo alone: the card stays turned, the sheet open", async () => {
+    rememberNetwork("peer", "testnet");
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    await waitFor(() => expect(amount()).toHaveFocus());
+    const memo = screen.getByRole("textbox", { name: "What for? (optional)" });
+    memo.focus();
+    fireEvent.compositionStart(memo);
+    fireEvent.keyDown(memo, { key: "Escape", isComposing: true });
+    fireEvent.compositionEnd(memo, { data: "" });
+    fireEvent.keyDown(memo, { key: "Escape", keyCode: 229 });
+    await act(async () => {});
+    expect(screen.queryByRole("radiogroup", { name: "Pay with" })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
   });
 
   it("never closes on a click inside, on the cards or on a turned card", async () => {
@@ -618,6 +641,12 @@ describe("sending Cashu from the chat's wallet", () => {
     }]);
     // With a wallet to review it, nothing goes out before the review is approved.
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("names the contact as the review's destination, not their key", async () => {
+    await sendCashu([mint(TEST_MINT, 500)], "30");
+    const review = await screen.findByRole("region", { name: "Payment review" });
+    expect(within(review).getByTestId("review-destination")).toHaveTextContent(/^Alice$/);
   });
 
   it("pays real sats from a real mint, on the Mainnet wallet", async () => {

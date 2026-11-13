@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.forward, headless.chat
 
 /**
@@ -8,14 +9,15 @@ import { callApi, type ApiContext } from "../src/api";
  * or group (synchronous work on the daemon's one thread, about 120 ms at 10,000 messages).
  */
 const link = (id: string, label: string) => ({ id, label, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" } }) as unknown as LinkView;
-const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, members: [] } as unknown as GroupView;
+const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
+  members: [{ key: "mine", role: "admin", me: true, online: true }, { key: "anakey", role: "member", me: false, online: true }] } as unknown as GroupView;
 const row = (linkId: string, id: string, fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId, id, text: "t " + id, sender: "peer", timestamp: 1, via: "datalink", ...fields });
 
 function fake() {
   const rows: StoredMessage[] = [row("chat-one", "peer_1"), row("chat-one", "peer_2"), row("group:g1", "k:0:1"), row("chat-two", "me_fwd", { sender: "me", delivery: "sent" }),
     row("chat-one", "me_1", { sender: "me", wireId: "W1", delivery: "delivered" }), row("group:g1", "mine:0:2", { sender: "me" })];
   const node = {
-    getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
@@ -173,6 +175,25 @@ describe("forward", () => {
     node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "peer_1" } });
     expect(node.forwardMessages).not.toHaveBeenCalled();
+  });
+
+  it("an id named twice is read once, and more than 30 messages or 5 chats are refused before any is read", async () => {
+    const { ctx, node } = fake();
+    // One id 50,000 times was read and guarded 50,000 times (a minute of the daemon's thread) for the one message the
+    // engine then forwarded.
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: Array(50_000).fill("peer_1").concat("peer_2"), to: ["Bob", "Bob", "chat-two"] });
+    expect(node.getMessage).toHaveBeenCalledTimes(2);
+    expect(node.forwardMessages).toHaveBeenCalledWith({ linkId: "chat-one", messageIds: ["peer_1", "peer_2"], to: ["chat-two"] });
+    node.getMessage.mockClear();
+    const many = Array.from({ length: 31 }, (_, i) => `peer_${i}`);
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: many, to: ["Bob"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward at most 30 messages at once, not 31" });
+    // The same chat or group by two names is one of the 5.
+    const state = node.getState();
+    node.getState = () => ({ ...state, links: [...state.links, ...["Cy", "Di", "Ed", "Flo"].map((name, i) => link(`chat-${i + 3}`, name))] });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "chat-two", "Crew", "group:g1", "Cy", "Di", "Ed"] });
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "Crew", "Cy", "Di", "Ed", "Flo", "nobody"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward to at most 5 chats and groups at once" });
+    expect(node.getMessage).toHaveBeenCalledOnce();
+    expect(node.forwardMessages).toHaveBeenCalledTimes(2);
   });
 });
 

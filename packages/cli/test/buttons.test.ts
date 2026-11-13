@@ -14,6 +14,7 @@ import { EventHub, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.buttons
 
 /** `send --button`, `group send --button` and `button update` (WISP 406 · Message Buttons), and `button.pressed`. */
@@ -32,7 +33,7 @@ function fake(links: LinkView[] = [link("chat-one", { label: "Alice", sessionOff
     return id;
   };
   const node = {
-    getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links, groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -188,6 +189,29 @@ describe("button update", () => {
     expect(params("button update", ["Alice", "me_1", "--text", "x", "--force"])).toMatchObject({ text: "x", force: true });
   });
 
+  it("refuses a blank new text before the engine is asked: the question keeps its words", async () => {
+    // The engine fills a card's blank text with its fallback line, so `--chosen yes --text "  "` (an empty variable
+    // with a space) turned the question into "Reply: Yes / No" on both sides, answered with exit 0.
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Ship it?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", chosen: "yes", text: "  " })).rejects.toMatchObject({ code: "bad_request", message: /blank/ });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: "\n\t" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    expect(rows("chat-one")[0]).toMatchObject({ text: "Ship it?" });
+  });
+
+  it("refuses a new text past 16 KiB as edit does, with its size, before the secret guard reads it", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
+    await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const long = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about " + "é".repeat(8193);
+    const bytes = new TextEncoder().encode(long).length;
+    for (const [chat, message] of [["Alice", "me_1"], ["Sala", "me_2"]])
+      await expect(callApi(ctx, "button.update", { chat, message, text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } });
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
   it("finds the message by the id both sides know too, and in a group", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
@@ -201,10 +225,10 @@ describe("button update", () => {
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Ok?", buttons: [{ id: "ok", label: "Ok" }] });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "nope", close: true })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", close: true })).rejects.toMatchObject({ code: "bad_request", message: /no buttons/ });
-    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2", chosen: "maybe" })).rejects.toMatchObject({ code: "bad_request", message: /no button "maybe"; its buttons: ok$/ });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2", chosen: "maybe" })).rejects.toMatchObject({ code: "not_found", message: /no button "maybe"; its buttons: ok$/ });
     // A button the message does not have: the answer lists the ones it has, as a press does.
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Deploy?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
-    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: "maybe" })).rejects.toMatchObject({ code: "bad_request", message: 'That message has no button "maybe"; its buttons: yes, no' });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: "maybe" })).rejects.toMatchObject({ code: "not_found", message: 'That message has no button "maybe"; its buttons: yes, no' });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "bad_request", message: /Nothing to update/ });
     expect(node.editMessage).not.toHaveBeenCalled();
   });
@@ -319,6 +343,8 @@ describe("presses in the stream", () => {
     expect(pressed[1]).toMatchObject({ replyId: "r3", inferred: true });
     // In a group the name is the one the member chose: under `untrusted` only.
     expect(pressed[2]).toMatchObject({ group: "g1", messageId: "gq", button: "go", label: "Go", by: "anakey", name: null, replyId: "gr1", untrusted: { name: "Ana" } });
+    // Said beside its reply's event, a press carries no reply: with --turns that event is the turn, and this none.
+    for (const press of pressed) { expect(press).not.toHaveProperty("message"); expect(toTurn(press)).toBeNull(); }
     // The reply's own event carries the press, and its replyTo the button.
     expect((events[1]!.message as Record<string, unknown>)).toMatchObject({ press: { messageId: "me_1", button: "yes", label: "Yes" }, replyTo: { id: "me_1", button: "yes", found: true } });
     // Once each: the same rows again say nothing.
@@ -378,7 +404,10 @@ describe("presses in the stream", () => {
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
     expect(events.map((e) => e.id)).toEqual(["group.message:g1:gr1", "button.pressed:g1:gr1"]);
-    expect(events[1]).toMatchObject({ group: "g1", messageId: "gq", button: "go", by: "anakey", replyId: "gr1" });
+    expect(events[1]).toMatchObject({ group: "g1", messageId: "gq", button: "go", by: "anakey", replyId: "gr1", message: { id: "gr1", text: "Go", member: "anakey", press: { messageId: "gq", button: "go" } } });
+    // With --turns it is the reply's turn, which its `group.message` did not start.
+    expect(toTurn(events[0]!)).toBeNull();
+    expect(toTurn(events[1]!)).toMatchObject({ source: "button.pressed", group: "g1", member: "anakey", press: { messageId: "gq", button: "go", label: "Go", by: "anakey" }, untrusted: { text: "Go", messageId: "gr1" } });
     // An edit of it later says the edit, not the press again.
     h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...whole, edit: { seq: 1, at: 2, history: [] } }] });
     expect(events.map((e) => e.type)).toEqual(["group.message", "button.pressed", "group.message.edited"]);
@@ -386,6 +415,17 @@ describe("presses in the stream", () => {
     const again = await hub("late-presses");
     again.h.baseline(state([], [group()]), new Map([["group:g1", [{ ...whole, edit: { seq: 1, at: 2, history: [] } }]]]));
     expect(again.events).toEqual([]);
+  });
+
+  it("a group reply whose press and mention of me come late together is one agent turn: the mention's, with the press", async () => {
+    const { h, events } = await hub("late-press-mention");
+    h.baseline(state([], [group()]), new Map([["group:g1", []]]));
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [row("group:g1", "gr1", { text: "@me Go", member: "anakey" })] });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [row("group:g1", "gr1", { text: "@me Go", member: "anakey", mentioned: true, press: { messageId: "gq", button: "go", label: "Go" } })] });
+    expect(events.map((e) => e.id)).toEqual(["group.message:g1:gr1", "button.pressed:g1:gr1", "group.mentioned:g1:gr1"]);
+    expect(events[1]).not.toHaveProperty("message");
+    expect(events.map((e) => toTurn(e)?.source ?? null)).toEqual([null, null, "group.mentioned"]);
+    expect(toTurn(events[2]!)!.press).toEqual({ messageId: "gq", button: "go", label: "Go", by: "anakey" });
   });
 
   it("an agent turn carries the press beside the untrusted text, and a plain turn none", () => {

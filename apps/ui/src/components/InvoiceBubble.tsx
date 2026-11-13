@@ -3,17 +3,18 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { MoneyQr } from "./MoneyQr";
 import { parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
-import { holdsLess, lightningNetworkFor } from "./walletCardData";
+import { CASHU_MINT_SOURCE, holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
 import { usePlatformValue, useWalletPlatform } from "../hooks/useServicesPlatform";
-import { servicesPlatform, type CashuInspection, type WalletNetwork } from "../lib/platform";
+import { servicesPlatform, type CashuInspection, type WalletNetwork, type WalletState } from "../lib/platform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { cardOn } from "../lib/chatPayments";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
+import { RichText } from "./rich/RichText";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
@@ -155,6 +156,25 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
   return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
 }
 
+type JournaledOp = NonNullable<WalletState["lightning"]>["recent"][number];
+/**
+ * The newest payment of this invoice the network's Lightning cards journaled (by payment hash), and the card's name.
+ * Not the card's own state: drawn again (another chat and back, a reload) it forgot a payment still in flight, and
+ * offered Pay and Open wallet as if nobody had paid it.
+ */
+function journaledPayment(state: WalletState | null | undefined, invoice: Bolt11Invoice): { op: JournaledOp; card?: string } | undefined {
+  const text = invoice.invoice.toLowerCase();
+  let found: { op: JournaledOp; card?: string } | undefined;
+  for (const card of [...(state?.lightnings ?? []), ...(state?.lightning ? [state.lightning] : [])]) {
+    for (const op of card.recent ?? []) {
+      const same = invoice.paymentHash ? op.paymentHash === invoice.paymentHash : op.invoice.toLowerCase() === text;
+      if (op.direction === "out" && same && (!found || op.createdAt > found.op.createdAt)) found = { op, card: card.name };
+    }
+  }
+  return found;
+}
+const IN_FLIGHT: JournaledOp["state"][] = ["sending", "pending", "unknown"];
+
 /**
  * `peerPubKey`: the contact told once it is paid (a test mint's invoice counts only on the payer's word): the chat's,
  * or in a group the writer's.
@@ -174,15 +194,33 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
   const id = useMemo(() => settledMoneyId(invoice.invoice.toLowerCase()), [invoice.invoice]);
-  const [paid, setPaid] = useSettled(id);
-  // Handed to the mint, which has not settled it yet: paying again could pay twice.
-  const [pending, setPending] = useState(false);
+  const [settledHere, setPaid] = useSettled(id);
+  const [error, setError] = useState<Problem | null>(null);
+  // Handed to the paying card, which has not settled it yet: paying again could pay twice. The wallet's journal says so
+  // for as long as it lasts; until it has this payment (one that started at `pendingSince` or later), the card does.
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
+  const journaled = journaledPayment(onNetwork?.getState(), invoice);
+  const current = journaled && (pendingSince === null || journaled.op.createdAt >= pendingSince) ? journaled.op : undefined;
+  const pending = current ? IN_FLIGHT.includes(current.state) : pendingSince !== null;
+  const paid = settledHere || current?.state === "paid";
+  // The wallet paid it: kept like a payment this card saw through, once the journal's recent list no longer has it.
+  useEffect(() => { if (paid && !settledHere) markSettled(id); }, [paid, settledHere, id]);
+  // Who holds it: the mint only when the Cashu mints pay, else the card by its name.
+  const holder = current ? { source: current.providerId, name: journaled?.card } : { source: wallet?.getState()?.lightning?.providerId, name: wallet?.getState()?.lightning?.name };
+  const pendingAt = !holder.source || holder.source === CASHU_MINT_SOURCE ? t("payments.invoice.pendingAtMint")
+    : holder.name ? t("payments.invoice.pendingAtCard", { card: holder.name }) : t("payments.invoice.pending");
+  // It ended unpaid while shown: Pay comes back, with why.
+  const failedOp = pending ? undefined : current?.state === "failed" ? current : undefined;
+  const wasPending = useRef(pending);
+  useEffect(() => {
+    if (wasPending.current && failedOp) setError(problemText(new Error(failedOp.error ?? "The Lightning payment did not go through."), t));
+    wasPending.current = pending;
+  }, [pending, failedOp, t]);
   // The invoice quoted rides with its quote: Paid is only ever kept for the invoice that was paid.
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number; id: string } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<Problem | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const { copied, failed, copy } = useMoneyCopy(invoice.invoice);
   useEffect(() => {
@@ -220,12 +258,13 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
 
   const pay = (payable: { quote: string; mint: string; id: string }, confirmedReal: boolean) =>
     run(async () => {
+      const started = Date.now();
       try {
         if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal, peerPubKey ? { peerPubKey, invoice: invoice.invoice } : undefined))) {
-          // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
+          // Pending: the wallet settles it, or gives the sats back, on its own.
           setQuote(null);
           setConfirming(false);
-          setPending(true);
+          setPendingSince(started);
           return;
         }
       } catch (e) {
@@ -245,21 +284,21 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
       tag={<NetworkTag network={network} testId="invoice-network" />}
       amount={invoice.amountSat}
       unit={satsIn(t, network)}
-      lines={[invoice.description, paid ? undefined : relativeExpiry(t, invoice.expiresAt, now), !mine && !paid && noWallet ? t(`payments.invoice.noWallet.${network}`) : undefined]}
+      lines={[invoice.description, paid || pending ? undefined : relativeExpiry(t, invoice.expiresAt, now), !mine && !paid && !pending && noWallet ? t(`payments.invoice.noWallet.${network}`) : undefined]}
       qr={`lightning:${invoice.invoice}`.toUpperCase()}
     >
       {paid ? (
         <span ref={target} tabIndex={-1} className="text-accent-hover chat-text-card-line font-bold self-center focus:outline-none" data-testid="invoice-paid">{t("payments.invoice.paid")}</span>
       ) : pending ? (
-        <span ref={target} tabIndex={-1} className="chat-text-card-line self-center text-text-primary/80 focus:outline-none" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
+        <span ref={target} tabIndex={-1} className="chat-text-card-line self-center text-text-primary/80 focus:outline-none" data-testid="invoice-pending">{pendingAt}</span>
       ) : quote && confirming && over === undefined ? (
-        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
+        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit: satsIn(t, network), fee: formatAmount(quote.feeReserve, t.language), feeUnit: satsIn(t, network, quote.feeReserve) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         // Each step's own buttons (keyed): reused across steps, the Cancel pressed would come back as Copy, focused.
         <Fragment key="quote">
           {over !== undefined && <p className="text-danger-ink chat-text-card-line m-0 basis-full" data-testid="invoice-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit: satsIn(t, network) })}</p>}
           <button ref={target} className={button} disabled={over !== undefined} {...working(busy)} data-testid="invoice-confirm" onClick={() => { if (busy) return; if (network === "mainnet") setConfirming(true); else void pay(quote, false); }}>
-            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
+            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), unit: satsIn(t, network), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
           <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>
         </Fragment>
@@ -491,7 +530,8 @@ export function InvoiceBubble({ money, mine, peerPubKey, payee }: { money: Money
   const off = !!method && offHere(method, network);
   return (
     <>
-      {money.rest && <p className="chat-text-message wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
+      {/* The words around the money read as any message's text: a spoiler among them stays covered. */}
+      {money.rest && <RichText text={money.rest} className="chat-text-message wrap-break-word whitespace-pre-wrap block m-0 mb-1.5" />}
       <Fragment key={whatItPays(money)}>
         {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={told} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={told} />} />}

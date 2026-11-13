@@ -2,6 +2,7 @@ import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileS
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { open as openFile, type FileHandle } from "node:fs/promises";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,14 @@ vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
   return {
     ...fs,
-    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); },
+    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); disk.synced++; },
+    fsync: (fd: number, done: (error: NodeJS.ErrnoException | null) => void) => {
+      syncs.count++;
+      if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
+      const end = (error: NodeJS.ErrnoException | null) => { disk.synced++; done(error); };
+      const go = () => fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
+      if (disk.held) void disk.held.then(go); else go();
+    },
     renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
     writeSync: (fd: number, bytes: Buffer, at = 0) => {
       if (faults.full) {
@@ -30,8 +38,16 @@ vi.mock("node:fs", async (original) => {
   };
 });
 
-/** What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full disk. */
-const faults = vi.hoisted(() => ({ rename: false, short: false, full: false }));
+/**
+ * What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full
+ * disk, a sync off the thread that fails.
+ */
+const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false }));
+/**
+ * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
+ * waits for first, when a test holds it. And the syncs done.
+ */
+const disk = vi.hoisted(() => ({ syncMs: 0, held: null as Promise<void> | null, synced: 0 }));
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -125,6 +141,58 @@ describe("persistent IndexedDB", () => {
     expect(await read(again.transaction("settings").objectStore("settings").get("seen:m1"))).toBe("delivered");
     expect(await read(again.transaction("settings").objectStore("settings").get("seen:m2"))).toBe("yes");
     expect(await read(again.transaction("messages").objectStore("messages").get(["a", "m1"]))).toMatchObject({ text: "hello" });
+  });
+
+  it("lets the transactions that commit while a sync runs share the next one, each `complete` after its entry is synced", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    // A disk that takes 10 ms a sync (#597's): one per transaction, one after another, held 8 sends in flight to the pace of 1.
+    disk.syncMs = 10;
+    // The first sync is held until the other 7 have committed (journaled, their `complete` not heard): a slow runner
+    // commits them more than 10 ms apart, and one that commits after the sync ended has a third one to itself.
+    let release = () => {};
+    disk.held = new Promise<void>((resolve) => { release = resolve; });
+    const journal = join(dir, "journal.bin");
+    const before = syncs.count, done = disk.synced;
+    // The syncs finished when each transaction's `complete` came: never before the one that covers it.
+    const heard: number[] = [];
+    try {
+      const all = Promise.all(Array.from({ length: 8 }, (_, at) => tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: `m${at}`, text: `text ${at}` }); })
+        .then(() => { heard.push(disk.synced - done); })));
+      for (const until = Date.now() + 5_000; Date.now() < until && !(existsSync(journal) && readFileSync(journal).includes("text 7"));) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(heard).toEqual([]);
+      release();
+      await all;
+    } finally { release(); disk.held = null; disk.syncMs = 0; }
+    expect(syncs.count - before).toBeLessThanOrEqual(2);
+    expect(heard[0]).toBeGreaterThanOrEqual(1);
+    expect(heard[heard.length - 1]).toBe(syncs.count - before);
+
+    // Crash: all of it is there.
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("messages").objectStore("messages").count())).toBe(8);
+  });
+
+  it("folds the store into a snapshot before the `complete`s go when a sync fails", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    await tx(d, ["settings"], (s) => { s.settings.put("before", "a"); });
+    const lines: string[] = [];
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation((line) => { lines.push(String(line)); return true; });
+    // A slow sync that fails, and a second transaction that commits while it runs: neither hears `complete` before the
+    // snapshot holds it (the journal it took the place of is gone by then).
+    const journalAt: boolean[] = [];
+    faults.sync = true;
+    disk.syncMs = 10;
+    try {
+      await Promise.all(["b", "c"].map((key) => tx(d, ["settings"], (s) => { s.settings.put("after", key); }).then(() => { journalAt.push(existsSync(join(dir, "journal.bin"))); })));
+    } finally { faults.sync = false; disk.syncMs = 0; errors.mockRestore(); }
+    expect(lines).toEqual([expect.stringContaining("EIO: i/o error, fsync")]);
+    expect(journalAt).toEqual([false, false]);
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("settings").objectStore("settings").getAll())).toEqual(["before", "after", "after"]);
   });
 
   it("drops an aborted transaction", async () => {
@@ -227,7 +295,7 @@ describe("persistent IndexedDB", () => {
 
   it("ignores a torn last journal entry (the process died mid-write)", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "1" }); });
     const header = Buffer.alloc(4); header.writeUInt32BE(1000);
@@ -238,7 +306,7 @@ describe("persistent IndexedDB", () => {
 
   it("stores Blobs as their bytes and gives them back as Blobs", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory);
     await tx(first, ["settings"], (s) => { s.settings.put({ blob: new Blob(["hello"], { type: "text/plain" }) }, "file"); });
     await store.flush();
@@ -251,7 +319,7 @@ describe("persistent IndexedDB", () => {
 
   it("keeps an upgrade and a deleted database", async () => {
     const dir = folder();
-    const store = await openPersistentIndexedDb(dir);
+    const store = await openPersistentIndexedDb(dir); opened.push(store);
     const first = await db(store.factory, "ghostly", 1);
     first.close();
     const upgraded = await new Promise<IDBDatabase>((resolve) => {
@@ -926,6 +994,8 @@ describe("messages kept in rows.db", () => {
     const file = new DatabaseSync(join(dir, "rows.db"));
     try { return Number((file.prepare("SELECT count(*) AS n FROM entries e JOIN trees t ON e.tree = t.id WHERE t.store = 'messages' AND t.idx = ?").get(idx) as { n: number }).n); } finally { file.close(); }
   };
+  /** Until the layers of the transactions finished so far are in rows.db: they go there 250 ms after (`APPLY_MS`). */
+  const applied = () => new Promise((resolve) => setTimeout(resolve, 300));
   const snapshotOf = (dir: string) => deserialize(readFileSync(join(dir, "snapshot.bin"))) as { format: number; databases: { name: string; stores: { name: string; records: unknown[]; onDisk?: boolean }[] }[] };
   const messagesIn = (dir: string) => snapshotOf(dir).databases.find((d) => d.name === "ghostly")!.stores.find((s) => s.name === "messages")!;
   const rawMessages = (factory: IDBFactory) => (factory as unknown as { _databases: Map<string, { rawObjectStores: Map<string, { records: { records: object } }> }> })._databases.get("ghostly")!.rawObjectStores.get("messages")!.records;
@@ -946,6 +1016,7 @@ describe("messages kept in rows.db", () => {
     expect(rawMessages(store.factory).records.constructor.name).toBe("SqlTree");
     const before = await all(store.factory);
     expect(before).toHaveLength(20);
+    await applied();
     expect(await entryCount(dir)).toBe(20);
     expect(await entryCount(dir, "byLink")).toBe(20);
     await store.compact();
@@ -1011,6 +1082,7 @@ describe("messages kept in rows.db", () => {
     opened.push(store);
     const d = await db(store.factory);
     for (let i = 0; i < 30; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+    await applied();
     const expected = await all(store.factory);
     const clone = vi.spyOn(globalThis, "structuredClone");
     const objects = d.transaction("messages").objectStore("messages");
@@ -1026,12 +1098,37 @@ describe("messages kept in rows.db", () => {
     // A value still in a transaction's layer (SQLite has not taken it) is the store's own: it is copied.
     const apply = vi.spyOn(TreeFile.prototype, "apply").mockImplementationOnce(() => { throw new Error("SQLITE_IOERR: disk I/O error"); });
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    try { await tx(d, ["messages"], (s) => { s.messages.put({ ...message(31), text: "late" }); }); } finally { apply.mockRestore(); stderr.mockRestore(); }
-    const late = await read(d.transaction("messages").objectStore("messages").get(["chat-1", "m031"])) as { text: string };
+    try { await tx(d, ["messages"], (s) => { s.messages.put({ ...message(31), text: "late" }); }); await applied(); } finally { apply.mockRestore(); stderr.mockRestore(); }
+    const late =await read(d.transaction("messages").objectStore("messages").get(["chat-1", "m031"])) as { text: string };
     late.text = "changed";
     for (const value of await all(store.factory) as { text: string }[]) value.text = "changed";
     expect(await read(d.transaction("messages").objectStore("messages").get(["chat-1", "m031"]))).toMatchObject({ text: "late" });
     expect(await all(store.factory)).toEqual([...expected, { ...message(31), text: "late" }].sort((a, b) => (a.linkId + a.id < b.linkId + b.id ? -1 : 1)));
+  });
+
+  it("takes the transactions that finish close together into SQLite at once, not each in a SQLite transaction of its own", async () => {
+    // Each SQLite transaction rewrites every page it touches: one per journal entry (a message's send, each delivery
+    // step, its read) wrote ~80 KB of rows.db's WAL per message, and checkpointed it on the daemon's thread every ~50.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    const apply = vi.spyOn(TreeFile.prototype, "apply");
+    try {
+      for (let i = 0; i < 20; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+      // Read before SQLite has them: from the layers.
+      expect(await all(store.factory)).toHaveLength(20);
+      // Killed now: the journal has them all, and the next start puts them in rows.db.
+      const crashed = copyOf(dir);
+      const second = await openPersistentIndexedDb(crashed);
+      opened.push(second);
+      expect(await all(second.factory)).toHaveLength(20);
+      expect(await entryCount(crashed)).toBe(20);
+      await vi.waitFor(async () => expect(await entryCount(dir)).toBe(20), { timeout: 2_000, interval: 20 });
+      expect(await entryCount(dir, "byLink")).toBe(20);
+      // The second open's own start is one more.
+      expect(apply.mock.calls.length).toBeLessThanOrEqual(3);
+    } finally { apply.mockRestore(); }
   });
 
   it("after a crash, replays what SQLite did not take, and skips what it did", async () => {
@@ -1043,10 +1140,11 @@ describe("messages kept in rows.db", () => {
     await store.compact();
     for (let i = 0; i < 5; i++) await tx(d, ["messages"], (s) => { s.messages.put({ ...message(i), text: "edited" }); });
     await tx(d, ["messages"], (s) => { s.messages.delete(["chat-0", "m006"]); s.messages.delete(IDBKeyRange.bound(["chat-1", "m007"], ["chat-1", "m007"])); });
+    await applied();
     // SQLite fails to take the last one: the journal has it, the layer stays in memory, reads find it.
     const apply = vi.spyOn(TreeFile.prototype, "apply").mockImplementationOnce(() => { throw new Error("SQLITE_IOERR: disk I/O error"); });
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    try { await tx(d, ["messages"], (s) => { s.messages.put({ ...message(9), text: "late" }); }); } finally { apply.mockRestore(); stderr.mockRestore(); }
+    try { await tx(d, ["messages"], (s) => { s.messages.put({ ...message(9), text: "late" }); }); await applied(); } finally { apply.mockRestore(); stderr.mockRestore(); }
     const expected = await all(store.factory);
     expect(expected).toHaveLength(8);
     expect(expected.find((m) => (m as { id: string }).id === "m009")).toMatchObject({ text: "late" });
@@ -1079,6 +1177,7 @@ describe("messages kept in rows.db", () => {
     t.abort();
     await new Promise((resolve) => { t.onabort = resolve; });
     expect((await all(store.factory)).map((m) => (m as { id: string }).id)).toEqual(["m099"]);
+    await applied();
     expect(await entryCount(dir)).toBe(1);
     d.close();
     d = await upgrade(store.factory, 2, (u) => { u.objectStore("messages").deleteIndex("byLink"); });
@@ -1239,6 +1338,26 @@ describe("messages kept in rows.db", () => {
     expect(held(close)).toEqual([]);
   });
 
+  it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
+    const dir = folder();
+    const factory = await open(dir);
+    const d = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("messages").createIndex("byU", "u", { unique: true }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 1 }, "a"); });
+    // Refused, and the transaction goes on (`preventDefault`): it commits having written nothing.
+    const refused = d.transaction("messages", "readwrite");
+    refused.objectStore("messages").put({ u: 1 }, "b").onerror = (event) => event.preventDefault();
+    await new Promise<void>((resolve, reject) => { refused.oncomplete = () => resolve(); refused.onabort = () => reject(refused.error); });
+    await tx(d, ["messages"], (s) => { s.messages.put({ u: 2 }, "c"); });
+
+    const again = await db(await open(dir));
+    expect(await read(again.transaction("messages").objectStore("messages").getAllKeys())).toEqual(["a", "c"]);
+  });
+
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
@@ -1346,6 +1465,48 @@ describe("messages kept in rows.db", () => {
     expect(await all(elsewhere.factory)).toEqual(before);
     const there = await db(elsewhere.factory);
     expect(await read(there.transaction("settings").objectStore("settings").get("mark"))).toBe("before");
+    there.close();
+    d.close();
+  });
+
+  it("a backup's export is serialized and written a page at a time, never whole, and restores as one snapshot", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    // An object held twice in one value, which v8 writes once and then as a reference to it: the copy reads the same.
+    const shared = { bytes: new Uint8Array([7, 7, 7]), list: [1, 2] };
+    await tx(d, ["messages", "settings"], (s) => {
+      for (let i = 0; i < 3000; i++) s.messages.put(i === 5 ? { ...message(i), a: shared, b: shared, c: new Map([["c", shared]]) } : message(i));
+      for (let i = 0; i < 3000; i++) s.settings.put({ i, text: `setting ${i} é漢`, ...(i % 1000 === 7 && { a: shared, b: [shared, shared.list] }) }, `k${i}`);
+    });
+    const before = await all(store.factory);
+    // The bytes handed to the export's file at once: each a buffer the export held whole.
+    const exported = join(folder(), "store.bin");
+    const handle = await openFile(join(folder(), "probe"), "w");
+    const file = Object.getPrototypeOf(handle) as FileHandle;
+    await handle.close();
+    const sizes: number[] = [];
+    const bytes = (data: unknown) => (Array.isArray(data) ? data.reduce((sum: number, part: Uint8Array) => sum + part.length, 0) : (data as Uint8Array).length);
+    const spies = (["write", "writev", "writeFile"] as const).map((method) => {
+      const original = file[method] as (...args: unknown[]) => unknown;
+      return vi.spyOn(file, method).mockImplementation(function (this: FileHandle, ...args: unknown[]) { sizes.push(bytes(args[0])); return original.apply(this, args); } as never);
+    });
+    try { await store.exportSnapshot(exported); } finally { for (const spy of spies) spy.mockRestore(); }
+    expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(statSync(exported).size);
+    // Built whole and serialized in one turn, the export held the store as objects and its serialized copy at once.
+    expect(Math.max(...sizes)).toBeLessThan(statSync(exported).size / 8);
+
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    expect(snapshotOf(copy).format).toBe(1);
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    expect(await all(elsewhere.factory)).toEqual(before);
+    const there = await db(elsewhere.factory);
+    expect(await read(there.transaction("messages").objectStore("messages").get(["chat-2", "m005"]))).toEqual({ ...message(5), a: shared, b: shared, c: new Map([["c", shared]]) });
+    expect(await read(there.transaction("settings").objectStore("settings").get("k2007"))).toEqual({ i: 2007, text: "setting 2007 é漢", a: shared, b: [shared, shared.list] });
+    expect(await read(there.transaction("settings").objectStore("settings").getAll())).toHaveLength(3000);
     there.close();
     d.close();
   });

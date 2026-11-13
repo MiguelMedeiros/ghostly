@@ -93,6 +93,50 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
 
+  it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    // Enter at once: no new preview made yet, the message's own goes with the edit.
+    let view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // The site fails now: the card stays as it was.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // Removed with ×, or another link: it does not go.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    fireEvent.click(screen.getByTestId("link-preview-remove"));
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+    view.unmount();
+    onSave.mockClear();
+    editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("look https://other.example/page");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://other.example/page", undefined));
+  });
+
   it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
     const fetch = sites();
     composer();
@@ -206,6 +250,19 @@ describe("a location card", () => {
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
   });
 
+  it("is not drawn for a place the text names only inside a spoiler: its coordinates would say what the spoiler hides", () => {
+    for (const text of ["meet me at ||geo:48.8584,2.2945||", "||meet at https://www.google.com/maps/@48.8584,2.2945,15z tonight||",
+      "> the place: ||geo:48.8584,2.2945||", "- *||https://www.openstreetmap.org/#map=15/48.8584/2.2945||*", "[||guess||](https://www.google.com/maps/@48.8584,2.2945,15z)"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+      expect(screen.queryByTestId("location-card"), text).toBeNull();
+      expect(document.body, text).not.toHaveTextContent("48.85840");
+      view.unmount();
+    }
+    // The same place outside the spoiler too: the bubble shows it, so its card tells nothing hidden.
+    renderApp(<MessageBubble message={{ id: "m14", text: "geo:48.8584,2.2945 or is it ||geo:48.8584,2.2945||", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+  });
+
   const torre = "meet me at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)";
 
   it("moves the focus to the map when Show map is used from the keyboard", async () => {
@@ -239,6 +296,30 @@ describe("a location card", () => {
       expect(screen.getByTestId("location-map")).toBeInTheDocument();
       expect(outside).toHaveFocus();
     } finally { outside.remove(); }
+  });
+
+  it("asks again before loading the map of another place a contact's edit names, and forgets a failed one's line", () => {
+    const at = (text: string, seq?: number) => ({ id: "m15", text, sender: "peer" as const, timestamp: 1_700_000_000_000,
+      ...(seq && { edit: { seq, at: 1_700_000_000_000 + seq, history: [] } }) });
+    const { container, rerender } = renderApp(<MessageBubble message={at(torre)} />);
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // Shown for the Torre de Belém: an edit to another place is not what Show map was pressed for.
+    rerender(<MessageBubble message={at("meet me at geo:48.8584,2.2945", 1)} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+    expect(container.querySelector("img[src*='openstreetmap']")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // The same place again (a typo fixed around it): the map stays as it was asked for.
+    rerender(<MessageBubble message={at("meet me there: geo:48.8584,2.2945", 2)} />);
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // A map that failed to load: its line is not said of the next place, which loads once asked.
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    rerender(<MessageBubble message={at(torre, 3)} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
   });
 
   it("names the map link's site cut at its start, as a preview's address", () => {

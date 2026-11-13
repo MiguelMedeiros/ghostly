@@ -72,15 +72,15 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="message-details-title" data-testid="message-details" data-side={phone ? "bottom" : "end"}
       data-loaded={view === undefined ? "no" : "yes"}
       className={`message-details-panel fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${
-        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "inset-y-0 end-0 w-[min(400px,100vw)] border-s"}`}>
+        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "end-panel inset-y-0 end-0 border-s"}`}>
       <div className="flex items-start gap-3 px-4 pt-3 pb-2 border-b border-border shrink-0">
         {phone && <div aria-hidden="true" className="absolute top-1.5 inset-x-0 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
         <div className="min-w-0 flex-1 pt-1">
           <h2 id="message-details-title" className="m-0 text-sm font-semibold text-text-primary">{t("chat.message.detailsTitle")}</h2>
-          {/* The message, as its bubble shows it: the panel belongs to it. */}
-          <div data-testid="message-details-excerpt" dir="auto" className={`mt-2 inline-block max-w-full rounded-[7.5px] px-[9px] py-[5px] text-[13px] leading-[18px] text-text-primary ${mine ? "bg-sent-bg" : "bg-received-bg"}`}>
+          {/* The message, as its bubble shows it: the panel belongs to it. Its text in its own direction, the kind in the app's. */}
+          <div data-testid="message-details-excerpt" className={`mt-2 inline-block max-w-full rounded-[7.5px] px-[9px] py-[5px] text-[13px] leading-[18px] text-text-primary ${mine ? "bg-sent-bg" : "bg-received-bg"}`}>
             <span data-testid="message-details-kind" className="me-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-primary/65">{model.kind}</span>
-            <span className="wrap-break-word">{excerpt}</span>
+            <span dir="auto" className="wrap-break-word">{excerpt}</span>
           </div>
         </div>
         <button type="button" data-testid="message-details-close" onClick={onClose} aria-label={t("chat.message.detailsClose")} title={t("chat.message.detailsClose")}

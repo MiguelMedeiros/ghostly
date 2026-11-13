@@ -83,6 +83,21 @@ export function useTransfer(fileId?: string) {
   return { platform: servicesPlatform, transfer: transfer ?? (known ? storedTransfers.get(fileId!)! : null), restoring: restoring || (stored && !known) };
 }
 
+/**
+ * What `select` reads of a file's transfer, re-rendering only when that changes by content: what needs only whether a
+ * file failed is not drawn again at each step of its progress, up to 20 a second. Nothing is read without a file.
+ */
+export function useTransferValue<T>(fileId: string | undefined, select: (transfer: FileTransferState | null) => T): T {
+  const subscribe = useCallback((listener: () => void) => (fileId && servicesPlatform?.subscribe(listener)) || (() => {}), [fileId]);
+  const last = useRef<{ value: T } | null>(null);
+  const snapshot = () => {
+    const now = select(fileId ? servicesPlatform?.getTransfer(fileId) ?? null : null);
+    if (!last.current || !sameValue(now, last.current.value)) last.current = { value: now };
+    return last.current.value;
+  };
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
 /** What a group file's record said while the engine showed no transfer for it, by file id: read once until one shows. */
 const storedTransfers = new Map<string, FileTransferState | null>();
 const storedReads = new Map<string, Promise<void>>();

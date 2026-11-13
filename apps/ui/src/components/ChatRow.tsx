@@ -14,7 +14,8 @@ import { PeerStatusMark, PresenceDot } from "./PresenceMarks";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, appCardsShown, cardLine, showsCard } from "../lib/statusCards";
+import { useAppsAvailable } from "../lib/apps/flag";
 import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
@@ -34,7 +35,9 @@ import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { unreadDot } from "./unreadDot";
 import { REORDER_KEYS } from "../hooks/useRowReorder";
+import { useEngineValue } from "../lib/engineState";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -59,11 +62,14 @@ const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" }
  */
 const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
 
-/** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
-export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
+/**
+ * Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. `acked`: a message
+ * without a delivery state (a compatibility chat's text) that the contact's acknowledgement covers, as its bubble says.
+ */
+export function DeliveryMark({ delivery, acked, live }: { delivery?: ChatMessage["delivery"]; acked?: boolean; live?: DhtOnlyBy }) {
   const words = useDeliveryWords();
-  const shape = deliveryShape(delivery);
-  const state = delivery ?? "sent";
+  const shape = deliveryShape(delivery, acked);
+  const state = delivery ?? (acked ? "delivered" : "sent");
   return (
     <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state, live)}
       className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
@@ -195,15 +201,21 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
  */
 function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
   return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
-    className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
+    className="current-mark pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
+/** `chat-list-row`: drawn only near the list's view (index.css), every row still in the page. */
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
+  `chat-list-row chat-list-row-${density} group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   /** The chat's session id: what its mute is kept under. */
   chatId: string;
+  /**
+   * A paired chat (`paired-chat/1`), whose bubbles draw an app card as a card where Apps shows; a v0.4 chat's show its
+   * text (`appCardsShown`), and so does its row.
+   */
+  paired?: boolean;
   density: ChatListDensity;
   active: boolean;
   /** What the contact goes by here (identities/contactFace.ts `shownContactName`), or the "Contact · xxxxxx" fallback when `named` is false. */
@@ -295,10 +307,19 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
   // A payment of the contact's this app refused: the app's line, in the app's language (not the stored English).
   const refused = p.lastMessage && refusedRowText(p.lastMessage, t);
-  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
-  const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
+  // An app card reads as its bubble shows it (appCardsShown): its card's line where the bubble draws the card, else its
+  // text. There, it names an app installed here as its bubble does (appCardLine): the list read, and the row drawn
+  // again. Elsewhere (Apps off, a v0.4 chat) nothing is asked of the engine.
+  const appCards = appCardsShown(p.paired ? p.chatId : undefined, useAppsAvailable());
+  const installed = useInstalledApps(appCards && p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
+  // A text of mine with no delivery state: delivered once the contact's acknowledgement covers it, by the link its
+  // bubble reads (platform/useChat.ts). Only that yes or no draws the row again.
+  const acked = useEngineValue(state => {
+    const m = p.lastMessage;
+    return m?.sender === "me" && !m.delivery && (state?.links.find(l => l.peerPubKeyZ32 === p.peerPubKey)?.peerAck ?? 0) >= m.timestamp;
+  });
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
@@ -369,13 +390,13 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} acked={acked} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
                 : payment ?? (p.lastMessage.paymentId ? storedPaymentLine(t, p.lastMessage.text, p.lastMessage.sender === "me")
-                  : appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
+                  : appCardLine(p.lastMessage.card, appCards, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t))}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -480,7 +501,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
             {/* Hidden from a screen reader, as the dot: the row's button says both (rowLabel). */}
             {mention && <span aria-hidden="true" data-testid="group-row-mention" data-muted={mentionQuiet || undefined} title={t("mentions.unread")}
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
-            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 ${unreadDot(muted)}`} />
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}

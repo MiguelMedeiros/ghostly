@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { pageOf } from "./support/messagePage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.replies
 
 /**
@@ -16,7 +17,7 @@ const reply = (to: string, snippet: string) => ({ replyTo: { id: "wire-" + to, s
 
 function fake(rows: StoredMessage[]) {
   const node = {
-    getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     messagePage: vi.fn(async ({ linkId, limit, before }: { linkId: string; limit: number; before?: string | number }) => pageOf(rows.filter((m) => m.linkId === linkId), { limit, before })),

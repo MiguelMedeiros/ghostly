@@ -47,6 +47,17 @@ describe("the site's invite reader agrees with the app's", () => {
     expect(checkInvite(device.toUpperCase())).toEqual({ ok: false, reason: "device", code: device });
   });
 
+  it("on a code copied with the sentence around it, as a link ghostly.tools/#ghostly1…. or …) brings it", () => {
+    const typo = inviteCode.slice(0, 20) + (inviteCode[20] === "q" ? "p" : "q") + inviteCode.slice(21);
+    for (const code of [inviteCode, inviteCode.toUpperCase(), typo]) {
+      for (const wrapped of [`${code}.`, `${code})`, `${code}).`, `${code}!`, `${code}…`, `<${code}>`, `«${code}»`, `"${code}",`, `Join me: ${code}`]) same(wrapped);
+    }
+    expect(checkInvite(`${inviteCode}).`)).toEqual({ ok: true, code: inviteCode });
+    expect(checkInvite(`${typo}.`)).toEqual({ ok: false, reason: "typo" });
+    // Not a sentence's mark: still read as part of the code, in both.
+    for (const tail of ["?utm_source=x", "&ref=x", "x"]) same(`${inviteCode}${tail}`);
+  });
+
   it("on arbitrary strings after ghostly1", () => {
     fc.assert(fc.property(fc.stringMatching(/^[qpzry9x8gf2tvdw0s3jn54khce6mua7l1bio]{0,240}$/), tail => same(`ghostly1${tail}`)), { numRuns: 400 });
   });

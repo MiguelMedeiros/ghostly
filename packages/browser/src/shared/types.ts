@@ -242,9 +242,10 @@ export interface StoredGroup {
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
    * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
    * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
-   * (`owedBye`).
+   * (`owedBye`). An admin that leaves keeps its `farewells` here too, and the edges to them: `heard`, when the admin my
+   * leave went to took it, and the tombstone stays for those farewells alone.
    */
-  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame; heard?: number };
   /**
    * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
    * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
@@ -1486,6 +1487,11 @@ export interface Settings {
    * Absent means yes; off, no presence is said (a set status still is), and a contact's is still shown.
    */
   sharePresence?: boolean;
+  /**
+   * Whether a headless daemon running this profile (the CLI's `settings set daemonPresence true`) says it is active
+   * while it runs, as a page does on input. Absent means no: kept only while on. The apps never read it.
+   */
+  daemonPresence?: boolean;
   /**
    * The status this profile set (availability, emoji, text, until when), said to every paired contact whose app offers
    * `status/1`. Set and cleared through `setOwnStatus`/`clearOwnStatus`, never a settings patch; this device's own.

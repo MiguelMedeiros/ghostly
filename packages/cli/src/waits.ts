@@ -1,5 +1,5 @@
-import type { StoredMessage } from "@ghostly/browser/shared/types";
-import { noMessage, nobodyJoinedChat, node, type ApiContext } from "./apiKit";
+import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import { noMessage, nobodyJoinedChat, node, state, type ApiContext } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { goesOn as goesOnIn } from "./waitNotice";
@@ -57,9 +57,32 @@ export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: s
 }
 
 /**
+ * A private group with no member but me (they all left, or nobody accepted an invitation yet): what I send there now
+ * reaches nobody, not even a member who joins later (a joiner reads nothing from before). A community's roster may not
+ * list every member yet, so only a private group counts.
+ */
+export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => alone(groupIn(ctx, groupId));
+
+/** A group as the engine shows it: `getState()` builds the whole engine view, so a poll reads it once. */
+const groupIn = (ctx: ApiContext, groupId: string): GroupView | undefined => state(ctx).groups?.find((g) => g.id === groupId);
+
+const alone = (group: GroupView | undefined): boolean => group?.profile === "mesh" && !group.members.some((m) => !m.me);
+
+/**
+ * Why I am no longer in a group (removed, say), or null while I am. A member removed while away learns it only after
+ * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
+ * out: it asks to be let in again by itself.
+ */
+const outOf = (group: GroupView | undefined): string | null =>
+  group?.status && group.status !== "active" && group.status !== "lost" ? group.statusReason ?? "You are not in this group" : null;
+
+/**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
- * private group, an edge to one of my hubs in a community.
+ * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no
+ * edge will ever take it, and the wait sat its whole time, then said "it goes when one opens" and exited 4, which a
+ * bot retries, sending it again each time. Refused as soon as I learn I am out of the group: it sat its whole time
+ * there too and said the same, though nothing goes any more.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
@@ -67,6 +90,10 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
     if (taken > 0) return taken;
+    const group = groupIn(ctx, groupId);
+    if (alone(group)) return taken;
+    const out = outOf(group);
+    if (out) throw new CliError("refused", `${out}: no member took it, and it no longer goes`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

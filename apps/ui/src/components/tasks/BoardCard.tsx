@@ -3,6 +3,7 @@ import { cardLinkHost, taskProgress } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
+import { formatAt } from "../../lib/time";
 import { STATUS_TONE, isFinished } from "../../lib/statusCards";
 import { boardCardLabel, chatNames, partsDone, progressText, type BoardGrouping, type BoardTask } from "../../lib/taskBoard";
 import type { PrChecks } from "@ghostly/core";
@@ -144,7 +145,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
             {card.pr?.files !== undefined && <><dt className="font-semibold">{t("cards.board.card.filesLabel")}</dt><dd className="m-0 tabular-nums">{card.pr.files}</dd></>}
             {card.tags && <><dt className="font-semibold">{t("cards.board.card.tagsLabel")}</dt><dd data-testid="board-card-tags" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{card.tags.join(", ")}</bdi></dd></>}
             <dt className="font-semibold">{t("cards.board.card.updatedLabel")}</dt>
-            <dd className="m-0">{new Date(task.at).toLocaleString(language, { dateStyle: "medium", timeStyle: "short" })}</dd>
+            <dd className="m-0">{formatAt(task.at, { dateStyle: "medium", timeStyle: "short" }, language)}</dd>
           </dl>
         )}
         {parts && task.parts && (
@@ -176,8 +177,8 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       {/* Progress along the card's foot: a still bar, never a spinner (an app nobody touches draws nothing). */}
       {progress !== undefined && (
         <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} data-testid="board-card-progress"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
-          <div className={`h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
+          className="progress-track pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
+          <div className={`progress-fill h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
         </div>
       )}
     </article>

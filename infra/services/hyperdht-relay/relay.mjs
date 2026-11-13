@@ -9,6 +9,11 @@ import { WebSocketServer } from 'ws'
 
 const require = createRequire(import.meta.url)
 
+// Every span of time the relay measures reads a monotonic clock, as the push relay's counts do: a host clock set back
+// (an NTP step, an operator fixing a clock that ran ahead) read as a refill an hour negative stopped reading each client
+// for that hour, so its pongs went unread and it was dropped, and kept the listens before the step in their minute.
+const monotonicNow = () => performance.now()
+
 /**
  * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
  * eight native listeners per app, and one per linked device) and dials a contact now and then; everything above that
@@ -70,11 +75,14 @@ export const DEFAULT_LIMITS = Object.freeze({
 /**
  * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
  * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
- * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
- * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
- * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ * its 3 nodes every 3 s, about one request a second per listen, all at once after a restart. Measured on loopback with
+ * the relay full (its own testnet, 20 s idle): listens / 12 left 400 to 900 pings waiting at 1,024 listens, and at 4,096
+ * and 8,192 a queue of 20,000 to 42,000 that kept growing, its timeouts bringing refreshes that queue more; listens / 2
+ * kept it empty (1,024 listens) or emptied it within seconds (8,192 at 2048). Never below dht-rpc's 80; at most 2048,
+ * which the defaults reach (512 × 16 / 2 is past it) and which keeps their 8,192 listens moving: a relay set for more
+ * is better split in two.
  */
-export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 2)))
 
 /**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
@@ -87,9 +95,13 @@ export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80,
  * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all. `onLeave(fail)` calls `fail`
  * when the browser leaves (at once if it has) and returns what forgets it: a wait on the client's `gone` itself stayed
  * there for every signature after it came, until the browser left.
+ * hyperdht's announcer also asks for one for a node whose answer had no token (seen with a few thousand listens through
+ * one relay): dht-relay cannot encode that request, and a client whose message cannot be sent is dropped (guardProtocol),
+ * every listen and dial with it. It is refused here, which fails that node's announcement only, as on a native node.
  */
 const SIGN_MS = 10_000
 const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) => {
+  if (token?.byteLength !== 32 || id?.byteLength !== 32) return Promise.reject(new Error('No token'))
   let timer
   let forget = () => {}
   return Promise.race([
@@ -133,6 +145,28 @@ async function holdsKey(keyPair, options, onLeave) {
   signable.set(NS.ANNOUNCE, 0)
   sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
   return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
+}
+/**
+ * Where a dial's stream goes. A far server that says it is open has HyperDHT connect the dial's UDX stream to the first
+ * public address it names, whatever that is, and send it everything the client writes: through the relay, anyone could
+ * have its node send UDP to any public host and port, from the relay's address. The public addresses a far server names
+ * are dropped from its reply to a dial here, so HyperDHT connects to the address the DHT node that relayed the handshake
+ * saw it at (an open server names that one itself). Its private ones stay: HyperDHT tries them only on a LAN, by a ping.
+ * Every other way a dial connects follows a packet from the far peer.
+ */
+const { isBogon } = hyperdht('bogon')
+const NoiseWrap = hyperdht('./lib/noise-wrap.js')
+const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
+const reached = payload => payload?.addresses4?.length ? { ...payload, addresses4: payload.addresses4.filter(address => isBogon(address.host)) } : payload
+const reachedOnly = create => (...args) => {
+  const handshake = create(...args)
+  const recv = handshake.recv.bind(handshake)
+  // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
+  handshake.recv = (...message) => {
+    const payload = recv(...message)
+    return typeof payload?.then === 'function' ? payload.then(reached) : reached(payload)
+  }
+  return handshake
 }
 const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
 
@@ -198,7 +232,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
-        const now = Date.now()
+        const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
@@ -225,12 +259,12 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
-        const now = Date.now()
+        const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
-        return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
+        return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
@@ -577,7 +611,7 @@ export async function startRelay(options = {}) {
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
   const onresponse = dht.io.onresponse
-  dht.io.onresponse = (...args) => { answeredAt = Date.now(); return onresponse(...args) }
+  dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
   if (dht.toArray().length === 0) log('bootstrap reached no node')
 
@@ -638,23 +672,32 @@ export async function startRelay(options = {}) {
    */
   const madeRoom = new Map()
   const makeRoom = address => {
-    if (Date.now() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
+    if (monotonicNow() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
     const own = perAddress.get(address)?.size ?? 0
     let most = null
     for (const held of perAddress.values()) if (!most || held.size > most.size) most = held
     if (!most || most.size <= own + 1) return null
     const [[, evict]] = most
-    return () => { madeRoom.set(address, Date.now()); evict() }
+    return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
   const forgetRoom = setInterval(() => {
-    for (const [address, at] of madeRoom) if (Date.now() - at >= ROOM_MS) madeRoom.delete(address)
+    for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
+  // Set as close() starts: while it waits for its clients, a client that redials on its 1001 would be let in again and
+  // cut with 1006 at the end of the wait, and a health check would keep sending new ones.
+  let stopping = false
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     // A GET or a monitor's HEAD (Node sends no body for it), with or without a query string, as the push relay reads it.
-    if ((request.method === 'GET' || request.method === 'HEAD') && request.url.split('?')[0] === '/healthz') {
+    const health = (request.method === 'GET' || request.method === 'HEAD') && request.url.split('?')[0] === '/healthz'
+    if (health && stopping) {
+      response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: false, stopping: true }))
+      return
+    }
+    if (health) {
       // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
       // Anyone may read it (behind a proxy every caller is on loopback), so only the node's state: the client counts
       // and the time of the last answer move with each browser, and on a small relay would tell when one opens the app.
@@ -679,13 +722,14 @@ export async function startRelay(options = {}) {
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.
-    const refuse = (status, why) => {
+    const refuse = (status, why, headers = '') => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
       if (why) refusals.line('refused', why)
       socket.on('error', () => {})
-      socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
+      socket.end(`HTTP/1.1 ${status}\r\n${headers}Connection: close\r\n\r\n`)
     }
+    if (stopping) return refuse('503 Service Unavailable', 'stopping', 'Retry-After: 1\r\n')
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     const room = clients.size >= limits.clients ? makeRoom(address) : undefined
     if (room === null) return refuse('503 Service Unavailable', 'full')
@@ -749,10 +793,10 @@ export async function startRelay(options = {}) {
     }
     // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
-    let last = Date.now()
+    let last = monotonicNow()
     let paused = false
     const spend = bytes => {
-      const now = Date.now()
+      const now = monotonicNow()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
       last = now
       tokens -= bytes
@@ -850,12 +894,13 @@ export async function startRelay(options = {}) {
     stats: () => ({
       clients: clients.size,
       ...stats,
-      sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt,
+      sinceAnswerMs: answeredAt === null ? null : monotonicNow() - answeredAt,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
-    // one that has not closed within `stopMs` is cut.
+    // one that has not closed within `stopMs` is cut. Meanwhile a new client is refused (503) and /healthz reads 503.
     async close({ stopMs = 1000 } = {}) {
+      stopping = true
       for (const ws of clients) ws.close(1001, 'The relay is stopping')
       if (clients.size) {
         let timer
@@ -896,7 +941,7 @@ export function originOf (entry) {
  * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
  * sending a new value each time cannot flood it.
  */
-export function originRefusals (log, { most = 16, now = Date.now } = {}) {
+export function originRefusals (log, { most = 16, now = monotonicNow } = {}) {
   let seen = new Set()
   let since = now()
   let full = false

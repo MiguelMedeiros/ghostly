@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.group-admin, headless.identities
 
 /**
@@ -17,7 +18,7 @@ function fake() {
   ] as unknown as LinkView[];
   const groups = [{ id: "grp-crew", name: "Crew", profile: "group/1", status: "active", isAdmin: true, canSend: true, members: [], lastMessageAt: null }];
   const node = {
-    getState: () => ({ links, groups, settings: {}, transport: {}, identityProofs: [{ id: "proof-1" }] }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links, groups, settings: {}, transport: {}, identityProofs: [{ id: "proof-1" }] }) as unknown as EngineState,
     inviteToGroup: vi.fn(async () => {}),
     shareIdentityProof: vi.fn(async () => {}),
   };

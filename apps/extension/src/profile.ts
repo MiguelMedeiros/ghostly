@@ -1,4 +1,4 @@
-import { activeProfileId, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
+import { activeProfileId, announceSwitch, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one
@@ -59,6 +59,8 @@ export function finishBeforeSwitching(work: () => Promise<unknown> | null): void
  * Starts this page again as the profile in use, on the page that profile was left on, as the tab that switched does
  * (`switchProfile`). The address this page showed belongs to the profile before the switch: a chat or group of its
  * own reads as gone from this device in the other one. Once what it has to finish is over.
+ * Under the profile's overlay, as on the tab that switched: until the reload lands, this page re-reads the registry and
+ * showed the old profile's page under the new one's name and picture.
  */
 export function startAsProfileInUse(): void {
   const work = unfinished();
@@ -66,6 +68,7 @@ export function startAsProfileInUse(): void {
     void work.catch(() => {}).then(startAsProfileInUse);
     return;
   }
+  announceSwitch(activeProfileId());
   history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
   location.reload();
 }

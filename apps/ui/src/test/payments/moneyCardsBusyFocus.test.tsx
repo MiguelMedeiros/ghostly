@@ -8,7 +8,7 @@ import { PaymentReview } from "../../components/PaymentReview";
 import { servicesPlatform, type WalletPlatform } from "../../lib/platform";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { lightningSource, liveMainnetInvoice, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, TEST_MINT } from "./fixtures";
+import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, mint, REAL_MINT, reviewOf, TEST_MINT } from "./fixtures";
 import { bcrt1q } from "./moneyFormatFixtures";
 
 // covers: payments.lightning.invoice-card, payments.cashu.token-card, payments.chat.review, payments.lightning.request, payments.cashu.reclaim, payments.money.onchain-card
@@ -125,7 +125,7 @@ describe("a request in the chat", () => {
   });
 
   it("over Lightning: the review takes the keys, Approve is busy where pressed and keeps them after a refusal, Cancel hands them back", async () => {
-    const { user, engine } = show({ kind: "request", direction: "in", amount: 250_000, invoice: REGTEST_INVOICE }, { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) });
+    const { user, engine } = show({ kind: "request", direction: "in", amount: 250_000, invoice: liveRegtestInvoice(250_000) }, { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) });
     const paid = later<void>();
     engine.on("walletQuoteInvoice", () => ({ quote: "q-1", mint: "", amount: 250_000, feeReserve: 5, source: "fake-lightning" })).on("payRequest", () => paid.promise);
     await press(user, reviewButton());

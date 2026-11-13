@@ -32,6 +32,7 @@ const message = (id: string, fields: Partial<StoredMessage> = {}): StoredMessage
 function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    getSettings: () => ({}),
     groupMessages: vi.fn(async () => messages),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:7" })),
@@ -169,6 +170,29 @@ describe("group rename", () => {
   });
 });
 
+describe("group link", () => {
+  it("turns the link on only for a real true (or on left out), and refuses an on that is no boolean", async () => {
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    // A word or a number read as "not false" turned the link on and answered it: whoever holds it joins.
+    for (const on of ["false", "off", 0, 1, "true", {}]) {
+      await expect(callApi(ctx, "group.link", { group: "Crew", on }), JSON.stringify(on)).rejects.toMatchObject({ code: "bad_request", message: "on must be true or false" });
+    }
+    // Off with a new link is no request at all, as `group link --off --reset` is refused.
+    await expect(callApi(ctx, "group.link", { group: "Crew", on: false, reset: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // null reads as false, as every other boolean parameter reads it.
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: false })).toEqual({ group: "g1", link: null });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: null })).toEqual({ group: "g1", link: null });
+    expect(disableGroupLink).toHaveBeenCalledTimes(2);
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK });
+    expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
+  });
+});
+
 describe("group remove", () => {
   it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
     const { ctx, node } = fake();
@@ -210,6 +234,19 @@ describe("an invitation not yet joined", () => {
     // A group joined is as before.
     await callApi(ctx, "group.rename", { group: "Crew", name: "Crew 2" });
     expect(node.renameGroup).toHaveBeenCalledWith({ groupId: "g1", name: "Crew 2" });
+  });
+});
+
+describe("an invitation that will not go on by itself", () => {
+  it("says a link join nobody answered and an invitation taken back, which read as a live invitation", () => {
+    const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
+      invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
+    expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
+      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true });
+    expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
+      .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
+    // One still going on is as before, with neither.
+    expect(groupJson(invited({ linkId: "chat-ana" })).invitation).toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null });
   });
 });
 

@@ -323,6 +323,14 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     }
   });
 
+  it("a web+ghostly: link with the profile's name, opened while the app is open, names the profile without the scheme", () => {
+    const device = code();
+    // As the router's intake hands it over: the path, escaped (the installed app's `/#%s`) or as written, then the hash.
+    for (const named of [`#${encodeURIComponent(`web+ghostly:Work#${device}`)}`, `#web+ghostly:Work#${device}`, `#web+ghostly://Work#${device}`]) {
+      expect(readDeviceLink(named), named).toEqual({ code: device, profile: "Work" });
+    }
+  });
+
   it("leaves a chat invite and a route alone, for the router", () => {
     window.history.replaceState(null, "", "#/settings");
     takeDeviceLinkFromAddress();
@@ -451,6 +459,23 @@ describe("a profile made for a code", () => {
     expect(sessionStorage.getItem(JOIN_REQUEST)).toBeNull();
   });
 
+  it("a screen reader hears the digits once, one by one, from a line there before they come", async () => {
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    renderApp(<JoinHost />);
+    await screen.findByTestId("device-join-connecting");
+    // A live region is read out when its text changes, not when it comes with the step: the line is there, empty, first.
+    const spoken = screen.getByTestId("device-join-spoken");
+    expect(spoken).toHaveAttribute("role", "status");
+    expect(spoken).toHaveTextContent(/^$/);
+    fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "confirm", digits: "482913" }));
+    await waitFor(() => expect(spoken).toHaveTextContent("Check that your other device shows the same digits. 4 8 2 9 1 3"), { timeout: 3_000 });
+    expect(screen.getByTestId("device-join-spoken")).toBe(spoken);
+    // Said once: no other live region holds them.
+    const regions = screen.getAllByRole("status").filter((region) => /4\s*8\s*2/.test(region.textContent ?? ""));
+    expect(regions).toEqual([spoken]);
+  });
+
   it("once added, opens the standby screen by itself, the lock handed over across that reload", async () => {
     const hash = await hashPassword("a long lock password");
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: hash, timeoutMinutes: 5 } }));
@@ -472,6 +497,28 @@ describe("a profile made for a code", () => {
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
       expect(JSON.parse(sessionStorage.getItem(HANDOVER)!)).toMatchObject({ profile: activeProfileId(), hash });
       expect(nameStepPending()).toBe(false);
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
+  it("goes on while the browser asks the person whether to keep its data, and opens once they say yes", async () => {
+    const reload = catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    // Firefox's storage.persist() answers once the person does, in a prompt of its own.
+    let answer: (kept: boolean) => void = () => {};
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => false, persist: () => new Promise<boolean>((resolve) => { answer = resolve; }) } });
+    try {
+      renderApp(<JoinHost />);
+      await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+      // Added while the prompt is still up: no reload under it, and no warning before the answer.
+      fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "done", device: "MacBook" }));
+      expect(await screen.findByTestId("device-join-continue", {}, { timeout: 3_000 })).toBeVisible();
+      expect(screen.queryByTestId("device-join-persist")).toBeNull();
+      // Past the pause the dialog takes before it opens the standby screen by itself.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(reload).not.toHaveBeenCalled();
+      act(() => answer(true));
+      await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
 

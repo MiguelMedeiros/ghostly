@@ -10,7 +10,8 @@ import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
 import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
-import { ghostly } from "./support/cli";
+import { ghostly, Running } from "./support/cli";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.hooks, headless.events
 
 /**
@@ -73,7 +74,12 @@ describe("--type", () => {
   it("a first word that is no family is a usage error naming them; a type no event has is said on stderr", () => {
     const warned: string[] = [];
     const check = (...types: string[]) => checkTypes(types, (line) => warned.push(line));
-    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received", "agent.turn")).not.toThrow();
+    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received")).not.toThrow();
+    expect(warned).toEqual([]);
+    // agent.turn comes only from --turns, which takes the place of --type: one kept alone was a listener silent for good.
+    for (const type of ["agent.turn", "agent", "agent.", "agent.*", "agent*"]) {
+      expect(() => check(type), type).toThrow(`No event is of type ${type} without --turns: ghostly listen --turns gives agent.turn events, in the place of --type`);
+    }
     expect(warned).toEqual([]);
     for (const type of ["bogus", "messages.received", "bogus.", "bogus*", ".message"]) {
       const error = (() => { try { check(type); } catch (e) { return e; } })();
@@ -175,6 +181,20 @@ describe("agent turns", () => {
     expect(toTurn(received("c1", "p5", "Deploy", { press }))).toMatchObject({ source: "message.received", chat: "c1", press: { ...press, by: "c1" } });
     expect(toTurn(received("c1", "p6", "hi"))).not.toHaveProperty("press");
   });
+
+  it("a member's press the engine learned late (its group.message pressed nothing) is one turn, with who pressed", () => {
+    const press = { messageId: "q1", button: "go", label: "Deploy" };
+    const first = groupMessage("g1", "p1", "Deploy");
+    expect(toTurn(first)).toBeNull();
+    // The author's whole copy completed it: `button.pressed` carries the reply, as the group's events give it.
+    const late = other("button.pressed", { group: "g1", ...press, by: KEY, name: null, replyId: "p1", untrusted: { name: "Carol" }, message: { ...first.message as object, press } });
+    expect(toTurn(late)).toEqual({
+      seq: late.seq, id: `agent.turn:button.pressed:g1:${turnRef("g1", "p1")}`, type: "agent.turn", at: 5, source: "button.pressed", group: "g1", member: KEY, messageId: turnRef("g1", "p1"), timestamp: 4,
+      press: { ...press, by: KEY }, untrusted: { text: "Deploy", name: "Carol", messageId: "p1" },
+    });
+    // The press said beside its reply's own event carries no reply: that event's turn has it already.
+    expect(toTurn(other("button.pressed", { group: "g1", ...press, by: KEY, name: null, replyId: "p2", untrusted: { name: "Carol" } }))).toBeNull();
+  });
 });
 
 describe("hooks", () => {
@@ -195,8 +215,8 @@ describe("hooks", () => {
     expect((JSON.parse(lines[1]) as { untrusted: { text: string } }).untrusted.text).toBe(text);
   });
 
-  it("run without the backup passphrase in their environment", () => {
-    const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
+  it("run without the backup passphrase or the webhook's URL in their environment", () => {
+    const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_WEBHOOK: "http://127.0.0.1:1/hook?token=s3cret", GHOSTLY_PROFILE: "bot" });
     expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
   });
 
@@ -212,7 +232,7 @@ describe("hooks", () => {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
       await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
-      expect(asked).toBeGreaterThan(0);
+      expect(asked).toBe(1);
       expect(elsewhere).toEqual([]);
     } finally {
       stderr.mockRestore();
@@ -389,7 +409,7 @@ describe("hooks", () => {
     expect(asCliError(named).toJSON()).toEqual({ code: "unavailable", message: "No room left for /x/p.backup: free some space, then try again", details: { reason: "no_space", errno: "EDQUOT", path: "/x/p.backup" } });
   });
 
-  it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
+  it("an event the webhook refuses (a 4xx) is posted once and passed: said on stderr, the cursor moves on", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
     let asked = 0;
     const bridge = createServer((request, response) => { asked++; request.resume(); response.writeHead(400).end(); });
@@ -400,7 +420,8 @@ describe("hooks", () => {
       const event = received("c1", "p", "poison");
       handle(event);
       await handle.idle();
-      expect(asked).toBe(3);
+      // Once, as stderr says: before, three times with backoff, three 400s in the bridge's log for "not tried again".
+      expect(asked).toBe(1);
       // The bridge (its origin: a token in the path or query stays off stderr), what it answered, and that the event
       // will not come again: a wrong path or a missing token is seen by its status.
       const said = stderr.mock.calls.map(([text]) => String(text)).join("");
@@ -493,6 +514,27 @@ describe("the allowlist", () => {
     expect(peerOf.mock.calls.filter(([chat]) => chat === "c1")).toHaveLength(1);
   });
 
+  it("a contact key passes its chat's removal by the key it carries: the chat is gone, so its lookup fails", async () => {
+    const list = new Allowlist(new Set(), new Set([KEY]), new Set(), async () => { throw new CliError("not_found", "No chat c1"); });
+    expect(await list.allows(other("chat.removed", { chat: "c1", peer: KEY }))).toBe(true);
+    expect(await list.allows(other("chat.removed", { chat: "c2", peer: OTHER_KEY }))).toBe(false);
+    // Only a removal's: no other event names the chat's contact by it.
+    expect(await list.allows(other("chat.renamed", { chat: "c3", peer: KEY }))).toBe(false);
+  });
+
+  it("a group's payment passes its group, whichever link it names; a chat's payment its chat", async () => {
+    const payment = (chat: string, group?: string) => other("payment.created", { chat, payment: { id: "p", chat, kind: "request", ...(group ? { group } : {}) } });
+    const groups = new Allowlist(new Set(), new Set(), new Set(["g1"]), async () => null);
+    expect(await groups.allows(payment("group:g1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("cpay:g1:m", "g1"))).toBe(true);
+    expect(await groups.allows(payment("c1", "g1"))).toBe(true);
+    expect(await groups.allows(payment("group:g2", "g2"))).toBe(false);
+    expect(await groups.allows(payment("c1"))).toBe(false);
+    const chats = new Allowlist(new Set(["c1"]), new Set(), new Set(), async () => null);
+    expect(await chats.allows(payment("c1"))).toBe(true);
+    expect(await chats.allows(payment("c1", "g1"))).toBe(false);
+  });
+
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
@@ -574,7 +616,7 @@ describe("listen with an allowlist and --turns", () => {
     const chat = [{ id: "peer_older", sender: "peer", text: "old", timestamp: 1 }, { id: theirs, sender: "peer", text: "which?", timestamp: 2, card: { kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes" }] } }];
     const crew = [{ id: inGroup, sender: "peer", text: "@me hi", timestamp: 2 }];
     const node = {
-      getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
+      chatView: chatViewOf, getState: () => ({ links: [{ id: "c1", peerPubKeyZ32: KEY, label: "Alice", pairing: { status: "ready" } }], groups: [{ id: "g1", name: "Crew", members: [] }], settings: {}, transport: {} }),
       // The newest page holds only the group's message and the chat's old one: the turn's is found in the whole history.
       messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: linkId === "c1" ? chat.slice(0, 1) : crew, more: linkId === "c1" })),
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
@@ -604,6 +646,11 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.pressButton).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs, buttonId: "yes" });
     await callApi(ctx, "chat.delete", { chat: "c1", message: ref });
     expect(node.deleteMessage).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs });
+    // History's cursors: the context before or after a turn; a timestamp stays a timestamp.
+    await callApi(ctx, "chat.history", { chat: "c1", before: ref, after: 1 });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "c1", limit: 50, before: theirs, after: 1 });
+    await callApi(ctx, "group.history", { group: "g1", after: groupRef });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "group:g1", limit: 50, before: undefined, after: inGroup });
 
     // A stored id still names its message; a turn's id of another chat, or of no message, names none here.
     await callApi(ctx, "chat.react", { chat: "c1", message: theirs, emoji: "👍" });
@@ -766,4 +813,53 @@ describe("listen with an allowlist and --turns", () => {
     }
     expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 2, json: { error: { code: "usage", message } } })));
   });
+
+  // A long-running listen's arguments are every local account's to read (`ps`, /proc/<pid>/cmdline): the bridge's
+  // token comes in GHOSTLY_WEBHOOK, out of them, and an argv URL that carries one is warned of.
+  it("GHOSTLY_WEBHOOK gives the webhook's URL out of the arguments, and nothing repeats the URL it is given", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const runs: [string[], NodeJS.ProcessEnv, string][] = [
+      [["--webhook", "http://127.0.0.1:1/hook"], { GHOSTLY_WEBHOOK: "http://127.0.0.1:1/hook?token=s3cret" }, "A webhook is set in GHOSTLY_WEBHOOK and --webhook was given: choose one"],
+      [[], { GHOSTLY_WEBHOOK: " " }, "GHOSTLY_WEBHOOK is empty: it holds the webhook's URL"],
+      [[], { GHOSTLY_WEBHOOK: "127.0.0.1:1/hook?token=s3cret%" }, "GHOSTLY_WEBHOOK is not a URL"],
+      [["--webhook", "127.0.0.1:1/hook?token=s3cret%"], {}, "--webhook is not a URL"],
+    ];
+    for (const [args, env, message] of runs) {
+      const result = await ghostly(["--home", dir, "listen", ...args], { env });
+      expect(result.code, message).toBe(2);
+      expect(result.json).toEqual({ error: { code: "usage", message } });
+      expect(result.stdout + result.stderr).not.toMatch("s3cret");
+    }
+    // Said once on stderr, the token not in it.
+    const onLine = new Running(["--home", dir, "listen", "--webhook", "http://127.0.0.1:1/hook?token=s3cret"]);
+    try {
+      await vi.waitFor(() => expect(onLine.stderr).toMatch("--webhook's URL shows in ps to every account on this machine while listen runs, a token in it too: give it in GHOSTLY_WEBHOOK instead"), { timeout: 10_000, interval: 100 });
+      expect(onLine.stderr).not.toMatch("s3cret");
+    } finally {
+      await onLine.stop();
+    }
+
+    const posted: string[] = [];
+    const bridge = createServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => { if (request.url === "/hook/s3cret?token=s3cret") posted.push(body); response.writeHead(204).end(); });
+    });
+    await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+    expect((await ghostly(["--home", dir, "profile", "create", "bot", "--use"])).code).toBe(0);
+    const url = `http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook/s3cret?token=s3cret`;
+    const listen = new Running(["--home", dir, "listen", "--since", "0", "--exec", `env > ${JSON.stringify(join(dir, "hook.env"))}`], { GHOSTLY_WEBHOOK: url });
+    try {
+      // --exec and the webhook both take the event: the hook's environment has no GHOSTLY_WEBHOOK.
+      await vi.waitFor(() => expect(posted.map((body) => (JSON.parse(body) as { type: string }).type)).toContain("daemon.started"), { timeout: 30_000, interval: 100 });
+      await vi.waitFor(() => expect(existsSync(join(dir, "hook.env"))).toBe(true), { timeout: 10_000, interval: 100 });
+      expect(readFileSync(join(dir, "hook.env"), "utf8")).not.toMatch("s3cret");
+      if (process.platform === "linux") expect(readFileSync(`/proc/${listen.child.pid}/cmdline`, "utf8")).not.toMatch("s3cret");
+      expect(listen.lines).toEqual([]);
+      expect(listen.stderr).not.toMatch("s3cret");
+    } finally {
+      await listen.stop();
+      bridge.close();
+    }
+  }, 60_000);
 });

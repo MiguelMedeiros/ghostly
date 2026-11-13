@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   allowingViewerGuard,
+  concatBytes,
   guardViewerAnswer,
   utf8Decode,
   utf8Encode,
@@ -9,6 +10,7 @@ import {
   VIEWER_GUARD_CSP,
   VIEWER_GUARD_HASH,
   VIEWER_GUARD_SCRIPT,
+  VIEWER_WORKER_GUARD_CSP,
   type HeaderList,
 } from "../src/index";
 
@@ -66,6 +68,9 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect(at("<!doc", false)).toBeNull();
     expect(at("<", false)).toBeNull();
     expect(at("", false)).toBeNull();
+    expect(at("ï", false)).toBeNull();
+    expect(at("ï»", false)).toBeNull();
+    expect(at("ï»")).toBe(0);
     // At the end of the page (or past the look), before what never ended.
     expect(at("<!-- not done")).toBe(0);
     expect(at("<!doctype html><!-- a")).toBe(15);
@@ -82,6 +87,43 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect(headers.map(([name]) => name)).not.toContain("content-length");
     expect(policies(headers)).toEqual([`script-src 'nonce-a' ${VIEWER_GUARD_HASH}`, VIEWER_GUARD_CSP]);
   });
+
+  it("goes after a byte order mark that comes split across chunks, as after a whole one", async () => {
+    const page = utf8Encode("\uFEFF<!doctype html><p>ação 日本</p>");
+    const guard = async (...parts: Uint8Array[]) => {
+      const { body } = await guardViewerAnswer([["content-type", "text/html"]], (async function* () { yield* parts; })(), "document");
+      const out: Uint8Array[] = [];
+      for await (const chunk of body) out.push(chunk);
+      return concatBytes(...out);
+    };
+    const whole = await guard(page);
+    expect(whole).toEqual(utf8Encode(`\uFEFF<!doctype html>${TAG}<p>ação 日本</p>`));
+    for (const cut of [1, 2]) expect(await guard(page.subarray(0, cut), page.subarray(cut))).toEqual(whole);
+  });
+
+  it("puts itself in the same place however the page is cut, and reads a head sent a byte at a time once", async () => {
+    const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+    const guarded = async (page: Uint8Array, size: number) => {
+      const out: number[] = [];
+      const parts = (async function* () { for (let i = 0; i < page.length; i += size) yield page.slice(i, i + size); })();
+      for await (const chunk of (await guardViewerAnswer([["content-type", "text/html"]], parts, "iframe")).body) for (const byte of chunk) out.push(byte);
+      return out;
+    };
+    const pages = [
+      "  <!DOCTYPE html>\n<html>", "<!-- a --><!--> <?xml x?><!doctype html><p>", "<!-- a -- b --!> <!---> \t<p>",
+      "<!-- > -> --> <!doctype x>", "<!x > <? y > <!doc", "  \n<", "<!-- never closed --", "<!d>ctype <p>",
+    ];
+    for (const page of pages) {
+      const whole = await guarded(bytes(page), page.length || 1);
+      for (const size of [1, 2, 3, 5]) expect(await guarded(bytes(page), size), `${JSON.stringify(page)} in ${size}`).toEqual(whole);
+    }
+    // A comment that never ends, past how far the guard looks, a byte at a time: once over its bytes, not once per byte
+    // (seconds of the page's time, before).
+    const comment = bytes(`<!--${"a".repeat(64 * 1024)}`);
+    const started = performance.now();
+    expect((await guarded(comment, 1)).length).toBe(comment.length + utf8Encode(TAG).length);
+    expect(performance.now() - started).toBeLessThan(3_000);
+  }, 60_000);
 
   it("guards a page whose destination the browser did not say, and an empty answer stays empty", async () => {
     expect(await read((await guardViewerAnswer([["content-type", "text/html"]], chunks("<p>hi"), null)).body)).toBe(`${TAG}<p>hi`);
@@ -139,9 +181,25 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     expect((await noScripts([["content-type", "text/html"], ["content-type", "text/html"]], "<p>twice")).policies).toContain(REFUSED);
     expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity"], ["content-encoding", "gzip"]], "zipped")).policies).toContain(REFUSED);
     expect((await noScripts([["content-type", "text/html"], ["content-encoding", "identity, br"]], "zipped")).policies).toContain(REFUSED);
-    // A script, a picture, a worker: not a page; only the policy goes along.
+    // A script, a picture: not a page; only the policy goes along.
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched"), ).toMatchObject({ text: `${TAG}<p>fetched` });
     expect(await noScripts([["content-type", "text/html"]], "<p>fetched", "empty")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "<p>fetched" });
-    expect(await noScripts([["content-type", "text/javascript"]], "go()", "worker")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "go()" });
+    expect(await noScripts([["content-type", "text/javascript"]], "go()", "script")).toEqual({ policies: [VIEWER_GUARD_CSP], text: "go()" });
+  });
+
+  it("leaves Trusted Types out of a worker's own policy, where no guard makes the default policy", async () => {
+    // covers: services.web-open
+    // A worker under `require-trusted-types-for` with no default policy refuses every `importScripts`, `eval` and `new Function`.
+    for (const destination of ["worker", "sharedworker", "serviceworker", "Worker"]) {
+      const answer = await guardViewerAnswer([["content-type", "text/javascript"], ["content-security-policy", "script-src 'self'"]], chunks("importScripts('/lib.js')"), destination);
+      expect(policies(answer.headers), destination).toEqual([`script-src 'self' ${VIEWER_GUARD_HASH}`, VIEWER_WORKER_GUARD_CSP]);
+      expect(await read(answer.body)).toBe("importScripts('/lib.js')");
+    }
+    expect(VIEWER_WORKER_GUARD_CSP).toBe("frame-src 'self'; object-src 'self'");
+    // Anything else keeps it: a page, a script a page loads, an answer whose destination the browser did not say.
+    for (const destination of ["iframe", "script", "empty", null]) {
+      const answer = await guardViewerAnswer([["content-type", "text/javascript"]], chunks("go()"), destination);
+      expect(policies(answer.headers), String(destination)).toContain(VIEWER_GUARD_CSP);
+    }
   });
 });

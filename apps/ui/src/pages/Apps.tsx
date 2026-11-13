@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -15,6 +15,7 @@ import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
+import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
 import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -61,10 +62,22 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
   const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
+  // Open goes when the app stops (an update check found it revoked or removed): its focus would drop to the page. The
+  // ref's cleanup runs while the button is still there; the row's name, which now says why, takes the focus, never
+  // taken from where the person went meanwhile.
+  const details = useRef<HTMLButtonElement>(null);
+  const openHadFocus = useRef(false);
+  const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!openHadFocus.current) return;
+    openHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) details.current?.focus({ preventScroll: true });
+  });
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -80,7 +93,7 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
     </div>
   );
 }
@@ -120,7 +133,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
       {asking && (
         <div role="group" aria-labelledby={questionId} data-testid="built-in-app-remove-question" className="basis-full space-y-2"
           onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.builtIn.removeTitle", { title: app.title })}</p>
+          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.builtIn.removeTitle", { title: NAME }), app.title)}</p>
           <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
@@ -236,7 +249,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
-          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{problem}</span>}
+          {problem && <span data-testid="app-store-problem" className="block text-xs text-danger-ink">{problem}</span>}
         </button>
         {!asking && (
           <div className="flex flex-wrap items-center gap-2 ms-auto">
@@ -250,7 +263,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         {asking && (
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
-            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.store.removeTitle", { name: storeName })}</p>
+            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             <p className="text-xs text-text-secondary">
               {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
             </p>
@@ -285,7 +298,11 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                   <AppIcon size={32} installed={app} />
                   <span className="min-w-0 flex-1">
                     <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
-                    <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                    {/* Why the store took it down is read whole: cut to one line, a phone showed only "Removed by <store>: It
+                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. */}
+                    {removed
+                      ? <span dir="auto" data-testid="app-listing-removed" className="text-match-parent block text-xs text-text-muted [overflow-wrap:anywhere]">{t("apps.install.removed", { store: store.name ?? "", reason: removed.reason })}</span>
+                      : <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{listing.tagline}</span>}
                   </span>
                 </span>
                 {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
@@ -358,6 +375,13 @@ export function Apps() {
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
   }, [gone, details, installed, builtIns, stores]);
+  // An app uninstalled elsewhere (another tab) while its screen is open here: the screen goes, so it is no longer chosen
+  // (it would open by itself once the app is installed again), and the focus goes to Add as for an uninstall here.
+  useEffect(() => {
+    if (!details || !installed || installed.some((a) => a.ref === details)) return;
+    setDetails(null);
+    setGone({ app: details });
+  }, [details, installed]);
   // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
   // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
   const [retried, setRetried] = useState<"installed" | "stores" | null>(null);

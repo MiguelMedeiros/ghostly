@@ -5,6 +5,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { updateFailure } from "../lib/updateFailure";
+import { reducedMotion } from "../lib/motion";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
@@ -126,31 +127,34 @@ export function Settings() {
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  const chosenLanguageName = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language;
   const install = useInstallState();
   // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
   const canWake = !!pushPlatform();
   const wakeOn = useWakeOn();
   const [wakeBusy, setWakeBusy] = useState(false);
-  const [wakeError, setWakeError] = useState("");
+  // A refusal is kept as it came and written at render: a change of Language further up the page does not redraw this.
+  const [wakeError, setWakeError] = useState<{ cause: unknown; noPush?: boolean } | null>(null);
   // A browser with no push service (Chromium without Google Play services: GrapheneOS's Vanadium): found once and kept
   // for the browser (lib/wakePush.ts `noPushService`), so the switch reads as unavailable with why, until Try again.
   const wakeNoPush = useNoPushService() && !wakeOn;
   const wakeHintId = useId();
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
-    setWakeError("");
+    setWakeError(null);
     try { await setWake(on); } catch (e) {
       // No push service: kept for the browser, the row says so itself for as long as it is and wake-ups are off (a line
       // of this page's when the browser's storage refused to keep it, or a refused New token left them on).
-      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError(t("pwa.wakeNoPushService")); } else setWakeError(problemLine(e, t));
+      if (on && isNoPushService(e)) { if (!noPushService() || wakeIsOn()) setWakeError({ cause: e, noPush: true }); } else setWakeError({ cause: e });
     } finally { setWakeBusy(false); }
   };
+  const wakeErrorLine = wakeError && (wakeError.noPush ? t("pwa.wakeNoPushService") : problemLine(wakeError.cause, t));
   // Online notices ride on the same subscription: the switch shows while one is shared, on by default.
   const wakeOnline = useWakeOnline();
-  const [wakeOnlineError, setWakeOnlineError] = useState("");
+  const [wakeOnlineError, setWakeOnlineError] = useState<{ cause: unknown } | null>(null);
   const changeWakeOnline = async (on: boolean) => {
-    setWakeOnlineError("");
-    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError(problemLine(e, t)); }
+    setWakeOnlineError(null);
+    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError({ cause: e }); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
@@ -238,7 +242,7 @@ export function Settings() {
   const pick = (to: SettingsSection) => {
     wanted.current = to;
     wantedField.current = null;
-    glide.current = settings.reduceMotion ? "auto" : "smooth";
+    glide.current = reducedMotion() ? "auto" : "smooth";
     document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: glide.current });
     setInView(to);
     // The page stays where it is; its address names the section, so a reload comes back to it.
@@ -655,10 +659,20 @@ export function Settings() {
         <TextSizeSetting />
         <Row label={t("settings.language")}
           hint={languageNotLoaded ? (
-            <span role="status" data-testid="settings-language-not-loaded">
-              {t("settings.languageNotLoaded", { language: LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language })}{" "}
-              <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
-            </span>
+            // A new version found: a deploy replaced this build, whose language files are gone from the server, so asking
+            // again never brings them. Its Reload is offered here, where a phone shows no update banner.
+            update.update?.apply === "reload" ? (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNeedsUpdate", { language: chosenLanguageName })} {t("updates.applyHint")}{" "}
+                <button type="button" onClick={() => void update.install()} aria-busy={update.stage === "installing" || undefined}
+                  className="underline text-accent cursor-pointer">{t("updates.reload")}</button>
+              </span>
+            ) : (
+              <span role="status" data-testid="settings-language-not-loaded">
+                {t("settings.languageNotLoaded", { language: chosenLanguageName })}{" "}
+                <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
+              </span>
+            )
           ) : undefined}>
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
@@ -690,9 +704,11 @@ export function Settings() {
             </Row>
           );
         })}
+        {/* The extension's peer shows them with every Ghostly tab closed too (apps/extension/src/attentionNotices.ts). */}
         <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
           hint={<span role="status">{noticePermission === "denied" ? t(deniedHint[noticePlace()])
-            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced") : t("settings.noticesRunning")}</span>}>
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced")
+            : t(noticePlace() === "extension" ? "settings.noticesRunningExtension" : "settings.noticesRunning")}</span>}>
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}
@@ -700,7 +716,7 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeError || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
+            hint={<span role="status" id={wakeHintId} data-testid="settings-wake-hint">{wakeErrorLine || (wakeNoPush ? t("pwa.wakeNoPushService") : wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             {wakeNoPush && <Button data-testid="settings-wake-retry" loading={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeTryAgain")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} busy={wakeBusy} unavailable={wakeNoPush} describedBy={wakeNoPush ? wakeHintId : undefined} onChange={(on) => void changeWake(on)} />
@@ -708,7 +724,7 @@ export function Settings() {
         )}
         {canWake && wakeOnline.shared && (
           <Row label={t("pwa.wakeOnline")} testId="settings-wake-online-row" info={t("pwa.wakeOnlineInfo")}
-            hint={<span role="status">{wakeOnlineError || t("pwa.wakeOnlineHint")}</span>}>
+            hint={<span role="status">{wakeOnlineError ? problemLine(wakeOnlineError.cause, t) : t("pwa.wakeOnlineHint")}</span>}>
             <Switch testId="settings-wake-online" label={t("pwa.wakeOnline")} checked={wakeOnline.on} onChange={(on) => void changeWakeOnline(on)} />
           </Row>
         )}

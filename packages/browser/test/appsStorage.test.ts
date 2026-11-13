@@ -224,6 +224,37 @@ describe("storage", () => {
     expect(await storageRows()).toEqual([]);
   });
 
+  it("a key kept with a lone surrogate (before the broker refused one) is read and deleted by its U+FFFD form, as the broker lists it", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    // Half an emoji, cut by `slice`, and what the broker lists in its place.
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}a`, value: "lost" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${listed}b`, value: "own" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}b`, value: "kept" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` })).toEqual({ value: "lost" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}b` }), "a key kept as asked comes first").toEqual({ value: "own" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}c` })).toBeNull();
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}a` });
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}b` });
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([`${half}b`]);
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}b` });
+    expect(await storageRows(), "the rows and their count are gone").toEqual([]);
+  });
+
+  it("a key kept with a lone surrogate, written by its U+FFFD form, takes the new value: its old one is not read back after a delete", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}a`, value: "lost" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${listed}a`, value: "new" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` })).toEqual({ value: "new" });
+    expect(await store.storageKeys({ ref, scope: "chat-1" }), "one key, not the same key listed twice").toHaveLength(1);
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}a` });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` }), "a deleted key reads nothing").toBeNull();
+    expect(await storageRows(), "the rows and their count are gone").toEqual([]);
+  });
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;
@@ -436,6 +467,39 @@ describe("uninstall", () => {
     }
   });
 
+  it("a chat deleted while its app deletes a key keeps no count of its rows: the same chat joined again starts empty", async () => {
+    const chats = new Set(["chat-1"]);
+    const app = await bundle();
+    net.put(BUNDLE_URL, app.bytes);
+    const store = apps(net, { isChat: (scope) => chats.has(scope) });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: app.digest, grant: ["chat"] });
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+    // As the engine's `removeLink`, done between the delete's read of its row and its write: the chat is no longer one,
+    // its rows go, then its counts.
+    let removed: Promise<void> | undefined;
+    const get = IDBObjectStore.prototype.get;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, query: IDBValidKey | IDBKeyRange) {
+      const request = get.call(this, query);
+      if (removed || !Array.isArray(query) || query[2] !== "k0") return request;
+      chats.delete("chat-1");
+      removed = db.deleteLink("chat-1").finally(() => store.forgetScope("chat-1"));
+      const read = new Promise<void>((resolve) => { request.onsuccess = () => resolve(); });
+      const held = { get result() { return request.result; }, set onsuccess(on: () => void) { void Promise.all([read, removed]).then(on); }, onerror: null };
+      return held as unknown as IDBRequest;
+    });
+    const deleted = await store.storageDelete({ ref, scope: "chat-1", key: "k0" }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+    spy.mockRestore();
+    expect(deleted).toBe("bad-scope");
+    expect(await storageRows()).toEqual([]);
+    // The same invite joined again: as many full values fit as before.
+    chats.add("chat-1");
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+  });
+
   it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
     const refs = ["ana/chess", "ana/go", "bo/notes"];
     const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");
@@ -546,6 +610,37 @@ describe("the engine", () => {
     expect(await peer.appStorageGet({ ref: app.ref, scope: "l1", key: "k" })).toEqual({ value: 1 });
     expect((await peer.appEntry({ ref: app.ref })).entry).toContain("Chess");
     expect(net.requests).toEqual([BUNDLE_URL, new URL("ghostly-revoke.json", BUNDLE_URL).href]);
+    await peer.shutdown({ quiet: true });
+  });
+
+  it("a chat deleted and joined again (the same invite, the same id) finds its app's storage empty, not full", async () => {
+    const peer = await node({ apps: true });
+    const app = await bundle();
+    net.put(BUNDLE_URL, app.bytes);
+    const preview = await peer.appPreview({ url: BUNDLE_URL });
+    await peer.appInstall({ digest: preview.digest, grant: ["chat"] });
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    let refused: string | undefined;
+    for (let i = 0; i < 100 && !refused; i++) {
+      refused = await peer.appStorageSet({ ref, scope: "l1", key: `k${i}`, value: big }).then(() => undefined, (e: Error) => e.message.split(":")[0]);
+    }
+    expect(refused).toBe("full");
+    // The engine's own removal: the chat goes at once, its rows in the background.
+    const links = (peer as unknown as { links: Map<string, unknown> }).links;
+    const live = links.get("l1");
+    peer.removeLink({ linkId: "l1" });
+    await vi.waitFor(async () => expect(await ownRows()).toEqual([]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The same invite joined again: a chat of this profile with the same id, as it is once paired.
+    links.set("l1", live);
+    expect(await peer.appStorageKeys({ ref, scope: "l1" })).toEqual([]);
+    const value = "y".repeat(63 * 1024);
+    await peer.appStorageSet({ ref, scope: "l1", key: "fresh", value });
+    expect(await peer.appStorageKeys({ ref, scope: "l1" })).toEqual(["fresh"]);
+    // The count kept is this one row's, not the deleted chat's added to it.
+    const counter = (await storageRows() as { scope: string; key: string; value: string }[]).find((r) => r.scope === "l1" && r.key === "");
+    expect(JSON.parse(counter!.value)).toEqual({ rows: 1, keyBytes: "fresh".length, size: "fresh".length + JSON.stringify(value).length });
     await peer.shutdown({ quiet: true });
   });
 });

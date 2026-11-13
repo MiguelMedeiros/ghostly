@@ -65,6 +65,7 @@
     "damaged": "它在此设备上的文件已损坏。请重新获取文件。",
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
+    "filesNotFound": "无法获取它的文件：它来源的链接现在都没有这个版本，或者都没有响应。请稍后再试。",
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "hostProblem": "主机出了问题（错误 {{status}}）。请稍后再试。",
@@ -89,7 +90,10 @@
     "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。",
     "storeKey": "该商店由另一把密钥签名。",
     "tooLarge": "太大了。",
-    "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
+    "unlistedVersion": "这个链接里是该商店尚未列出的版本。",
+    "updateFilesGone": "这个更新的文件已不在了。Ghostly 会在下次检查时重新获取。",
+    "updateGone": "这个更新已不再等待。已安装的版本就是上方显示的那个。",
+    "updateUnlisted": "这个商店已不再列出这个更新。Ghostly 会在下次检查时查看它现在列出的版本。"
   },
   "files": {
     "allow": "允许",
@@ -130,6 +134,7 @@
     "publisher": "发布者",
     "removed": "已被 {{store}} 移除：{{reason}}",
     "revoked": "发布者已撤销此版本。",
+    "revokedReason": "发布者已撤销此版本：{{reason}}",
     "rollback": "你已有更新的版本。",
     "same": "已安装。",
     "sentBy": "由 {{name}} 发送",

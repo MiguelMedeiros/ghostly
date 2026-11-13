@@ -33,28 +33,33 @@ interface Tools {
   /** The newest pages the host read itself (`messagePage`). */
   pageReads: (chat: string) => number;
   reported: () => string[];
+  /** How many times the hub read its seen set (`EventHub.loadSeen`). */
+  seenReads: () => number;
 }
 
 /**
  * A process's life with the profile: the engine and the store are new each time, as after a restart. `reread`: the
- * host reads each newest page itself, as it did before the engine handed it the rows its start read.
+ * host reads each newest page itself, as it did before the engine handed it the rows its start read. `mode`: the daemon's
+ * start by default, which takes every chat's baseline; a one-shot takes a chat's when its history changes.
  */
-async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: Tools) => Promise<T>, reread = false): Promise<T> {
+async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: Tools) => Promise<T>, reread = false, options: import("../src/runtime/engine").RuntimeOptions = {}, mode: "daemon" | "one-shot" = "daemon"): Promise<T> {
   vi.resetModules();
   const { GhostlyNode } = await import("@ghostly/browser/engine/node");
   const whole = vi.spyOn(GhostlyNode.prototype, "getMessages");
   const page = vi.spyOn(GhostlyNode.prototype, "messagePage");
   const { EngineServer } = await import("@ghostly/browser/engine/server");
   const handed = reread ? vi.spyOn(EngineServer.prototype, "takeStartNewest").mockReturnValue(new Map()) : null;
+  const { EventHub } = await import("../src/events");
+  const seen = vi.spyOn(EventHub.prototype, "loadSeen");
   const { openHost } = await import("../src/host");
   const { db } = await import("@ghostly/browser/engine/db");
-  const host = await openHost(paths, "one-shot", "test");
+  const host = await openHost(paths, mode, "test", options);
   // Every message event the profile ever reported, this start's included.
   const reported = () => host.ctx.hub.replay(0).filter((event) => event.type.startsWith("message.")).map((event) => event.id);
   const calls = (spy: typeof whole | typeof page, chat: string) => spy.mock.calls.filter(([id]) => (typeof id === "string" ? id : id.linkId) === chat).length;
   try {
-    return await work(host, { db, wholeReads: (chat) => calls(whole, chat), pageReads: (chat) => calls(page, chat), reported });
-  } finally { await host.close(); whole.mockRestore(); page.mockRestore(); handed?.mockRestore(); }
+    return await work(host, { db, wholeReads: (chat) => calls(whole, chat), pageReads: (chat) => calls(page, chat), reported, seenReads: () => seen.mock.calls.length });
+  } finally { await host.close(); whole.mockRestore(); page.mockRestore(); handed?.mockRestore(); seen.mockRestore(); }
 }
 
 describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
@@ -147,6 +152,76 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
       expect(reread!.pages, name).toEqual([1, 1]);
       expect([handed!.wholes, reread!.wholes], name).toEqual([whole, whole]);
       expect(handed!.events, name).toBe(reread!.events);
+    }
+  });
+
+  it.each([["online", false], ["offline", true]] as const)("an %s one-shot reads no seen note while no history changes; then that chat's notes and its newest messages only", async (name, offline) => {
+    const paths = profilePaths(join(root, name), name);
+    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+    const { callApi } = await import("../src/api");
+    const chat = await run(paths, async (host, { db }) => {
+      const { chat } = (await callApi(host.ctx, "invite.create", { label: "long" })) as { chat: string };
+      for (let i = 1; i <= LONG; i++) await db.putMessage(row(chat, i));
+      return chat;
+    });
+    await run(paths, async (_host, { reported }) => { expect(reported()).toHaveLength(LONG); });
+
+    // A read (`chat list`): the seen set, a note per message of the last 30 days, took 0.07-0.16 s and 56 MB at 50,000.
+    await run(paths, async (host, { seenReads, wholeReads, pageReads }) => {
+      await callApi(host.ctx, "chat.list", {});
+      expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
+    }, false, { offline }, "one-shot");
+
+    // A message deleted here: the chat's notes are read then, its newest messages as the engine's start read them are in
+    // step with them, and only the deletion is told.
+    await run(paths, async (host, { seenReads, wholeReads, pageReads, reported }) => {
+      host.ctx.runtime.server.node.deleteMessage({ linkId: chat, messageId: `peer_${LONG}` });
+      // The row goes a turn later.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await host.close();
+      expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
+      // The deleted message's own event leaves the journal with it.
+      expect(reported()).toHaveLength(LONG);
+      expect(reported().at(-1)).toBe(`message.deleted:${chat}:peer_${LONG}`);
+    }, false, { offline }, "one-shot");
+  });
+
+  it("a file of a message past its newest: only the history's file rows are read to name it, never the whole history", async () => {
+    const paths = profilePaths(join(root, "files"), "files");
+    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+    const { callApi } = await import("../src/api");
+    const file = (id: string) => ({ id, name: "a.txt", size: 9, mime: "text/plain" });
+    const { chat, group } = await run(paths, async (host, { db }) => {
+      const { chat } = (await callApi(host.ctx, "invite.create", { label: "files" })) as { chat: string };
+      const group = (await callApi(host.ctx, "group.create", { name: "files" })) as { group: string };
+      for (let i = 1; i <= LONG; i++) {
+        await db.putMessage({ ...row(chat, i), ...(i === 1 ? { file: file(`${chat}-in-old`) } : {}) });
+        await db.putMessage({ ...row(`group:${group.group}`, i), id: `member_${i}`, member: "ab".repeat(32), ...(i === 1 ? { file: file(`group-${group.group}-old`) } : {}) });
+      }
+      return { chat, group: group.group };
+    });
+    await run(paths, async () => {});
+
+    // Closed in step: the next start reads the newest 100 of each (a one-shot none). A contact's file of the oldest
+    // message then ends.
+    for (const mode of ["daemon", "one-shot"] as const) {
+    const copy = profilePaths(join(root, "files"), `files-${mode}`);
+    mkdirSync(copy.dir, { recursive: true, mode: 0o700 });
+    cpSync(paths.db, copy.db, { recursive: true });
+    cpSync(paths.events, copy.events);
+    await run(copy, async (host, { wholeReads }) => {
+      const { GhostlyNode } = await import("@ghostly/browser/engine/node");
+      const groupWhole = vi.spyOn(GhostlyNode.prototype, "groupMessages");
+      try {
+        const done = { state: "done", transferred: 9, size: 9, direction: "in" };
+        const state = host.ctx.runtime.server.node.getState();
+        host.ctx.hub.sink.post({ kind: "state", state: { ...state, transfers: { [`${chat}-in-old`]: done, [`group-${group}-old`]: done } } as typeof state });
+        const ends = () => host.ctx.hub.replay(0).filter((event) => event.type === "file.done").map((event) => [event.file, event.messageId]);
+        await vi.waitFor(() => expect(ends()).toEqual([[`${chat}-in-old`, "peer_1"], [`group-${group}-old`, "member_1"]]));
+        expect(wholeReads(chat)).toBe(0);
+        expect(groupWhole).not.toHaveBeenCalled();
+      } finally { groupWhole.mockRestore(); }
+    }, false, {}, mode);
     }
   });
 });

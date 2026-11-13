@@ -16,14 +16,14 @@ import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releas
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { forgetPosition, holdPlayback, playingFrom, rememberPosition, rememberedPosition, takePlayback, usePlayingChat } from "../../lib/nowPlaying";
 import { Highlight } from "../chat/ChatSearch";
-import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const pill = `text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /**
  * An audio file in the chat (an MP3, an M4A, a FLAC: sent as a file, not recorded as a voice message): its name, a
@@ -310,7 +310,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             className="block w-full h-3 my-0.5 accent-accent cursor-pointer disabled:cursor-default disabled:opacity-50"
           />
           {/* At least a line high; the status wraps (cut with …, it lost its end: how far the file is, its size). */}
-          <div className="flex items-center gap-1.5 min-h-[18px] chat-text-media-meta text-text-primary/65" data-testid="audio-meta">
+          <div className="flex items-center gap-1.5 min-h-[18px] chat-text-media-meta text-text-primary/75" data-testid="audio-meta">
             {active && <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />}
             <span className="tabular-nums shrink-0 whitespace-nowrap" data-testid="audio-time">
               {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size, t)}
@@ -332,13 +332,13 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
         <div className="mt-1.5 px-1" data-testid="audio-offer">
           <div className="flex items-center gap-2">
             <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
-              className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">
+              className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
             {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
           </div>
           {typeof transfer.room === "number" && (
-            <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
+            <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="audio-room">
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
             </p>
           )}
@@ -353,7 +353,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="audio-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
-        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
+        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/75" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
             <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer">{t("chat.message.download")}</button>

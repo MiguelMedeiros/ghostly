@@ -107,6 +107,9 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     : store.sequence < held.sequence ? t("apps.add.storeOlder")
     : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
   const offered = !!store && !store.refused && (!held || held.sequence === undefined || store.sequence > held.sequence);
+  // The store found, said to a screen reader: Enter in the field keeps the focus there, and Check's focus goes to a bare
+  // Cancel, so nothing else told that a store came, which one, or that it is held already.
+  const found = store ? [store.name, t("apps.store.count", { count: store.apps }), heldLine].filter(Boolean).join(". ") : "";
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
@@ -130,6 +133,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             </div>
           )}
         </form>
+        <p role="status" className="sr-only" data-testid="apps-add-store-said">{found}</p>
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">

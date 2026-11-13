@@ -4,23 +4,37 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
 const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
-/** How a request reaches the contact: the engine's `request` for that contact and service. */
+/**
+ * How a request reaches the contact: the engine's `request` for that contact and service. Each chunk of the answer's
+ * `body` is handed over to `serve`: one that spans a whole buffer of its own goes to the services worker as it is (its
+ * buffer moves there, and reads empty here after), any other is copied first.
+ */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
+
+/**
+ * A chunk that is all of a plain buffer (the engine's `HttpClient` gives each one so, already copied out of the link's
+ * frame) is moved to the worker as it is. A view into a larger or shared buffer would move, or fail on, bytes that are
+ * not its own: that one is copied.
+ */
+function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
+  return chunk.buffer instanceof ArrayBuffer && chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength;
+}
 
 /**
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline. `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the
- * view's name and the line under the app's name.
+ * while the contact is offline. `blocked` and `unguarded`: the view's notice when the bridge shows no app
+ * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
+ * name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -54,50 +68,118 @@ export async function serviceLabel(tag: string, peerPubKeyZ32: string, serviceId
 /**
  * The cookies one opened app set, kept in this page for as long as it is open. A service worker neither sees a
  * request's cookies nor may set one, so the app's `Set-Cookie`s are taken here and sent back with its requests, as a
- * browser would for that origin (by name; never another app's). The app's own script cannot read them.
+ * browser would for that origin (by name and path, while they last; never another app's). The app's own script cannot
+ * read them.
  */
 export class CookieJar {
-  private readonly cookies = new Map<string, string>();
+  /** By name and path, as a browser keeps them: `sid` at `/` and `sid` at `/admin` are two cookies. */
+  private readonly cookies = new Map<string, { name: string; value: string; path: string; until: number }>();
   static readonly MAX = 64;
 
-  take(setCookie: string): void {
+  /** `requestPath`: the path the answer that set it is for, whose directory is the cookie's path when it names none. */
+  take(setCookie: string, requestPath = "/"): void {
     const [pair, ...attributes] = setCookie.split(";");
     const at = pair?.indexOf("=") ?? -1;
     const name = at > 0 ? pair!.slice(0, at).trim() : "";
     if (!name) return;
     const value = pair!.slice(at + 1).trim();
-    const gone = attributes.some((a) => {
-      const [key, v = ""] = a.split("=").map((s) => s.trim());
-      if (/^max-age$/i.test(key ?? "")) return Number(v) <= 0;
-      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); return Number.isFinite(when) && when <= Date.now(); }
-      return false;
-    });
-    if (gone) { this.cookies.delete(name); return; }
-    if (!this.cookies.has(name) && this.cookies.size >= CookieJar.MAX) return;
-    this.cookies.set(name, value);
+    // As RFC 6265 §5.3 reads them: the last of each that parses counts, and a Max-Age wins over an Expires.
+    let maxAge: number | undefined;
+    let expires: number | undefined;
+    let path = defaultCookiePath(requestPath);
+    for (const a of attributes) {
+      const eq = a.indexOf("=");
+      const key = (eq < 0 ? a : a.slice(0, eq)).trim();
+      const v = eq < 0 ? "" : a.slice(eq + 1).trim();
+      if (/^max-age$/i.test(key) && /^-?\d+$/.test(v)) maxAge = Number(v);
+      if (/^expires$/i.test(key)) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+      if (/^path$/i.test(key)) path = v.startsWith("/") ? v : defaultCookiePath(requestPath);
+    }
+    const now = Date.now();
+    const until = maxAge !== undefined ? now + maxAge * 1000 : expires ?? Infinity;
+    const key = `${path}\n${name}`;
+    if (until <= now) { this.cookies.delete(key); return; }
+    if (!this.cookies.has(key) && this.cookies.size >= CookieJar.MAX) return;
+    this.cookies.set(key, { name, value, path, until });
   }
 
-  header(): string | null {
-    return this.cookies.size ? [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ") : null;
+  /**
+   * The `Cookie` header for a request to `path`: the cookies whose path it is under and that have not run out, the
+   * longer paths first (RFC 6265 §5.4).
+   */
+  header(path = "/"): string | null {
+    const now = Date.now();
+    const sent: { name: string; value: string; path: string }[] = [];
+    for (const [key, cookie] of this.cookies) {
+      if (cookie.until <= now) this.cookies.delete(key);
+      else if (pathMatches(path, cookie.path)) sent.push(cookie);
+    }
+    // A stable sort: cookies of one path length go in the order they were first set.
+    sent.sort((a, b) => b.path.length - a.path.length);
+    return sent.length ? sent.map(({ name, value }) => `${name}=${value}`).join("; ") : null;
   }
 }
 
+/** A cookie's path when its `Set-Cookie` names none: the request path's directory (RFC 6265 §5.1.4). */
+function defaultCookiePath(requestPath: string): string {
+  const path = requestPath.split("?")[0]!;
+  const last = path.lastIndexOf("/");
+  return path.startsWith("/") && last > 0 ? path.slice(0, last) : "/";
+}
+
+/** Whether a request to `path` carries a cookie of `cookiePath`: that path, or one under it (RFC 6265 §5.1.4). */
+function pathMatches(path: string, cookiePath: string): boolean {
+  if (path === cookiePath) return true;
+  return path.startsWith(cookiePath) && (cookiePath.endsWith("/") || path[cookiePath.length] === "/");
+}
+
 /**
- * What one opened app (its jar) may have waiting in this page at once, requests and their bodies' bytes: past either, a
- * request is refused at once, so the app cannot make the page that runs the peer hold unbounded memory.
+ * What one opened app (its jar) may have in this page at once: requests sent on the link, more waiting their turn
+ * (a page asks for all its images and modules together, 100 at once in Chromium), and the bytes of their bodies and
+ * headers. Past the waiting ones or the bytes, a request is refused at once, so the app cannot make the page that runs
+ * the peer hold unbounded memory.
  */
 export const MAX_PENDING_REQUESTS = 32;
+export const MAX_WAITING_REQUESTS = 256;
 export const MAX_PENDING_BODY_BYTES = 32 * 1024 * 1024;
-const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number }>();
+const pendingOf = new WeakMap<CookieJar, { count: number; bytes: number; waiting: (() => void)[] }>();
 
-/** Takes room for one request of the app's: how to give it back, or null with none left. */
-function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
-  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0 };
-  if (pending.count >= MAX_PENDING_REQUESTS || pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
-  pending.count++;
-  pending.bytes += bytes;
+/**
+ * Takes room for one request of the app's, at once or when one sent before it ends: how to give it back, or null with
+ * no room left, or once `signal` aborts while it waits (it leaves its turn).
+ */
+async function holdRoom(jar: CookieJar, bytes: number, signal: AbortSignal): Promise<(() => void) | null> {
+  const pending = pendingOf.get(jar) ?? { count: 0, bytes: 0, waiting: [] };
   pendingOf.set(jar, pending);
-  return () => { pending.count--; pending.bytes -= bytes; };
+  if (pending.bytes + bytes > MAX_PENDING_BODY_BYTES) return null;
+  if (pending.count < MAX_PENDING_REQUESTS) pending.count++;
+  else if (pending.waiting.length >= MAX_WAITING_REQUESTS || signal.aborted) return null;
+  else {
+    pending.bytes += bytes;
+    // Its turn comes with the place of one that ended (`count` stays), or never once the page lets go of it.
+    const turn = await new Promise<boolean>((resolve) => {
+      const go = () => { signal.removeEventListener("abort", leave); resolve(true); };
+      const leave = () => { pending.waiting.splice(pending.waiting.indexOf(go), 1); resolve(false); };
+      pending.waiting.push(go);
+      signal.addEventListener("abort", leave, { once: true });
+    });
+    pending.bytes -= bytes;
+    if (!turn) return null;
+  }
+  pending.bytes += bytes;
+  return () => {
+    pending.bytes -= bytes;
+    const next = pending.waiting.shift();
+    if (next) next();
+    else pending.count--;
+  };
+}
+
+/** What a request holds in this page while it waits or goes: its body and its headers. */
+function heldBytes(request: ServiceRequestMessage): number {
+  let bytes = request.body?.byteLength ?? 0;
+  for (const [name, value] of request.headers) bytes += name.length + value.length;
+  return bytes;
 }
 
 /**
@@ -112,7 +194,6 @@ function holdRoom(jar: CookieJar, bytes: number): (() => void) | null {
  */
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
   const request = readRequest(data);
-  if (!request) { port.close(); return; }
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
   let ended = false;
   const post = (reply: ServiceReply, transfer: Transferable[] = []) => {
@@ -126,14 +207,24 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     port.postMessage(reply, transfer);
   };
-  const release = holdRoom(jar, request.body?.byteLength ?? 0);
-  if (!release) {
-    post({ type: "error", status: 503, text: words.failed });
+  // One this page does not take (a path past its length, a method it does not read) never goes on the link, and is
+  // answered now: left unanswered, the worker waited `HEAD_TIMEOUT_MS` and said so in its own English.
+  if (!request) {
+    post({ type: "error", status: 400, text: words.failed });
     port.close();
     return;
   }
   const stop = new AbortController();
-  port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  // What the app's frame read of the answer, as the worker says (`flow`), and the wait for it to read on.
+  let read = 0;
+  let readOn: (() => void) | null = null;
+  const wake = () => { readOn?.(); readOn = null; };
+  stop.signal.addEventListener("abort", wake);
+  port.onmessage = (event) => {
+    const said = event.data as { type?: unknown; bytes?: unknown } | null;
+    if (said?.type === "cancel") stop.abort();
+    else if (said?.type === "read" && typeof said.bytes === "number" && said.bytes > read) { read = said.bytes; wake(); }
+  };
   const pageGone = () => stop.abort();
   if (view?.aborted) stop.abort();
   else view?.addEventListener("abort", pageGone);
@@ -143,8 +234,16 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     post({ type: "error", status: 504, text: words.tooSlow });
     stop.abort();
   }, ANSWER_BY_MS);
+  let release: (() => void) | null = null;
   try {
-    const cookie = jar.header();
+    // Its turn on the link, after the app's requests sent before it: none past the room this page keeps for them.
+    release = await holdRoom(jar, heldBytes(request), stop.signal);
+    if (!release) {
+      post({ type: "error", status: 503, text: words.failed });
+      return;
+    }
+    const path = request.path.split("?")[0]!;
+    const cookie = jar.header(path);
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
     const answer = await send({ method: request.method, path: request.path, headers, body: request.body ? new Uint8Array(request.body) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
@@ -156,7 +255,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     let out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
-      if (name.toLowerCase() === "set-cookie") jar.take(value);
+      if (name.toLowerCase() === "set-cookie") jar.take(value, path);
       else out.push([name, value]);
     }
     // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
@@ -171,10 +270,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
-      const bytes = chunk.slice();
+      const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
+      sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
+      // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
     }
     post({ type: "end" });
   } catch (error) {
@@ -182,7 +285,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
-    release();
+    release?.();
     clearTimeout(late);
     view?.removeEventListener("abort", pageGone);
     port.close();
@@ -206,6 +309,8 @@ const ENTRY = "ghostlyServiceView";
 const isViewEntry = (state: unknown) => !!state && typeof state === "object" && (state as Record<string, unknown>)[ENTRY] === true;
 /** Set while a second open closes the first: the new view keeps the entry. */
 let handingOver = false;
+/** Counts the opens: one overtaken by a later open while it waits draws nothing (the last one wins). */
+let opens = 0;
 
 /**
  * Back to the entry the view was opened on. Straight to it where the browser can (the Navigation API): the contact's
@@ -242,9 +347,12 @@ function watchDeadEntries(): void {
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
   const locked = serviceWindowsClosedSince();
+  const open = ++opens;
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
+  // Open tapped again, or another app opened, before this one was drawn: that one is shown, this one never is.
+  if (open !== opens) return;
   if (locked()) throw new Error(SERVICE_LOCKED);
   // Drawn over everything, a call's windows too: not over a call on screen (one that comes later closes it).
   if (callWindowOn()) throw new Error(options.words.callOn);
@@ -309,30 +417,48 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   notice.append(said, retry);
   view.append(bar, notice, frame);
   const src = `${origin}${BRIDGE_PAGE}`;
-  /** The notice while the contact is offline; once back, the app again, loaded anew (its last page may be stale). */
+  /** Why the bridge shows no app (`BRIDGE_REFUSED`), in the profile's words: said until Try again. */
+  let refused: string | null = null;
+  /** What the notice says now: null while the app is on screen. */
+  let shown: string | null = null;
+  /**
+   * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
+   * (its last page may be stale).
+   */
   const present = () => {
-    const offline = options.presence?.offline() ?? false;
-    if (offline === !notice.hidden) return;
-    if (offline) {
-      said.textContent = options.words.offline;
+    const text = options.presence?.offline() ? options.words.offline : refused;
+    if (text === shown) return;
+    shown = text;
+    if (text !== null) {
+      said.textContent = text;
       notice.hidden = false;
       notice.style.display = "flex";
       frame.style.display = "none";
       if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
     } else {
+      // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
+      const had = notice.contains(document.activeElement);
       notice.hidden = true;
       notice.style.display = "none";
       frame.style.display = "";
       frame.src = src;
+      if (had) frame.focus({ preventScroll: true });
     }
   };
-  retry.addEventListener("click", present);
+  retry.addEventListener("click", () => { refused = null; present(); });
 
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
   let bridge = new AbortController();
   const onMessage = (event: MessageEvent) => {
-    if (event.source !== frame.contentWindow || event.origin !== origin || (event.data as { type?: unknown } | null)?.type !== BRIDGE_READY) return;
+    if (event.source !== frame.contentWindow || event.origin !== origin) return;
+    const message = event.data as { type?: unknown; reason?: unknown } | null;
+    if (message?.type === BRIDGE_REFUSED) {
+      refused = message.reason === "blocked" ? options.words.blocked : options.words.unguarded;
+      present();
+      return;
+    }
+    if (message?.type !== BRIDGE_READY) return;
     // A new bridge (the frame loaded again): a new channel, and the old one's requests end.
     for (const old of ports) old.close();
     ports.clear();
@@ -348,6 +474,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // The strip and the Services dialog drop the Open button once the contact goes offline or stops sharing the app: the
+  // focus then goes to the dialog it was in, or else to the chat's composer.
+  const holder = before?.parentElement?.closest<HTMLElement>("[role=dialog]") ?? null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   let unwatch = () => {};
   // The person's taps and keys in the app go to its frame, never to this page, whose lock screen would lock them out
@@ -358,23 +487,32 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
-    removeEventListener("keydown", onKey);
+    removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     bridge.abort();
     view.remove();
     for (const el of shut) el.removeAttribute("inert");
     const active = document.activeElement;
-    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
+    if (!active || active === document.body) {
+      const composer = document.querySelector<HTMLElement>("[data-composer] textarea:not(:disabled)");
+      for (const el of [before, holder, composer]) {
+        if (!el?.isConnected) continue;
+        el.focus({ preventScroll: true });
+        if (document.activeElement === el) break;
+      }
+    }
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  // Taken before the page's own listeners and spent here: a modal of the app under the view (the chat's Shared services
+  // dialog it was opened from) would close on the same Escape.
+  const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
-  addEventListener("keydown", onKey);
+  addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);

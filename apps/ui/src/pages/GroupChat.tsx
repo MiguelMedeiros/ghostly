@@ -30,6 +30,7 @@ import { keepSentOriginal } from "../lib/sentOriginals";
 import type { SentTranslation } from "../components/MessageInput";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
+import { groupPayNoteLine } from "../components/paymentWords";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
@@ -63,7 +64,7 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType, mayPin, replySnippet, type GroupMention, type RoutineCard, type VoiceMeta } from "@ghostly/core";
 import { servicesPlatform } from "../lib/platform";
-import { useEngineValue } from "../lib/engineState";
+import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
@@ -75,9 +76,10 @@ import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
-import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
+import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
@@ -145,23 +147,9 @@ function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
   return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
 }
 
-/** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
-function noteIdOf(payments: Payments, paymentId: string): string {
-  const payment = payments[paymentId];
-  return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
-}
-
-/**
- * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
- * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
- */
+/** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
 function captionOf(payments: Payments, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
-  const payment = payments[message.paymentId!];
-  // Said once, under the request (or the payment) itself: not again under a payment that answers it.
-  if (payment?.kind === "payment" && payment.requestId) return undefined;
-  const note = notes.get(noteIdOf(payments, message.paymentId!));
-  const starter = message.sender === "me" ? myKey : message.member;
-  return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
+  return groupPayCaption(message, payments[message.paymentId!], id => notes.get(id), myKey);
 }
 
 /** What the engine writes after "Group created. " and "You joined. ": who can read what (GROUP_READ_NOTE), in the interface's words. */
@@ -214,11 +202,31 @@ function namelessEvent(event: StoredMessage["event"], text: string, t: Translate
 }
 
 /**
+ * A name in a membership line, between two private-use characters (as `NAME_SLOT` is), for `eventLine` to draw as its
+ * own <bdi>. Not FSI … PDI: a name told apart by its key's end has its own isolates already.
+ */
+const NAMED = /([^]*)/;
+const NAMED_PARAMS = new Set(["name", "by", "group"]);
+/** `t` for membership lines: each name it is given (a member's, the admin's who removed, the group's) set apart. */
+function namesApart(t: Translate): Translate {
+  const apart = (value: string | number) => typeof value === "string" && value !== NAME_SLOT ? `${value.replace(/[]/g, "")}` : value;
+  return Object.assign((key: Parameters<Translate>[0], params?: Record<string, string | number>) =>
+    t(key, params && Object.fromEntries(Object.entries(params).map(([k, v]) => [k, NAMED_PARAMS.has(k) ? apart(v) : v]))), { language: t.language });
+}
+/**
+ * A line's names, each its own <bdi>: one the person gave (Latin in an Arabic line, Arabic in an English one) keeps its
+ * own direction, so the punctuation or emoji at its end stays on its side ("Bob!", not "!Bob").
+ */
+const namedNodes = (text: string): ReactNode => text.split(NAMED).map((part, i) => i % 2 ? <bdi key={i}>{part}</bdi> : part);
+
+/**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
- * the shape the engine writes. Any other text (a reason the core gave) is shown as it is.
+ * the shape the engine writes. Any other text (a reason the core gave) is shown as it is. Its names are set apart
+ * (`namesApart`), for `eventLine`.
  */
 function eventText(message: StoredMessage, group: GroupView, t: Translate, nameSlot?: string): string {
+  const say = namesApart(t);
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
   // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
@@ -228,7 +236,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
   if (message.event === "gone" && message.member && message.by && !me) {
     const name = authorName(group, message.member, t);
     const byMe = message.by === group.myKey || !!group.members.find(m => m.key === message.by)?.me;
-    return byMe ? t("group.event.goneByYou", { name }) : t("group.event.goneBy", { by: authorName(group, message.by, t), name });
+    return byMe ? say("group.event.goneByYou", { name }) : say("group.event.goneBy", { by: authorName(group, message.by, t), name });
   }
   // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
@@ -240,13 +248,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
     const nameOf = (stored: string) => message.member && !me ? othersName(formerName(group, message.member, writtenName(stored, t)), t) : writtenName(stored, t);
     const gone = " is no longer a member";
-    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
+    if (message.event === "gone" && text.endsWith(gone)) return say("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";
-    if (message.event === "left" && text.endsWith(left)) return t("group.event.left", { name: nameOf(text.slice(0, -left.length)) });
+    if (message.event === "left" && text.endsWith(left)) return say("group.event.left", { name: nameOf(text.slice(0, -left.length)) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
     // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
     // credits nobody, without one.
-    const written = message.member ? writtenEvent(message.event, text, t, nameOf) : namelessEvent(message.event, text, t);
+    const written = message.member ? writtenEvent(message.event, text, say, nameOf) : namelessEvent(message.event, text, say);
     if (written) return written;
     // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
     // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
@@ -258,22 +266,22 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
   const shown = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
   // A member who named themselves as the app calls me is quoted (`othersName`): "“You” joined" is not my "You joined.".
   const name = me || nameSlot ? shown : othersName(shown, t);
-  if (message.event === "joined") return t("group.event.joined", { name });
+  if (message.event === "joined") return say("group.event.joined", { name });
   // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
   // what happened to me in its own words.
-  if (message.event === "gone") return me ? t("group.event.removed") : t("group.event.gone", { name });
-  if (message.event === "left" && !me) return t("group.event.left", { name });
-  if (message.event === "admin") return me ? t("group.event.adminYou") : t("group.event.admin", { name });
+  if (message.event === "gone") return me ? t("group.event.removed") : say("group.event.gone", { name });
+  if (message.event === "left" && !me) return say("group.event.left", { name });
+  if (message.event === "admin") return me ? t("group.event.adminYou") : say("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");
     if (me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
-    return removed ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
+    return removed ? say("group.event.pictureRemoved", { name }) : say("group.event.pictureChanged", { name });
   }
   const marker = " renamed the group to “";
   const renamed = message.event === "renamed" ? text.indexOf(marker) : -1;
   if (renamed >= 0 && text.endsWith("”")) {
     const group = text.slice(renamed + marker.length, -1);
-    return me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
+    return me ? say("group.event.renamedYou", { group }) : say("group.event.renamed", { name, group });
   }
   return text;
 }
@@ -287,10 +295,10 @@ const NAME_SLOT = "";
  */
 function eventLine(message: StoredMessage, group: GroupView, t: Translate): ReactNode {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
-  if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
+  if (!member || member.me || member.role !== "admin" || message.event === "admin") return namedNodes(eventText(message, group, t));
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
-  if (after === undefined || more.length) return eventText(message, group, t);
-  return <>{before}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
+  if (after === undefined || more.length) return namedNodes(eventText(message, group, t));
+  return <>{namedNodes(before)}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{namedNodes(after)}</>;
 }
 
 /**
@@ -401,6 +409,8 @@ export function GroupChat() {
   const started = useEngineValue(state => !!state);
   // Who is typing changes all the time, and only the header's line shows it: that line reads it (`GroupTypingLine`).
   const rosterGroup = useEngineValue(state => withoutTyping(state?.groups.find(g => g.id === groupId)));
+  // An extension tab that lost its peer (the Reconnecting notice): who is reachable is the last thing it was told.
+  const peerLost = useEngineReconnecting();
   // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
   const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
@@ -419,9 +429,11 @@ export function GroupChat() {
   // group was left). Until this group's own list comes, what the engine last sent for it.
   const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
+  /** This group's history is here: what comes in it from now on is news to a screen reader (MessageAnnouncer). */
+  const historyIn = loaded.groupId === groupId || engine.messages.has(`group:${groupId}`);
   // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
   // loading, not an empty group.
-  const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
+  const reading = !historyIn && (group?.lastMessageAt ?? 0) > 0;
   const [readReplies] = useState(() => replyIndexer(true));
   const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   /**
@@ -728,13 +740,19 @@ export function GroupChat() {
   const nameOf = replyNames(group, t("chat.reply.you"), t);
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf, t);
   const canPin = group.canSend && !!group.myKey && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);
+  // A private group knows my lines by the member key I wrote them under: removed and invited back, I hold a new one,
+  // and the group refuses an edit or a deletion of what I wrote before.
+  const underMyKey = (m: StoredMessage) => group.profile !== "mesh" || !group.myKey || m.id.startsWith(`${group.myKey}:`);
+  // So does a reaction of mine from before (it stays under the old key): one row with it takes no other of mine.
+  let rejoinedAt = 0;
+  if (group.profile === "mesh") for (const m of messages) if (m.event === "joined" && !m.member) rejoinedAt = Math.max(rejoinedAt, m.timestamp);
+  const reactedBefore = (m: StoredMessage) => !!m.reactions?.me?.e && m.reactions.me.at < rejoinedAt;
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.filter(m => captionOf(payments, notes, m, group.myKey) || payments[m.paymentId!]?.requestId)
-    .map(m => noteIdOf(payments, m.paymentId!)));
+  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey, linkId => groupMemberOfLink(group, linkId)) ?? []));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
@@ -769,10 +787,10 @@ export function GroupChat() {
     : <MessageRow key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
       onReply={replyTarget(m, true) && group.canSend ? () => replyRow(m) : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
-      onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => editRow(m) : undefined}
+      onEdit={canEditInGroup(m) && !m.card && underMyKey(m) && group.canSend ? () => editRow(m) : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
-      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend ? () => removeRow(m) : undefined}
-      onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
+      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && underMyKey(m) && group.canSend ? () => removeRow(m) : undefined}
+      onReact={replyTarget(m, true) && !reactedBefore(m) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinRow(m) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => saveRow(m.id)} saved={savedHere.has(m.id)} />;
   // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
@@ -810,6 +828,9 @@ export function GroupChat() {
   const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? problemLine(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
+    // The tab lost its peer: on its way, as the connection icon beside it says, not who was reachable (bug hunt,
+    // 2026-11-13: "3 members · 2 of 2 reachable" beside Connecting…).
+    : peerLost && group.status === "active" && others.length > 0 ? t("group.chat.communityConnecting", { members: count })
     // A community with nobody else in it, as a private group: not "connecting…" (to nobody) nor relaying for others.
     : community && group.status === "active" ? (others.length === 0 ? count : community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
@@ -846,7 +867,7 @@ export function GroupChat() {
     {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
     <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
-      <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
+      <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => groupPayNoteLine(note, group, t)} ready={historyIn} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}
@@ -907,8 +928,9 @@ export function GroupChat() {
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {!noTimeline && <ChatSearchBar search={search} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
@@ -937,7 +959,7 @@ export function GroupChat() {
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
           {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
-            className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
+            className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
           <button ref={cancelJoinRef} data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
             className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
@@ -977,7 +999,7 @@ export function GroupChat() {
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
           {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{staleText}</p>}
           {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
-            className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
+            className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText]">{t("group.join.tryAgain")}</button>}
           <button ref={cancelJoinRef} onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
@@ -1016,7 +1038,7 @@ export function GroupChat() {
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
             .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
-          const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
+          const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card && underMyKey(m));
           if (last) { setReplyingTo(null); setEditing(last); }
         } : undefined}
         onSendFile={platform?.sendGroupFile ? sendFile : undefined}

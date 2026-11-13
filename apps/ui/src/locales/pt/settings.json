@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "Senha incorreta",
   "language": "Idioma",
+  "languageNeedsUpdate": "{{language}} precisa da nova versão do Ghostly.",
   "languageNotLoaded": "Não foi possível carregar {{language}}. Verifique sua conexão.",
   "languageRetry": "Tentar de novo",
   "license": "Licença",
@@ -117,6 +118,7 @@
   "noticesMisplaced": "Mova o Ghostly para Aplicativos para permitir",
   "noticesOpenSettings": "Abrir ajustes",
   "noticesRunning": "Enquanto o Ghostly estiver aberto",
+  "noticesRunningExtension": "Enquanto o navegador estiver aberto, mesmo sem nenhuma aba do Ghostly",
   "noticesUnavailable": "Indisponível aqui",
   "notificationSounds": "Sons",
   "notificationSoundsDescription": "Mensagens, chamadas e pagamentos confirmados",
@@ -187,7 +189,6 @@
   "sharePresenceHint": "Os contatos veem um ponto enquanto você usa o Ghostly. Um status que você definir aparece de qualquer forma.",
   "shareProfile": "Compartilhar meu nome e foto com contatos",
   "shareProfileHint": "Seus contatos veem o nome e a foto deste perfil. Desligado, veem “Contato” e um padrão no lugar.",
-  "sourceCode": "Código fonte",
   "stayConnected": "Manter conectado em segundo plano",
   "stayConnectedHint": "Conversas e grupos continuam conectados enquanto o Ghostly está fora de vista, com uma notificação discreta. Usa mais bateria.",
   "stayConnectedStopped": "O Android parou o Ghostly em segundo plano",
@@ -230,12 +231,6 @@
     "large": "Grande",
     "larger": "Maior",
     "small": "Pequeno"
-  },
-  "theme": "Tema",
-  "themes": {
-    "dark": "Escuro",
-    "light": "Claro",
-    "system": "Sistema"
   },
   "timeout": "Bloquear após",
   "timeoutOptions": {

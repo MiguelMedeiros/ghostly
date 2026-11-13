@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { previewImageSize, type LinkPreview } from "@ghostly/core";
-import { labelMisleads } from "../lib/parse";
+import { labelMisleads, unspoiledText } from "../lib/parse";
 import { shownPreview, videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
@@ -154,14 +154,16 @@ export function LocationCard({ place }: { place: Place }) {
  * place its text names. Nothing when there is neither.
  */
 export function MessageLinkCards({ text, preview: sent }: { text: string; preview?: LinkPreview }) {
-  const place = useMemo(() => locationIn(text), [text]);
-  // A link the bubble keeps under a spoiler gets no card: its title and picture would say what the spoiler hides.
+  // A link or place the bubble keeps under a spoiler gets no card: its title, picture or coordinates would say what the
+  // spoiler hides.
+  const place = useMemo(() => locationIn(unspoiledText(text)), [text]);
   const preview = useMemo(() => shownPreview(text, sent), [text, sent]);
   if (!preview && !place) return null;
   return (
     <div data-testid="message-link-cards">
       {preview && <LinkPreviewCard preview={preview} />}
-      {place && <LocationCard place={place} />}
+      {/* By its point: Show map (and a map that failed) was for that place, and a contact's edit to another one asks again. */}
+      {place && <LocationCard key={`${place.lat},${place.lon}`} place={place} />}
     </div>
   );
 }

@@ -14,6 +14,7 @@
     "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
     "notSent": "你的消息“{{text}}”未发送",
     "notSentCount": "{{count}} 条消息未发送",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位",
     "rowMoved": "已移到 {{count}} 项中的第 {{place}} 位",
     "waiting": "你的消息“{{text}}”正在等待联系人上线",
@@ -241,7 +242,6 @@
     "newOne": "1 条新消息，滚动到底部"
   },
   "keyChanged": "此聊天已停止：你联系人的密钥已更改。",
-  "lastSeen": "最后上线 {{time}}",
   "listTime": {
     "days": "{{count}}天",
     "hours": "{{count}}小时",
@@ -314,7 +314,7 @@
   "online": "在线",
   "options": "选项",
   "payments": {
-    "needLive": "付款需要直连",
+    "needLive": "发送需要联系人在线：ecash 从不排队等待。请求可以等到对方回来。",
     "noWallet": "你的联系人还没有钱包",
     "off": "此聊天已关闭：在“接收”中开启一种方式",
     "offOrOld": "你的联系人在此聊天中关闭了付款，或需要更新 Ghostly"
@@ -394,6 +394,8 @@
     "copyCode": "复制代码",
     "hiddenChars": "这段代码包含隐藏字符或改变文字方向的字符，显示为 {{marker}}。复制代码时也会一并复制它们。",
     "localTime": "你的时间 {{time}}",
+    "notCopied": "未复制",
+    "notCopiedHint": "未复制。请选中文字后复制。",
     "showAll": "显示全部",
     "showLess": "收起",
     "spoiler": "隐藏的文字。点按显示",
@@ -483,7 +485,6 @@
     "showTranslation": "显示译文",
     "translate": "翻译"
   },
-  "typeMessage": "输入消息...",
   "typing": "正在输入…",
   "typingRecording": "正在录音…",
   "typingThinking": "正在思考…",

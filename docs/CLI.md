@@ -82,7 +82,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
-| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings travel with it |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
 
 Only one process opens a profile at a time.
 
@@ -94,7 +94,9 @@ the daemon runs another version). Ctrl-C, a service manager's stop, or the termi
 it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
 socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
 wait up to `--timeout` for its socket, then stop it. Any other command run meanwhile waits up to 30 s for that socket
-and goes through it.
+and goes through it. The same goes for a profile that `daemon restart` or `daemon --detach` keeps for the daemon it
+starts (`daemon.claim` in the profile's folder), from before the stop until the new daemon holds the profile: other
+commands do not open the profile in between, so a stream of them cannot keep the new daemon from starting.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
@@ -142,6 +144,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `agent.turn` comes only with `--turns`: a `--type` that keeps it alone (`agent`) is a usage error.
   `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
   across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
@@ -152,7 +155,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
   says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell). A command that exits non-zero, or that a signal kills
+  arguments, so a contact's text cannot reach the shell), and `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID` and
+  `GHOSTLY_EVENT_SEQ` in its environment. It also gets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` of the folder and profile
+  the listen runs on (given with `--home`, `--profile` or the environment), so a `ghostly send` in it answers from the
+  same profile. A command that exits non-zero, or that a signal kills
   ("--exec was killed by SIGKILL on event N"), is said on stderr and the cursor moves past its event: it is not run
   again. With `--print`, the command's own stdout goes to listen's stderr, so stdout carries the JSON events only;
   without `--print`, it is listen's stdout. One still running after a minute is said once on stderr (the events after
@@ -160,7 +166,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   5 s to end, then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before
   its event, so the next start runs it again, never alongside the old one.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). Give a URL with a token in
+  `GHOSTLY_WEBHOOK` instead of `--webhook` (one or the other): a running `listen`'s arguments show in `ps` to every
+  account on the machine, its environment does not, and no `--exec` command or other child gets it. A `--webhook` URL
+  with a path or query is warned of on stderr, and one that is not a URL is refused without repeating it. A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
@@ -207,7 +216,9 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
 `group.message` that mentions this profile or presses a button of a question it sent, becomes one `agent.turn` (a
 press on another member's question is not). A mention learned later (the message first
-came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
+came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. A
+press learned later the same way is a `button.pressed` that carries the reply as `message`, and its turn then, with
+`source: "button.pressed"`. Nothing else is one (my own messages, edits,
 reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
 ```json
@@ -218,7 +229,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
-  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`, and `history --before`
+  or `--after` for the messages around it).
 - **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
   `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
@@ -284,7 +296,7 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
-  name contacts see in `profile set`, `profile create --name` and `settings set nick`, the `--name` of `file send`,
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name in `file send`,
   the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
@@ -302,7 +314,9 @@ once the daemon has answered `status`: one that has not in 15 seconds is a timeo
 sent, so the daemon does not act on it when it wakes. A read (`chat list`, `status` and the like) that a daemon
 stopping or restarting leaves unanswered is asked once more, through the daemon that runs then or on the profile
 itself; so is a `chat wait` or `file wait`, for the time it had left. When that one goes away too it fails with
-`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. A `file send --wait`
+`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. Any command whose
+connection ended before it was sent to the daemon (`unavailable`, "The daemon went away") is sent once more the same
+way: the daemon never read it. A `file send --wait`
 answers before the daemon stops, as `send --wait` does: a timeout (exit 4) with `details.reason: daemon-stopped`, its
 `chat`, `messageId`, the file's id (`file`) and how far it got. Any other command it leaves unanswered may be done: it
 is a timeout (exit 4) with `details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
@@ -348,7 +362,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   numbers: [AI agents § Reporting usage](AI-AGENTS.md#reporting-usage).
 - Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
   buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
-  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  `label`, `by`); with `--turns`, a press on your question (in a chat or a group) is the `agent.turn` that carries `press` instead
+  ([Agent turns](#agent-turns)). Then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. Someone else's question is answered with `ghostly button press <chat> <message> <button>`, as a
   tap in the app. The text is what apps without buttons show, so it says how to answer in words
   ([WISP 406 · Message Buttons](wisps/406-message-buttons.md)). A typed answer is matched by label or id, ignoring

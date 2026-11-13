@@ -56,12 +56,13 @@ export function protocolLinkCode(pathname: string): string | null {
 /**
  * The invite a route carries, if it carries one: `/ghostly1…` (the hash of a shared link), `/chat/<code>`, or a
  * `web+ghostly:` link. Whatever a `web+ghostly:` link holds is read as an invite, so what is not one is refused
- * and leaves the address like a bad invite does.
+ * and leaves the address like a bad invite does. A `/` a link ends with (typed, or added by a linkifier) is not the
+ * code's; anything else after a `ghostly1…` is read with it, and refused: it is never left drawing nothing.
  */
 export function inviteRouteCode(pathname: string): string | null {
   const protocol = protocolLinkCode(pathname);
   if (protocol !== null) return protocol || "web+ghostly:";
-  return pathname.match(/^\/?(ghostly1[^/]*)$/i)?.[1] ?? pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+  return pathname.match(/^\/?(ghostly1.*?)\/*$/i)?.[1] ?? pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
 }
 
 /** What reading a pasted, scanned or opened invite gave: the keys, or the one reason the UI says. */

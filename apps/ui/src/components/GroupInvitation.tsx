@@ -51,9 +51,9 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
 const rowOpen = (groupId: string) =>
   [...document.querySelectorAll<HTMLElement>('[data-testid="group-row"]')].find(row => row.dataset.group === groupId)?.querySelector<HTMLElement>('[data-testid="group-row-open"]') ?? null;
 
-/** The open button of the chat list's row after this group's, if there is one and it is drawn (not a space far from the view). */
+/** The open button of the chat list's row after this group's, if there is one. */
 export function rowAfter(groupId: string): HTMLElement | null {
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"], [data-row-space]')];
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
   const at = rows.findIndex(row => row.dataset.group === groupId);
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
 }
@@ -146,7 +146,7 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
   const size = large ? "min-h-11 px-5 text-sm" : ROW_BUTTON;
   return <>
     <button {...answering(busy)} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
+      className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 ${size}`}>{t("chat.file.accept")}</button>
     <button {...answering(busy)} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
       className={`rounded-lg text-text-secondary hover:bg-surface-hover aria-disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
   </>;
@@ -156,7 +156,7 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
 export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
   const { t } = useI18n();
   return <button {...answering(busy)} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
-    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
+    className={`rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 ${ROW_BUTTON}`}>{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */

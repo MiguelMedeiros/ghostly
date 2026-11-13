@@ -54,7 +54,7 @@ describe("the host says a file of this build is gone", () => {
 
     gone();
     await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("A new build of Ghostly 1.1.4 is available")).toBeInTheDocument();
+    expect(await screen.findByTestId("update-banner")).toHaveTextContent("A new build of Ghostly 1.1.4 is available");
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
 
     // Gone with the provider: nothing listens after it.
@@ -78,7 +78,7 @@ describe("the host says a file of this build is gone", () => {
 
     answer();
     await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("A new build of Ghostly 1.1.4 is available")).toBeInTheDocument();
+    expect(await screen.findByTestId("update-banner")).toHaveTextContent("A new build of Ghostly 1.1.4 is available");
   });
 
   it("a newer version found this way is named as before", async () => {
@@ -86,7 +86,7 @@ describe("the host says a file of this build is gone", () => {
     renderApp(<UpdateProvider><UpdateBanner /></UpdateProvider>);
     await waitFor(() => expect(listening()).toBe(true));
     gone();
-    expect(await screen.findByText("Ghostly 1.1.5 is available")).toBeInTheDocument();
+    expect(await screen.findByTestId("update-banner")).toHaveTextContent("Ghostly 1.1.5 is available");
   });
 
   it("does nothing while automatic checks are off: the setting is kept, the next Check now still finds it", async () => {

@@ -150,7 +150,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       const touch = touchOnly();
       // A device code is not an invite: the words say which one to paste.
       if (value === null) { setError(said(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() }))); setManual(true); return; }
-      if (!value.trim()) { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); return; }
+      if (!value.trim()) {
+        const empty = () => { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); };
+        // No text, but the app may hold a picture there (a screenshot of the QR): read as Ctrl+V on the dialog reads one.
+        const picture = platformPastedImage(IMAGE_MAX);
+        if (picture) readHeld(picture, false, empty); else empty();
+        return;
+      }
       setInput(value.trim()); setPastes(count => count + 1);
       accept(value.trim());
     } finally {
@@ -207,8 +213,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     readHeld(reading, picture || pasteNamesFiles(event.clipboardData));
   };
   // A picture the app holds (pasted, or dropped from another app), weighed as it was read. `named`: files or a picture
-  // were offered, so finding none is said.
-  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean) => {
+  // were offered, so finding none is said; otherwise `none` says it, if anything.
+  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean, none?: () => void) => {
     stop(); setError(null); busyRef.current = true; setBusy(true);
     const current = generation.current;
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
@@ -219,6 +225,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       else if (found) void readImage(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(said(t("join.imageFailed")));
+      else none?.();
     }, (cause: unknown) => {
       // In the dialog's own words: the composer's point at its +, which Join has none of.
       if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
@@ -258,7 +265,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />
     {camera ? <button ref={cancelButton} onClick={() => { focusSwap.current = document.activeElement === cancelButton.current ? "scan" : null; stop(); }} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
       {/* Busy, not disabled: a press from the keys keeps the focus here through a refusal, as `paste` ignores a second one. */}
-      <button ref={primary} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header aria-disabled:opacity-40 aria-disabled:cursor-progress`}>
+      <button ref={primary} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 aria-disabled:cursor-progress`}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12h8M8 16h5"/></svg>
         {t("join.paste")}
       </button>
@@ -279,7 +286,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} noteClassName="mt-2 text-center text-sm text-text-secondary" />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
-      <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
+      <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header forced-colors:border forced-colors:border-[color:ButtonText]`}>{t("join.openChat")}</button>
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
       <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-invalid={error && input.trim() ? true : undefined} aria-describedby={error ? errorId : undefined} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />

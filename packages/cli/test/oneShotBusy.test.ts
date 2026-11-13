@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { profilePaths } from "../src/profiles";
 import { error, ghostly, home, localRelay, ok, Running } from "./support/cli";
@@ -43,6 +44,26 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
     expect(run.json.error).toMatchObject({ details: { pid: process.pid } });
   });
 
+  it("one behind processes that take the profile in turn waits for each of them, not 5 s in all", async () => {
+    const turns = home("one-shot-turns");
+    ok(await ghostly(["--home", turns, "settings", "get"], { env }));
+    const { lock } = profilePaths(turns, "default");
+    // This test's own process, then another one, each hold the profile for 3 s: 6 s in all, past one holder's wait.
+    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore" });
+    try {
+      writeFileSync(lock, String(process.pid));
+      const started = Date.now();
+      const run = ghostly(["--home", turns, "chat", "list"], { env });
+      await new Promise((r) => setTimeout(r, 3_000));
+      writeFileSync(lock, String(other.pid));
+      await new Promise((r) => setTimeout(r, 3_000));
+      rmSync(lock, { force: true });
+      // Before: busy, "and was not free after 5 s", while the profile was passing from one process to the next.
+      expect(ok(await run)).toEqual({ chats: [] });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(6_000);
+    } finally { other.kill(); }
+  });
+
   it.skipIf(process.platform === "win32")("one run while the daemon starts goes through it once its socket answers, not busy after the wait", async () => {
     const starting = home("one-shot-daemon-starting");
     ok(await ghostly(["--home", starting, "settings", "get"], { env }));
@@ -64,6 +85,54 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
       const resumed = Date.now();
       expect(ok(await run)).toEqual({ chats: [] });
       expect(Date.now() - resumed).toBeLessThan(4_000);
+    } finally {
+      daemon.child.kill("SIGCONT");
+      await daemon.stop();
+    }
+  });
+
+  it("on a terminal it says what it waits for once the wait goes on, and on a pipe nothing", async () => {
+    const held = home("one-shot-held-tty");
+    ok(await ghostly(["--home", held, "settings", "get"], { env }));
+    // stderr taken for a terminal's: the CLI reads `process.stderr.isTTY`, which a test's pipe never is.
+    const tty = `${held}/tty-stderr.cjs`;
+    writeFileSync(tty, "Object.defineProperty(process.stderr, \"isTTY\", { value: true });\n");
+    writeFileSync(profilePaths(held, "default").lock, String(process.pid));
+    // Before: nothing at all for the 5 s, then the busy answer.
+    const [onTty, onPipe] = await Promise.all([
+      ghostly(["--home", held, "chat", "list"], { env: { ...env, NODE_OPTIONS: `--require "${tty}"` } }),
+      ghostly(["--home", held, "chat", "list"], { env }),
+    ]);
+    error(onTty, "busy", 1);
+    expect(onTty.stderr).toBe(`ghostly: profile default is in use by process ${process.pid}, another ghostly command: waiting for it to let go (up to 5 s; Ctrl-C stops waiting)\n`);
+    error(onPipe, "busy", 1);
+    expect(onPipe.stderr).toBe("");
+  });
+
+  it.skipIf(process.platform === "win32")("on a terminal, one run while the daemon starts says it waits for that start", async () => {
+    const starting = home("one-shot-daemon-starting-tty");
+    ok(await ghostly(["--home", starting, "settings", "get"], { env }));
+    const tty = `${starting}/tty-stderr.cjs`;
+    writeFileSync(tty, "Object.defineProperty(process.stderr, \"isTTY\", { value: true });\n");
+    const paths = profilePaths(starting, "default");
+    const daemon = new Running(["--home", starting, "daemon"], env);
+    try {
+      const until = Date.now() + 30_000;
+      while (!existsSync(`${paths.dir}/daemon.starting`)) {
+        if (Date.now() > until) throw new Error(`the daemon never marked its start: ${daemon.stderr}`);
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      daemon.child.kill("SIGSTOP");
+      const run = new Running(["--home", starting, "chat", "list"], { ...env, NODE_OPTIONS: `--require "${tty}"` });
+      try {
+        // Before: nothing for up to 30 s (a big profile's engine start), then busy.
+        const told = Date.now() + 5_000;
+        while (!run.stderr.includes("\n") && Date.now() < told) await new Promise((r) => setTimeout(r, 50));
+        expect(run.stderr).toBe(`ghostly: profile default's daemon (process ${daemon.child.pid}) is starting: waiting for it (up to 30 s; Ctrl-C stops waiting)\n`);
+        daemon.child.kill("SIGCONT");
+        expect(await run.exited(15_000)).toBe(0);
+        expect(run.lines).toEqual([{ chats: [] }]);
+      } finally { await run.stop(); }
     } finally {
       daemon.child.kill("SIGCONT");
       await daemon.stop();

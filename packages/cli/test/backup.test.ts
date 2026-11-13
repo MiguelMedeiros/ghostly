@@ -3,8 +3,11 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
+import { createIdentity } from "@ghostly/core";
+import type { ApiContext } from "../src/apiKit";
+import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { BIN, error, ghostly, home, ok, testEnv } from "./support/cli";
 // covers: headless.backup, backup.light
@@ -36,8 +39,11 @@ it("backs a profile up under a passphrase and restores it into a new one, never 
   error(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--passphrase-file", wrong]), "refused", 1);
   error(await ghostly(["--home", dir, "profile", "restore", file, "default", "--copy"], { env: PASS }), "refused", 1);
   error(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--copy"], { env: NO_PASS }), "usage", 2);
-  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy", protection: "passphrase" });
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy", protection: "passphrase", current: false });
   expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ profile: "copy", name: "Backup bot" });
+  // --use says the restored profile is now the current one, as profile create --use does.
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "used", "--use", "--copy"], { env: PASS }))).toMatchObject({ restored: "used", current: true });
+  expect(ok(await ghostly(["--home", dir, "profile", "list"]))).toMatchObject({ profiles: expect.arrayContaining([{ name: "used", current: true, running: false }]) });
 });
 
 it("a profile's files travel with it, large ones too, and a damaged or cut backup restores nothing", async () => {
@@ -70,6 +76,25 @@ it("a profile's files travel with it, large ones too, and a damaged or cut backu
     expect(error(await ghostly(["--home", dir, "profile", "restore", join(dir, damaged), "broken", "--copy"], { env: PASS }), "refused", 1).message).toContain("damaged");
     expect(readdirSync(join(dir, "profiles")).sort()).toEqual(["copy", "default"]);
   }
+});
+
+it("--out naming a folder is refused in words that say so, and leaves no file of the folder's name", async () => {
+  const dir = home("backup-folder");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Folder bot"]));
+  // A slash at its end and no such folder: before, the backup was written as a file named "backups".
+  const missing = join(dir, "backups");
+  const slashed = error(await ghostly(["--home", dir, "profile", "backup", "--out", `${missing}/`], { env: PASS }), "bad_request", 1);
+  expect(slashed.message).toBe(`${missing} names a folder: name the backup's file in it, e.g. --out ${join(missing, "<name>.ghostly-backup")} (path over the socket)`);
+  expect(existsSync(missing)).toBe(false);
+  // A folder that is there: before, "exists: choose another name", as if a file were in the way.
+  const folder = join(dir, "kept");
+  mkdirSync(folder);
+  for (const out of [folder, `${folder}/`]) {
+    expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: PASS }), "bad_request", 1).message).toContain(`${folder} names a folder: name the backup's file in it`);
+  }
+  expect(readdirSync(folder)).toEqual([]);
+  // The file in it, as the message says, is made.
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
 });
 
 it("a backup without a passphrase is made only when asked for by name, says so, and restores with none", async () => {
@@ -181,6 +206,24 @@ it("the files profile commands read are named as every other file: a folder, a p
   expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", "", "--no-passphrase"], { env: NO_PASS }), "usage", 2).message).toBe(NAMES_NO_FILE);
   expect(error(await ghostly(["--home", dir, "profile", "picture", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
   expect(error(await ghostly(["--home", dir, "identity", "complete", "draft", "--evidence-file", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+});
+
+// "-" was read as a file of that name ("No such file or folder: <cwd>/-"), where every other secret the CLI takes reads
+// stdin for it: a pipe from a password manager keeps the passphrase off disk and out of the environment.
+it("--passphrase-file - reads the passphrase from stdin, for backup and restore", async () => {
+  const dir = home("backup-stdin");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Piped bot"]));
+  const file = join(dir, "piped.ghostly-backup"), pass = `${PASS.GHOSTLY_BACKUP_PASSPHRASE}\n`;
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", file, "--passphrase-file", "-"], { env: NO_PASS, input: pass }))).toMatchObject({ path: file, protection: "passphrase" });
+  // Sealed with the piped passphrase, its line end dropped: the one in the environment opens it.
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "env-copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "env-copy" });
+  error(await ghostly(["--home", dir, "profile", "restore", file, "wrong", "--passphrase-file", "-"], { env: NO_PASS, input: "not the passphrase\n" }), "refused", 1);
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--passphrase-file", "-", "--copy"], { env: NO_PASS, input: pass }))).toMatchObject({ restored: "copy", protection: "passphrase" });
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ name: "Piped bot" });
+  // Nothing on stdin: said in stdin's words, not a file's.
+  const empty = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "none.ghostly-backup"), "--passphrase-file", "-"], { env: NO_PASS, input: "" }), "bad_request", 1);
+  expect(empty.message).toBe("Stdin is empty: it holds the backup's passphrase");
+  expect(existsSync(join(dir, "none.ghostly-backup"))).toBe(false);
 });
 
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
@@ -316,8 +359,90 @@ it("a restored profile keeps auto-join (groups.json) and auto-answer (calls.json
   const none = join(plain, "none.ghostly-backup");
   ok(await ghostly(["--home", plain, "profile", "backup", "--out", none, "--no-passphrase"], { env: NO_PASS }));
   const bare = ok(await ghostly(["--home", plain, "profile", "restore", none, "copy", "--copy"], { env: NO_PASS })) as { folder: string };
-  expect(existsSync(join(bare.folder, "groups.json")) || existsSync(join(bare.folder, "calls.json"))).toBe(false);
+  expect(["groups.json", "calls.json", "holds.json", "apps.json"].filter((name) => existsSync(join(bare.folder, name)))).toEqual([]);
   expect(ok(await ghostly(["--home", plain, "--profile", "copy", "group", "auto"]))).toEqual({ autoJoin: { on: false, from: [] } });
+});
+
+// The apps a bot serves (`app serve`) were left out: the restored bot served none and offered apps/1 to no contact.
+it("a restored profile keeps the apps it serves (apps.json)", async () => {
+  const dir = home("backup-served");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "App bot"]));
+  const original = join(dir, "profiles", "default");
+  // As `app serve` writes it.
+  const served = { ref: `${createIdentity().pubKeyZ32}/chess`, title: "Chess", version: "1.2.0", sequence: 3, digest: "d".repeat(64), url: "https://example.com/chess.ghostlyapp", permissions: ["chat"], granted: ["chat"], servedAt: 1 };
+  const apps = JSON.stringify([served], null, 2) + "\n";
+  writeFileSync(join(original, "apps.json"), apps, { mode: 0o600 });
+
+  const file = join(dir, "served.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file, "--no-passphrase"], { env: NO_PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--copy"], { env: NO_PASS })) as { folder: string };
+  expect(readFileSync(join(restored.folder, "apps.json"), "utf8")).toBe(apps);
+  expect(statSync(join(restored.folder, "apps.json")).mode & 0o777).toBe(0o600);
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "app", "served"]))).toMatchObject({ apps: [served] });
+});
+
+/** The restored daemon's start over its folder (`resumeHolds`), with these chats on DHT only, as its store has them. */
+function startRestored(dir: string, chats: string[]) {
+  let links = chats.map((id) => ({ id, profile: "paired-chat/1", deliveryMode: "dht", runnableTransports: ["webrtc/1"] }));
+  const released: Record<string, unknown>[] = [];
+  const node = {
+    getState: () => ({ links }),
+    setDeliveryMode: vi.fn(async ({ linkId, mode }: { linkId: string; mode: string }) => { links = links.map((l) => (l.id === linkId ? { ...l, deliveryMode: mode } : l)); }),
+  };
+  const hub = { onState: () => () => {}, emit: (type: string, _id: string, fields: Record<string, unknown>) => { released.push({ type, ...fields }); } };
+  const ctx = { runtime: { server: { node }, paths: { dir } }, hub, mode: "daemon" } as unknown as ApiContext;
+  return { ctx, node, released, modes: () => Object.fromEntries(links.map((l) => [l.id, l.deliveryMode])) };
+}
+
+// A chat held off its direct link (`chat disconnect --hold`) is on DHT only in the store, and only holds.json says it
+// comes back: the backup left that file out, so the restored copy kept the chat on DHT only for good, and nothing said why.
+it("a restored profile keeps a chat's hold: the chat gets its live link back when the hold ends, at the start if it ended meanwhile", async () => {
+  const dir = home("backup-holds");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Held bot"]));
+  const original = join(dir, "profiles", "default");
+  // The held chats are the profile's (a start drops a hold whose chat its store does not have).
+  const opened = await openPersistentIndexedDb(join(original, "db"));
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = opened.factory.open("ghostly"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const tx = db.transaction("links", "readwrite");
+    for (const id of ["chat-held", "chat-ended"]) {
+      tx.objectStore("links").put({ id, profile: "paired-chat/1", createdAt: 1, label: id, deliveryMode: "dht", seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+        peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64, pairedPeerKey: createIdentity().pubKeyZ32, peerTrust: { version: 1 } });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error); });
+    db.close();
+  } finally { await opened.close(); }
+  // As `chat disconnect --hold` writes it: two holds on at the backup.
+  const now = Date.now(), until = now + 60 * 60_000;
+  const holds = JSON.stringify({ "chat-held": { until, since: now }, "chat-ended": { until: now + 10 * 60_000, since: now } }) + "\n";
+  writeFileSync(join(original, "holds.json"), holds, { mode: 0o600 });
+
+  const file = join(dir, "held.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--copy"], { env: PASS })) as { folder: string };
+  const copied = join(restored.folder, "holds.json");
+  expect(existsSync(copied), "the holds travel with the backup").toBe(true);
+  expect(readFileSync(copied, "utf8")).toBe(holds);
+  expect(statSync(copied).mode & 0o777).toBe(0o600);
+
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // Restored and started half an hour later: one hold ended meanwhile.
+  vi.setSystemTime(now + 30 * 60_000);
+  try {
+    const { ctx, node, released, modes } = startRestored(restored.folder, ["chat-held", "chat-ended", "chat-chosen"]);
+    resumeHolds(ctx);
+    await vi.advanceTimersByTimeAsync(0);
+    // The hold that ended meanwhile: the chat is back on its live link at the start, not left on DHT only. The other is still on.
+    expect(modes()).toEqual({ "chat-held": "dht", "chat-ended": "stream", "chat-chosen": "dht" });
+    expect(holdOf(ctx, "chat-held")).toBe(until);
+    expect(holdOf(ctx, "chat-ended")).toBeNull();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    // Its time up, the held chat comes back too; a DHT only the chat chose itself (no hold) stays.
+    expect(modes()).toEqual({ "chat-held": "stream", "chat-ended": "stream", "chat-chosen": "dht" });
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(2);
+    expect(released).toEqual([{ type: "chat.released", chat: "chat-ended", reason: "expired" }, { type: "chat.released", chat: "chat-held", reason: "expired" }]);
+    expect(JSON.parse(readFileSync(copied, "utf8"))).toEqual({});
+  } finally { vi.useRealTimers(); }
 });
 
 // The profile keeps its messages in rows.db: its snapshot names them only. A backup is one store with every value in

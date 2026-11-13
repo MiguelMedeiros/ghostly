@@ -3,6 +3,7 @@ import { emptyIdentityLedger, type IdentityLedger, type SharedIdentity } from "@
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { IdentityProofs } from "@ghostly/browser/engine/identities";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.identities
 
 /**
@@ -26,7 +27,7 @@ function fake() {
     linkIds: () => ["chat-alice"], online: () => false, emit: () => {}, publish: async () => {}, resolve: async () => null,
   }, () => []);
   const alice = { id: "chat-alice", label: "Alice", peerNick: "Alice", peerPubKeyZ32: "a".repeat(52), identities: engine.linkView("chat-alice", true) };
-  const node = { getState: () => ({ links: [alice], groups: [], settings: {}, transport: {}, identityProofs: [] }) as unknown as EngineState };
+  const node = { chatView: chatViewOf, getState: () => ({ links: [alice], groups: [], settings: {}, transport: {}, identityProofs: [] }) as unknown as EngineState };
   return { runtime: { server: { node }, paths: { name: "default" } }, hub: { emit: () => {}, onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 

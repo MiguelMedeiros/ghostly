@@ -1,10 +1,19 @@
 import { CliError } from "../errors";
-import { here, readInput, type Command } from "./shared";
+import { here, localStat, readInput, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
   if (typeof value !== "string" || !value) throw new CliError("usage", `--key <file> is needed: ghostly ${usage}`);
   return value;
+}
+
+/**
+ * `app serve`'s bundle file, in the API's words (apps.ts) when it is not there or a folder: said before the profile
+ * opens. Before, a one-shot went online first (about 12 s with no daemon) to say the file was not there.
+ */
+function bundleFile(path: string): string {
+  if (localStat(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a .ghostlyapp file`);
+  return path;
 }
 
 /** `app send`'s message: JSON on the command line, or `-` for stdin. */
@@ -86,9 +95,9 @@ export const commands: Record<string, Command> = {
     args: ["bundle"],
     options: {
       grant: { type: "list", description: "A permission the app asks and you allow: chat (talk to the contact's app) or name (your name in that chat); again for each" },
-      url: { type: "string", description: "Where a contact's app reads the bundle, for the card (default: the URL it was served from, else the manifest's first source)" },
+      url: { type: "string", description: "Where a contact's app reads the bundle, for the card (raw.githubusercontent.com, or cdn.jsdelivr.net at a commit; default: the first of those it was served from or its manifest names)" },
     },
-    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : here(a.bundle), grant: options.grant, url: options.url }),
+    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : bundleFile(here(a.bundle)!), grant: options.grant, url: options.url }),
   },
   "app served": {
     method: "app.served", usage: "app served",
@@ -102,7 +111,7 @@ export const commands: Record<string, Command> = {
   },
   "app verify": {
     method: "app.verify", usage: "app verify <bundle|url>",
-    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason, revoked when the ghostly-revoke.json beside it revokes this version",
+    summary: "Check a .ghostlyapp as a client would, from a file or an https URL: its manifest and digest, or refused (exit 1) with the reason, revoked when the ghostly-revoke.json beside it (for a URL, or beside one of its sources) revokes this version",
     args: ["bundle"],
     run: async (_, a) => (await import("../apps")).verifyApp(a.bundle!),
   },

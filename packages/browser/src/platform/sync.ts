@@ -23,6 +23,7 @@ import {
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
 import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
+import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
@@ -238,6 +239,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) change().reactions = message.reactions;
+    // A reply's quote as the engine holds it now: one whose original was deleted for everyone keeps its id and loses its
+    // words (WISP 400 § Delete for everyone), and the stored copy here must not keep them.
+    if (previous && message.replyTo && JSON.stringify(previous.replyTo ?? null) !== JSON.stringify(message.replyTo)) change().replyTo = message.replyTo;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
     // A received row the engine gave a place to after this chat had it (one stored, before places were kept, under a
     // time that had not come yet: engine/arrival.ts): its place here follows, with the time its sender said.
@@ -481,6 +485,8 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
+    // An app still running in it (a Desktop app window) stops: the engine answers nothing more for this chat.
+    stopAppsIn(link.id);
     // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }

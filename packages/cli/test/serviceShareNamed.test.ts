@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.services
 
 /**
@@ -16,7 +17,7 @@ function fake() {
     { id: "chat-mallory", label: null, peerNick: "Bob", peerPubKeyZ32: KEY, profile: "paired-chat/1" },
   ] as unknown as LinkView[];
   const node = {
-    getState: () => ({ links, groups: [], settings: {}, transport: {},
+    chatView: chatViewOf, getState: () => ({ links, groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }] }) as unknown as EngineState,
     setServiceShared: vi.fn(async () => {}),
   };

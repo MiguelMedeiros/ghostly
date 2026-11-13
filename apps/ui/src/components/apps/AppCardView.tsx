@@ -6,7 +6,7 @@ import { servicesPlatform } from "../../lib/platform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { NAME, aroundName } from "./aroundName";
+import { NAME, aroundName, withName } from "./aroundName";
 import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/apps/installed";
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
@@ -73,9 +73,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const open = (runAnyway = false) => {
     if (opening) return;
     setError(null); setOpening(runAnyway ? "anyway" : "open");
+    const lacked = app?.run.status === "needs-files";
     // Refused (removed or revoked since the list was read): the list is read again first, so the card says Stopped,
     // and offers Run anyway only for a store's removal, as the Apps page then does.
-    void openApp(card.ref, linkId, { runAnyway }).catch(async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
+    void openApp(card.ref, linkId, { runAnyway })
+      // Opening is what fetched its files (a restored profile): every screen's list says so, and the icon shows.
+      .then(() => { if (lacked) void refreshInstalledApps(); }, async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
       .finally(() => setOpening(null));
   };
   return (
@@ -98,11 +101,11 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         </div>
       </div>
       {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="chat-text-card-line text-danger" data-testid="app-card-error">{error}</p>}
+      {error && <p role="alert" className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
+            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
         {app?.run.status === "removed" &&<Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>

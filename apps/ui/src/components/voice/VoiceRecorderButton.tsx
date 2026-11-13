@@ -4,6 +4,7 @@ import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { useIsLocked } from "../../contexts/LockScreenContext";
+import { composingKey } from "../../hooks/useComposition";
 import { androidApp } from "../../lib/touchOnly";
 import { openAppSettings } from "../../desktop/androidCameraRefusal";
 
@@ -22,6 +23,19 @@ import { LiveWaveform, PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine } from "../../lib/problemText";
 
+/**
+ * Whether the browser will ask the person for the microphone before it answers: its question comes up over the page.
+ * The iPhone's web app asks again at each launch. Undefined where the browser can't say.
+ */
+async function microphoneAsks(): Promise<boolean | undefined> {
+  try {
+    const state = (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state;
+    return state === undefined ? undefined : state === "prompt";
+  } catch {
+    return undefined;
+  }
+}
+
 type Mode = "idle" | "hold" | "locked";
 type Phase = "starting" | "recording" | "paused" | "sending";
 
@@ -37,6 +51,11 @@ const CANCEL_PX = 110;
 const LOCK_PX = 80;
 const HINT_MS = 2500;
 const PREVIEW_BARS = 40;
+/**
+ * A held press whose microphone took this long to answer: a person answered the browser's question about it, not a
+ * microphone waking up. Used where the browser can't say beforehand that it will ask (no Permissions API for it).
+ */
+const ASKED_MS = 1500;
 /** Esc throws away a recording shorter than this at once; a longer one asks first. */
 const CONFIRM_MS = 3000;
 /** How long the bin shows after a slide throws a recording away. */
@@ -115,6 +134,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const sendingRef = useRef(false);
   /** Send was asked for before the microphone answered: it sends once it does. */
   const pendingSendRef = useRef(false);
+  /**
+   * The browser is asking the person for the microphone of this hold. Its question takes the touch: on an iPhone the
+   * page never hears that touch end (no pointerup, no pointercancel), elsewhere it ends to answer. Either way the hold
+   * can't go on, so the recording goes on hands-free once allowed, sent with a tap. False when the browser said it will
+   * not ask (a microphone allowed already, only slow to open); undefined while it hasn't said, or can't.
+   */
+  const askingRef = useRef<boolean | undefined>(undefined);
   /** Whether the recording was running when Esc asked "discard?", so Keep carries on. */
   const confirmResumeRef = useRef(false);
   const modeRef = useRef<Mode>("idle");
@@ -205,6 +231,14 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     }
   }, [cancel, reset, focusOutOfBar, stopPreview, showHint, onSend, onError, t]);
 
+  const lock = useCallback(() => {
+    gestureRef.current = null;
+    setDrag({ x: 0, y: 0 });
+    setModeBoth("locked");
+    setAnnounce(t("chat.voice.handsFree"));
+    buttonRef.current?.focus();
+  }, [t]);
+
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
     if (unavailable) { onError(unavailable); return; }
@@ -226,6 +260,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     };
     setModeBoth(next);
     setPhase("starting");
+    askingRef.current = undefined;
+    const pressedAt = performance.now();
+    if (next === "hold") void microphoneAsks().then((asks) => { if (recorderRef.current === recorder) askingRef.current = asks; });
     try {
       await recorder.start();
     } catch (error) {
@@ -238,10 +275,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
+    const asked = askingRef.current ?? performance.now() - pressedAt >= ASKED_MS;
+    askingRef.current = undefined;
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
+    // Still held after the browser's question: the finger that answered it is not on the mic any more, whatever the page
+    // heard. It records hands-free, to send with a tap, rather than running on with nothing to let go of.
+    if (modeRef.current === "hold" && asked) lock();
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, t]);
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -338,10 +380,16 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
   // panels (Message details, the connection panel) are a `role="dialog"` box, not a `<dialog>`, and a menu (a message's
   // ⋮) is a group of buttons: Enter there presses its row. The bar's own "discard?" is an alertdialog in the bar, and its
-  // keys stay the bar's.
+  // keys stay the bar's. Nor the keys of an input method composing in a field (chat search in Japanese): its Enter
+  // picks a candidate and its Escape drops one.
   useEffect(() => {
     if (mode === "idle") return;
+    let composedAt: number | null = null;
+    const onCompositionEnd = (event: CompositionEvent) => { composedAt = event.timeStamp; };
     const onKey = (event: globalThis.KeyboardEvent) => {
+      const ended = composedAt;
+      composedAt = null;
+      if (composingKey(event, ended)) return;
       if (sendingRef.current || lockedRef.current) return;
       const dialog = event.target instanceof Element ? event.target.closest("dialog, [role=dialog], [role=alertdialog], [data-menu]") : null;
       if (dialog && !dialog.contains(buttonRef.current) && !barRef.current?.contains(dialog)) return;
@@ -352,17 +400,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       if (event.key === "Escape") { event.preventDefault(); askDiscard(); }
       else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked" && !keyboardOnBarButton(event.target)) { event.preventDefault(); void send(); }
     };
+    document.addEventListener("compositionend", onCompositionEnd, true);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("compositionend", onCompositionEnd, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [mode, askDiscard, keep, send]);
-
-  const lock = useCallback(() => {
-    gestureRef.current = null;
-    setDrag({ x: 0, y: 0 });
-    setModeBoth("locked");
-    setAnnounce(t("chat.voice.handsFree"));
-    buttonRef.current?.focus();
-  }, [t]);
 
   const bin = useCallback(() => {
     if (binTimer.current) clearTimeout(binTimer.current);
@@ -393,6 +437,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setDrag({ x: Math.min(0, x), y: Math.min(0, y) });
   };
 
+  /** A hold whose microphone has not answered yet because the browser asks the person for it (or took a person's time). */
+  const askedDuringHold = () => {
+    const recorder = recorderRef.current, gesture = gestureRef.current;
+    if (modeRef.current !== "hold" || !recorder || recorder.recording || recorder.paused || recorder.ended) return false;
+    return askingRef.current ?? (!!gesture && Date.now() - gesture.at >= ASKED_MS);
+  };
+
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     // Hands-free: the send button sends as the press ends on it, whether or not a click follows.
     if (modeRef.current === "locked") {
@@ -405,6 +456,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     const gesture = gestureRef.current;
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     suppressClickRef.current = true;
+    // Let go to answer the browser's question about the microphone: what it allows is recorded hands-free.
+    if (askedDuringHold()) return lock();
     gestureRef.current = null;
     const tap = Date.now() - gesture.at < TAP_MS;
     if (gesture.mouse) {
@@ -420,7 +473,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const onPointerCancel = () => {
     sendPressRef.current = null;
-    if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
+    // The browser's question about the microphone took the touch: the recording it allows goes on hands-free.
+    if (askedDuringHold()) lock();
+    else if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
   };
 
   const onClick = () => {
@@ -585,7 +640,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         onKeyDown={onKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         style={{ touchAction: "none" }}
-        className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
+        className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
       >
         {/* One element either way (so a press's target never leaves the page); the send icon pops in by CSS. */}
         <span className="voice-button-icon">{locked ? <SendIcon /> : <MicIcon />}</span>

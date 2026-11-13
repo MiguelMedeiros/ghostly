@@ -326,6 +326,9 @@ const RULES: readonly Rule[] = [
   { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
   exact("None of your mints can pay an invoice with no amount", "errors.cashu.mintsNoAnyAmount", "errors.cashu.mintsNoAnyAmountNext"),
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
+  exact("The mint quoted another amount than this invoice's. Nothing was paid.", "errors.cashu.quoteMismatch", "errors.cashu.quoteMismatchNext"),
+  // Also a browser wallet's (paymentAdapters/providers/webln.ts).
+  exact("That is not an invoice this wallet can pay", "errors.cashu.cannotPayInvoice"),
   exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
   { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet, less (?<fee>\d+) sats? the mint kept as its fee\.$/, key: "errors.cashu.notPaid", reason: "title", next: "errors.cashu.backInWalletLessFee" },
@@ -371,6 +374,15 @@ const RULES: readonly Rule[] = [
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
+  // What a payee's app sends back for a payment it did not take, on the payer's bubble; a USDT receipt's, on the payee's.
+  exact("Too many payments at once: send it again in a minute", "errors.pay.busy", "errors.pay.busyNext"),
+  exact("This ecash does not pay the request: the amount or the mint differs", "errors.pay.ecashMismatch", "errors.pay.ecashMismatchNext"),
+  exact("This transaction already paid another request", "errors.pay.txUsed"),
+  exact("Too many open USDT requests of this amount: wait for one to be paid", "errors.pay.usdtTooMany", "errors.pay.usdtTooManyNext"),
+  // A group's pay to one member the engine refused, its member list stale (engine/communityPay.ts): the list's own words.
+  exact("Payments are turned off in this group.", "errors.group.paymentsOff"),
+  exact("They are no longer in this group", "errors.group.memberGone"),
+  exact("They take no way of paying this device allows.", "payments.group.why.noWay"),
   exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet", "errors.pay.wrongNetworkMainnetNext"),
   exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet", "errors.pay.wrongNetworkTestnetNext"),
   { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", next: "errors.pay.confirmRealFirstNext", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
@@ -450,6 +462,7 @@ const RULES: readonly Rule[] = [
   exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
   exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("These notes were already received", "errors.pay.notesReceived"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
@@ -515,6 +528,8 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
+  // Hand over admin, Remove or a hub choice confirmed for a member whose leave or removal came in meanwhile (core groupSession/groupCommunity).
+  exact("Not a member", "errors.group.memberGone"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),
@@ -563,6 +578,10 @@ const RULES: readonly Rule[] = [
   { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
   exact("It did not answer in time", "errors.wallet.didNotAnswer"),
   exact("No mint answered", "errors.wallet.noMintAnswered"),
+  // A mint that took a swap and has not answered (engine/wallet.ts SwapUnsettledError): nothing failed, and the next
+  // line says what comes back. Three sentences, so it read as "Something went wrong" (or in English) without these.
+  { match: new RegExp(`^${HOST} has not answered yet\\. The payment was not made\\. The sats set aside for it return to your wallet a few minutes after the mint answers\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentPayNext" },
+  { match: new RegExp(`^${HOST} has not answered yet\\. The ecash is added to your wallet as soon as it does\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentRedeemNext" },
   exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
   { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
   exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),
@@ -695,6 +714,9 @@ const RULES: readonly Rule[] = [
   // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
   { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
   { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
+  { match: /^This is an OpenPGP v(?<version>\d) key, which Ghostly does not accept\. Use a v4 key \(gpg makes Ed25519 ones\) or a v6 key\.$/, key: "errors.proof.pgpKeyVersion", next: "errors.proof.pgpKeyVersionNext" },
+  // A key from keys.openpgp.org that its owner has not confirmed an email for: served without the user IDs it is checked by.
+  exact("This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", "errors.proof.pgpNoUserIds", "errors.proof.pgpNoUserIdsNext"),
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
   exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),

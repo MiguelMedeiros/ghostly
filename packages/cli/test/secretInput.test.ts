@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { pairs } from "../src/commands/shared";
 import { CliError } from "../src/errors";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "../src/secretInput";
+import { completeWithPipedEvidence, credentialFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "../src/secretInput";
 // covers: headless.cli
 
 const stdin = (text: string) => async () => text;
@@ -38,6 +39,18 @@ describe("secrets from stdin, out of ps", () => {
     expect(await secretsFromStdin("wallet.create", params, stdin("uri=nostr+walletconnect://x?secret=y&a=b\napi-key=k=1\n\n"))).toBeUndefined();
     expect(params).toEqual({ type: "lightning", values: { network: "signet", uri: "nostr+walletconnect://x?secret=y&a=b" }, apiKey: "k=1" });
     await expect(secretsFromStdin("wallet.create", { stdin: true }, stdin("no equals sign"))).rejects.toMatchObject({ code: "usage" });
+  });
+
+  it("wallet create --stdin on a terminal is a usage error at once, not a silent wait on the keyboard", async () => {
+    await expect(secretsFromStdin("wallet.create", { type: "lightning", stdin: true }, never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/\| ghostly wallet create <type> --stdin\), not a terminal/) });
+    expect(await secretsFromStdin("wallet.create", { type: "lightning" }, never, true)).toBeUndefined();
+  });
+
+  it("x401 credential add - reads the credential from stdin, and refuses a terminal or nothing as a usage error", async () => {
+    expect(await credentialFromStdin(stdin("eyJ.a.b~\n"))).toBe("eyJ.a.b~\n");
+    const missing = { code: "usage", message: "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file" };
+    await expect(credentialFromStdin(never, true)).rejects.toMatchObject(missing);
+    await expect(credentialFromStdin(stdin(""))).rejects.toMatchObject(missing);
   });
 
   it("wallet create warns about an API key on the command line, not about plain fields", async () => {
@@ -154,6 +167,17 @@ describe("secrets from stdin, out of ps", () => {
     expect(secretValuesWarning(list, "bitcoin", undefined, ["mnemonic", "scriptType"])).toMatch(/^--value mnemonic on/);
     expect(secretValuesWarning(list, "lightning", "nwc", [])).toBeUndefined();
     expect(secretValuesWarning(undefined, "lightning", "nwc", ["uri"])).toBeUndefined();
+  });
+
+  it("a --value with no name never repeats it: it is a seed phrase or a macaroon as often as not", () => {
+    // Before: "--value takes name=value, not \"abandon abandon … about\"", the seed on the terminal and in any log of it.
+    const seed = "abandon ".repeat(11) + "about";
+    let refused: unknown;
+    try { pairs([seed]); } catch (error) { refused = error; }
+    expect(refused).toMatchObject({ code: "usage", message: "--value takes name=value, and one has no name or no =" });
+    expect((refused as Error).message).not.toContain("abandon");
+    expect(() => pairs(["=0201abcd"])).toThrow("--value takes name=value, and one has no name or no =");
+    expect(pairs(["mnemonic=" + seed, "scriptType=p2wpkh"])).toEqual({ mnemonic: seed, scriptType: "p2wpkh" });
   });
 
   it("identity add --stdin takes a signer's fields as name=value lines, out of ps; a --field the signer marks secret is warned about", async () => {

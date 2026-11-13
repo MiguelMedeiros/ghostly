@@ -13,13 +13,15 @@ import type { ChatMessage, ChatSession } from "../../lib/types";
 import { Saved } from "../../pages/Saved";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "./showApps";
 
 // covers: apps.chat.card
 
 /*
  * An app card's line (the chat list, a quote and the pinned bar, Saved, the screen reader) names an app installed here
  * as its bubble does: the installed app's own title and version, never the sender's words for it. Only an app not
- * installed here reads with the card's own title.
+ * installed here reads with the card's own title. In a 1:1 chat where Apps shows, as its bubble draws the card only
+ * there (elsewhere every view reads its text: appCardLineWhereShown.test.tsx).
  */
 
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo";
@@ -40,9 +42,13 @@ const OTHER: AppCard = { ...CARD, id: appCardId(`${KEY}/chess`), ref: `${KEY}/ch
 describe("an app card for an app installed here", () => {
   beforeEach(() => {
     forgetInstalledApps();
+    showApps();
     fakeEngine.on("appList", () => [NOTES]);
   });
-  afterEach(() => forgetInstalledApps());
+  afterEach(() => {
+    forgetInstalledApps();
+    hideApps();
+  });
 
   it("the chat list row names the installed app, read when the row shows", async () => {
     saveSession({ id: "a", profile: "paired-chat/1", mySeedB64: "seed-a", peerPubKeyB64: "a".repeat(52), encKeyB64: "enc", nick: "Ana", createdAt: NOW, messages: [MESSAGE] } as unknown as ChatSession);
@@ -53,8 +59,8 @@ describe("an app card for an app installed here", () => {
 
   it("a quote and the pinned bar name the installed app; one not installed here keeps the card's title", async () => {
     await refreshInstalledApps();
-    expect(messageSnippet(MESSAGE)).toBe("🧩 App: Private Notes 3.1.0");
-    expect(messageSnippet({ ...MESSAGE, card: OTHER })).toBe("🧩 App: Chess 1.0.0");
+    expect(messageSnippet(MESSAGE, undefined, true)).toBe("🧩 App: Private Notes 3.1.0");
+    expect(messageSnippet({ ...MESSAGE, card: OTHER }, undefined, true)).toBe("🧩 App: Chess 1.0.0");
   });
 
   it("Saved names the installed app", async () => {
@@ -72,8 +78,8 @@ describe("an app card for an app installed here", () => {
     try {
       const nameOf = () => "Ana";
       const history: Announceable[] = [{ id: "h1", sender: "peer", text: "hi" }];
-      const view = renderApp(<MessageAnnouncer chat="c" messages={history} nameOf={nameOf} />);
-      view.rerender(<MessageAnnouncer chat="c" messages={[...history, { id: "m1", sender: "peer", text: MESSAGE.text, card: CARD }]} nameOf={nameOf} />);
+      const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={history} nameOf={nameOf} />);
+      view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...history, { id: "m1", sender: "peer", text: MESSAGE.text, card: CARD }]} nameOf={nameOf} />);
       act(() => { vi.advanceTimersByTime(ANNOUNCE_WINDOW_MS); });
       expect(screen.getByTestId("chat-announcement")).toHaveTextContent(/^Ana: 🧩 App: Private Notes 3\.1\.0$/);
     } finally { vi.useRealTimers(); }

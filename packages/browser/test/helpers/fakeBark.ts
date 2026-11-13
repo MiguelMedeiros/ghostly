@@ -82,6 +82,7 @@ export class FakeBarkWallet implements BarkWalletHandle {
     const payee = this.server.owner(address);
     if (payee) { payee.spendable += amount; payee.record({ subsystemKind: "receive", intendedBalanceSats: amount, effectiveBalanceSats: amount, receivedOnAddresses: [JSON.stringify({ type: "ark", value: address })] }); }
     if (this.server.nextSend === "throw-after") { this.server.nextSend = undefined; throw new Error("deadline exceeded"); }
+    return this.movements[0].id;
   }
   async history() { return this.movements.map((m) => ({ ...m })); }
   async sync() {}

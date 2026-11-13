@@ -705,6 +705,21 @@ describe("splitting ecash for a token", () => {
     expect(await balance(), "stored once").toBe(72 - 8);
   });
 
+  it("a second send that needs the sats the silent mint holds says the mint has not answered, not that the sats are missing", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.createToken(40, undefined, undefined, outbox)).rejects.toBeInstanceOf(SwapUnsettledError);
+    const [held] = await swaps();
+    const again = await wallet.createToken(40, undefined, undefined, outbox).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(SwapUnsettledError);
+    expect((again as SwapUnsettledError).swap.id, "the swap that holds them").toBe(held.id);
+    expect(await swaps(), "no second swap").toHaveLength(1);
+    expect(mintApi.completeSwap).toHaveBeenCalledTimes(1);
+    // More than the wallet has, held or not: that is still not enough sats.
+    await expect(wallet.createToken(100, undefined, undefined, outbox)).rejects.toMatchObject({ engineCode: "notEnoughSats" });
+  });
+
   it("a mint that stops answering is asked about less and less often, every 10 min at most, and the swap is settled once it answers", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());

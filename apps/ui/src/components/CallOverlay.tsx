@@ -5,7 +5,7 @@ import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
-import { useTabTrap } from "../hooks/useDismiss";
+import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
@@ -148,6 +148,10 @@ export function CallOverlay({
   const overVideo = useSyncExternalStore(watchWindowFilled, windowFilledNow);
   const stack = overVideo ? "z-[2147483001]" : "z-50";
   useTabTrap(box, !mini);
+  // Back (Android's back gesture) takes it to the small window, as a phone's own call screen does: the chat under it
+  // stays where it was. It went back under the call (a chat to the list), and the next Back left the app mid-call. For
+  // this call only: the window's button is the choice kept; stored, one Back opened every later call small.
+  useBackCloses(() => setMiniState(true), !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
@@ -485,7 +489,8 @@ export function CallOverlay({
             aria-label={isScreenSharing ? t("calls.stopSharing") : t("calls.shareScreen")}
             aria-pressed={isScreenSharing}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
+              // Its icon is the same on and off: in forced colors, where the accent goes, Highlight tells you are sharing.
+              isScreenSharing ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
             title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ? errorText(screenShareUnavailable, t) : t("calls.shareScreen")}
           >

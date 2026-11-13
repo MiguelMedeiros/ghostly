@@ -161,11 +161,14 @@
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
   gap: 0 56px;
 }
+/* A description's line and a license or release notes may hold one long word (a payment address, a code name): it
+   breaks anywhere, or it ran past the screen's edge on a phone, where nothing scrolls sideways to it. */
 .ap-description p {
   font-size: var(--t-body);
   line-height: 1.6;
   color: var(--muted);
   max-width: 40em;
+  overflow-wrap: anywhere;
 }
 .ap-perms {
   display: grid;
@@ -228,6 +231,7 @@
   font-size: 15px;
   color: var(--text);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .ap-fingerprint {
   color: var(--cyan);

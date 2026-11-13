@@ -106,7 +106,8 @@ interface BrokerOptions {
    * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
    * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
    * the box they type in, and name an app they cannot see. On Desktop the sheet is in the Ghostly window, so an app
-   * whose own window does not have the focus would pull that window over what the person is doing.
+   * whose own window does not have the focus would pull that window over what the person is doing. A `files.list` from
+   * one that is not answers the links without asking the person again about kept picks.
    */
   shown?: () => boolean | Promise<boolean>;
   /**
@@ -137,16 +138,69 @@ export interface Broker {
 const encoder = new TextEncoder();
 const utf8Bytes = (text: string) => encoder.encode(text).byteLength;
 
-/** Whether `value` is plain JSON (what a request may carry), no deeper than MAX_DEPTH. */
+/**
+ * Half of a surrogate pair standing alone (`"😀".slice(0, 1)`). With the `u` flag a whole pair is one code point, so
+ * only a lone half matches. Desktop's IPC is read with serde_json, which refuses one, so neither runner carries it
+ * (WISP 1200 § The broker's messages): a request holding one is `bad-request`, and an answer or event holding one gets
+ * U+FFFD in its place. A pattern, not `String.prototype.isWellFormed`: older WebKit and this code's ES2020 lib lack it.
+ */
+const LONE_SURROGATE = /\p{Cs}/u;
+const LONE_SURROGATES = /\p{Cs}/gu;
+const wellFormedText = (text: string) => !LONE_SURROGATE.test(text);
+
+/** How deep `hasLoneSurrogate` and `withoutLoneSurrogates` walk an answer: deeper than any JSON Desktop can carry. */
+const WALK_DEPTH = 256;
+
+const isPlainObject = (value: object) => {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * Whether a string, or any string or member name in a JSON value (arrays and plain objects, nested), holds a lone
+ * surrogate. Anything else (an ArrayBuffer, a typed array) holds none.
+ */
+export function hasLoneSurrogate(value: unknown, depth = 0): boolean {
+  if (typeof value === "string") return !wellFormedText(value);
+  if (value === null || typeof value !== "object" || depth > WALK_DEPTH) return false;
+  if (Array.isArray(value)) return value.some((item) => hasLoneSurrogate(item, depth + 1));
+  if (!isPlainObject(value)) return false;
+  for (const [key, item] of Object.entries(value)) if (!wellFormedText(key) || hasLoneSurrogate(item, depth + 1)) return true;
+  return false;
+}
+
+/**
+ * `value` with every lone surrogate in its strings and member names replaced by U+FFFD, as a decoder does: what the
+ * broker posts to an app. A value already stored (a restored backup, a contact's older client) cannot be refused
+ * after the fact, and on Desktop an answer holding one never reached the app, which waited a minute for `failed`.
+ * The same value comes back when there is nothing to replace; binary data and the transfer list are kept as they are.
+ */
+export function withoutLoneSurrogates<T>(value: T): T {
+  const fix = (item: unknown, depth: number): unknown => {
+    if (typeof item === "string") return item.replace(LONE_SURROGATES, "\uFFFD");
+    if (item === null || typeof item !== "object" || depth > WALK_DEPTH) return item;
+    if (Array.isArray(item)) return item.map((inside) => fix(inside, depth + 1));
+    if (!isPlainObject(item)) return item;
+    const out: Record<string, unknown> = {};
+    for (const [key, inside] of Object.entries(item)) {
+      // Defined, not assigned: a member named `__proto__` stays a member (jsonValueOf).
+      Object.defineProperty(out, fix(key, depth) as string, { value: fix(inside, depth + 1), enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+  };
+  return hasLoneSurrogate(value) ? (fix(value, 0) as T) : value;
+}
+
+/** Whether `value` is plain JSON (what a request may carry), no deeper than MAX_DEPTH, with no lone surrogate. */
 export function isJsonValue(value: unknown, depth = 0): value is MiniAppJson {
   if (depth > MAX_DEPTH) return false;
-  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "string") return wellFormedText(value);
   if (typeof value === "number") return Number.isFinite(value);
   if (Array.isArray(value)) return value.every((item) => isJsonValue(item, depth + 1));
   if (typeof value !== "object") return false;
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return false;
-  return Object.values(value).every((item) => isJsonValue(item, depth + 1));
+  if (!isPlainObject(value)) return false;
+  return Object.entries(value).every(([key, item]) => wellFormedText(key) && isJsonValue(item, depth + 1));
 }
 
 const NOT_JSON: unique symbol = Symbol("not JSON");
@@ -154,12 +208,14 @@ const NOT_JSON: unique symbol = Symbol("not JSON");
 /**
  * A request's value as JSON.stringify writes it (WISP 1200 § The app API): an object member that is `undefined` is left
  * out, and `undefined` in an array is null; anything else that is not plain JSON (a function, a Map, a Date, a number
- * that is not finite, a value deeper than MAX_DEPTH) makes it NOT_JSON. Apps written in JavaScript spread records with
- * `field: undefined` all the time; refusing those refused Chess's every move.
+ * that is not finite, a value deeper than MAX_DEPTH, a string or member name with a lone surrogate) makes it NOT_JSON.
+ * Apps written in JavaScript spread records with `field: undefined` all the time; refusing those refused Chess's every
+ * move.
  */
 export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT_JSON {
   if (depth > MAX_DEPTH) return NOT_JSON;
-  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "string") return wellFormedText(value) ? value : NOT_JSON;
   if (typeof value === "number") return Number.isFinite(value) ? value : NOT_JSON;
   if (Array.isArray(value)) {
     const out: MiniAppJson[] = [];
@@ -176,6 +232,7 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
   const out: Record<string, MiniAppJson> = {};
   for (const [key, item] of Object.entries(value)) {
     if (item === undefined) continue;
+    if (!wellFormedText(key)) return NOT_JSON;
     const next = jsonValueOf(item, depth + 1);
     if (next === NOT_JSON) return NOT_JSON;
     // Defined, not assigned: a member named `__proto__` (a word a person typed) is kept as JSON.stringify keeps it,
@@ -278,12 +335,24 @@ function readRange(value: unknown): { offset: number; length: number } {
   return { offset: offset as number, length: length as number };
 }
 
+/**
+ * How many bytes a `storage.keys` answer takes as JSON, escapes included: a key is bounded by its UTF-8 bytes, but a
+ * control character, one byte kept, is six as JSON (`\u0001`), so a full scope's list reaches about 3.7 MB.
+ */
+function keysBytes(keys: readonly string[]): number {
+  let bytes = 2;
+  for (const key of keys) bytes += JSON.stringify(key).length + 1;
+  return bytes;
+}
+
 function storageKey(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || utf8Bytes(value) > MINI_APP_LIMITS.storageKeyBytes) refuse("bad-key");
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, inUse = () => false, onInput, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post: postToApp, stopped, byReference = false, shown = () => true, inUse = () => false, onInput, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
+  // Every answer and event alike, on both runners: a lone surrogate becomes U+FFFD (withoutLoneSurrogates).
+  const post = (message: unknown, transfer?: Transferable[]) => postToApp(withoutLoneSurrogates(message), transfer);
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -379,8 +448,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   };
 
   /**
-   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read` and `files.list`
-   * share the chain, so an app cannot double its bytes a second by mixing them.
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read`, `files.list` and
+   * `storage.keys` share the chain, so an app cannot double its bytes a second by mixing them.
    */
   const counted = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
     const read = reading.then(async () => {
@@ -465,7 +534,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       case "storage.set": {
         const key = storageKey(args[0]);
         const value = args[1];
-        if (!isJsonValue(value) || utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
+        // No value is a request the call does not take, not one too large (`storage.delete` removes a key).
+        if (!isJsonValue(value)) refuse("bad-request");
+        if (utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
         await host.storage.set(launch.ref, scope, key, value as MiniAppJson);
         return {};
       }
@@ -473,7 +544,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         await host.storage.delete(launch.ref, scope, storageKey(args[0]));
         return {};
       case "storage.keys":
-        return { value: await host.storage.keys(launch.ref, scope) };
+        // Counted with the file reads: the app sets the size of each list, and 50 lists a second of a full scope
+        // were ~185 MB of JSON a second for the page to write (and on Desktop, the main thread to read again).
+        return { value: await counted(() => host.storage.keys(launch.ref, scope), keysBytes) };
       case "chat.send": {
         if (!chatAllowed || !launch.chat) refuse("not-allowed");
         if (args.length !== 1 || utf8Bytes(JSON.stringify(args[0])) > MINI_APP_LIMITS.chatDataBytes) refuse("too-large");
@@ -500,8 +573,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       case "files.list": {
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
+        // Asking the person again about kept picks is a sheet, as a pick's: only for an app on screen.
+        const ask = await shown();
         // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
-        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes) as unknown as MiniAppJson };
+        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal, ask), listBytes) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();

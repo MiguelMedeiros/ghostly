@@ -284,14 +284,86 @@ describe("HttpHost", () => {
     const t = host(localFetch);
     t.host.handleRequest(req({ m: "PUT", b: true }));
     vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs - 1);
-    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: Uint8Array.of(1) });
-    vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs - 1);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle) });
+    vi.advanceTimersByTime(LIMITS.bodyIdleTimeoutMs);
     expect(t.controls()).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(errorOf(t.controls())).toEqual([408, "request-timeout"]);
     expect(t.host.activeRequests).toBe(0);
     t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: true, payload: Uint8Array.of(2) });
     expect(localFetch).not.toHaveBeenCalled();
+  });
+
+  it("holds at most the peer's body budget, counting a finished body until its local fetch settles", async () => {
+    const fetches: { request: LocalRequest; settle: () => void }[] = [];
+    const t = host((request) => new Promise((resolve) => fetches.push({ request, settle: () => resolve(ok()) })));
+    const full = new Uint8Array(LIMITS.maxRequestBodyBytes);
+    const perBody = LIMITS.maxHostBodyBytesPerPeer / LIMITS.maxRequestBodyBytes;
+    for (let id = 1; id <= perBody; id++) {
+      t.host.handleRequest(req({ id, m: "POST", b: true }));
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id, end: false, payload: full });
+    }
+    const oneByte = (id: number, end = false) => {
+      t.host.handleRequest(req({ id, m: "POST", b: true }));
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id, end, payload: Uint8Array.of(1) });
+    };
+
+    oneByte(100);
+    expect(errorOf(t.controls(), 100)).toEqual([503, "busy"]);
+
+    // A finished body still counts while the local service has it.
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: true, payload: new Uint8Array(0) });
+    await flush();
+    expect(fetches).toHaveLength(1);
+    expect(fetches[0].request.body).toHaveLength(LIMITS.maxRequestBodyBytes);
+    oneByte(101);
+    expect(errorOf(t.controls(), 101)).toEqual([503, "busy"]);
+
+    fetches[0].settle();
+    await flush();
+    t.host.handleRequest(req({ id: 102, m: "POST", b: true }));
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 102, end: false, payload: full });
+    expect(errorOf(t.controls(), 102)).toBeUndefined();
+    oneByte(103);
+    expect(errorOf(t.controls(), 103)).toEqual([503, "busy"]);
+
+    // A body the client drops frees its bytes at once.
+    t.host.handleReset({ t: "rst", id: 102, d: "q", e: "" });
+    oneByte(104, true);
+    await flush();
+    expect(errorOf(t.controls(), 104)).toBeUndefined();
+    expect(fetches).toHaveLength(2);
+    t.host.closeAll();
+  });
+
+  it("gives up on a request body that trickles, but not on one that keeps its pace for many windows", async () => {
+    vi.useFakeTimers();
+    const localFetch = vi.fn<LocalFetch>(async () => ok());
+    const t = host(localFetch);
+    const window = LIMITS.bodyIdleTimeoutMs;
+
+    t.host.handleRequest(req({ id: 1, m: "POST", b: true }));
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle - 1) });
+    vi.advanceTimersByTime(window - 1);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: Uint8Array.of(1) });
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(window - 1);
+      t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: false, payload: new Uint8Array(LIMITS.minRequestBodyBytesPerIdle) });
+    }
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 1, end: true, payload: new Uint8Array(0) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(localFetch).toHaveBeenCalledOnce();
+    expect(localFetch.mock.calls[0][0].body).toHaveLength(5 * LIMITS.minRequestBodyBytesPerIdle);
+
+    t.host.handleRequest(req({ id: 2, m: "POST", b: true }));
+    vi.advanceTimersByTime(window - 1000);
+    t.host.handleChunk({ kind: CHUNK_KIND.requestBody, id: 2, end: false, payload: Uint8Array.of(1) });
+    vi.advanceTimersByTime(999);
+    expect(errorOf(t.controls(), 2)).toBeUndefined();
+    vi.advanceTimersByTime(1);
+    expect(errorOf(t.controls(), 2)).toEqual([408, "request-timeout"]);
+    expect(t.host.activeRequests).toBe(0);
+    expect(localFetch).toHaveBeenCalledOnce();
   });
 
   it("answers 504 when the local service does not answer in time", async () => {
@@ -369,6 +441,61 @@ describe("HttpHost", () => {
     await flush();
     expect(t.body(1)).toBe("one");
     expect(t.chunks().some((c) => c.end)).toBe(false);
+  });
+
+  it("resets the open requests of a service once it is taken back, and serves the others to their end", async () => {
+    const taken = new AbortController();
+    const shared = { atlas: { ...services.atlas, revoked: taken.signal }, other: { id: "other", target: services.atlas.target } };
+    const r = recorder();
+    const answers: (() => void)[] = [];
+    let next!: () => void;
+    const requests: LocalRequest[] = [];
+    const h = new HttpHost(r.channel, (id) => shared[id as keyof typeof shared], (request) => {
+      requests.push(request);
+      if (request.url.endsWith("/stream")) {
+        return Promise.resolve(ok((async function* () {
+          yield utf8Encode("one");
+          await new Promise<void>((resolve) => (next = resolve));
+          yield utf8Encode("two");
+        })()));
+      }
+      return new Promise((resolve) => answers.push(() => resolve(ok([utf8Encode("secret answer")]))));
+    });
+    h.handleRequest(req({ id: 1, p: "/slow" }));
+    h.handleRequest(req({ id: 3, p: "/stream" }));
+    h.handleRequest(req({ id: 5, s: "other", p: "/slow" }));
+    await vi.waitFor(() => expect(next).toBeTypeOf("function"));
+    taken.abort();
+    expect(requests.map((q) => q.signal.aborted)).toEqual([true, true, false]);
+    for (const answer of answers) answer();
+    next();
+    await flush();
+    expect(r.controls().filter((f) => !("id" in f) || f.id !== 5)).toEqual([
+      { t: "res", id: 3, st: 200, h: [], b: true },
+      { t: "rst", id: 1, d: "s", e: "The app is no longer shared with you." },
+      { t: "rst", id: 3, d: "s", e: "The app is no longer shared with you." },
+    ]);
+    expect(r.body(1)).toBe("");
+    expect(r.body(3)).toBe("one");
+    expect(r.chunks().filter((c) => c.end).map((c) => c.id)).toEqual([5]);
+    expect(r.body(5)).toBe("secret answer");
+    expect(h.activeRequests).toBe(0);
+    expect(h["revokedListeners"].size).toBe(0);
+  });
+
+  it("listens once to a service being taken back, and stops once its requests are done", async () => {
+    const taken = new AbortController();
+    const add = vi.spyOn(taken.signal, "addEventListener");
+    const remove = vi.spyOn(taken.signal, "removeEventListener");
+    const r = recorder();
+    const answers: (() => void)[] = [];
+    const h = new HttpHost(r.channel, () => ({ ...services.atlas, revoked: taken.signal }), () => new Promise((resolve) => answers.push(() => resolve(ok()))));
+    for (let id = 1; id < 2 * LIMITS.maxConcurrentRequestsPerPeer; id += 2) h.handleRequest(req({ id }));
+    expect(add).toHaveBeenCalledOnce();
+    for (const answer of answers) answer();
+    await flush();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(r.controls().filter((f) => f.t === "res")).toHaveLength(LIMITS.maxConcurrentRequestsPerPeer);
   });
 
   it("hands a followed redirect back as 302 for GET and 303 for other methods", async () => {
@@ -598,6 +725,99 @@ describe("HttpClient", () => {
     const response = await pending;
     c.client.close();
     await expect(response.bytes()).rejects.toMatchObject({ code: "closed" });
+  });
+
+  it("resets a response its reader leaves unread past the bound, and lets go of what it held", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    const fits = LIMITS.maxUnreadResponseBytes / chunk.length;
+    for (let i = 0; i < fits; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: chunk });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+
+    c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: Uint8Array.of(1) });
+    await vi.advanceTimersByTimeAsync(LIMITS.unreadStallMs - 1);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(c.controls().at(-1)).toEqual({ t: "rst", id: 1, d: "q", e: "Response body not read in time" });
+    const iterator = response.body[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toMatchObject({ code: "unread" });
+
+    // The slot is free again: the next request goes out at once.
+    void c.client.request("atlas", { method: "GET", path: "/next" });
+    expect(lastReq(c.controls()).p).toBe("/next");
+  });
+
+  it("lets go of an ended response its reader never reads", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    const count = LIMITS.maxUnreadResponseBytes / chunk.length + 1;
+    for (let i = 0; i < count; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i === count - 1, payload: chunk });
+    await vi.advanceTimersByTimeAsync(LIMITS.unreadStallMs);
+    await expect(response.bytes()).rejects.toMatchObject({ code: "unread" });
+  });
+
+  it("lets a reader that keeps up take a body far past the unread bound, though the link hands it over at once", async () => {
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const reading = response.bytes();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    const count = (2 * LIMITS.maxUnreadResponseBytes) / chunk.length;
+    for (let i = 0; i < count; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i === count - 1, payload: chunk });
+    expect((await reading).length).toBe(2 * LIMITS.maxUnreadResponseBytes);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+  });
+
+  it("lets a reader that keeps reading, slower than the link, take a body far past the unread bound", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const iterator = response.body[Symbol.asyncIterator]();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    // A video playing as it arrives: the link brings two chunks for each one the reader takes.
+    const count = (3 * LIMITS.maxUnreadResponseBytes) / chunk.length;
+    let read = 0;
+    for (let i = 0; i < count; i += 2) {
+      c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: chunk });
+      c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i + 2 >= count, payload: chunk });
+      read += ((await iterator.next()).value as Uint8Array).length;
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    for (let next = await iterator.next(); !next.done; next = await iterator.next()) read += next.value.length;
+    expect(read).toBe(3 * LIMITS.maxUnreadResponseBytes);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+  });
+
+  it("resets an answer past the unread bound at once while the client's answers hold more than their bound together", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    // Each answer one slow reader could keep alone: two fit what the client holds for all, three are past it.
+    const each = Math.floor(LIMITS.maxClientUnreadResponseBytes / 3 / chunk.length) + 1;
+    const responses = [];
+    for (let id = 1; id <= 3; id++) {
+      const pending = c.client.request("atlas", { method: "GET", path: `/${id}` });
+      c.client.handleResponse({ t: "res", id, st: 200, h: [], b: true });
+      responses.push(await pending);
+      for (let i = 0; i < each; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id, end: i === each - 1, payload: chunk });
+    }
+    // No time passed, so no reader stalled: the third is let go for what the client held, the first two are whole.
+    expect(c.controls().filter((f) => f.t === "rst")).toEqual([{ t: "rst", id: 3, d: "q", e: "Response body not read in time" }]);
+    await expect(responses[2]!.bytes()).rejects.toMatchObject({ code: "unread" });
+    expect((await responses[0]!.bytes()).length).toBe(each * chunk.length);
+    expect((await responses[1]!.bytes()).length).toBe(each * chunk.length);
   });
 });
 

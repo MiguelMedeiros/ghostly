@@ -120,11 +120,14 @@ const readDeviceSet = () => engine.call("deviceSet").then((next) => {
   return next;
 });
 
+/** How often a screen that lists the devices reads the set again. */
+export const DEVICE_SET_EVERY_MS = 3_000;
+
 /**
  * The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read.
  * Not read behind a hidden window, and the same object while the set says the same (`useShownPoll`).
  */
-export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
+export function useDeviceSet(everyMs = DEVICE_SET_EVERY_MS): DeviceSetView | null {
   return useShownPoll(readDeviceSet, everyMs);
 }
 
@@ -359,8 +362,13 @@ export function readDeviceLink(input: string): DeviceLink {
   const parts = text.replace(/%23/gi, "#").split("#");
   const code = parts[parts.length - 1].trim();
   if (parts.length < 3) return { code: parts.length === 2 ? code : text };
-  let profile = parts[parts.length - 2];
-  try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
+  // A `web+ghostly:` link's name, as the router hands it over while the app is open: read without the scheme, as a
+  // fresh page reads it (`takeDeviceLinkFromAddress`).
+  let profile = protocolLinkCode(parts[parts.length - 2]);
+  if (profile === null) {
+    profile = parts[parts.length - 2];
+    try { profile = decodeURIComponent(profile); } catch { /* as it is */ }
+  }
   // From whatever made the link: shown and used as a name, so cleaned as a link is made.
   profile = cleanProfileName(profile.replace(/^\//, ""));
   return profile ? { code, profile } : { code };
@@ -396,7 +404,8 @@ export function takeDeviceLink(): DeviceLink | null {
  * on a device on standby too, where no router runs. Anything else is left for the router.
  */
 export function takeDeviceLinkFromAddress(): void {
-  const rest = window.location.hash.replace(/^#/, "");
+  // A `/` the link ends with (typed, or added by a linkifier) is not the code's.
+  const rest = window.location.hash.replace(/^#/, "").replace(/\/+$/, "");
   if (!rest) return;
   // As a link reads after its origin: `#ghostly1z…`, or `#<profile>#ghostly1z…`.
   const value = `#${protocolLinkCode(rest) ?? rest.replace(/^\//, "")}`;

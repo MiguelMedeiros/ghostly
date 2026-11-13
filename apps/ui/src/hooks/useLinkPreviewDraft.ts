@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { canonicalUrl, linksIn, type LinkPreview } from "@ghostly/core";
 import { previewableLink } from "../lib/parse/linkPreview";
 import { linkPreviewFor } from "../lib/linkPreviewFetch";
@@ -17,10 +17,11 @@ export interface LinkPreviewDraft {
 /**
  * The preview of the first link in a draft (WISP 401 § Link previews), made by this app once the text rests. The
  * person can remove it; a removed link gets no preview again in this draft. `preview` is what goes with the message
- * when it is sent now: only a finished preview whose link is still in the text.
+ * when it is sent now: only a finished preview whose link is still in the text. `kept`: the preview of the message being
+ * edited; it stands for its link until a new one is made (saved at once, or the site failing now, it is not lost).
  */
-export function useLinkPreviewDraft(text: string, enabled: boolean) {
-  const link = enabled ? previewableLink(text) : null;
+export function useLinkPreviewDraft(text: string, enabled: boolean, kept?: LinkPreview) {
+  const link = useMemo(() => (enabled ? previewableLink(text) : null), [enabled, text]);
   const key = link ? canonicalUrl(link) ?? link : null;
   const [draft, setDraft] = useState<LinkPreviewDraft | null>(null);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
@@ -37,7 +38,9 @@ export function useLinkPreviewDraft(text: string, enabled: boolean) {
     return () => { current = false; clearTimeout(timer); };
   }, [link, key, removed]);
 
-  const shown = draft && key === draft.key && !removed.has(draft.key) ? draft : null;
+  const made = draft && key === draft.key && !removed.has(draft.key) ? draft : null;
+  const shown: LinkPreviewDraft | null = made?.status !== "ready" && link && key && kept?.u === key && !removed.has(key)
+    ? { link, key, status: "ready", preview: kept } : made;
   const remove = useCallback(() => {
     if (!key) return;
     setRemoved(prev => new Set([...prev, key]));

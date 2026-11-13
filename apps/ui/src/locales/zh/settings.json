@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "密码错误",
   "language": "语言",
+  "languageNeedsUpdate": "{{language}} 需要新版本的 Ghostly。",
   "languageNotLoaded": "无法加载 {{language}}。请检查网络连接。",
   "languageRetry": "重试",
   "license": "许可证",
@@ -117,6 +118,7 @@
   "noticesMisplaced": "将 Ghostly 移到“应用程序”以允许通知",
   "noticesOpenSettings": "打开设置",
   "noticesRunning": "Ghostly 打开时",
+  "noticesRunningExtension": "浏览器打开时，即使没有 Ghostly 标签页",
   "noticesUnavailable": "此处不可用",
   "notificationSounds": "声音",
   "notificationSoundsDescription": "消息、通话和已确认的付款",
@@ -187,7 +189,6 @@
   "sharePresenceHint": "你使用 Ghostly 时，联系人会看到一个圆点。你设置的状态无论如何都会显示。",
   "shareProfile": "与联系人分享我的名字和头像",
   "shareProfileHint": "你的联系人会看到此个人资料的名字和头像。关闭后，他们只会看到“联系人”和一个图案。",
-  "sourceCode": "源代码",
   "stayConnected": "在后台保持连接",
   "stayConnectedHint": "Ghostly 不在前台时，聊天和群组仍保持连接，并显示一条安静的通知。会消耗更多电量。",
   "stayConnectedStopped": "Android 在后台停止了 Ghostly",
@@ -230,12 +231,6 @@
     "large": "大",
     "larger": "较大",
     "small": "小"
-  },
-  "theme": "主题",
-  "themes": {
-    "dark": "深色",
-    "light": "浅色",
-    "system": "跟随系统"
   },
   "timeout": "锁定时间",
   "timeoutOptions": {
