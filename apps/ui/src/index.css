@@ -1230,6 +1230,16 @@ html .toast-place.toast-place-page[data-at="top"] {
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5c6c8' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
+/* Forced colors (Windows Contrast themes) replace a bubble's background with the page's, and it was all that drew the
+   bubble: the wallpaper's pattern ran under the words, and the tail (an SVG fill, kept in the theme's colour) hung on
+   its own. There the wallpaper is plain, the tail is not drawn and the bubble has an edge in the theme's text colour,
+   an outline inside its box so nothing moves. Message details' accent outline (`outline-2`) stays as it is. */
+@media (forced-colors: active) {
+  .chat-wallpaper, [data-theme] .chat-wallpaper { background-image: none; }
+  .bubble-tail { display: none; }
+  [data-message-bubble]:not([class~="outline-2"]) { outline: 1px solid CanvasText; outline-offset: -1px; }
+}
+
 /*
  * A chat's message list on a layer of its own. In WebKit (Desktop on the Mac), a long chat left open froze for 300 to
  * 450 ms every half second or so with no script running (nothing drawn by React, nothing changed in the page), and the
@@ -1864,4 +1874,13 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     border-start-end-radius: 9999px;
     border-end-end-radius: 0;
   }
+}
+
+/* Forced colors: a progress bar (a file on its way, a backup or a restore, a task card). Its track and its fill were
+   backgrounds alone, which forced colors replace with the page's: an empty strip. A CanvasText frame on the page's
+   colour and a Highlight fill instead, both kept as drawn; at least 6px tall, so the frame leaves the fill room. Only
+   the bars here. */
+@media (forced-colors: active) {
+  .progress-track { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; min-block-size: 6px; }
+  .progress-fill { forced-color-adjust: none; background: Highlight; }
 }

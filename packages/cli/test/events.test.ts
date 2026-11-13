@@ -62,12 +62,58 @@ describe("the event stream", () => {
       [4, "message.deleted:c1:old"],
       [5, "chat.pairing:c1:live:1000"],
       [6, "chat.connection:c1:hyperdht/1:1000"],
-      [7, "chat.created:c2"],
+      [7, "chat.created:c2:1000"],
       [8, "chat.renamed:c2:1000"],
-      [9, "chat.removed:c1"],
+      [9, "chat.removed:c1:1000"],
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+  });
+
+  // The same invite joined again gives the same chat id, a group joined again keeps its id: the second creation and
+  // removal had the first one's id, and a listener that dedupes on it dropped them.
+  it("gives a chat or a group that comes back, and its removal again, ids of their own", async () => {
+    let now = 1000;
+    const h = new EventHub(join(dir, "again.jsonl"), () => now, "again.jsonl");
+    await h.open();
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    h.baseline(state([]), new Map());
+    const g = { id: "g1", status: "active", members: [{ key: "ana" }] };
+    for (let round = 0; round < 2; round++) {
+      h.sink.post({ kind: "state", state: state([link("c1")], [g]) });
+      now += 1000;
+      h.sink.post({ kind: "state", state: state([]) });
+      now += 1000;
+    }
+    const ids = events.filter((e) => /^(chat|group)\.(created|removed)$/.test(e.type)).map((e) => e.id);
+    expect(ids).toHaveLength(8);
+    expect(new Set(ids).size).toBe(8);
+  });
+
+  it("gives a delivery a message comes back to an id of its own, also after a restart (a listener dedupes on it)", async () => {
+    const first = await hub("again.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
+    const deliver = (h: EventHub, delivery: StoredMessage["delivery"]) => h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", delivery })] });
+    // The contact's daemon went away before its receipt: the text goes again, and fails twice before it is delivered.
+    for (const delivery of ["sending", "sent", "queued", "sending", "sent", "failed", "sending"] as const) deliver(first.h, delivery);
+    // The seen set is written behind the events, and read again by the next run's hub: it goes on counting from it.
+    const later = await hub("again.jsonl");
+    later.h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "me_1", { sender: "me", delivery: "sending" })]]]));
+    for (const delivery of ["failed", "sending", "delivered"] as const) deliver(later.h, delivery);
+    const ids = [...first.events, ...later.events].map((e) => e.id);
+    expect(ids).toEqual([
+      "message.sent:c1:me_1",
+      "message.delivery:c1:me_1:sent",
+      "message.delivery:c1:me_1:queued",
+      "message.delivery:c1:me_1:sending:3",
+      "message.delivery:c1:me_1:sent:4",
+      "message.delivery:c1:me_1:failed",
+      "message.delivery:c1:me_1:sending:6",
+      "message.delivery:c1:me_1:failed:7",
+      "message.delivery:c1:me_1:sending:8",
+      "message.delivery:c1:me_1:delivered",
+    ]);
   });
 
   it("names the contact on a 1:1 message, so an agent turn carries their name (the engine keeps it on the chat)", async () => {
@@ -262,7 +308,7 @@ describe("the event stream", () => {
     expect(second.h.inStep("c1", [{ ...mine, reactions: { peer: { e: "", n: 2, at: 2 } } }, last])).toBe(false);
     expect(second.h.inStep("c2", [message("c2", "x")])).toBe(false);
 
-    second.h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [mine, last]]]), whole: async () => [old, mine, last] });
+    second.h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [mine, last]]]), files: async () => [old, mine, last] });
     expect(second.events).toEqual([]);
     // The message the baseline did not read is still known: its edit is an edit, a new message is news, and nothing is deleted.
     second.h.sink.post({ kind: "message-changes", linkId: "c1", messages: [{ ...old, edit: { seq: 1, at: 5, history: [] } }, message("c1", "m4")], deleted: [] });
@@ -505,10 +551,10 @@ describe("the event stream", () => {
     expect(journal()).toContain("kept");
     h.sink.post({ kind: "state", state: state([link("c1")], [group]) });
     expect(journal()).not.toContain("SECRET-TWO");
-    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2");
+    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2:1000");
     h.sink.post({ kind: "state", state: state([link("c1")]) });
     expect(journal()).not.toContain("SECRET-THREE");
-    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1");
+    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1:1000");
     expect(journal()).toContain("kept");
     expect(statSync(path).mode & 0o777).toBe(0o600);
     // The seq goes on from where it was.
@@ -694,6 +740,48 @@ describe("the event stream", () => {
     }, 60_000);
   });
 
+  /**
+   * Every `listen` connect and reconnect replays from its cursor (`events.subscribe`): each read the journal's whole
+   * window (up to 32 MiB) and parsed every line of it, 49 ms of a blocked daemon to return one event at 19,000 events.
+   */
+  describe("what a replay reads of the journal", () => {
+    function counted(work: () => GhostlyEvent[]): { read: number; parsed: number; events: GhostlyEvent[] } {
+      const alloc = Buffer.alloc, parse = JSON.parse;
+      let read = 0, parsed = 0;
+      const allocs = vi.spyOn(Buffer, "alloc").mockImplementation((size: number, ...rest: unknown[]) => { read += size; return alloc.call(Buffer, size, ...(rest as [])); });
+      const parses = vi.spyOn(JSON, "parse").mockImplementation((...args: Parameters<typeof JSON.parse>) => { parsed++; return parse(...args); });
+      try { const events = work(); return { read, parsed, events }; } finally { allocs.mockRestore(); parses.mockRestore(); }
+    }
+
+    it("a cursor near the end reads and parses the journal's end only, and gives what a whole read gives", async () => {
+      const { h } = await hub("replay-end.jsonl");
+      const text = "x".repeat(300);
+      for (let i = 0; i < 5_000; i++) h.emit("x", `x:${i}`, { text });
+      const path = join(dir, "replay-end.jsonl"), size = statSync(path).size;
+      const near = counted(() => h.replay(h.lastSeq - 1));
+      expect(near.events.map((e) => e.seq)).toEqual([5_000]);
+      expect(near.parsed).toBeLessThan(5);
+      expect(near.read).toBeLessThan(size / 10);
+      // From further back, or from before the journal, every event after the cursor, in order.
+      for (const since of [0, 1, 2_500, 4_998, 4_999, 5_000]) {
+        expect(h.replay(since).map((e) => e.seq)).toEqual(Array.from({ length: 5_000 - since }, (_, i) => since + 1 + i));
+      }
+    }, 60_000);
+
+    it("finds its start past blanked, torn and unended lines, and still says a gap", async () => {
+      const path = join(dir, "replay-odd.jsonl");
+      const line = (seq: number) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 });
+      // 5 and 6: kept; 7 blanked (a message removed); 8 torn; 9 and 10 whole, the last with no newline.
+      writeFileSync(path, [line(5), line(6), " ".repeat(line(7).length), line(8).slice(0, 12), line(9), line(10)].join("\n"));
+      const h = new EventHub(path, () => 1000, "replay-odd");
+      await h.open();
+      expect(h.replay(2).map((e) => e.type === "events.gap" ? `gap ${e.from}-${e.to}` : e.seq)).toEqual(["gap 3-4", 5, 6, 9, 10]);
+      for (const [since, seqs] of [[5, [6, 9, 10]], [6, [9, 10]], [7, [9, 10]], [8, [9, 10]], [9, [10]], [10, []]] as const) {
+        expect(h.replay(since).map((e) => e.seq)).toEqual(seqs);
+      }
+    });
+  });
+
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {
     const first = await hub("e.jsonl");
     first.h.baseline(state([link("c9")]), new Map([["c9", [message("c9", "a"), message("c9", "b")]]]));
@@ -732,21 +820,21 @@ describe("the event stream", () => {
       expect(events[3]).toMatchObject({ chat: "c1", file: "c1-out-w", error: "Cancelled", retry: true });
     });
 
-    it("a file of a message older than the baseline read names its message: the history is read then, once", async () => {
+    it("a file of a message older than the baseline read names its message: the history's file rows are read then, once", async () => {
       const older = message("c1", "peer_v", { file: voice }), other = message("c1", "peer_w", { file: { ...voice, id: "c1-in-w" } }), last = message("c1", "m9");
       const first = await hub("f4.jsonl");
       first.h.baseline(state([link("c1")]), new Map([["c1", [older, other, last]]]));
       await new Promise((r) => setTimeout(r, 50));
 
       const { h, events } = await hub("f4.jsonl");
-      const whole = vi.fn(async () => [older, other, last]);
-      h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [last]]]), whole });
-      expect(whole).not.toHaveBeenCalled();
+      const files = vi.fn(async () => [older, other]);
+      h.baseline(state([link("c1")]), new Map(), { newest: new Map([["c1", [last]]]), files });
+      expect(files).not.toHaveBeenCalled();
       h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" } }) });
       await vi.waitFor(() => expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"]]));
       h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-in-w": { state: "failed", transferred: 5, size: 900, direction: "in", error: "Cancelled" } }) });
       expect(events.map((e) => [e.type, e.file, e.messageId])).toEqual([["file.done", "c1-in-v", "peer_v"], ["file.failed", "c1-in-w", "peer_w"]]);
-      expect(whole.mock.calls).toEqual([["c1"]]);
+      expect(files.mock.calls).toEqual([["c1"]]);
     });
 
     /**

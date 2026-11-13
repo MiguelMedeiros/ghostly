@@ -211,4 +211,34 @@ describe("a request the app's page could not get an answer to", () => {
     controller.abort();
     await vi.waitFor(() => expect(said).toEqual([{ type: "cancel" }]));
   });
+
+  it("hands the frame the answer only as it reads, and tells the page what it read: the page sends no more than that ahead", async () => {
+    let port: MessagePort | undefined;
+    let asked: unknown;
+    const said: unknown[] = [];
+    bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
+      asked = message;
+      port = transfer[0] as MessagePort;
+      port.onmessage = (event) => said.push(event.data);
+      port.postMessage({ type: "head", status: 200, headers: [] });
+      for (const n of [3, 4, 5]) port.postMessage({ type: "chunk", bytes: new Uint8Array(n).fill(n) });
+    });
+    const response = await fetchThrough({ path: "/video.mp4", mode: "no-cors", destination: "video", referrer: `${ORIGIN}/` }, "app")!;
+    expect(asked).toMatchObject({ type: "request", flow: true });
+    // Nothing read yet: nothing said, however much came.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(said).toEqual([]);
+    const reader = response.body!.getReader();
+    expect((await reader.read()).value).toEqual(new Uint8Array(3).fill(3));
+    await vi.waitFor(() => expect(said).toEqual([{ type: "read", bytes: 3 }]));
+    expect((await reader.read()).value).toEqual(new Uint8Array(4).fill(4));
+    expect((await reader.read()).value).toEqual(new Uint8Array(5).fill(5));
+    await vi.waitFor(() => expect(said).toEqual([{ type: "read", bytes: 3 }, { type: "read", bytes: 7 }, { type: "read", bytes: 12 }]));
+    // The rest, read before it came, goes straight on; then the end.
+    const next = reader.read();
+    port!.postMessage({ type: "chunk", bytes: new Uint8Array(2).fill(2) });
+    expect((await next).value).toEqual(new Uint8Array(2).fill(2));
+    port!.postMessage({ type: "end" });
+    expect((await reader.read()).done).toBe(true);
+  });
 });

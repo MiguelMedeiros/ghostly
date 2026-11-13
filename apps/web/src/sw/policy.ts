@@ -405,9 +405,9 @@ export function pushNotice(
   const home = { path: "/", profile: options.profile };
   const runs = !device || device.state === "active";
   if (wake.kind === "device") {
-    const asker = device?.tokens[wake.token];
-    if (asker === undefined || options.appVisible) return null;
-    const name = asker || "Ghostly";
+    // Only a token of its own: one that names what every object has (`__defineGetter__`) is no device's.
+    if (!device || !Object.prototype.hasOwnProperty.call(device.tokens, wake.token) || options.appVisible) return null;
+    const name = device.tokens[wake.token] || "Ghostly";
     return { title, body: fill(runs ? text.takeover : text.moveHere, name), tag: `device:${options.profile}`, call: false, data: home };
   }
   if (runs) return wakeNotice(found, { now: options.now, appVisible: options.appVisible, profile: options.profile, kind: wake.kind });

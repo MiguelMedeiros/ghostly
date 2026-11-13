@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { isLetterKey } from "../lib/appCommands";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
@@ -14,6 +15,21 @@ export const SEARCH_DEBOUNCE_MS = 150;
 /** Scrolls to a message and marks it, as a quote's tap does, bringing the rows around it in first when it is not in the page. */
 function jump(id: string) {
   if (!jumpToMessage(id) && revealMessage(id)) jumpToMessage(id);
+}
+
+/**
+ * Where a match no longer among `now` stood in it: the place of the first one older than it (`before`, newest first, as
+ * the matches were while it was among them) that still is, or the end. Matches that came since are newer, before it.
+ * -1 when it was never among `before`.
+ */
+function placeOf(id: string, before: readonly string[], now: readonly string[]): number {
+  const was = before.indexOf(id);
+  if (was < 0) return -1;
+  for (let i = was + 1; i < before.length; i++) {
+    const at = now.indexOf(before[i]);
+    if (at >= 0) return at;
+  }
+  return now.length;
 }
 
 /**
@@ -68,7 +84,8 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   useEffect(() => {
     if (!active || locked) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.key.toLowerCase() !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      // F's key on a keyboard that types no Latin letter there too (Arabic, Russian): the browser's own Find opened.
+      if (e.defaultPrevented || !isLetterKey(e, "f") || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       // A dialog over the chat keeps its keys and its focus, as the app's other shortcuts leave it.
       if (modalOpen()) return;
       e.preventDefault();
@@ -105,13 +122,20 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   }, [term]);
 
   const index = current ? results.indexOf(current) : -1;
+  /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
+  const held = useRef(results);
+  if (index >= 0) held.current = results;
   const step = useCallback((by: 1 | -1) => {
     // Enter before the pause is over: these words now, on their newest match.
     if (query.trim() && query !== term) { setTerm(query); return; }
     const list = latest.current;
     if (!list.length) return;
     const at = current ? list.indexOf(current) : -1;
-    const next = list[at < 0 ? 0 : (at + by + list.length) % list.length];
+    // The one being read went (deleted here or for everyone, edited so it no longer matches): on from where it stood,
+    // to the one older or newer than it. Before, the search began again at the newest.
+    const gone = at < 0 && current ? placeOf(current, held.current, list) : -1;
+    const next = gone >= 0 ? list[(by === 1 ? gone : gone - 1 + list.length) % list.length]
+      : list[at < 0 ? 0 : (at + by + list.length) % list.length];
     setCurrent(next);
     jump(next);
   }, [current, query, term]);

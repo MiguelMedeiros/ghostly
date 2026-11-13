@@ -197,10 +197,16 @@ export class Mainline {
     });
   }
 
-  destroy(): Promise<void> {
+  /** Closes the node and its socket, if it started; the next thing asked of it starts it again. */
+  stop(): Promise<void> {
     const node = this.node;
-    this.closed = true;
+    this.node = null;
     return node ? new Promise((resolve) => node.dht.destroy(() => resolve())) : Promise.resolve();
+  }
+
+  destroy(): Promise<void> {
+    this.closed = true;
+    return this.stop();
   }
 }
 
@@ -267,8 +273,9 @@ const waitable = (options: PkarrRequestOptions): boolean =>
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
  * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
- * request budget held it back (the DHT has no budget). A background read the budget holds waits for it. Background reads
- * the DHT answers in the relays' place keep to the relays' background share (`DhtBackgroundBudget`).
+ * request budget held it back (the DHT has no budget), or every relay rate limits this address (429). A background read
+ * this app's budget holds waits for it. Background reads the DHT answers in the relays' place keep to the relays'
+ * background share (`DhtBackgroundBudget`).
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -284,9 +291,15 @@ export class RelaysAndDht implements PkarrTransport {
   /** Background reads on the DHT in the relays' place, at their background share (`DhtBackgroundBudget`). */
   private readonly dhtBackground = new DhtBackgroundBudget(() => BACKGROUND_REQUESTS_PER_MINUTE * this.relays.describe().relays.length);
 
-  constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
+  /** Off while the profile keeps to the relays (Hide my IP from contacts, `configure`'s `dhtDirect: false`). */
+  private direct = true;
+
+  constructor(private readonly mainline: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
   }
+
+  /** The DHT this transport reaches now: none while the profile keeps to the relays. */
+  private get dht(): Mainline | null { return this.direct ? this.mainline : null; }
 
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
@@ -370,14 +383,19 @@ export class RelaysAndDht implements PkarrTransport {
         return found;
       }
       ({ packet: fromRelays, failed } = answered);
+      // No relay is asked now: each one rate limits this address (429) for as long as it said, or fails. Their answer is
+      // what they last saw, or a wait, and the DHT is asked in their place, as when they all fail (a background read
+      // at their share). Taken as their answer, a daemon whose relays answered 429 for 10 minutes read none of its 50
+      // contacts in that time, and looked none up on the DHT (bug hunt, 2026-11-11).
+      const refusing = this.relays.discovery().relays.every((relay) => relay.state !== "ok");
       // The relays' budget held the read back: the DHT, which has no budget and already has a contact's first
       // envelope, is asked instead. Waiting for the relays' minute made each pairing past ~10 chats on working relays
       // take 3-18 s (13-37 s on one relay), where DHT-only pairings take 0.1-2.8 s (agents#1715). Found nowhere there,
       // or a background read, it is still a wait.
-      if (isDiscoveryBudgetError(failed)) return this.heldBack(pubKeyZ32, failed, options);
+      if (isDiscoveryBudgetError(failed) && !(refusing && options.background)) return this.heldBack(pubKeyZ32, failed, options);
       if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
-      if (!failed && !down()) return fromRelays;
+      if (!failed && !down() && !refusing) return fromRelays;
     }
     try {
       // A background read the DHT answers instead of the relays waits its turn there (`DhtBackgroundBudget`), as it did
@@ -406,7 +424,9 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
-    const packet = await this.dht!.get(pubKeyZ32);
+    // The switch turned while a read was on its way to the DHT: it does not go.
+    if (!this.dht) throw new Error("The DHT is not reached while the profile keeps to the relays");
+    const packet = await this.dht.get(pubKeyZ32);
     if (packet) this.relays.sawTimestamp(pubKeyZ32, packet.timestampMicros);
     return packet;
   }
@@ -454,7 +474,16 @@ export class RelaysAndDht implements PkarrTransport {
   /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
   publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
-  configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
+  /**
+   * `dhtDirect: false` (Hide my IP from contacts): no packet is put on or read from the DHT, and its node is closed, so
+   * no UDP goes from this machine to a DHT node; true again starts it at the next put or read. Absent leaves it as it is.
+   */
+  configure({ relays, dhtDirect }: { relays: string[]; readRelays: boolean; dhtDirect?: boolean }): void {
+    if (!this.pinned) this.relays.setRelays(relays);
+    if (dhtDirect === undefined) return;
+    this.direct = dhtDirect;
+    if (!dhtDirect) this.mainline?.stop().catch(() => {});
+  }
   /**
    * The relays' side only: the DHT side keeps nothing per key it puts. What it keeps per key it reads is bounded
    * (`missing`, `MISSING_KEPT`; the background budget's two-minute window).

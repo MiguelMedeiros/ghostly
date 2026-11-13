@@ -32,6 +32,8 @@ const KEYS: Record<string, TranslationKey> = {
   "signature-key": "apps.errors.notSigned",
   "bad-signature-statement": "apps.errors.notSigned",
   "needs-files": "apps.errors.needsFiles",
+  // Get its files found no link holding the installed version (AppInstallDialog.tsx): nothing was fetched.
+  "files-not-found": "apps.errors.filesNotFound",
   // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
   damaged: "apps.errors.damaged",
   storage: "apps.errors.storage",
@@ -45,6 +47,17 @@ const STORE_KEYS: Record<string, TranslationKey> = {
   rollback: "apps.store.rollback",
   "too-large": "apps.store.tooLarge",
   "expires-too-far": "apps.store.clockLate",
+};
+
+/**
+ * A waiting update's Update refused, said of the update: on the installed app's screen there is no link, and the app
+ * itself keeps its files and runs. The engine drops the update (its Update goes); the next check looks again.
+ */
+const UPDATE_KEYS: Record<string, TranslationKey> = {
+  unlisted: "apps.errors.updateUnlisted",
+  "needs-files": "apps.errors.updateFilesGone",
+  // Installed or dropped meanwhile (another tab, a check): nothing was refused, the screen shows what is installed now.
+  "no-update": "apps.errors.updateGone",
 };
 
 /** The longer story behind an ⓘ beside an error's line, for the errors that have one. */
@@ -67,6 +80,12 @@ export function appErrorView(error: unknown, t: Translate): AppErrorView {
   // A refusal the app has no words for: what was refused (a bound, a hash, the format) is behind the ⓘ, as it came.
   const refused = code && !KEYS[code] ? (error instanceof Error ? error.message : String(error)).slice(code.length + 2) : undefined;
   return { text: appErrorText(error, t), ...(info ? { info: t(info) } : refused ? { info: refused } : {}) };
+}
+
+/** An error of a waiting update's Update (`appUpdateAccept`), as the installed app's screen says it. */
+export function appUpdateErrorView(error: unknown, t: Translate): AppErrorView {
+  const code = appErrorCode(error);
+  return code && UPDATE_KEYS[code] ? { text: t(UPDATE_KEYS[code]) } : appErrorView(error, t);
 }
 
 /**

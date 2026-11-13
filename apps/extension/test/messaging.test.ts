@@ -313,7 +313,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }, { name: "permissions-policy", value: expect.stringContaining("geolocation=()") }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -342,6 +342,47 @@ describe("viewer tabs", () => {
       throw offline;
     };
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+  });
+
+  it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {
+    // The worker opens the app (`tabs.update`), and so do the person's reload and back: Chrome saves such an answer
+    // with no question. Desktop and the web view save no file a contact's app sends either.
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const page = async (headers: [string, string][], status = 200, resourceType = "Document") => {
+      engineControl().respond = async () => okResponse("#!/bin/sh\n", status, headers);
+      return (await pauseRequest(world, tabId, { url }, resourceType)).params;
+    };
+    const refused = (params: Record<string, unknown>) => {
+      expect(params.responseCode).toBe(502);
+      expect(params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+      expect(params.responseHeaders).not.toContainEqual(expect.objectContaining({ name: expect.stringMatching(/^content-disposition$/i) }));
+      expect(bodyText(params)).not.toContain("#!/bin/sh");
+    };
+    refused(await page([["Content-Type", "application/octet-stream"], ["Content-Disposition", 'attachment; filename="Ghostly-update.command"']]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "ATTACHMENT"]]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "x-other; filename=a.exe"]]));
+    refused(await page([["content-type", "application/octet-stream"]]));
+    refused(await page([["content-type", "application/x-sh"]]));
+    refused(await page([["content-type", "text/html, application/zip"]]));
+    refused(await page([["content-type", "text/html"], ["content-type", "application/zip"]]));
+    refused(await page([]));
+    refused(await page([["content-type", "application/octet-stream"]], 404));
+    refused(await page([["content-type", "application/octet-stream"]], 302));
+
+    // What a tab shows goes through as before, and so does a redirect: its target is asked for as a page too.
+    const served = (params: Record<string, unknown>, status = 200) => {
+      expect(params.responseCode).toBe(status);
+      expect(bodyText(params)).toBe("#!/bin/sh\n");
+    };
+    served(await page([["Content-Type", "text/html; charset=utf-8"]]));
+    served(await page([["content-type", "text/plain"], ["content-disposition", "inline; filename=notes.txt"]]));
+    served(await page([["content-type", "image/png"]]));
+    served(await page([["content-type", "application/json"]]));
+    served(await page([["location", "/f"]], 302), 302);
+    served(await page([], 204), 204);
+    // A script's fetch or a picture is no navigation: it saves nothing, whatever it says.
+    served(await page([["content-type", "application/octet-stream"], ["content-disposition", "attachment"]], 200, "XHR"));
   });
 
   it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
@@ -439,9 +480,30 @@ describe("viewer tabs", () => {
     await pauseRequest(world, tabId, {
       url: `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`,
       method: "PUT",
-      postDataEntries: [{ bytes: b64("part one, ") }, {}, { bytes: b64("part two") }],
+      // An empty piece comes as `bytes: ""` (an empty Blob in a FormData).
+      postDataEntries: [{ bytes: b64("part one, ") }, { bytes: "" }, { bytes: b64("part two") }],
     });
     expect(new TextDecoder().decode(engine().requests[0].init.body!)).toBe("part one, part two");
+  });
+
+  it("sends the app no body cut short: a picked file or a stream DevTools does not hand over fails the request", async () => {
+    // Chromium leaves `bytes` out of a body's piece it holds as a file or a stream (a FormData with a picked file,
+    // an XHR sending one): what came was the form's text with an empty file, or no body at all, as if uploaded.
+    const tabId = await openViewer(world);
+    const b64 = (s: string) => Buffer.from(s).toString("base64");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`;
+    for (const postDataEntries of [
+      [{ bytes: b64('--b\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\n\r\n') }, {}, { bytes: b64("\r\n--b--\r\n") }],
+      [{}],
+    ]) {
+      const answer = await pauseRequest(world, tabId, { url, method: "POST", postDataEntries });
+      expect(answer.method).toBe("Fetch.fulfillRequest");
+      expect(answer.params).toMatchObject({ responseCode: 502 });
+      expect(bodyText(answer.params)).toContain("The request failed.");
+    }
+    expect(engine().requests).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
@@ -492,6 +554,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
@@ -514,6 +577,7 @@ describe("viewer tabs", () => {
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
@@ -616,6 +680,18 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
     // The tab is no viewer any more: coming back to the virtual origin is not served.
     expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+  });
+
+  it("closes the tab when its page goes to a document of its own origin that is no viewer address", async () => {
+    const tabId = await openViewer(world);
+    // `location = URL.createObjectURL(blob)`: the app's code would go on running on its origin, out of every closer's reach.
+    fire(world.chrome.debugger.onEvent, { tabId }, "Page.frameNavigated", {
+      frame: { url: `blob:https://${SERVICE}.${PEER}.${TAG}.invalid/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45` },
+    });
+    await settle();
+    expect(world.tabs.has(tabId)).toBe(false);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+    expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
   });
 
   it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {
@@ -759,6 +835,56 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.create")).toHaveLength(1);
     expect(world.callsTo("tabs.update")).toEqual([[tab.id, { active: true }]]);
     expect(world.callsTo("windows.update")).toEqual([[tab.windowId, { focused: true }]]);
+  });
+
+  it("opens one tab when pressed again before the first one opened, or as a first install opens it", async () => {
+    // Pressed twice while the peer starts (nothing shows yet), and once more as the install opens the app.
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.action.onClicked);
+    fire(world.chrome.runtime.onInstalled, { reason: "install" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+  });
+
+  it("opens one tab on a double-click, though Chrome lists a new tab only once its page loads", async () => {
+    await send({ target: "background", type: "ensure-engine" });
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toHaveLength(1);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
+  });
+
+  it("opens no second tab when pressed while an update opens again the pages Update and restart closed", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    world.tabs.clear();
+    world.local.set("ghostly_reopen_after_update", [`${app}#/chats`]);
+    world.calls.length = 0;
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    // The tab "Update and restart" closed is gone, so the person presses the toolbar button as the new version starts.
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chats`]]);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
   });
 
   it("opens the app even when the peer does not start, so the page can say why", async () => {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { BlobSource, BufferTarget, Conversion, EncodedPacketSink, Input, MP4, MovOutputFormat, Mp4OutputFormat, Output, QTFF } from "mediabunny";
-import { NO_VIDEO_METADATA, videoMetadataPatches, withoutVideoMetadata } from "../src/videoMetadata";
+import { NO_VIDEO_METADATA, VIDEO_METADATA_LIMITS, readingAhead, videoMetadataPatches, withoutVideoMetadata } from "../src/videoMetadata";
 import { H264_MP4, PLACE, box, hasPlace, headerTimes, metadataTrack, withFirst, withMovie, withTrack, xyzUdta } from "./support/videoFixtures";
 // covers: files.video.metadata
 
@@ -409,6 +409,32 @@ describe("withoutVideoMetadata", () => {
     // Fragments of 100 KB: one read for a fragment's three headers and its `moof`, one for its `prft` and `moof` again
     // when they are emptied and copied (five before).
     expect(await reads(recording(40, 50_000), 40)).toBeLessThanOrEqual(2 * 40 + 4);
+  });
+
+  it("a walk through the whole file reads it in growing windows; one that jumps reads a small window at each jump", async () => {
+    // In Chromium a Blob's read costs ~0.3 ms plus ~0.9 ms per MiB: an Ogg's pages or a live WebM's blocks (a browser's
+    // own recording, clusters of unknown size) read 64 KiB at a time took 5 s to walk 512 MiB before the bubble showed.
+    const size = 32 * 2 ** 20;
+    const counted = () => {
+      const seen = { reads: 0, bytes: 0 };
+      const source = readingAhead({ size, read: async (offset, length) => {
+        const bytes = new Uint8Array(Math.max(0, Math.min(length, size - offset)));
+        seen.reads++;
+        seen.bytes += bytes.length;
+        return bytes;
+      } });
+      return { source, seen };
+    };
+    // A page header every 8,252 bytes, each page's body skipped (509 reads of 64 KiB before).
+    const walk = counted();
+    for (let at = 0; at + 27 <= size; at += 8252) expect((await walk.source.read(at, 27)).length).toBe(27);
+    expect(walk.seen.reads).toBeLessThan(24);
+    expect(walk.seen.bytes).toBeLessThan(size + 8 * 2 ** 20);
+    // A box header every 1 MiB, the samples between skipped: each jump reads 64 KiB, never more.
+    const jumps = counted();
+    for (let at = 0; at < size; at += 2 ** 20) await jumps.source.read(at, 16);
+    expect(jumps.seen.reads).toBe(32);
+    expect(jumps.seen.bytes).toBe(32 * VIDEO_METADATA_LIMITS.readAhead);
   });
 
   it("a video with nothing left to remove goes the same: the fixture's encoder tag (udta/meta/ilst) went the first time", async () => {

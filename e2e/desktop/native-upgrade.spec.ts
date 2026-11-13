@@ -144,7 +144,8 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
     }
     for (const p of [a, b]) {
       expect(await count(p, "first, over the DHT"), `${p.name} keeps the DHT text once`).toBe(1);
-      expect(await p.awaitingReceipt(), `${p.name} has nothing awaiting a receipt`).toBe(false);
+      // The last text shows on both sides before its receipt is back with its sender.
+      await expect.poll(() => p.awaitingReceipt(), { timeout: 60_000, message: `${p.name} has nothing awaiting a receipt` }).toBe(false);
       // Still live on the same transport after the traffic.
       expect(await transport(p)).toBe(onA);
     }
