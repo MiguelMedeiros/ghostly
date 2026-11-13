@@ -30,10 +30,12 @@ export const STORE_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"];
 export const LIMITS = {
   indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4, totalBytes: 64 * 1024 * 1024,
   /**
-   * One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the listings of one publisher read: a
-   * bound of each, so one publisher's files never leave another's unread (a file not kept revokes nothing).
+   * One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the build reads together. Each publisher
+   * gets an equal share of the total for the files its listings read, so one publisher's files never leave another's
+   * unread (a file not kept revokes nothing), and many publishers together never grow the snapshot past what the build
+   * can write and the pages verify.
    */
-  revocationsBytes: 16 * 1024 * 1024, revocationsPublisherBytes: 64 * 1024 * 1024,
+  revocationsBytes: 16 * 1024 * 1024, revocationsTotalBytes: 64 * 1024 * 1024,
   /** The `sources` one manifest may name (core's appBundle.ts). */
   sources: 8,
 };
@@ -134,11 +136,13 @@ export async function fromStore(fetcher = fetch) {
     }
   }
   // By publisher (the reference's key, as core's appRefPublisher reads it): the URLs its listings read, and their bytes.
+  const publisherOf = (listing) => (typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "");
+  const share = Math.floor(LIMITS.revocationsTotalBytes / new Set(listings.map(publisherOf)).size);
   const publishers = new Map();
   const kept = new Map();
   const failed = new Set();
   for (const listing of listings) {
-    const key = typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "";
+    const key = publisherOf(listing);
     if (!publishers.has(key)) publishers.set(key, { urls: new Set(), bytes: 0 });
     const publisher = publishers.get(key);
     for (const url of revocationUrls(listing, readBundles)) {
@@ -147,8 +151,8 @@ export async function fromStore(fetcher = fetch) {
       try {
         const bytes = kept.get(url) ?? await read(url, LIMITS.revocationsBytes, fetcher);
         // Over this publisher's bound, the file is not kept for it; another publisher whose listings read it still may.
-        if (publisher.bytes + bytes.length > LIMITS.revocationsPublisherBytes) {
-          problems.push(`${url}: over the ${LIMITS.revocationsPublisherBytes} bytes one publisher's revocation files may take`);
+        if (publisher.bytes + bytes.length > share) {
+          problems.push(`${url}: over the ${share} bytes one publisher's revocation files may take`);
           continue;
         }
         publisher.bytes += bytes.length;

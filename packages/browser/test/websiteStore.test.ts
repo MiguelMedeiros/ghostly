@@ -396,9 +396,10 @@ describe("the site leaves out a version its publisher revoked, as the app does b
   });
 
   it("the build bounds each publisher's files apart: one listed ahead that fills its bound leaves another's revocation read", async () => {
-    // `mal`, of another publisher, names three sources: four files of 16 MiB beside its URLs, any bytes. `vic` comes after.
+    // `mal`, of another publisher, names one source: two files of 16 MiB beside its URLs, any bytes, its whole share of
+    // the total with two publishers listed. `vic` comes after.
     const m = signerOf("publisher m");
-    const mal = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2, 3].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
+    const mal = await buildAppBundle({ ...base("mal", "mal"), sources: [at("mal-1")] }, [page("mal")], m);
     const vic = await buildAppBundle(base("vic", "vic"), [page("vic")], a);
     const index: AppStoreIndex = {
       ghostlyStore: 1, key: STORE, name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
@@ -412,7 +413,7 @@ describe("the site leaves out a version its publisher revoked, as the app does b
     const filler = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes);
     const served: Record<string, Uint8Array> = {
       [sync.STORE_URL]: indexBytes, [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes, [at("mal")]: mal.bytes, [at("vic")]: vic.bytes,
-      ...Object.fromEntries(["mal", "mal-1", "mal-2", "mal-3"].map((name) => [revokeAt(name), filler])),
+      ...Object.fromEntries(["mal", "mal-1"].map((name) => [revokeAt(name), filler])),
       [revokeAt("vic")]: fileOf([await signAppRevocation({ ghostlyRevoke: 1, app: ref("vic"), upTo: 1 }, a)]),
     };
     const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
@@ -426,11 +427,30 @@ describe("the site leaves out a version its publisher revoked, as the app does b
     expect(view.skipped.map((x) => [x.ref.slice(53), x.reason])).toEqual([["vic", "revoked"]]);
 
     // Past its own bound, a publisher's next file is left out, and only its own.
-    served[revokeAt("mal-4")] = filler;
-    const more = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2, 3, 4].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
+    served[revokeAt("mal-2")] = filler;
+    const more = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
     served[at("mal")] = more.bytes;
     const again = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
-    expect(again.problems).toEqual([`${revokeAt("mal-4")}: over the ${sync.LIMITS.revocationsPublisherBytes} bytes one publisher's revocation files may take`]);
+    expect(again.problems).toEqual([`${revokeAt("mal-2")}: over the ${sync.LIMITS.revocationsTotalBytes / 2} bytes one publisher's revocation files may take`]);
     expect(Object.keys(again.revocations)).toContain(revokeAt("vic"));
+  });
+
+  it("the build keeps the files of all publishers together within one total, so many that fill their bounds still leave a snapshot it can write", async () => {
+    // Six publishers, each with one listing whose four URLs have a 16 MiB file beside them (no bundle), then `vic`.
+    const filler = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes);
+    const many = [1, 2, 3, 4, 5, 6].map((n) => ({ ref: appRef(keyOf(`publisher ${n}`), `mal${n}`), urls: [1, 2, 3, 4].map((u) => at(`mal${n}-${u}`)) }));
+    const index = utf8Encode(JSON.stringify({ apps: [...many, { ref: ref("vic"), urls: [at("vic")] }] }));
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: index, [sync.STORE_URL.replace(/\.json$/, ".sig")]: new Uint8Array(64),
+      ...Object.fromEntries(many.flatMap((listing) => listing.urls.map((url) => [besideUrl(url, "ghostly-revoke.json"), filler]))),
+      [revokeAt("vic")]: fileOf([await signAppRevocation({ ghostlyRevoke: 1, app: ref("vic"), upTo: 1 }, a)]),
+    };
+    const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
+    const snap = await sync.fromStore(fetcher) as { revocations: Record<string, string> };
+    expect(Object.keys(snap.revocations)).toContain(revokeAt("vic"));
+    // As the build writes it (V8 strings stop at ~512 Mi characters).
+    expect(() => JSON.stringify(snap)).not.toThrow();
+    const kept = Object.values(snap.revocations).reduce((n, b64) => n + Buffer.from(b64, "base64").length, 0);
+    expect(kept).toBeLessThanOrEqual(64 * 1024 * 1024);
   });
 });
