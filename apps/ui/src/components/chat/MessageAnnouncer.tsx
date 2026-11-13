@@ -42,10 +42,12 @@ const PREVIEW_CHARS = 80;
 /**
  * What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), a voice message's
  * or a video's (filePreview, as the chat list), else its text. An app card's line only where the chat's bubbles draw it
- * as a card (`appCards`: `appCardsShown`), its text elsewhere, as the bubble shows it.
+ * as a card (`appCards`: `appCardsShown`), its text elsewhere, as the bubble shows it. A group's payment note as its
+ * timeline shows it (`noteLine`), not the engine's English line.
  */
-function spoken(message: Announceable, t: Translate, appCards: boolean): string {
+function spoken(message: Announceable, t: Translate, appCards: boolean, noteLine?: (note: GroupPayNote) => string): string {
   if (showsCard(message.card)) return cardLine(message.card);
+  if (message.groupPay && noteLine) return noteLine(message.groupPay);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
   if (payment) return paymentLine(t, payment, wallet!.getState());
@@ -344,12 +346,12 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
       timers.current.flush = undefined;
       const batch = pending.current;
       pending.current = [];
-      const { t, nameOf, active, appCards } = words.current;
+      const { t, nameOf, noteLine, active, appCards } = words.current;
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));
       const offer = batch.length === 1 && batch[0].file ? fileOfferLine(batch[0].file, servicesPlatform?.getTransfer(batch[0].file.id) ?? null, nameOf(batch[0]), t) : null;
       const line = offer ?? (batch.length === 1
-        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t, appCards)) })
+        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t, appCards, noteLine)) })
         : names.size === 1
         ? t("chat.announce.messagesFrom", { count: batch.length, name: [...names][0] })
         : t("chat.announce.messages", { count: batch.length }));
