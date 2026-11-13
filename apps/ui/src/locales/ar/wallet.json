@@ -194,7 +194,6 @@
   "cashu": {
     "add": "إضافة",
     "addMintPlaceholder": "أضف دار سك: \u2066https://…\u2069",
-    "amountSats": "{{amount}} sats",
     "askingMint": "جارٍ سؤال دار السك…",
     "backupCopied": "نُسخت النسخة الاحتياطية. من يملك هذه الرموز يملك الـ sats.",
     "contactHint": "تدفع لجهة اتصال؟ استخدم ⚡ في المحادثة.",

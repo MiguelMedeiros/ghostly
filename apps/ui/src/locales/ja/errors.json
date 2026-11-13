@@ -61,7 +61,6 @@
     "tooLong": "メッセージが長すぎます",
     "tooLongNext": "短くするか、ファイルとして送信してください。"
   },
-  "connectionFailed": "接続に失敗しました",
   "devices": {
     "digitsEnded": "このデバイスの追加は終了しました",
     "digitsEndedNext": "「デバイスを追加」からやり直してください。",
@@ -406,7 +405,6 @@
     "refused": "{{host}} がリクエストを拒否しました",
     "tooSlow": "サーバーの応答に時間がかかりすぎました"
   },
-  "messageFailed": "メッセージの送信に失敗しました",
   "pay": {
     "alreadyPaid": "このリクエストはすでに支払い済みです",
     "bothNeed": "あなたと相手の両方に {{rail}} が必要で、チャットがライブである必要があります",

@@ -61,7 +61,6 @@
     "tooLong": "Mensagem longa demais",
     "tooLongNext": "Encurte ou envie como arquivo."
   },
-  "connectionFailed": "Falha na conexão",
   "devices": {
     "digitsEnded": "A adição deste dispositivo terminou",
     "digitsEndedNext": "Comece de novo em Adicionar um dispositivo.",
@@ -406,7 +405,6 @@
     "refused": "{{host}} recusou o pedido",
     "tooSlow": "O servidor demorou demais para responder"
   },
-  "messageFailed": "Falha ao enviar mensagem",
   "pay": {
     "alreadyPaid": "Você já pagou este pedido",
     "bothNeed": "Você e seu contato precisam de {{rail}}, com a conversa ao vivo",

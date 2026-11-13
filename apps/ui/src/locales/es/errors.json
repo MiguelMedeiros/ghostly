@@ -61,7 +61,6 @@
     "tooLong": "Mensaje demasiado largo",
     "tooLongNext": "Acórtalo o envíalo como archivo."
   },
-  "connectionFailed": "Error de conexión",
   "devices": {
     "digitsEnded": "La adición de este dispositivo terminó",
     "digitsEndedNext": "Empieza de nuevo desde Añadir un dispositivo.",
@@ -406,7 +405,6 @@
     "refused": "{{host}} rechazó la solicitud",
     "tooSlow": "El servidor tardó demasiado en responder"
   },
-  "messageFailed": "Error al enviar mensaje",
   "pay": {
     "alreadyPaid": "Ya pagaste esta solicitud",
     "bothNeed": "Tú y tu contacto necesitan {{rail}}, con el chat en vivo",

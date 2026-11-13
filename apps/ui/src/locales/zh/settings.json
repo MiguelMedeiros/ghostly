@@ -188,7 +188,6 @@
   "sharePresenceHint": "你使用 Ghostly 时，联系人会看到一个圆点。你设置的状态无论如何都会显示。",
   "shareProfile": "与联系人分享我的名字和头像",
   "shareProfileHint": "你的联系人会看到此个人资料的名字和头像。关闭后，他们只会看到“联系人”和一个图案。",
-  "sourceCode": "源代码",
   "stayConnected": "在后台保持连接",
   "stayConnectedHint": "Ghostly 不在前台时，聊天和群组仍保持连接，并显示一条安静的通知。会消耗更多电量。",
   "stayConnectedStopped": "Android 在后台停止了 Ghostly",
@@ -231,12 +230,6 @@
     "large": "大",
     "larger": "较大",
     "small": "小"
-  },
-  "theme": "主题",
-  "themes": {
-    "dark": "深色",
-    "light": "浅色",
-    "system": "跟随系统"
   },
   "timeout": "锁定时间",
   "timeoutOptions": {

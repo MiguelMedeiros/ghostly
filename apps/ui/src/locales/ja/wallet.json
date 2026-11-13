@@ -178,7 +178,6 @@
   "cashu": {
     "add": "追加",
     "addMintPlaceholder": "ミントを追加：https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "ミントに問い合わせ中…",
     "backupCopied": "バックアップをコピーしました。このトークンを持つ人が sats を持ちます。",
     "contactHint": "連絡先に支払いますか？チャットの ⚡ を使ってください。",
