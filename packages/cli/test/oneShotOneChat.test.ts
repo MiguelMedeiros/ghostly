@@ -107,9 +107,10 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
   });
 
   it("leaves every chat unstarted, its history unread, for a read that needs none", () => {
-    for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list"]) expect(readsNoHistory(method), method).toBe(true);
+    for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
+      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served"]) expect(readsNoHistory(method), method).toBe(true);
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
-    for (const method of ["chat.history", "file.list", "payment.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+    for (const method of ["chat.history", "file.list", "payment.list", "wallet.list", "wallet.history", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
   });
 });
 

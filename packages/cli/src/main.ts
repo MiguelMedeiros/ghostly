@@ -221,9 +221,14 @@ export function oneGroupOnly(method: string): boolean {
 /**
  * Reads that need nothing of a chat's history: a one-shot for one leaves every saved chat unstarted too (`deferChats`),
  * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
- * `profile show` took 0.8 s and 243 MB instead of 0.45 s and 162 MB with 53,800 messages in the profile.
+ * `profile show` took 0.8 s and 243 MB instead of 0.45 s and 162 MB with 53,800 messages in the profile, and
+ * `group list` 0.89 s and 220 MB instead of 0.42 s and 154 MB with 50,000. A group's own reads need its history only,
+ * which its start reads whatever this says.
  */
-const NO_HISTORY_READS: ReadonlySet<string> = new Set(["status", "profile.get", "settings.get", "status.get", "chat.list"]);
+const NO_HISTORY_READS: ReadonlySet<string> = new Set([
+  "status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
+  "call.list", "service.list", "identity.list", "x401.credential.list", "app.served",
+]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
 export function readsNoHistory(method: string): boolean {
