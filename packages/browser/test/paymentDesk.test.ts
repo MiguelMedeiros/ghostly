@@ -992,6 +992,21 @@ describe("Ark receipts", () => {
     expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
   });
 
+  it("an Ark receipt for a request on another rail is not taken; that rail's own receipt still settles it", async () => {
+    const { desk, arkWallet, usdtWallet, state, texts } = setup([record({ id: "r", direction: "out", unit: "testusdt", target: usdt(), amount: 2_000_000 })]);
+    await desk.start();
+    await desk.onPayment("l", { id: "p-ark", requestId: "r", timestamp: 1, amount: { value: "2000000", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid: tx("a") })] });
+    expect(state("p-ark")).toBeUndefined();
+    expect(texts().filter((t) => t?.includes("on Ark"))).toEqual([]);
+    expect(arkWallet.adapter.verifyReceipt).not.toHaveBeenCalled();
+
+    const txid = "0x" + tx("b");
+    usdtWallet.adapter.receipt.mockResolvedValueOnce({ settled: true });
+    await desk.onPayment("l", { id: "p", requestId: "r", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoint: [ENDPOINT.usdt, JSON.stringify({ txid })] });
+    expect(state("p")).toMatchObject({ state: "settled", txid });
+    expect(state("r")?.state).toBe("settled");
+  });
+
   it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
     const { desk, arkWallet, state, texts } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
     await desk.start();
