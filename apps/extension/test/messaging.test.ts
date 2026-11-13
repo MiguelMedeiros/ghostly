@@ -844,6 +844,28 @@ describe("the toolbar button", () => {
     expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
   });
 
+  it("opens no second tab when pressed while an update opens again the pages Update and restart closed", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    world.tabs.clear();
+    world.local.set("ghostly_reopen_after_update", [`${app}#/chats`]);
+    world.calls.length = 0;
+    // As in Chrome: the tab is there when `tabs.create` answers, its page (what the worker sees) some 25 ms later.
+    const create = world.chrome.tabs.create.bind(world.chrome.tabs);
+    world.chrome.tabs.create = (async (props: { url: string }) => {
+      const tab = await create(props);
+      const opened = world.tabs.get(tab.id!)!;
+      world.tabs.delete(tab.id!);
+      setTimeout(() => world.tabs.set(opened.id, opened), 25);
+      return tab;
+    }) as typeof world.chrome.tabs.create;
+    // The tab "Update and restart" closed is gone, so the person presses the toolbar button as the new version starts.
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    fire(world.chrome.action.onClicked);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chats`]]);
+    expect(world.callsTo("tabs.update")).toEqual([[expect.any(Number), { active: true }]]);
+  });
+
   it("opens the app even when the peer does not start, so the page can say why", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
