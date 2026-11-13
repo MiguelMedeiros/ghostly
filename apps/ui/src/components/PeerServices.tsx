@@ -14,8 +14,9 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
   // Drawn again when this contact or the apps shared change, not on every engine state.
   usePlatformValue(() => [platform?.getPeer(peerPubKey), platform?.getSharedServices()]);
   const { t } = useI18n();
-  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ.
-  const [error, setError] = useState<Problem | null>(null);
+  // Said as a notice: a refusal's why (Hide my IP's) is behind its ⓘ. Kept by the app it is about, and shown only while
+  // that app is listed: the strip stays mounted while the contact is away, and came back with another app.
+  const [error, setError] = useState<{ id: string; problem: Problem } | null>(null);
   const peer = platform?.getPeer(peerPubKey);
   if (!platform || !peer) return null;
 
@@ -38,8 +39,8 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
         <button key={service.id} data-testid="open-service"
           onClick={() => {
             setError(null);
-            if (!platform.features.openServices) { setError({ tone: "error", title: t("chat.services.openNeedsApp") }); return; }
-            platform.openService(peerPubKey, service.id).catch((e) => setError(problemText(e, t)));
+            if (!platform.features.openServices) { setError({ id: service.id, problem: { tone: "error", title: t("chat.services.openNeedsApp") } }); return; }
+            platform.openService(peerPubKey, service.id).catch((e) => setError({ id: service.id, problem: problemText(e, t) }));
           }}
           // At most the strip's width, the name cut with an ellipsis: a 48-character name went 25 px past the strip's
           // edge on a 320 px phone, its start cut off in Arabic (agents#1629). The whole name is in the title. Forced
@@ -54,7 +55,7 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
         title={t("chat.services.manageHint")}>
         {granted.length === 1 ? t("chat.services.sharingOne") : granted.length > 0 ? t("chat.services.sharingMany", { count: granted.length }) : t("chat.services.shareOne")} · {t("chat.services.manage")}
       </button>
-      {error && <Notice problem={error} className="text-xs shrink-0 w-full" />}
+      {error && services.some((s) => s.id === error.id) && <Notice problem={error.problem} className="text-xs shrink-0 w-full" />}
     </div>
   );
 }
