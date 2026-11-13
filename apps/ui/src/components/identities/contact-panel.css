@@ -20,14 +20,12 @@
 .contact-panel-lead{margin:2px 0 0;font-size:12px;line-height:1.4;color:var(--theme-text-muted)}
 .contact-panel-close{display:grid;place-items:center;flex:none;width:40px;height:40px;border:0;border-radius:10px;background:none;color:var(--theme-text-muted);cursor:pointer}
 .contact-panel-close:hover{background:var(--theme-surface-hover);color:var(--theme-text-primary)}
-.contact-panel-close:focus-visible,.contact-panel-link:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.contact-panel-close:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
 .contact-panel-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 16px 20px;display:grid;align-content:start;gap:22px}
 .contact-panel-section{display:grid;gap:10px;min-width:0}
 .contact-panel-heading{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--theme-text-muted)}
 .contact-panel-note,.contact-panel-hint{margin:0;font-size:12px;line-height:1.4;color:var(--theme-text-muted)}
 .contact-panel-hint{text-align:center}
-.contact-panel-link{min-height:36px;padding:0 4px;border:0;border-radius:6px;background:none;font-size:12px;color:var(--theme-accent);cursor:pointer}
-.contact-panel-link:hover{text-decoration:underline}
 
 /* The contact's cards and a card turned over: the back is an ID card's back (composer-identities.css), in its ink. */
 .contact-cards{display:grid;gap:8px;min-width:0}
