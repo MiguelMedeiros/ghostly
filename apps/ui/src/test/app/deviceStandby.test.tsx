@@ -162,6 +162,24 @@ describe("the standby screen", () => {
     await waitFor(() => expect(order).toEqual(["reload"]));
   });
 
+  it("keeps what it said until the reload a move asks for: the device taking the profile never says it is on standby", async () => {
+    const reload = vi.fn();
+    vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, reload } as Location);
+    const view = renderApp(<DeviceStandby gate={{ state: "taking" }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Finishing");
+    // The move is done (or its copy is installed): the engine asks for the reload with a bare standby view.
+    view.rerender(<DeviceStandby gate={{ state: "standby", reload: true }} />);
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(screen.getByTestId("device-standby")).toHaveAttribute("data-state", "taking");
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Finishing");
+    expect(screen.getByTestId("device-standby")).not.toHaveTextContent("This device is on standby for this profile.");
+    expect(screen.queryByRole("button", { name: "Use here" })).toBeNull();
+    view.unmount();
+    // A page whose first word is a reload (the active device giving the profile away) says that one.
+    renderApp(<DeviceStandby gate={{ state: "releasing", reload: true }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Moving to another device");
+  });
+
   it("leaves the person's other profiles one click away", () => {
     createProfile("Work");
     renderApp(<DeviceStandby gate={{ state: "standby" }} />);
