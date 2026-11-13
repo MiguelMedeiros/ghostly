@@ -78,10 +78,21 @@ export function linkStop(url: string): string {
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", in any of
  * the app's languages), an emoji or invisible character (`linkTail`) and a closing bracket or quote the link did not
- * open ("(https://x.example/a)") are left as text. The same rule as the message bubble's links. `emoji: false` keeps
- * the emoji: a payment link's label may end in one ("bitcoin:…?label=ok%20😀").
+ * open ("(https://x.example/a)") are left as text. The same rule as the message bubble's links.
  */
-export function linkEnd(whole: string, emoji = true): string {
+export function linkEnd(whole: string): string {
+  return trimEnd(whole, true);
+}
+
+/**
+ * A payment link (`bitcoin:`, `monero:`…) ends as a web link does, but keeps an emoji at its end: its label or message
+ * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls.
+ */
+export function uriEnd(whole: string): string {
+  return trimEnd(whole, false);
+}
+
+function trimEnd(whole: string, tails: boolean): string {
   const url = linkStop(whole);
   // Brackets counted once, then taken off as they go: linear in the link, however many ")" a peer puts at its end.
   const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
@@ -90,7 +101,7 @@ export function linkEnd(whole: string, emoji = true): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    const tail = emoji ? linkTail(url, end) : 0;
+    const tail = tails ? linkTail(url, end) : 0;
     if (tail) { end -= tail; continue; }
     if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;

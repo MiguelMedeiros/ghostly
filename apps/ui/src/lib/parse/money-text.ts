@@ -1,4 +1,4 @@
-import { linkEnd } from "@ghostly/core";
+import { uriEnd } from "@ghostly/core";
 
 /** The message without what was found in it, for the text shown above the card. */
 export function cut(text: string, index: number, length: number): string {
@@ -10,9 +10,9 @@ export const URI_MAX_CHARS = 4 * 1024;
 
 /**
  * A link's own characters, without the sentence's closing punctuation or an unbalanced bracket around it (the web
- * links' rule, linear however many ")" end it). An emoji at its end stays: a label may end in one.
+ * links' rule, linear however many ")" end it).
  */
-export const trimUriEnd = (uri: string) => linkEnd(uri, false);
+export const trimUriEnd = uriEnd;
 
 /** The web links of the last text asked about, as [start, end) in order: every scanner asks once per word it found. */
 let urlSpans: { text: string; spans: [number, number][] } | null = null;
