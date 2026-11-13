@@ -646,14 +646,15 @@ function helpRow(label: string, text: string, at: number, columns: number | unde
 
 /**
  * What `ghostly` says first in a Ghostly folder with no profile yet: where to start, as the README's "Five minutes"
- * does, before the whole list. `$ ` keeps the lines apart from the list's commands.
+ * does, before the whole list. `$ ` keeps the lines apart from the list's commands. The join pipes the invite in, as
+ * docs/CLI.md does: `invite join -` waits for stdin a pipe gives, and a terminal is refused it.
  */
 const FIRST_STEPS = [
   "First steps:",
-  "  $ ghostly invite create --label alice   make an invite for a contact",
-  "  $ ghostly invite join -                 join one (pasted on stdin)",
-  "  $ ghostly daemon --detach               keep the profile online",
-  "  $ ghostly help <command>                one command and its options",
+  "  $ ghostly invite create --label alice             make an invite for a contact",
+  "  $ printf '%s' \"$INVITE\" | ghostly invite join   join one, from stdin",
+  "  $ ghostly daemon --detach                         keep the profile online",
+  "  $ ghostly help <command>                          one command and its options",
 ];
 
 function help(firstSteps = false): string {
