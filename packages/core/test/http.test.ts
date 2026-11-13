@@ -356,7 +356,10 @@ describe("rtc signal", () => {
 describe("http over the data link", () => {
   function setup(localFetch: LocalFetch) {
     const [clientSide, hostSide] = createChannelPair();
-    const services = new Map([["atlas", { id: "atlas", target: parseLocalTarget("localhost:3400") }]]);
+    const services = new Map([
+      ["atlas", { id: "atlas", target: parseLocalTarget("localhost:3400") }],
+      ["wiki", { id: "wiki", target: parseLocalTarget("localhost:3400/app") }],
+    ]);
     const host = new HttpHost(hostSide, (id) => services.get(id), localFetch);
     const client = new HttpClient(clientSide);
     wire(hostSide, { req: (f) => host.handleRequest(f), rst: (f) => host.handleReset(f), chunk: (c) => host.handleChunk(c) });
@@ -454,6 +457,29 @@ describe("http over the data link", () => {
       expect(blocked.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
       expect(utf8Decode(await blocked.bytes())).not.toContain("localhost");
     }
+  });
+
+  it("reads a relative redirect against the page that asked, as a browser does", async () => {
+    const locations: Record<string, string> = {
+      "/admin/users/7": "edit",
+      "/search": "?page=2",
+      "/app/x/y": "../other",
+      "/app/x/z": "../../escape",
+    };
+    const { client } = setup(async (request) => ({
+      status: 302,
+      headers: [["location", locations[new URL(request.url).pathname]]],
+      body: null,
+    }));
+    expect((await client.request("atlas", { method: "GET", path: "/admin/users/7" })).headers).toEqual([["location", "/admin/users/edit"]]);
+    expect((await client.request("atlas", { method: "GET", path: "/search?q=x" })).headers).toEqual([["location", "/search?page=2"]]);
+    const inside = await client.request("wiki", { method: "GET", path: "/x/y" });
+    expect(inside.status).toBe(302);
+    expect(inside.headers).toEqual([["location", "/other"]]);
+    // Past the base path it is still refused.
+    const outside = await client.request("wiki", { method: "GET", path: "/x/z" });
+    expect(outside.status).toBe(502);
+    expect(outside.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
   });
 
   it("hands a redirect a browser followed back to the client, never off the target", async () => {
