@@ -197,10 +197,14 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </button>
         </div>
       </div>}
-      {/* Stopped by the client (a takedown): why, in the app's place, until Close. */}
-      {shown && app?.stopped && <p role="status" data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
-        {takedownText(title, app.stopped, t)}
-      </p>}
+      {/* Stopped by the client (a takedown): why, in the app's place, until Close. Said politely in a line that is always
+          there, as a live region must be before what it says: the focus stays in the chat beside it, or goes to a bare
+          "Open again", and a line that came with its words was not read out. */}
+      <div role="status">
+        {shown && app?.stopped && <p data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
+          {takedownText(title, app.stopped, t)}
+        </p>}
+      </div>
       {/* Stopped by the watchdog: it may run fine once started again, and the person decides. */}
       {shown && app?.stopped?.why === "unresponsive" && appOpener && (
         <button type="button" data-testid="mini-app-open-again" onClick={openAgain}
