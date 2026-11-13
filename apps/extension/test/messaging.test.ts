@@ -480,9 +480,30 @@ describe("viewer tabs", () => {
     await pauseRequest(world, tabId, {
       url: `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`,
       method: "PUT",
-      postDataEntries: [{ bytes: b64("part one, ") }, {}, { bytes: b64("part two") }],
+      // An empty piece comes as `bytes: ""` (an empty Blob in a FormData).
+      postDataEntries: [{ bytes: b64("part one, ") }, { bytes: "" }, { bytes: b64("part two") }],
     });
     expect(new TextDecoder().decode(engine().requests[0].init.body!)).toBe("part one, part two");
+  });
+
+  it("sends the app no body cut short: a picked file or a stream DevTools does not hand over fails the request", async () => {
+    // Chromium leaves `bytes` out of a body's piece it holds as a file or a stream (a FormData with a picked file,
+    // an XHR sending one): what came was the form's text with an empty file, or no body at all, as if uploaded.
+    const tabId = await openViewer(world);
+    const b64 = (s: string) => Buffer.from(s).toString("base64");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/upload`;
+    for (const postDataEntries of [
+      [{ bytes: b64('--b\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\n\r\n') }, {}, { bytes: b64("\r\n--b--\r\n") }],
+      [{}],
+    ]) {
+      const answer = await pauseRequest(world, tabId, { url, method: "POST", postDataEntries });
+      expect(answer.method).toBe("Fetch.fulfillRequest");
+      expect(answer.params).toMatchObject({ responseCode: 502 });
+      expect(bodyText(answer.params)).toContain("The request failed.");
+    }
+    expect(engine().requests).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("refuses another contact's origin, another service, or anything else in the tab", async () => {
