@@ -266,7 +266,8 @@ describe("opening an app on Desktop", () => {
     expect(await answer("app-1", 4)).toEqual({ id: 4, ok: true, raw: film.slice(0, 1024 * 1024) });
     expect(calls.filter((c) => c.command === "app_post_bytes").map((c) => c.headers)).toEqual([{ "x-label": "app-1", "x-id": "2" }, { "x-label": "app-1", "x-id": "4" }]);
     expect(calls.some((c) => c.command === "app_post" && "bytes" in (c.args.message as object))).toBe(false);
-  });
+    // On main's vitest 5.0.5, comparing the 1 MiB answers takes about 3 s here and more than 5 s on CI (350 ms on 5.1).
+  }, 30_000);
 
   it("sends the contact's frames to that window as events", async () => {
     const { open, request, answer, host, posts } = setup();
