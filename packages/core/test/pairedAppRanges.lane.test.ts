@@ -251,6 +251,26 @@ describe("the read lane of one chat", () => {
     expect(get(CINEMA, again, 1)).not.toBeNull();
   });
 
+  // An ask past the end of the file was refunded to 0 bytes, and one of 1 byte cost 1, so the budget never
+  // answered `busy` and only 4 in flight bounded the reads a contact made this device do (100,000 in one instant).
+  it("each ask counts at least 64 KiB, answered past the end of the file or of 1 byte: 512 a second, then busy", () => {
+    const sent: AppRangeFrame[] = [];
+    const clock = { t: 1_000 };
+    const server = new AppRanges(frame => sent.push(frame), undefined, () => clock.t);
+    const serve = server.serve(CINEMA, "film-id");
+    const floor = APP_RANGE_LIMITS.askFloorBytes, asks = APP_RANGE_LIMITS.bytesPerSecond / floor;
+    const get = (r: number, o: number, n: number) => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, o, n) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    let handed = 0;
+    for (let r = 0; r < 2_000; r++) {
+      const task = r % 2 ? get(r, 10_000_000, APP_RANGE_LIMITS.requestBytes) : get(r, 0, 1);
+      if (task) { handed++; server.finish(task, 100); }
+    }
+    expect(handed).toBe(asks);
+    expect(sent.filter(frame => frame.t === "ar-err" && frame.e === "busy")).toHaveLength(2_000 - asks);
+    clock.t += 1_000;
+    expect(get(2_000, 0, 1)).not.toBeNull();
+  });
+
   it("chunks out of order, or past what was asked, fail the read and cancel it", async () => {
     const { ana, bob, toAna, flush } = pair({ hold: true });
     const serve = ana.serve(CINEMA, "film-id");

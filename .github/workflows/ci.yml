@@ -903,6 +903,11 @@ jobs:
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
+          # First: with `changes` not green, every output below is empty, and the plan's check would blame the plan.
+          if [[ "$CHANGES" != "success" ]]; then
+            echo "::error::Changed paths ended $CHANGES, so this run has no plan: see that job"
+            exit 1
+          fi
           # Not a draft (this job is "CI Success"): the plan must be the full tier, or nothing passes. Only a push to dev
           # whose tree already passed it may plan less.
           if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then
@@ -915,12 +920,26 @@ jobs:
           fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
+          # One error per job that did not pass, by the name the run page shows: the summary alone hid it among the skips.
+          failed=0
+          check() {
+            ok "$2" "$3" && return
+            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"; else echo "::error::$1 ended $2"; fi
+            failed=1
+          }
+          check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
+          check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
+          check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
+          check "Affected unit tests (draft)" "$AFFECTED" "$AFFECTED_GATE"
+          check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
+          check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
+          check "Tauri Backend" "$TAURI" "$RUST"
+          check "Website" "$WEBSITE" "$WEBSITE_GATE"
+          check "Website browser checks" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE"
+          check "Desktop media" "$DESKTOP_MEDIA" "$APP"
+          check "Desktop on macOS" "$DESKTOP_MACOS" "$APP"
           summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
-          if [[ "$CHANGES" != "success" ]] || ! ok "$FRONTEND_CHECKS" "$LINT" || \
-             ! ok "$FRONTEND_TESTS" "$FULL" || ! ok "$FRONTEND_BUILD" "$FULL" || ! ok "$AFFECTED" "$AFFECTED_GATE" || \
-             ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
-             ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" || \
-             ! ok "$DESKTOP_MEDIA" "$APP" || ! ok "$DESKTOP_MACOS" "$APP"; then
+          if (( failed )); then
             echo "One or more jobs failed: $summary"
             exit 1
           fi

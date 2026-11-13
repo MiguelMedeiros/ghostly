@@ -636,9 +636,13 @@ describe("the Share to… picker", () => {
     vi.useFakeTimers();
     try {
       picker();
-      expect(screen.getByTestId("share-none")).toHaveTextContent("Getting what was shared...");
+      expect(screen.getByTestId("share-none")).toHaveTextContent("Getting what was shared…");
+      expect(screen.getByTestId("share-next")).toBeEmptyDOMElement();
       act(() => { vi.advanceTimersByTime(6000); });
       expect(screen.getByTestId("share-none")).toHaveTextContent("Nothing was shared, or it was already picked up.");
+      // Said to a screen reader too: the line changed on its own, with no press to bring anyone to it.
+      act(() => { vi.advanceTimersByTime(SEARCH_STATUS_SETTLE_MS); });
+      expect(screen.getByTestId("share-next")).toHaveTextContent("Nothing was shared, or it was already picked up.");
     } finally {
       vi.useRealTimers();
     }

@@ -60,9 +60,13 @@ const GATHER = 256 * 1024;
  * Writes one file in order, gathering small writes into larger ones. `written` counts what was handed over,
  * gathered or not; `flush` makes all of it durable. Its calls run one after another: a close while a flush still
  * writes the gathered part (a holder gone, then the transfer cancelled) would write that part a second time.
+ *
+ * The gathering buffer is made at the first small write and let go at a flush or close: a file waiting (paused,
+ * its session gone) holds none. Made with every appender, a contact's 256 small files offered and then paused held
+ * 64 MiB until a restart.
  */
 export class FileAppender {
-  private buffer = new Uint8Array(GATHER);
+  private buffer: Uint8Array | null = null;
   private buffered = 0;
   private stored: number;
   private turn: Promise<unknown> = Promise.resolve();
@@ -79,6 +83,7 @@ export class FileAppender {
         this.stored += chunk.length;
         return;
       }
+      this.buffer ??= new Uint8Array(GATHER);
       this.buffer.set(chunk, this.buffered);
       this.buffered += chunk.length;
     });
@@ -87,6 +92,7 @@ export class FileAppender {
   flush(): Promise<void> {
     return this.inTurn(async () => {
       await this.drain();
+      this.buffer = null;
       await this.bytes.flush(this.id);
     });
   }
@@ -94,6 +100,7 @@ export class FileAppender {
   close(): Promise<void> {
     return this.inTurn(async () => {
       await this.drain();
+      this.buffer = null;
       await this.bytes.close(this.id);
     });
   }
@@ -105,7 +112,7 @@ export class FileAppender {
   }
 
   private async drain(): Promise<void> {
-    if (!this.buffered) return;
+    if (!this.buffered || !this.buffer) return;
     const part = this.buffer.slice(0, this.buffered);
     await this.bytes.append(this.id, this.stored, part);
     this.stored += part.length;

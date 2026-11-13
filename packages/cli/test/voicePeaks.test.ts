@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { VOICE_LIMITS, parseVoiceMeta, voicePeaksOf } from "@ghostly/core";
-import { VoiceMeter, decodeWithFfmpeg, measureVoice } from "../src/voicePeaks";
+import { MAX_OPUS_PACKETS, VoiceMeter, decodeWithFfmpeg, demuxOgg, demuxWebm, measureVoice } from "../src/voicePeaks";
 // covers: headless.files
 
 /**
@@ -214,6 +214,37 @@ describe("a voice note's waveform, measured from its file", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("holds no more Opus packets than the longest voice note can have, however many empty ones a small file declares", async () => {
+    // Every packet of a voice note is at least 2.5 ms long: the cap holds one a little past the limit.
+    expect(MAX_OPUS_PACKETS * 2.5).toBeGreaterThanOrEqual(VOICE_LIMITS.maxDurationMs + 5_000);
+    // WebM: 7 bytes a block, each 256 empty frames laced at a fixed size (512,000 frames in 14 KB).
+    const block = Buffer.from([0xa3, 0x85, 0x81, 0x00, 0x00, 0x04, 0xff]);
+    const webm = Buffer.concat([
+      Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x80]),
+      Buffer.from([0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+      Buffer.from([0x16, 0x54, 0xae, 0x6b, 0xff, 0xae, 0xff, 0xd7, 0x81, 0x01, 0x86, 0x86]), Buffer.from("A_OPUS"),
+      Buffer.from([0x1f, 0x43, 0xb6, 0x75, 0xff]),
+      ...Array.from({ length: 2_000 }, () => block),
+    ]);
+    expect(demuxWebm(webm)!.frames.length).toBeLessThanOrEqual(MAX_OPUS_PACKETS);
+    // Ogg: pages of 255 empty segments, 255 packets in 282 bytes.
+    const page = (segments: number[], data: Buffer) => {
+      const header = Buffer.alloc(27);
+      header.write("OggS", 0, "ascii");
+      header[26] = segments.length;
+      return Buffer.concat([header, Buffer.from(segments), data]);
+    };
+    const opusHead = Buffer.concat([Buffer.from("OpusHead"), Buffer.from([1, 1, 0, 0, 0x80, 0xbb, 0, 0, 0, 0, 0])]);
+    const ogg = Buffer.concat([page([opusHead.length], opusHead), ...Array.from({ length: 2_000 }, () => page(new Array(255).fill(0), Buffer.alloc(0)))]);
+    expect(demuxOgg(ogg)!.frames.length).toBeLessThanOrEqual(MAX_OPUS_PACKETS);
+    for (const [name, bytes] of [["bomb.webm", webm], ["bomb.ogg", ogg]] as const) {
+      const path = join(dir, name);
+      writeFileSync(path, bytes);
+      // Read as a sound past the longest voice note: the send refuses its length.
+      expect((await measured(path)).duration).toBeGreaterThan(VOICE_LIMITS.maxDurationMs + 5_000);
+    }
+  }, 60_000);
 
   it("says why when it cannot read the sound", async () => {
     const path = join(dir, "noise.m4a");

@@ -12,7 +12,7 @@ import { useState } from "react";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { groupChat, setChatMute } from "../../lib/chatMute";
-import { CATEGORY_PREVIEW, CUES, CueChat, REPEAT_MS, cueOutcome, eventSound, playCue, resetCues, type CueName } from "../../lib/cues";
+import { ATTENTION_FRESH_MS, CATEGORY_PREVIEW, CUES, CueChat, REPEAT_MS, cueOutcome, eventSound, firstSight, playCue, resetCues, sightsKept, type CueName } from "../../lib/cues";
 import { CUE_CATEGORIES, DEFAULT_CUES, loadSettings, saveSettings, type CueSwitches, type NotificationSettings } from "../../lib/settings";
 import { SOUNDS } from "../../lib/sounds";
 import { saveSession } from "../../lib/storage";
@@ -173,6 +173,7 @@ describe("AttentionFeedback plays the engine's cues", () => {
     // Claims go once no event they stand for can be presented: 20 s later, the next claims drop them.
     const kept = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key) => key?.startsWith("ghostly_feedback_claim:")).length;
     expect(kept()).toBeGreaterThanOrEqual(300);
+    // A minute on, past every event taken here (an earlier test moves the clock 20 s ahead).
     const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_000);
     await send(...Array.from({ length: 64 }, (_, i) => event({ id: groupId(1000 + i), type: "cue", cue: "knock", linkId: "link-a" })));
     expect(kept()).toBeLessThanOrEqual(65);
@@ -188,6 +189,24 @@ describe("AttentionFeedback plays the engine's cues", () => {
     setup();
     const request = event({ cue: "request", linkId: "link-a" });
     expect(await send(request, request, event({ cue: "knock", linkId: "link-a" }))).toEqual(["request", "knock"]);
+  });
+
+  it("forgets the events it took once they are too old to play, instead of keeping one id per event for as long as the page is open", async () => {
+    setup();
+    const start = Date.now();
+    await send(...Array.from({ length: 300 }, () => event({ cue: "knock", linkId: "link-a" })));
+    expect(sightsKept()).toBeGreaterThanOrEqual(301);
+    // Before: every id stayed in the page for good (a message, a reaction, a cue: thousands a day in a busy chat).
+    // A minute on, past every event taken here (an earlier test moves the clock 20 s ahead).
+    const later = vi.spyOn(Date, "now").mockImplementation(() => start + 60_000 + ATTENTION_FRESH_MS);
+    try {
+      const fresh = event({ cue: "request", linkId: "link-a" });
+      expect(await send(fresh)).toEqual(["request"]);
+      expect(sightsKept()).toBe(2);
+      // One the page took stays refused while fresh, and an old one is refused by its time, as before.
+      expect(firstSight(fresh.id, fresh.at)).toBe(false);
+      expect(firstSight("old", start)).toBe(false);
+    } finally { later.mockRestore(); }
   });
 
   it("gives a mention and my settled payment their own sounds, and the first ones with those categories off", async () => {

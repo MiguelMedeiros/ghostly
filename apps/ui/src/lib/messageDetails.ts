@@ -260,12 +260,13 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
     view ? { label: L("textSize"), value: bytes(view.message.textBytes) } : undefined,
   ]);
 
-  // An edited text (WISP 400 § Edits): how often, when last, and every earlier version kept, oldest first.
+  // An edited text (WISP 400 § Edits): how often, when last, and every earlier version kept, oldest first. Only the
+  // first can be the original: a later one's time is its author's to give.
   const edit = message.edit;
   if (edit) add("edits", [
     { label: L("edits"), value: V("edits", { count: edit.seq, time: time(edit.at) }) },
     edit.pending ? group ? { label: L("group"), value: V("groupNotSent") } : { label: L("contact"), value: V("contactNotShown") } : undefined,
-    ...edit.history.map((version): DetailRow => ({ label: t(version.at === shownTime(message) ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
+    ...edit.history.map((version, i): DetailRow => ({ label: t(i === 0 && version.at === shownTime(message) ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
   ]);
 
   const last = d?.sends?.[d.sends.length - 1];

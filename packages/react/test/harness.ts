@@ -7,10 +7,11 @@ import { useWebRTC } from "../src/useWebRTC";
  * Renders `useWebRTC` as a chat does: `receive` is the other side's `_call` record changing, and
  * `published` is every value the hook put in ours, in order (`null` clears it). `media`: where the call's media
  * comes from, when not the page's own WebRTC; `devices`: the microphone and camera the profile chose; `network`: the
- * profile's ICE servers and "Hide my IP from contacts"; `chatId`: the chat's id, as a chat gives it.
+ * profile's ICE servers and "Hide my IP from contacts" (and `asksEachAlone`, the Android app's capture); `chatId`: the
+ * chat's id, as a chat gives it.
  */
 export function renderCall(media?: CallMedia, devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString },
-  network: { iceServers?: CallIceServer[]; relayOnly?: boolean } = {}, chatId?: string) {
+  network: { iceServers?: CallIceServer[]; relayOnly?: boolean; asksEachAlone?: boolean } = {}, chatId?: string) {
   const published: (string | null)[] = [];
   const publishCallSignal = vi.fn((signal: string | null) => { published.push(signal); });
   const setFastPoll = vi.fn();

@@ -544,6 +544,55 @@ describe("the Mainline DHT node starts when it is asked something", { timeout: 6
     await expect(node.get(createIdentity().pubKeyZ32)).rejects.toThrow("closed");
   });
 
+  // Hide my IP from contacts: the engine configures `dhtDirect: false`, and the packets go through the relays alone. Before,
+  // the setting was dropped, and every packet was put on and read from the DHT beside them, from this machine's address.
+  it("with Hide my IP from contacts on (dhtDirect false), no packet goes to the DHT, nor a read; off again, they do", async () => {
+    received = 0;
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const node = new Mainline({ bootstrap: [bootstrap()], host: "127.0.0.1", timeoutMs: 1_000 });
+    const transport = new RelaysAndDht(node, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    const me = createIdentity();
+    try {
+      // On from the start (a profile that arrives with it on): the node never starts.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: false });
+      await transport.publish(me, [{ label: "_x", value: "relays only" }]);
+      expect((await transport.resolve(me.pubKeyZ32))?.records[0].value).toBe("relays only");
+      expect(await transport.resolve(createIdentity().pubKeyZ32)).toBeNull();
+      await settle();
+      expect(received).toBe(0);
+      expect(node.running).toBe(false);
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP)");
+      expect(transport.publishHeld(me.pubKeyZ32)).toBeNull();
+
+      // Off: every packet goes to the DHT again.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: true });
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP), and the Mainline DHT (BEP44) directly");
+      await transport.publish(me, [{ label: "_x", value: "both" }]).catch(() => {});
+      await settle();
+      expect(node.running).toBe(true);
+      expect(received).toBeGreaterThan(0);
+
+      // On again with the node running: it is closed, and nothing more goes out.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: false });
+      await settle();
+      expect(node.running).toBe(false);
+      received = 0;
+      await transport.publish(me, [{ label: "_x", value: "relays only again" }]);
+      expect((await transport.resolve(me.pubKeyZ32))?.records[0].value).toBe("relays only again");
+      // The relays failing do not send a read to the DHT either.
+      store.down = true;
+      await expect(transport.resolve(createIdentity().pubKeyZ32, {}, false)).rejects.toThrow();
+      await settle();
+      expect(node.running).toBe(false);
+      expect(received).toBe(0);
+      // Absent leaves it as it is.
+      transport.configure({ relays: RELAYS, readRelays: false });
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP)");
+    } finally {
+      await node.destroy();
+    }
+  });
+
   it("chat list, settings get and status, and a profile set offline, send the DHT's routers nothing", async () => {
     received = 0;
     const dir = home("dht-quiet");

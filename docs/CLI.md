@@ -144,6 +144,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `agent.turn` comes only with `--turns`: a `--type` that keeps it alone (`agent`) is a usage error.
   `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
   across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
@@ -162,7 +163,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   5 s to end, then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before
   its event, so the next start runs it again, never alongside the old one.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). Give a URL with a token in
+  `GHOSTLY_WEBHOOK` instead of `--webhook` (one or the other): a running `listen`'s arguments show in `ps` to every
+  account on the machine, its environment does not, and no `--exec` command or other child gets it. A `--webhook` URL
+  with a path or query is warned of on stderr, and one that is not a URL is refused without repeating it. A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
@@ -222,7 +226,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
-  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`, and `history --before`
+  or `--after` for the messages around it).
 - **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
   `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.

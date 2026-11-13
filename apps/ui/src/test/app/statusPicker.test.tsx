@@ -201,6 +201,26 @@ describe("the status picker in the account menu", () => {
     expect(within(dialog).getByRole("textbox")).toHaveAttribute("dir", "auto");
   });
 
+  it("gives the focus to the chosen emoji when one is picked from More emoji, not to the page", async () => {
+    answerStatus();
+    const { user, engine } = renderBar();
+    const dialog = await openPicker(user);
+    await user.click(within(dialog).getByRole("button", { name: "More emoji" }));
+    const search = await within(dialog).findByRole("searchbox");
+    await waitFor(() => expect(search).toHaveFocus());
+    await user.type(search, "rocket{Enter}");
+    expect(within(dialog).queryByTestId("emoji-tab")).not.toBeInTheDocument();
+    const chosen = within(dialog).getByRole("button", { name: "🚀" });
+    expect(chosen).toHaveAttribute("aria-pressed", "true");
+    expect(chosen).toHaveFocus();
+
+    // The keys still work in the picker: Tab goes on from there, and Save saves the emoji.
+    await user.tab();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(engine.callsTo("setOwnStatus")[0]?.status.emoji).toBe("🚀");
+  });
+
   it("is clean for axe when open, and Escape closes it back to the account button", async () => {
     answerStatus({ availability: "away", emoji: "🌴", text: "On holiday", until: NOW + 86_400_000 });
     const { user } = renderBar();

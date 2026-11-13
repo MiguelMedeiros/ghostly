@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
-import { saveSession } from "../../lib/storage";
+import { notifySessionsChanged } from "@ghostly/browser/platform/sync";
+import { deleteMessage, loadSession, saveSession } from "../../lib/storage";
 import type { ChatMessage } from "../../lib/types";
 import { SEARCH_DEBOUNCE_MS } from "../../hooks/useChatSearch";
 import { linkView } from "../fakeEngine";
@@ -259,6 +260,38 @@ describe("search inside a chat", () => {
     fireEvent.click(screen.getByTestId("chat-search-close"));
     await settle();
     expect(marked()).toEqual([]);
+  });
+
+  it("goes on from the match being read once it is gone (deleted, edited away), not from the newest", async () => {
+    openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    await type("message 29");
+    await jumpedTo("m299");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(count()).toBe("3 of 11");
+    expect(last()).toBe("m297");
+
+    // Deleted here (or for everyone by the contact) while it is the one read: Older goes on to the one older than it.
+    // Before, the search began again at the newest ("Message 299"), as if its words had just been typed.
+    act(() => { deleteMessage("chat-1", "m297"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m297")).toBeNull());
+    expect(count()).toContain("of 10");
+    fireEvent.click(screen.getByTestId("chat-search-older"));
+    expect(last()).toBe("m296");
+    expect(count()).toBe("3 of 10");
+
+    // Edited so it no longer matches: Newer goes on to the one newer than it.
+    act(() => {
+      const session = loadSession("chat-1")!;
+      saveSession({ ...session, messages: session.messages.map(m => m.id === "m296" ? { ...m, text: "Something else" } : m) });
+      notifySessionsChanged();
+    });
+    await vi.waitFor(() => expect(count()).toContain("of 9"));
+    fireEvent.click(screen.getByTestId("chat-search-newer"));
+    expect(last()).toBe("m298");
+    expect(count()).toBe("2 of 9");
   });
 
   it("finds whatever the case and accents, a file by its name, and says when nothing is found", async () => {
