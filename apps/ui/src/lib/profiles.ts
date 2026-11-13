@@ -449,10 +449,26 @@ export function announceSwitch(id: string, avatar?: string): void {
 }
 
 /**
+ * A backup restored with Replace (ProfileBackups) opens the copy on its profile page, which offers the original's
+ * removal. A share that goes along opens it on its Share to… picker instead (only that page is handed the share): the
+ * replace step is kept here for the picker, which goes on to it once the share is in (`takeReplaceStep`).
+ */
+const REPLACING = /^\/profile\?replace=[^&#]+$/;
+const REPLACE_KEY = "ghostly_replace_after_share";
+/** The copy's replace step a switch kept behind its share, taken once: the profile page's route that offers it. */
+export function takeReplaceStep(): string | null {
+  try {
+    const route = sessionStorage.getItem(REPLACE_KEY);
+    sessionStorage.removeItem(REPLACE_KEY);
+    return route && REPLACING.test(route) ? route : null;
+  } catch { return null; }
+}
+
+/**
  * Makes another profile the active one and restarts the app, so no peer, wallet or timer of the old
  * profile keeps running beside the new one. Contacts of the old profile see it go offline. The profile
  * left keeps its place; the one opened goes back to its own (`route` overrides it, e.g. a new profile's
- * page), or to its Share to… picker when a share goes along. Its lock, if it has one, asks for the password before anything of it shows.
+ * page), or to its Share to… picker when a share goes along (a backup's Replace goes on from there, `takeReplaceStep`). Its lock, if it has one, asks for the password before anything of it shows.
  */
 export function switchProfile(id: string, options: { route?: string; avatar?: string } = {}): void {
   const registry = read();
@@ -467,6 +483,9 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   // page asks the web app's worker for it (`askForShare`): on any other route, a tapped notice's chat or a new
   // profile's page, it would be dropped without a word.
   const shareKept = carryIncomingShare();
+  if (shareKept && options.route && REPLACING.test(options.route)) {
+    try { sessionStorage.setItem(REPLACE_KEY, options.route); } catch { /* the original stays, removable by hand */ }
+  }
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
   // then this page stays the old profile under it (whatever re-renders reads the registry), so the new one
   // becomes active only now, quietly.
