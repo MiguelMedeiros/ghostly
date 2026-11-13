@@ -289,7 +289,9 @@ add` prints the statement and the command, `identity complete` takes its output.
 then `identity complete` asks the engine to look it up. The last of the steps `identity add` answers is that `identity
 complete` command, with its draft (the app's "press Check" and "paste it into Ghostly" point to it). In-app signers (a Nostr signer over NIP-46, Pubky) run in one
 `identity add`, with their fields in `--field` (a NIP-46 `bunker://` link on stdin: `printf 'bunker=%s\n' "$LINK" | ghostly
-identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr. OpenID Connect,
+identity add nostr --signer nip46 --stdin`), and print what they wait on (a link, a code) to stderr. The signer brings
+the subject; one given is NIP-05's domain, or the key the signer must hold (another key fails before anything is
+signed). OpenID Connect,
 AT Protocol and a NIP-07 browser extension need a browser window: make those proofs in the app. `identity providers`
 marks each signer that runs here as `headless`.
 
