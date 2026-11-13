@@ -62,6 +62,8 @@ const request = () => screen.getByTestId("payment-request");
 /** A card by its type and network: `card("cashu-mainnet")`. */
 const card = (id: string) => screen.getByTestId(`payment-card-${id}`);
 const hint = () => screen.getByText((_, el) => !!el?.classList.contains("payment-back-hint"));
+/** The card back's line under its name: what it holds, and whom with. */
+const meta = () => screen.getByTestId("payment-back").querySelector(".payment-back-meta");
 /** The sheet's Mainnet | Testnet tab. */
 const tab = (network: WalletNetwork) => screen.getByTestId(`payment-tab-${network}`);
 /** The ids of the cards the deck shows. */
@@ -183,7 +185,7 @@ describe("the cards", () => {
     expect(card("lightning-mainnet")).not.toHaveTextContent("1,000");
     await user.click(card("lightning-mainnet"));
     // Turned over, it is the only card shown: what it can spend, as before.
-    expect(within(screen.getByTestId("payment-back")).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
   });
 
   it("starts on the card used last time, on its network's tab", () => {
@@ -243,7 +245,7 @@ describe("the cards", () => {
     expect(card("bark-testnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toBeDisabled();
     act(() => fakeEngine.update({ wallet: { ...fakeEngine.state.wallet, ark: arkReady() } }));
-    expect(await screen.findByText("Use Ark")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("payment-use")).toHaveTextContent("Use Ark"));
     expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
   });
 
@@ -263,7 +265,7 @@ describe("the cards", () => {
     expect(screen.getByTestId("payment-composer")).toHaveAttribute("data-network", "testnet");
     expect(within(back).getByText("Ark · Testnet")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Test money");
-    expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("5,000 test sats · with Alice");
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
 
@@ -274,7 +276,7 @@ describe("the cards", () => {
     expect(back).toHaveAttribute("data-network", "mainnet");
     expect(within(back).getByText("Cashu")).toBeInTheDocument();
     expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Real money");
-    expect(within(back).getByText("1,000 sats · with Alice")).toBeInTheDocument();
+    expect(meta()).toHaveTextContent("1,000 sats · with Alice");
   });
 
   it("moves along the cards with the arrow keys and turns the chosen one over with Enter", async () => {
