@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { GROUP_FILE_LIMITS, type GroupFileMeta } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { GroupFileDesk, groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
@@ -9,6 +9,11 @@ import type { FileTransferView } from "../src/shared/types";
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("base64url");
 const pattern = (size: number, seed: number) => { const out = new Uint8Array(size); for (let i = 0; i < size; i++) out[i] = (i * 31 + seed * 7) & 0xff; return out; };
+
+const elapsed = performance.now;
+afterEach(() => { performance.now = elapsed; });
+/** A world whose time gone by, as every device's monotonic clock reads it, is the world's. */
+const newWorld = () => { const world = new CommunityWorld(); performance.now = () => world.now; return world; };
 
 /** A device's files store and file storage, in memory. */
 class MemoryFiles implements GroupFileStore {
@@ -54,7 +59,7 @@ const cases: [string, number, { autoDownloads?: boolean; serveFiles?: boolean } 
  */
 describe("a member back from away in a busy group", { timeout: 10 * 60_000 }, () => {
   it.each(cases)("asks for the files it missed about once each, and reports each file's row only when it changes: %s", async (_, senders, other) => {
-    const world = new CommunityWorld();
+    const world = newWorld();
     const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView> }>();
     const add = (name: string) => {
       const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
@@ -144,7 +149,7 @@ describe("files waiting for their author, away", { timeout: 10 * 60_000 }, () =>
     const proto = GroupFileDesk.prototype as unknown as { ask(...args: unknown[]): unknown };
     const ask = proto.ask;
     try {
-      const world = new CommunityWorld();
+      const world = newWorld();
       const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView>; settings: { autoDownloads: boolean; serveFiles: boolean } }>();
       const add = (name: string) => {
         const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>(), settings: { autoDownloads: name !== "zed", serveFiles: true } };

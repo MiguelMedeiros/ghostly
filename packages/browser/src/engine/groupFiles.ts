@@ -163,7 +163,7 @@ export interface GroupFileDeps extends GroupFilesHost {
 }
 
 /**
- * Time gone by, on the monotonic clock: a transfer's pace and how long it held its place, which a device clock set
+ * Time gone by, on the monotonic clock: how long a want waited for an offer, a transfer's pace and how long it held its place, which a device clock set
  * ahead or back (`deps.now()`, the wall clock) would cut short or stretch. Stored times and the day stay on the wall clock.
  */
 const elapsed = (): number => performance.now();
@@ -232,10 +232,12 @@ interface Want {
   /** The holder asked now and the edge it was asked on; none while nobody reachable has it. */
   holder?: string;
   linkId?: string;
+  /** When it was asked of its holder, or found nobody to ask (on the monotonic clock). */
   at: number;
   /**
-   * When this round began: once `wantWaitMs` went by and nobody is asked, a new round asks every holder again, the one
-   * left too. Asks that find nobody, or a member that says it holds the file and answers `gone`, do not put it off.
+   * When this round began (on the monotonic clock): once `wantWaitMs` went by and nobody is asked, a new round asks
+   * every holder again, the one left too. Asks that find nobody, or a member that says it holds the file and answers
+   * `gone`, do not put it off.
    */
   round: number;
   /** Holders asked in this round that had nothing to give: the next ask goes to another. */
@@ -600,7 +602,7 @@ export class GroupFileDesk {
     }
     const want = this.wants.get(kept.id);
     if (!want) this.wants.set(kept.id, this.newWant());
-    else if (!want.wire) { want.tried.clear(); want.why = want.busy = undefined; want.round = this.deps.now(); }
+    else if (!want.wire) { want.tried.clear(); want.why = want.busy = undefined; want.round = elapsed(); }
     this.ask(kept);
   }
 
@@ -700,7 +702,7 @@ export class GroupFileDesk {
       const kept = this.kept.get(id);
       if (!kept) { this.wants.delete(id); continue; }
       if (this.leaveSlow(kept, want) || this.leaveGone(kept, want)) continue;
-      if ((want.wire ? elapsed() - want.movedAt : now - (want.holder ? want.at : want.round)) < GROUP_FILE_LIMITS.wantWaitMs) continue;
+      if (elapsed() - (want.wire ? want.movedAt : want.holder ? want.at : want.round) < GROUP_FILE_LIMITS.wantWaitMs) continue;
       if (want.wire) {
         // A holder that stalls, or sends too little to count (`wantMoveBytes`), is left: the transfer ends here, and the
         // next holder is asked (`transferChanged`).
@@ -711,7 +713,7 @@ export class GroupFileDesk {
       }
       if (want.holder) want.tried.add(want.holder);
       // Everyone asked in turn: a new round, as holders come and go.
-      else { want.tried.clear(); want.why = want.busy = undefined; want.round = now; }
+      else { want.tried.clear(); want.why = want.busy = undefined; want.round = elapsed(); }
       this.ask(kept);
     }
     this.letGo();
@@ -734,7 +736,7 @@ export class GroupFileDesk {
 
   // -- asking --------------------------------------------------------------------------------------------------
 
-  private newWant(): Want { return { at: this.deps.now(), round: this.deps.now(), tried: new Set(), moved: 0, movedAt: 0 }; }
+  private newWant(): Want { return { at: elapsed(), round: elapsed(), tried: new Set(), moved: 0, movedAt: 0 }; }
 
   /**
    * Wants of this group that wait for a holder: asked now (an edge came up or freed, or a member said it holds
@@ -845,14 +847,14 @@ export class GroupFileDesk {
       // Its wants go at their pace (§ Bounds): past it, this one waits its turn too, asked once the window frees (`tick`).
       if (this.paced(linkId)) { this.edgesById.get(linkId)!.wantPaced = true; behind = true; continue; }
       // Asked of it before the frame goes: its answer is this want's, however soon it comes.
-      Object.assign(want, { holder: key, linkId, at: this.deps.now() });
+      Object.assign(want, { holder: key, linkId, at: elapsed() });
       this.askedOn.set(linkId, { id: kept.id, want });
       this.edgesById.get(linkId)!.wantSent.take();
       if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
       if (want.holder === key) this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
       return;
     }
-    Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
+    Object.assign(want, { holder: undefined, linkId: undefined, at: elapsed() });
     if (behind) { this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" }); return; }
     // Why it waits: a holder busy, bytes that came damaged (its person can ask again), or nobody in reach has it. On
     // hubs, a file only its author is known to hold, the author with no edge here, comes only once a hub holds it: said

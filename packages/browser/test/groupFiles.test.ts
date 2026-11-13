@@ -1735,6 +1735,37 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.done(bob, id, messageId)).toBe(false);
   });
 
+  it("a member whose holder never offers asks the next one after `wantWaitMs` though its device's clock was set back", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const { messageId } = await t.send(alice, id, pattern(256 * 1024, 15));
+    await t.world.until(() => [bob, carol].every(p => !!t.got(p, id, messageId).message?.file), 60_000);
+    await carol.groups.downloadFile(t.got(carol, id, messageId).message!.file!.id);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    await t.world.run(15_000);
+    t.say(carol, bob, id, { t: "group-have", g: id, ids: [messageId] });
+    await t.world.run(1_000);
+    // The first holder to answer goes silent: none of its files/3 frames reach Bob.
+    let first: string | undefined;
+    t.hold = (from, to, frame) => {
+      if (!first && to === bob && frame.t === "pf-offer") first = from.name;
+      return to === bob && from.name === first && typeof frame.t === "string" && frame.t.startsWith("pf-");
+    };
+    const mark = t.seen.length;
+    const offers = () => new Set(t.seen.slice(mark).filter(s => s.to === "bob" && s.frame.t === "pf-offer").map(s => s.from));
+    await bob.groups.downloadFile(t.got(bob, id, messageId).message!.file!.id);
+    for (let i = 0; i < 10 && !offers().size; i++) await t.world.run(1_000);
+    expect(offers().size).toBe(1);
+    bob.clock = -60 * 60_000;
+    const set = t.world.now;
+    for (let i = 0; i < 120 && offers().size < 2; i++) await t.world.run(5_000);
+    // Within `wantWaitMs` and a step, not an hour: the other holder offers it.
+    expect(offers().size).toBe(2);
+    expect(t.world.now - set).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs + 5_000);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+  });
+
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
