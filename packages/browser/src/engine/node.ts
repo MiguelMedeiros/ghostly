@@ -2413,8 +2413,10 @@ export class GhostlyNode implements EngineImplementation {
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials. Each group's latest
-    // reaction is noted from the history its load reads (`loaded`).
-    await this.groups.load(this.limitedMode);
+    // reaction is noted from the history its load reads (`loaded`). A run whose groups take and send nothing reads each
+    // one's newest message alone: an offline one, and one that leaves their sessions unstarted (`deferGroups`), where
+    // only an admission over a contact chat touches one, from its chain and secrets.
+    await this.groups.load(this.limitedMode, !!this.options.offline || !!this.options.deferGroups);
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();

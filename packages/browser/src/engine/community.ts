@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, loadNewest, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -487,15 +487,21 @@ export class Communities {
   /** Is this device a hub of the group? (tests and the load harness) */
   isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }
 
-  async load(groups: StoredGroup[]): Promise<void> {
+  /** `newestOnly`: a run that starts no group reads each history's newest message alone (`Groups.load`). */
+  async load(groups: StoredGroup[], newestOnly = false): Promise<void> {
     for (const group of groups) {
       this.stored.set(group.id, group);
-      // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id));
-      // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`) too, not from its record alone.
-      if (group.community) this.attach(group.community, history.flatMap(m => m.frame ? [{ id: m.id, frame: m.frame as CommunityMessageFrame }] : []));
-      loadMarks(this.marks, group, history);
-      this.host.loaded?.(group.id, history);
+      if (newestOnly) {
+        if (group.community) this.attach(group.community);
+        await loadNewest(this.marks, this.store, group.id);
+      } else {
+        // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
+        const history = await this.store.getMessages(MESSAGE_LINK(group.id));
+        // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`) too, not from its record alone.
+        if (group.community) this.attach(group.community, history.flatMap(m => m.frame ? [{ id: m.id, frame: m.frame as CommunityMessageFrame }] : []));
+        loadMarks(this.marks, group, history);
+        this.host.loaded?.(group.id, history);
+      }
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
