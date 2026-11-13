@@ -152,11 +152,11 @@ function report(result: Result): void {
  * `budgetHeldMs`: from the restart, the relays' budget holds back every publish of the app that stayed for this long.
  * `endpointAfterMs`: the restarted app's native endpoint starts this long after it.
  * `cli`: the staying side's WebRTC never says `disconnected` and goes `failed` `rtcFailsAfterMs` after the crash
- * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
+ * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs` (when given).
  * `restartAfterMs`: how long the app is gone.
  */
 async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
-  cli?: { rtcFailsAfterMs: number; dialFailMs: number },
+  cli?: { rtcFailsAfterMs: number; dialFailMs?: number },
   readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }, restartAfterMs = RESTART_AFTER_MS): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
@@ -172,7 +172,7 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   const before = channelOf(stays);
   const quitAt = Date.now();
   await quit(world, goes, how, cli?.rtcFailsAfterMs);
-  if (cli) { world.native.dialsLost.add("goes"); world.native.dialFailMs = cli.dialFailMs; }
+  if (cli?.dialFailMs !== undefined) { world.native.dialsLost.add("goes"); world.native.dialFailMs = cli.dialFailMs; }
   const failuresBefore = world.native.dialFailures;
   // When the staying side lets the old session go (it may only do so once the other app is back).
   let downSeenAt = 0;
@@ -255,6 +255,17 @@ describe("a chat on Automatic, both apps with WebRTC and an Iroh through its rel
     const result = await restart("auto+iroh", restarted, "crash", undefined, 300);
     expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_000);
     expect(result.transport).toBe("iroh/1");
+  }, 240_000);
+
+  /**
+   * The same with no Iroh to go on (its relay out of reach): the CLI's HyperDHT endpoint is up 0.1 s after the first dial,
+   * which offered WebRTC to a contact holding the dead session. The higher key waited for the race: live again 8.5 s after
+   * a kill (two CLI daemons, Iroh relay down, 2026-11-13), against 0.9 s for the lower key.
+   */
+  it.each(["lower", "higher"] as const)("the app with the %s key crashes and its HyperDHT is up after its first dial: it resumes on HyperDHT once it is up", async restarted => {
+    const result = await restart("webrtc+hyperdht", restarted, "crash", undefined, 300, { rtcFailsAfterMs: 27_100 });
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_000);
+    expect(result.transport).toBe("hyperdht/1");
   }, 240_000);
 });
 
