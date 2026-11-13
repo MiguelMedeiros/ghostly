@@ -23,7 +23,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, PLATFORM_PASTE_FILES, platformDroppedFiles, platformPastedFiles, someNames, type PlatformFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
 import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
@@ -765,8 +765,11 @@ export function MessageInput({
     void sendChosen(chosen);
   };
 
-  /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
-  const offerFiles = (files: File[]): boolean => {
+  /**
+   * Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. `left`:
+   * the paste's or drop's files the platform left out, said beside the sheet.
+   */
+  const offerFiles = (files: File[], left?: Omit<PlatformFiles, "files">): boolean => {
     // An edit is text only: files wait until it ends.
     if (disabled || !files.length || edit) return false;
     // Where files cannot go, the reason is said: also in a group, which has no way to send one at all (no
@@ -775,6 +778,11 @@ export function MessageInput({
     if (!onSendFile) return false;
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
+    const leftOut = left && [
+      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit) }) : "",
+      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut) }) : "",
+    ].filter(Boolean).join(" ");
+    if (leftOut) showToast(leftOut);
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
@@ -792,14 +800,14 @@ export function MessageInput({
    * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
    * is a read that ends where files cannot go any more (an edit began meanwhile).
    */
-  const offerHeld = (held: Promise<File[]>) => {
+  const offerHeld = (held: Promise<PlatformFiles>) => {
     // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
     setDropsReading((was) => was + 1);
     const ended = () => setDropsReading((was) => was - 1);
-    held.then((files) => {
+    held.then(({ files, ...left }) => {
       ended();
       if (!files.length) showToast(t("errors.files.dropUnreadable"));
-      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+      else if (!offerRef.current(files, left)) showToast(t("errors.files.dropLate"));
     },
       (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
@@ -829,10 +837,10 @@ export function MessageInput({
     const ended = () => { readingRef.current = false; setReading(false); };
     // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
     const named = pasteNamesFiles(data);
-    read.then((found) => {
+    read.then(({ files: found, ...left }) => {
       ended();
       // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
-      if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
+      if (found.length) { if (!offerRef.current(found, left)) showToast(t("errors.files.pasteLate")); }
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });

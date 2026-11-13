@@ -114,6 +114,18 @@ describe("files dragged in from another app that the webview names by address on
     expect(read).toHaveBeenCalledTimes(1);
   });
 
+  it("a drop the platform brought only some files of names the ones it left out: past the most one drop brings, and not files", async () => {
+    read.mockResolvedValueOnce(Object.assign([held("p1.txt", "1")], { pastLimit: ["p33.txt", "p34.txt"], leftOut: ["Photos"] }));
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("p1.txt")).toBeInTheDocument();
+    const said = await within(open).findByRole("alert");
+    expect(said).toHaveTextContent("Only the first 32 files were added. Left out: p33.txt, p34.txt. Add the rest with + → Document.");
+    expect(said).toHaveTextContent("Not added: Photos. Folders, and files that cannot be read, are left out.");
+  });
+
   it("a drop over the read limit, or whose files are gone, says so in a drop's words: nothing was pasted", async () => {
     const huge: ClipboardFile = { name: "film.mkv", size: PLATFORM_PASTE_MAX + 1, mime: null, read: vi.fn(), done: vi.fn() };
     read.mockResolvedValueOnce([huge]);

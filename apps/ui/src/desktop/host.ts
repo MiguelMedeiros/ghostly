@@ -27,7 +27,7 @@ import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
-import type { ClipboardFile, PubkyCookieSession } from "@ghostly/browser/host";
+import type { ClipboardFile, ClipboardFiles, PubkyCookieSession } from "@ghostly/browser/host";
 import { followPlatformDrags } from "../lib/pastedFiles";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
@@ -367,10 +367,12 @@ export function desktopApps(runsApps: boolean) {
 
 /** A file Rust put on its paste shelf (a paste's, a drop's): read by token, never by path. */
 interface ShelvedItem { token: string; name: string | null; size: number; mime: string | null }
+/** What a paste or a drop brought onto the shelf, and the names of the files Rust left out of it. */
+interface Shelved { items: ShelvedItem[]; pastLimit: string[]; leftOut: string[] }
 
 /** Shelved files as the page reads them. Once read (or not), Rust lets them go (`incoming_share_done`). */
-function shelved(items: ShelvedItem[]): ClipboardFile[] {
-  return items.map(({ token, ...item }) => ({
+function shelved({ items, pastLimit, leftOut }: Shelved): ClipboardFiles {
+  const files: ClipboardFile[] = items.map(({ token, ...item }) => ({
     ...item,
     read: async (offset: number, length: number) => {
       const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
@@ -378,6 +380,7 @@ function shelved(items: ShelvedItem[]): ClipboardFile[] {
     },
     done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
   }));
+  return Object.assign(files, { pastLimit, leftOut });
 }
 
 /**
@@ -407,7 +410,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   setAppBadgeTarget(dockBadge());
   // WebKitGTK names another app's dragged files to the page by their address only: Rust says when such a drag is over
   // the window and holds the files of its drop, which the page reads as a paste's (Linux; elsewhere it never says).
-  const draggedOver = followPlatformDrags(async () => shelved(await invoke<ShelvedItem[]>("read_dropped_files")));
+  const draggedOver = followPlatformDrags(async () => shelved(await invoke<Shelved>("read_dropped_files")));
   void listen<boolean>("file-drag", ({ payload }) => draggedOver(payload === true)).catch(() => {});
   const apps = desktopApps(appsPlatform());
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
@@ -458,7 +461,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
     // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
     // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
-    readClipboardFiles: async () => shelved(await invoke<ShelvedItem[]>("read_clipboard_files")),
+    readClipboardFiles: async () => shelved(await invoke<Shelved>("read_clipboard_files")),
     // The WebView's copy cannot mark one sensitive, and every system keeps copies somewhere: Android's preview and
     // keyboards, Windows' clipboard history and cloud clipboard, clipboard managers on macOS and Linux. A secret (an
     // invite, a device's link, ecash) is copied natively, marked so (Kotlin on Android, arboard on Desktop).

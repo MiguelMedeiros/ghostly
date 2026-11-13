@@ -5,7 +5,7 @@
  * text and HTML.
  */
 import { IMAGE_LIMITS, imageSize, previewable } from "@ghostly/core";
-import type { ClipboardFile } from "@ghostly/browser/host";
+import type { ClipboardFile, ClipboardFiles } from "@ghostly/browser/host";
 import { servicesPlatform } from "./platform";
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -22,6 +22,15 @@ const TYPES: Record<string, string> = {
 
 /** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
 export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
+/** The most files a paste or a drop read by the platform brings (the desktop app's `MAX_PASTED_FILES`). */
+export const PLATFORM_PASTE_FILES = 32;
+/** How many names of files left out a line says; the rest is "…". */
+const NAMES_SAID = 10;
+
+/** File names for a line: the first few, then "…". */
+export function someNames(names: string[]): string {
+  return [...names.slice(0, NAMES_SAID), ...(names.length > NAMES_SAID ? ["…"] : [])].join(", ");
+}
 const READ_STEP = 16 * 1024 * 1024;
 const TOO_LARGE_TO_PASTE = "That is too large to paste. Send it with + → Document.";
 
@@ -83,14 +92,14 @@ function dragNamesAddress(data: DataTransfer | null): boolean {
  * Linux: WebKitGTK gives the page neither the files nor their addresses). The platform holds the files of its drop;
  * the page reads them by token, never by path.
  */
-let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]> } | null = null;
+let platformDrag: { over: boolean; read: () => Promise<ClipboardFiles> } | null = null;
 
 /**
  * The platform takes drops of files: `read` hands over the files of the drop that just happened. Returns what the
  * platform calls while such a drag is over the window (true) and once it left (false). The page forgets it once a
  * drop's handlers ran: the platform says nothing of a drop, which it could say before the page hears of it.
  */
-export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window): (over: boolean) => void {
+export function followPlatformDrags(read: () => Promise<ClipboardFiles>, target: Window = window): (over: boolean) => void {
   const drag = { over: false, read };
   platformDrag = drag;
   target.addEventListener("drop", () => { setTimeout(() => { drag.over = false; }); });
@@ -109,13 +118,21 @@ const DROP_WORDS: Record<string, string> = {
   "That paste is gone. Paste it again.": "That drop is gone. Drop it again.",
 };
 
+/** A paste's or a drop's files the platform read into the page, and the names of those it left out (`ClipboardFiles`). */
+export interface PlatformFiles { files: File[]; pastLimit: string[]; leftOut: string[] }
+
+async function readAllPlatformFiles(clips: ClipboardFiles): Promise<PlatformFiles> {
+  const { pastLimit = [], leftOut = [] } = clips;
+  return { files: await readPlatformFiles(clips, new Date(), true), pastLimit, leftOut };
+}
+
 /**
  * The files of a drop the platform holds (`followPlatformDrags`), read into the page as a paste's are; null when the
  * drop handed the page its files itself, or is no drop of files.
  */
-export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
+export function platformDroppedFiles(data: DataTransfer | null): Promise<PlatformFiles> | null {
   if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
-  return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true)).catch((error: unknown) => {
+  return platformDrag.read().then(readAllPlatformFiles).catch((error: unknown) => {
     const words = DROP_WORDS[error instanceof Error ? error.message : String(error)];
     throw words ? new Error(words) : error;
   });
@@ -225,9 +242,9 @@ export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new D
 }
 
 /** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */
-export function platformPastedFiles(): Promise<File[]> | null {
+export function platformPastedFiles(): Promise<PlatformFiles> | null {
   const read = servicesPlatform?.readClipboardFiles();
-  return read ? read.then((clips) => readPlatformFiles(clips, new Date(), true)) : null;
+  return read ? read.then(readAllPlatformFiles) : null;
 }
 
 /**

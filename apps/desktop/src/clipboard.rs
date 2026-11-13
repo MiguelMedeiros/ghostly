@@ -190,7 +190,7 @@ fn bounded(text: String) -> Result<String, String> {
 
 /// A paste made ready for the page: the files it may read, or a picture's PNG.
 enum Ready {
-    Files(Vec<(PathBuf, String, u64)>),
+    Files(PastedFiles),
     Png(Vec<u8>),
     Nothing,
 }
@@ -367,22 +367,47 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
     Ok(out)
 }
 
+/// The files of a paste or a drop ([`pasted_files`]), and the names of those left out, for the page to say.
+#[derive(Debug, Default, PartialEq)]
+pub struct PastedFiles {
+    /// The files the page may read, with the names it shows and their sizes.
+    pub files: Vec<(PathBuf, String, u64)>,
+    /// Files past the most one paste brings ([`MAX_PASTED_FILES`]).
+    pub past_limit: Vec<String>,
+    /// What is no regular file (a folder), or could not be seen (gone meanwhile, no access).
+    pub left_out: Vec<String>,
+}
+
 /// The files of a paste the page may read: regular files only (a copied folder is not sent),
-/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard drops the
+/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes; the rest by name. A name that
+/// is not UTF-8 (Latin-1, from an old archive or a USB stick) is shown with what of it can be: the file is
+/// read from its own path. On Linux arboard drops the
 /// CRLF line end of the file manager's `text/uri-list` (RFC 2483, as GTK and Qt write it) before
 /// decoding, so a '\r' left at the end of a path is the file's own name (`%0D`) and stays.
-pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
+pub fn pasted_files(paths: Vec<PathBuf>) -> PastedFiles {
     let mut seen = std::collections::HashSet::new();
-    paths
-        .into_iter()
-        .filter(|path| path.is_absolute() && seen.insert(path.clone()))
-        .filter_map(|path| {
-            let meta = std::fs::metadata(&path).ok()?;
-            let name = path.file_name()?.to_str()?.to_string();
-            meta.is_file().then_some((path, name, meta.len()))
-        })
-        .take(MAX_PASTED_FILES)
-        .collect()
+    let mut pasted = PastedFiles::default();
+    for path in paths {
+        if !path.is_absolute() || !seen.insert(path.clone()) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => {
+                if pasted.files.len() < MAX_PASTED_FILES {
+                    pasted.files.push((path, name, meta.len()));
+                } else {
+                    pasted.past_limit.push(name);
+                }
+            }
+            _ => pasted.left_out.push(name),
+        }
+    }
+    pasted
 }
 
 /// What a paste brought that the page could not see itself: files copied in a file manager,
@@ -392,7 +417,7 @@ pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
 #[tauri::command]
 pub async fn read_clipboard_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
-) -> Result<Vec<PastedItem>, String> {
+) -> Result<ShelvedFiles, String> {
     if window.label() != "main" {
         return Err("Not allowed from this window".into());
     }
@@ -420,32 +445,51 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
         .try_state::<PasteShelf>()
         .ok_or("Clipboard unavailable")?;
     Ok(match pasted {
-        Ready::Nothing => Vec::new(),
+        Ready::Nothing => ShelvedFiles::default(),
         Ready::Png(png) => {
             let size = png.len() as u64;
-            vec![PastedItem {
-                token: shelf.put(Held::Bytes(Arc::new(png))),
-                name: None,
-                size,
-                mime: Some("image/png".into()),
-            }]
+            ShelvedFiles {
+                items: vec![PastedItem {
+                    token: shelf.put(Held::Bytes(Arc::new(png))),
+                    name: None,
+                    size,
+                    mime: Some("image/png".into()),
+                }],
+                ..Default::default()
+            }
         }
         Ready::Files(files) => shelve_files(&shelf, files),
     })
 }
 
+/// What a paste or a drop brought onto the shelf, for the page's sheet, and the names of the files it left out
+/// ([`PastedFiles`]): the page says them beside the sheet.
+#[derive(serde::Serialize, Debug, Default, PartialEq)]
+pub struct ShelvedFiles {
+    pub items: Vec<PastedItem>,
+    #[serde(rename = "pastLimit")]
+    pub past_limit: Vec<String>,
+    #[serde(rename = "leftOut")]
+    pub left_out: Vec<String>,
+}
+
 /// Files ([`pasted_files`]'s) on the shelf, for the page to read by token: a paste's, or a drop's
 /// (`dropped_files`).
-pub fn shelve_files(shelf: &PasteShelf, files: Vec<(PathBuf, String, u64)>) -> Vec<PastedItem> {
-    files
-        .into_iter()
-        .map(|(path, name, size)| PastedItem {
-            token: shelf.put(Held::Path(path)),
-            name: Some(name),
-            size,
-            mime: None,
-        })
-        .collect()
+pub fn shelve_files(shelf: &PasteShelf, pasted: PastedFiles) -> ShelvedFiles {
+    ShelvedFiles {
+        items: pasted
+            .files
+            .into_iter()
+            .map(|(path, name, size)| PastedItem {
+                token: shelf.put(Held::Path(path)),
+                name: Some(name),
+                size,
+                mime: None,
+            })
+            .collect(),
+        past_limit: pasted.past_limit,
+        left_out: pasted.left_out,
+    }
 }
 
 /// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,
@@ -482,6 +526,7 @@ pub fn shelve_share(
 ) -> IncomingShare {
     let mimes: std::collections::HashMap<PathBuf, Option<String>> = files.iter().cloned().collect();
     let files = pasted_files(files.into_iter().map(|(path, _)| path).collect())
+        .files
         .into_iter()
         .map(|(path, name, size)| {
             let mime = mimes.get(&path).cloned().flatten();
@@ -801,7 +846,7 @@ mod tests {
     }
 
     fn files(window: &tauri::WebviewWindow<MockRuntime>) -> Result<Vec<PastedItem>, String> {
-        tauri::async_runtime::block_on(read_clipboard_files(window.clone()))
+        tauri::async_runtime::block_on(read_clipboard_files(window.clone())).map(|read| read.items)
     }
 
     /// Everything a paste brought, read the way the page reads it: `step` bytes at a time.
@@ -1054,7 +1099,15 @@ mod tests {
             dir.join("a.txt"),
             PathBuf::from("relative.txt"),
         ]);
-        assert_eq!(picked, vec![(dir.join("a.txt"), "a.txt".into(), 3)]);
+        // What is left out is named, for the page to say so.
+        assert_eq!(
+            picked,
+            PastedFiles {
+                files: vec![(dir.join("a.txt"), "a.txt".into(), 3)],
+                past_limit: Vec::new(),
+                left_out: vec!["folder".into(), "missing.bin".into()],
+            }
+        );
         let many: Vec<PathBuf> = (0..MAX_PASTED_FILES + 5)
             .map(|i| {
                 let path = dir.join(format!("{i}.txt"));
@@ -1062,7 +1115,57 @@ mod tests {
                 path
             })
             .collect();
-        assert_eq!(pasted_files(many).len(), MAX_PASTED_FILES);
+        let pasted = pasted_files(many);
+        assert_eq!(pasted.files.len(), MAX_PASTED_FILES);
+        assert_eq!(
+            pasted.past_limit,
+            (MAX_PASTED_FILES..MAX_PASTED_FILES + 5)
+                .map(|i| format!("{i}.txt"))
+                .collect::<Vec<_>>()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A paste past the most one brings: the page reads the first, and hears the rest by name.
+    #[test]
+    fn a_paste_names_the_files_it_left_out() {
+        let dir = scratch();
+        let mut paths: Vec<PathBuf> = (0..MAX_PASTED_FILES + 1)
+            .map(|i| {
+                let path = dir.join(format!("p{i}.txt"));
+                std::fs::write(&path, b"x").unwrap();
+                path
+            })
+            .collect();
+        std::fs::create_dir(dir.join("Photos")).unwrap();
+        paths.push(dir.join("Photos"));
+        let app = paste_app(PasteSource::fixed(move || Ok(Pasted::Files(paths.clone()))));
+        let main = main_window(&app);
+        let read = tauri::async_runtime::block_on(read_clipboard_files(main.clone())).unwrap();
+        assert_eq!(read.items.len(), MAX_PASTED_FILES);
+        assert_eq!(
+            (read.past_limit, read.left_out),
+            (
+                vec![format!("p{MAX_PASTED_FILES}.txt")],
+                vec!["Photos".to_string()]
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A Latin-1 name from an old archive or a USB stick is no UTF-8: the file is read from its own path, and shown
+    /// with what of its name can be.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_whose_name_is_not_utf8_comes_with_a_name_that_can_be_shown() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = scratch();
+        let latin = dir.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+        std::fs::write(&latin, b"x").unwrap();
+        assert_eq!(
+            pasted_files(vec![latin.clone()]).files,
+            vec![(latin, "caf\u{FFFD}.txt".into(), 1)]
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1209,7 +1312,7 @@ mod tests {
             panic!("a file manager's copy brought no files");
         };
         assert_eq!(
-            pasted_files(paths),
+            pasted_files(paths).files,
             vec![(dir.join("id_ed25519"), "id_ed25519".into(), 6)]
         );
         drop(file_manager);

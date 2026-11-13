@@ -137,7 +137,7 @@ export interface BrowserHost {
    * carried neither files nor text (a webview that hides them from the page). Left out where the page
    * sees them in the paste event (a browser, WebKit on macOS).
    */
-  readClipboardFiles?(): Promise<ClipboardFile[]>;
+  readClipboardFiles?(): Promise<ClipboardFiles>;
   /**
    * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
    * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
@@ -243,3 +243,9 @@ export interface ClipboardFile {
   read(offset: number, length: number): Promise<Uint8Array>;
   done?(): void;
 }
+
+/**
+ * What a paste or a drop the platform read brought, and the names of the files it left out: past the most one brings
+ * (`pastLimit`), and not files or not seen (`leftOut`: a folder, one gone meanwhile).
+ */
+export type ClipboardFiles = ClipboardFile[] & { pastLimit?: string[]; leftOut?: string[] };
