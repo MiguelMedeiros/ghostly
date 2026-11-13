@@ -454,15 +454,20 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
  * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with `pr.behind` ({ batch,
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with that label that may not
+ * (`cannot`: `canGoAlone` refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
-export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null) {
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null, cannot = false) {
   const mark = `<!-- merge-train:head ${head} -->`;
+  const flake = `if that red is a flake, re-run the failed jobs of CI on \`${base}\` (${stuck?.slice(0, 12)})`;
   const help = stuck
-    ? ` It has been on hold for ${Math.round(HOLD_HELP / 60_000)} minutes or more: if that red is a flake, re-run the failed jobs of CI on \`${base}\` (${stuck.slice(0, 12)}); if \`${base}\` needs a fix, give the pull request that fixes it \`queue:priority\`, and the train lands it alone ahead of the held one.`
+    ? ` It has been on hold for ${Math.round(HOLD_HELP / 60_000)} minutes or more: ${cannot ? `${flake}.` : `${flake}; if \`${base}\` needs a fix, give the pull request that fixes it \`queue:priority\`, and the train lands it alone ahead of the held one.`}`
     : "";
-  const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.${help}` : "";
+  const pinned = cannot
+    ? ` It has \`${LABEL.priority}\`, but the train may not push to its branch, so it cannot go ahead of the held one alone: land it by hand, or open it again from a new branch.`
+    : "";
+  const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.${help}${pinned}` : "";
   // The train cancels a pull request's own full CI that it does not land on (`cancelOwnCi`), and `gh pr checks` lists
   // each cancelled job as "fail" (the gate under ci.yml's unrendered name): said here, so nobody pushes to "fix" it.
   const own = pr.ci !== "success" && pr.ci !== "failure" && !pr.draft;
@@ -1354,6 +1359,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // Its mark (`past`: the held one's number) keeps it flying across runs while the hold lasts; a new one starts only
   // while the base is red, not while its CI still runs. Nothing else boards.
   let past = null;
+  /** The `queue:priority` ones in line that cannot go ahead of the held one alone: `canGoAlone` refuses their branch. */
+  const cannot = new Set();
   if (held && inFlight) {
     const parked = new Set(inFlight.members.map((p) => p?.number));
     const fits = (p) => p.priority && !parked.has(p.number) && canGoAlone(p) && !refused(p);
@@ -1367,6 +1374,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       }
     }
     past ||= null;
+    // A `queue:priority` one whose branch the train may not push to never goes ahead alone, whatever the hold: its
+    // comment says so, instead of the help that tells it to add the label it has.
+    for (const p of line()) {
+      if (!p.priority || p.fork || parked.has(p.number) || canGoAlone(p)) continue;
+      cannot.add(p.number);
+      say(`::warning::#${p.number} has \`${LABEL.priority}\`, but the train may not push to its branch (${p.branch}), so it cannot go ahead of the held #${inFlight.number} alone.`);
+    }
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
   let holding = null;
@@ -1398,7 +1412,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)
             ? positionText(base, p, 0, inFlight.number, p.sha, null, held, null, stuck)
-            : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck);
+            : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck, cannot.has(p.number));
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (p.unread) {
       // A comment posted now would be past what the next run reads too: one more every run.

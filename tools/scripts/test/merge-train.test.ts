@@ -2846,6 +2846,29 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     await lone.run({ now: Date.parse(at) + HOLD_HELP });
     expect(said(lone, 11)).toMatch(help);
   });
+
+  it("says why a priority pull request on a branch it may not push to cannot go ahead, instead of telling it to add the label", async () => {
+    const repo = await heldBatch();
+    const at = "2026-10-08T01:00:00Z";
+    repo.runs.set("dev0", [{ ...red[0], completed_at: "2026-10-08T00:50:00Z" }]);
+    repo.runs.set(repo.batch()!.sha, [{ ...red[0], completed_at: at }]);
+    repo.add(13, { priority: true }); // green on its own full run, at dev's tip: only its branch keeps it from going
+    repo.pulls.get(13)!.branch = "claude/security-auto-fix-1";
+    repo.add(14);
+    const advice = /give the pull request that fixes it `queue:priority`/;
+    const cannot = /It has `queue:priority`, but the train may not push to its branch, so it cannot go ahead of the held one alone: land it by hand, or open it again from a new branch\./;
+    const r = await repo.run({ now: Date.parse(at) + HOLD_HELP });
+    expect(r.inFlight).toBe(9000);
+    expect(repo.pushes).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.log.filter((l) => /#13/.test(l))).toEqual(["::warning::#13 has `queue:priority`, but the train may not push to its branch (claude/security-auto-fix-1), so it cannot go ahead of the held #9000 alone."]);
+    expect(said(repo, 13)).toMatch(/\*\*1st\*\*.*on hold.*re-run the failed jobs of CI on `dev` \(dev0\)\./);
+    expect(said(repo, 13)).toMatch(cannot);
+    expect(said(repo, 13)).not.toMatch(advice);
+    // The others keep the advice: a fix from a branch the train may push to still goes ahead.
+    expect(said(repo, 14)).toMatch(advice);
+    expect(said(repo, 14)).not.toMatch(cannot);
+  });
 });
 
 describe("a pull request on hold (queue:hold)", () => {
