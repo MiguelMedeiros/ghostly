@@ -1816,7 +1816,8 @@ export class Apps {
     const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
       const { pending: _p, ...rest } = installed;
-      if (!(await this.putApp(rest))) fail("not-installed", "This app is not installed");
+      // Only over the record read above, as below: a newer version the check installed meanwhile stays.
+      if (!(await this.putAppIfUnchanged(rest, installed))) return this.acceptedOver(ref, pending.digest);
       fail("needs-files", "The update's files are gone; it is fetched again at the next check");
     }
     const stores = await this.stores();
@@ -1838,7 +1839,7 @@ export class Apps {
     // It grants only what the person was shown: an update that now adds other permissions is shown again first.
     const added = plan.action === "ask" ? plan.added : [];
     if (added.length !== pending.added.length || added.some((p) => !pending.added.includes(p as AppPermission))) {
-      if (!(await this.putApp({ ...installed, pending: { ...pending, added: added as AppPermission[] } }))) fail("not-installed", "This app is not installed");
+      if (!(await this.putAppIfUnchanged({ ...installed, pending: { ...pending, added: added as AppPermission[] } }, installed))) return this.acceptedOver(ref, pending.digest);
       fail("permissions-changed", `This update now adds ${added.length ? added.join(", ") : "no permission"}; look at it again`);
     }
     if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
@@ -1846,14 +1847,16 @@ export class Apps {
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
     // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is
     // not put back on the new version with its data gone, and one changed meanwhile is left as it is.
-    if (!(await this.putAppIfUnchanged(next, installed))) {
-      const now = await this.app(ref);
-      if (!now) fail("not-installed", "This app is not installed");
-      if (now.digest === pending.digest) return this.view(now, await this.stores());
-      fail("no-update", "This update can no longer be installed");
-    }
+    if (!(await this.putAppIfUnchanged(next, installed))) return this.acceptedOver(ref, pending.digest);
     await this.removeBundle(installed.bytes, installed.digest);
     return this.view(next, stores);
+  }
+  /** Accept's answer when the app's record changed while it read: uninstalled, this update installed, or another version. */
+  private async acceptedOver(ref: string, digest: string): Promise<InstalledAppView> {
+    const now = await this.app(ref);
+    if (!now) fail("not-installed", "This app is not installed");
+    if (now.digest === digest) return this.view(now, await this.stores());
+    fail("no-update", "This update can no longer be installed");
   }
 
   // ---------- updates ----------
