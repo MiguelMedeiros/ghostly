@@ -139,9 +139,10 @@ for (const height of [900, 560]) test(`the pointer passing over the cards moves 
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
   await chosen(page, "cashu-testnet");
-  // The page opens without taking the focus: the amount is below the deck.
+  // The page opens with the focus on itself, as every page a route change opens on a wide screen, not in the amount
+  // below the deck.
   const still = await stillness(page);
-  expect(still.focus).toBe("body");
+  expect(still.focus).toBe("main");
 
   // Over each card, back and forth: each comes up with its panel (Cashu's and Lightning's with an amount), and
   // nothing scrolls or takes the focus.
