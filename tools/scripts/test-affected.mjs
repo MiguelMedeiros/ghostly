@@ -20,7 +20,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan } from "./affected/select.mjs";
+import { plan as makePlan, parseUnitGroup, unitGroupOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -47,6 +47,15 @@ const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
 const webUrl = process.env.E2E_WEB_URL;
+// --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
+// UNIT_ALONE says which project goes where). Lint, typecheck, Rust and e2e are as without it.
+const unitGroupText = flag("--unit-group") ? option("--unit-group") ?? "" : null;
+const unitGroup = unitGroupText === null ? null : parseUnitGroup(unitGroupText);
+if (unitGroupText !== null && !unitGroup) {
+  console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
+  process.exit(2);
+}
+const otherGroup = (u) => unitGroup !== null && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -119,8 +128,11 @@ if (changed.length > 40) console.log(`  … and ${changed.length - 40} more`);
 for (const s of p.scriptsOnly) console.log(`\nnote: only the "scripts" of ${s} changed: nothing here tests a script, so run the ones you changed yourself`);
 console.log(`\nworkers: vitest ${JOBS} (JOBS), playwright ${E2E_WORKERS} (E2E_WORKERS)\n`);
 
-console.log("unit (vitest)");
-for (const u of p.unit) console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+console.log(`unit (vitest)${unitGroup ? `: group ${unitGroup.index} of ${unitGroup.count} (--unit-group)` : ""}`);
+for (const u of p.unit) {
+  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} group ${unitGroupOf(u.name, unitGroup.count)} runs it (${u.mode}: ${u.reason})`);
+  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+}
 console.log("lint (eslint)");
 console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
 console.log("typecheck (tsc)");
@@ -205,6 +217,7 @@ const started = Date.now();
 
 // unit
 for (const u of p.unit) {
+  if (otherGroup(u)) { skipped.push(`unit ${u.name}: group ${unitGroupOf(u.name, unitGroup.count)} runs it (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
   if (u.mode === "skip") { skipped.push(`unit ${u.name}: ${u.reason}`); continue; }
   const cwd = join(ROOT, u.cwd);
   const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests"];
