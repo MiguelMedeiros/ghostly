@@ -70,6 +70,8 @@ export class Allowlist {
     if (typeof chat !== "string") return false;
     if (this.chats.has(chat)) return true;
     if (!this.keys.size) return false;
+    // A removal carries the key: the chat is gone, so its lookup fails, and a replay holds no earlier event of it.
+    if (event.type === "chat.removed" && typeof event.peer === "string") return this.keys.has(event.peer);
     // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
     let key = this.peers.get(chat);
     if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
