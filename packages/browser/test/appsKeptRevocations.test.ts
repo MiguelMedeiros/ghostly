@@ -1,10 +1,10 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJsonBytes, readAppRevocationShape } from "@ghostly/core";
+import { canonicalJsonBytes, readAppRevocationShape, signAppRevocation } from "@ghostly/core";
 import type * as core from "@ghostly/core";
 import { APP_REVOCATIONS_KEY } from "../src/engine/apps";
-import { PROFILE_SETTINGS_KEYS } from "../src/shared/idb";
-import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, keyOf, listing, revocation, storeFiles } from "./appsSupport";
+import { PROFILE_SETTINGS_KEYS, STORES, store as dbStore, wrap } from "../src/shared/idb";
+import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_URL, apps, appRows, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
 vi.mock("@ghostly/core", async (importOriginal) => {
@@ -119,6 +119,35 @@ describe("revocations an app's uninstall leaves", () => {
     expect(await store.runCheck({ ref: v2.ref })).toEqual({ status: "ok" });
     expect(await appRows()).toEqual([expect.objectContaining({ digest: v2.digest, revocations: [revoked] })]);
     expect(PROFILE_SETTINGS_KEYS).toContain(APP_REVOCATIONS_KEY);
+  });
+});
+
+describe("how many are kept", () => {
+  it("another publisher's install screens, revoking their own apps up to the cap, push out none of this publisher's", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest], "Leaked key")]));
+    const store = apps(net);
+    expect((await store.preview({ url: BUNDLE_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+
+    // 16 apps of another key, each shown with 64 revocations of itself beside it: 1024 kept of that publisher alone.
+    const other = signer("another publisher");
+    for (let i = 0; i < 16; i++) {
+      const app = await bundle({ by: other, name: `app${i}` });
+      const dir = `https://raw.githubusercontent.com/other/app${i}/HEAD`;
+      net.put(`${dir}/app.ghostlyapp`, app.bytes);
+      net.put(`${dir}/ghostly-revoke.json`, canonicalJsonBytes(await Promise.all(Array.from({ length: 64 }, (_, n) =>
+        signAppRevocation({ ghostlyRevoke: 1, app: app.ref, digests: [app.digest], reason: `Reason ${n}` }, other)))));
+      expect((await store.preview({ url: `${dir}/app.ghostlyapp` })).run).toEqual({ status: "revoked", reason: expect.any(String) });
+    }
+
+    net.put(MIRROR_URL, v1.bytes);
+    expect((await store.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.install({ digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([]);
+    // Still bounded: the other publisher made room from its own.
+    const kept = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
+    expect(kept.reduce((n, [, list]) => n + list.length, 0)).toBeLessThanOrEqual(1024);
   });
 });
 

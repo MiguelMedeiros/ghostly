@@ -455,8 +455,8 @@ async function noteBundles(change: (noted: Set<string>) => void): Promise<void> 
  */
 export const APP_REVOCATIONS_KEY = "appRevocations";
 /**
- * Revocations kept there: at most `each` of one app and `all` in all, the ones kept longest ago dropped first. A
- * revocation is at most about 3.5 KiB (64 digests and a reason).
+ * Revocations kept there: at most `each` of one app and `all` in all, dropped from the publisher holding the most (see
+ * `keepRevocations`). A revocation is at most about 3.5 KiB (64 digests and a reason).
  */
 const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
 
@@ -489,12 +489,22 @@ function keepRevocations(settings: IDBObjectStore, ref: string, add: readonly Si
     if (merged.size === before.length) return;
     kept.delete(ref);
     kept.set(ref, [...merged.values()].slice(-REVOCATIONS_KEPT.each));
+    // Past the cap, room is made from the publisher that holds the most (on a tie, the one kept longest ago), from its
+    // apps kept longest ago: one publisher's revocations of its own apps never push out another's, and a publisher keeps
+    // its revocations until as many others each hold as many.
+    const held = new Map<string, number>();
     let all = 0;
-    for (const list of kept.values()) all += list.length;
-    for (const [other, list] of kept) {
-      if (all <= REVOCATIONS_KEPT.all || other === ref) break;
+    for (const [r, list] of kept) {
+      held.set(appRefPublisher(r), (held.get(appRefPublisher(r)) ?? 0) + list.length);
+      all += list.length;
+    }
+    while (all > REVOCATIONS_KEPT.all) {
+      let most = "";
+      for (const [publisher, n] of held) if (n > (held.get(most) ?? 0)) most = publisher;
+      const [other, list] = [...kept].find(([r]) => appRefPublisher(r) === most)!;
       const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all);
       all -= drop;
+      held.set(most, held.get(most)! - drop);
       if (drop === list.length) kept.delete(other); else kept.set(other, list.slice(drop));
     }
     settings.put([...kept], APP_REVOCATIONS_KEY);
