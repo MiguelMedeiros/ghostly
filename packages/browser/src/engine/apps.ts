@@ -353,7 +353,7 @@ export interface AppsHost {
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
  * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
  */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number }
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number; carried?: true }
 /** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
 const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
@@ -1707,15 +1707,13 @@ export class Apps {
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
 
-  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
-    const { manifest, digest } = bundle;
-    const version = versionOf(manifest, digest);
-    // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
-    // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
-    // this build carries makes no request; the update check reads them.
-    const read = carried ? [] : (await this.readRevocations(version.ref, [from, ...(manifest.sources ?? [])])) ?? [];
-    // One that stops this version is kept (the person was shown it revoked: a copy of it elsewhere is refused too), and
-    // the ones kept before are judged with them, whatever URL this one came from.
+  /**
+   * The publisher's revocations of `version`'s app read beside `urls`. One that stops this version is kept (the person was
+   * shown it revoked: a copy of it elsewhere is refused too), and the ones kept before are judged with them, whatever URL
+   * this one came from.
+   */
+  private async readStopping(version: AppVersion, urls: string[]): Promise<SignedAppRevocation[]> {
+    const read = (await this.readRevocations(version.ref, urls)) ?? [];
     const stops = stopping([version], read);
     if (stops.length) {
       const tx = (await openDb()).transaction(STORES.settings, "readwrite");
@@ -1725,6 +1723,16 @@ export class Apps {
       const installed = await this.app(version.ref);
       if (installed) await this.keepOnRecord(installed, stops);
     }
+    return read;
+  }
+
+  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
+    const { manifest, digest } = bundle;
+    const version = versionOf(manifest, digest);
+    // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
+    // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
+    // this build carries makes no request here: `install` reads them.
+    const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? [])]);
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
     // What Install will answer: a clash with the update waiting is one too.
@@ -1735,7 +1743,7 @@ export class Apps {
     const stage = stagedKey(digest, from, fromStore);
     this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now(), ...(carried && { carried: true as const }) });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
@@ -1764,12 +1772,15 @@ export class Apps {
     if (live.length > 1) fail("screens", "This app was fetched from more than one place; install it from its screen");
     const [key, staged] = live[0] ?? [stage ?? ""];
     if (!staged) { this.staged.delete(key); fail("expired", "Fetch the app again"); }
-    const { bundle, bytes, from, store: fromStore, revocations } = staged;
+    const { bundle, bytes, from, store: fromStore } = staged;
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
     const shown: readonly string[] = asks ?? staged.asks;
     if (!Array.isArray(shown)) fail("permissions", "The permissions shown must be a list");
     const version = versionOf(manifest, digest);
+    // A version this build carries was opened with no request: its publisher's revocations are read now, at its public
+    // URL and its sources, as for a fetched one. None answering (offline) installs it; the update check reads them later.
+    const revocations = staged.carried ? [...staged.revocations, ...await this.readStopping(version, [from, ...(manifest.sources ?? [])])] : staged.revocations;
     // The files written here: left only while a record names them (a version refused after all keeps none).
     let wrote: FileBytesKind | undefined;
     try {
