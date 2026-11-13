@@ -708,11 +708,18 @@ export class Apps {
    */
   private readonly listingMisses = new Map<string, string>();
   /**
-   * URLs whose whole read the update check refused (a file hash that does not hold, a bad signature, too large), with
-   * the digest their peek showed then: the same peek there is not read whole again at every check, for an hour (a fixed
-   * upload of the same version keeps its manifest). At most `REFUSED_READS_KEPT`, the oldest going first.
+   * URLs whose whole read the update check refused (a file hash that does not hold, a bad signature, too large, another
+   * version under a number held), with the digest their peek showed then: the same peek there is not read whole again
+   * at every check, for an hour (a fixed upload of the same version keeps its manifest). At most `REFUSED_READS_KEPT`,
+   * the oldest going first.
    */
   private readonly refusedReads = new Map<string, { digest: string; at: number }>();
+
+  private refuseRead(url: string, digest: string): void {
+    this.refusedReads.delete(url);
+    this.refusedReads.set(url, { digest, at: this.now() });
+    for (const old of this.refusedReads.keys()) { if (this.refusedReads.size <= REFUSED_READS_KEPT) break; this.refusedReads.delete(old); }
+  }
   /**
    * The index a store's own URL served at its last read when it was not taken (behind the copy the person took, at a
    * commit): by store key, with that URL. The same bytes there again are not checked whole at every refresh.
@@ -2010,25 +2017,28 @@ export class Apps {
       if (holds && refused?.digest === holds.digest && this.checkedWithin(refused.at, APP_CHECK_TIMINGS.freshMs)) continue;
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch (error) {
-        if (holds && (!(error instanceof AppFetchError) || error.code === "too-large")) {
-          this.refusedReads.delete(url);
-          this.refusedReads.set(url, { digest: holds.digest, at: this.now() });
-          for (const old of this.refusedReads.keys()) { if (this.refusedReads.size <= REFUSED_READS_KEPT) break; this.refusedReads.delete(old); }
-        }
+        if (holds && (!(error instanceof AppFetchError) || error.code === "too-large")) this.refuseRead(url, holds.digest);
         continue;
       }
       const { bundle, bytes } = fetched;
       const version = versionOf(bundle.manifest, bundle.digest);
       if (version.ref !== app.ref || known.has(version.digest)) continue;
       if (want.digest !== undefined && version.digest !== want.digest) continue;
+      // Another version under a number held marks the app. Its URL is not read whole again for an hour: with two of them
+      // (one per source) the mark would take each in turn, and both were read whole at every check.
       if (app.pending && version.sequence === app.pending.sequence) {
         app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
         outcome = "equivocation";
+        this.refuseRead(url, version.digest);
         continue;
       }
       const plan = planAppUpdate(app, { ...version, permissions: bundle.manifest.permissions });
       if (plan.action === "refuse") {
-        if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
+        if (plan.decision === "equivocation") {
+          app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
+          outcome = "equivocation";
+          this.refuseRead(url, version.digest);
+        }
         continue;
       }
       if (judge(version).status !== "ok") continue;
