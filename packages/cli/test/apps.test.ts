@@ -329,6 +329,20 @@ describe("app publish", () => {
     expect(error(await ghostly(["store", "sign", folder, "--key", join(keys, "store.key")]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
     expect(existsSync(join(keys, "store.key"))).toBe(false);
   }, 60_000);
+
+  it("names a file that stands where an output folder goes, not Node's raw EEXIST as an engine error", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const file = join(tmp(), "a-file");
+    writeFileSync(file, "x");
+    const inTheWay = `${file} is a file, not a folder`;
+    expect(error(await ghostly(["app", "publish", dir, "--key", join(file, "new.key")]), "not_found", 3).message).toBe(inTheWay);
+    expect(error(await ghostly(["app", "publish", dir, "--key", vectorKey(tmp(), "publisher"), "--out", join(file, "app.ghostlyapp")]), "not_found", 3).message).toBe(inTheWay);
+    const index = join(tmp(), "index.json");
+    const { key: _key, ...unsigned } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
+    writeFileSync(index, JSON.stringify(unsigned));
+    expect(error(await ghostly(["store", "sign", index, "--key", vectorKey(tmp(), "store"), "--out", file]), "not_found", 3).message).toBe(inTheWay);
+  }, 60_000);
 });
 
 describe("app publish --sequence", () => {
@@ -623,6 +637,35 @@ describe("app verify <url>", () => {
     expect(await verifyApp(url)).toMatchObject({ valid: true });
     expect(most).toBe(3);
   }, 60_000);
+
+  it("gives a URL one 60 s in all, its redirects included, not 60 s a hop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      // AbortSignal.timeout runs on Node's own clock: one on the fake clock in its place.
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), ms);
+        return controller.signal;
+      });
+      // Each hop redirects 50 s after it is asked, just inside a wait of its own.
+      const hops: string[] = [];
+      vi.stubGlobal("fetch", (at: string, init: RequestInit) => new Promise<Response>((answer, fail) => {
+        hops.push(at);
+        const timer = setTimeout(() => answer(new Response(null, { status: 302, headers: { location: `https://example.com/${hops.length}.ghostlyapp` } })), 50_000);
+        init.signal?.addEventListener("abort", () => { clearTimeout(timer); fail(init.signal!.reason); });
+      }));
+      const start = Date.now();
+      const read = verifyApp("https://example.com/0.ghostlyapp").then(() => undefined, (error: unknown) => ({ error, after: Date.now() - start }));
+      await vi.advanceTimersByTimeAsync(400_000);
+      const failed = await read;
+      expect(failed).toMatchObject({ error: { code: "timeout" } });
+      expect(failed!.after).toBe(60_000);
+      expect(hops).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
 
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));

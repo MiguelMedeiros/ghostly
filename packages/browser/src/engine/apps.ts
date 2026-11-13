@@ -734,6 +734,12 @@ export class Apps {
   private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[]; bytes: number }>();
   /** Whether every entry of a `ghostly-revoke.json` verified, by the SHA-256 of its bytes: at most `REVOCATION_VERDICTS_KEPT`. */
   private readonly revocationVerdicts = new Map<string, boolean>();
+  /**
+   * While an update check runs (`checkNow`), the `ghostly-revoke.json` files it read, by the SHA-256 of their bytes:
+   * their revocations by app (null: refused), so the apps of one publisher that share a file have it parsed once. At
+   * most `REVOCATION_FILES_KEPT.bytes` of files, the oldest dropped first; none outside a check.
+   */
+  private revocationSplits: Map<string, { bytes: number; split: Promise<Map<string, SignedAppRevocation[]> | null> }> | null = null;
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -1369,22 +1375,9 @@ export class Apps {
       this.revocationFiles.set(key, known);
       return known.revocations;
     }
-    const read = readCanonicalJson(bytes);
-    let out: SignedAppRevocation[] | null = null;
-    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
-      out = [];
-      const pause = pacer(REVOCATIONS_SLICE_MS);
-      for (const entry of read.value) {
-        await pause();
-        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
-        if (!one.ok) { out = null; break; }
-        if (one.revocation.statement.app === ref) out.push(one.revocation);
-      }
-    }
-    this.revocationVerdicts.delete(id);
-    this.revocationVerdicts.set(id, out !== null);
-    if (this.revocationVerdicts.size > REVOCATION_VERDICTS_KEPT) this.revocationVerdicts.delete(this.revocationVerdicts.keys().next().value!);
-    if (!out) return null;
+    const split = await this.splitRevocationsOnce(id, bytes, verdict);
+    if (!split) return null;
+    const out = split.get(ref) ?? [];
     this.revocationFiles.set(key, { revocations: out, bytes: out.length ? canonicalJsonBytes(out as unknown as JsonValue).length : 0 });
     let held = 0;
     for (const file of this.revocationFiles.values()) held += file.bytes;
@@ -1393,6 +1386,50 @@ export class Apps {
       this.revocationFiles.delete(old);
       held -= file.bytes;
     }
+    return out;
+  }
+
+  /** `splitRevocations`, read once per update check for the same bytes (`revocationSplits`). */
+  private splitRevocationsOnce(id: string, bytes: Uint8Array, verdict: boolean | undefined): Promise<Map<string, SignedAppRevocation[]> | null> {
+    const splits = this.revocationSplits;
+    const held = splits?.get(id);
+    if (held) return held.split;
+    const split = this.splitRevocations(id, bytes, verdict);
+    if (splits) {
+      splits.set(id, { bytes: bytes.length, split });
+      let all = 0;
+      for (const file of splits.values()) all += file.bytes;
+      for (const [old, file] of splits) {
+        if (splits.size <= 1 || all <= REVOCATION_FILES_KEPT.bytes) break;
+        splits.delete(old);
+        all -= file.bytes;
+      }
+    }
+    return split;
+  }
+
+  /**
+   * The revocations of a `ghostly-revoke.json`, by app; null when one entry does not verify. A file whose bytes verified
+   * before (`verdict`) is canonical by its digest: parsed with no canonical check, and each entry's shape taken alone.
+   */
+  private async splitRevocations(id: string, bytes: Uint8Array, verdict: boolean | undefined): Promise<Map<string, SignedAppRevocation[]> | null> {
+    const read = verdict ? { ok: true as const, value: JSON.parse(utf8Decode(bytes)) as JsonValue } : readCanonicalJson(bytes);
+    let out: Map<string, SignedAppRevocation[]> | null = null;
+    if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
+      out = new Map();
+      const pause = pacer(REVOCATIONS_SLICE_MS);
+      for (const entry of read.value) {
+        await pause();
+        const one = verdict ? readAppRevocationShape(entry) : readAppRevocation(entry);
+        if (!one.ok) { out = null; break; }
+        const app = one.revocation.statement.app;
+        const list = out.get(app);
+        if (list) list.push(one.revocation); else out.set(app, [one.revocation]);
+      }
+    }
+    this.revocationVerdicts.delete(id);
+    this.revocationVerdicts.set(id, out !== null);
+    if (this.revocationVerdicts.size > REVOCATION_VERDICTS_KEPT) this.revocationVerdicts.delete(this.revocationVerdicts.keys().next().value!);
     return out;
   }
 
@@ -1913,8 +1950,13 @@ export class Apps {
     // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
     // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
     // while the other workers still run, and the next check would start beside them.
-    const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
-    return out.filter((r) => r !== null);
+    this.revocationSplits = new Map();
+    try {
+      const out = await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)));
+      return out.filter((r) => r !== null);
+    } finally {
+      this.revocationSplits = null;
+    }
   }
 
   /** One app's part of the update check (`checkNow`); null when it is not installed any more. */

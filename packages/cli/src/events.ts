@@ -109,6 +109,14 @@ export class EventHub {
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
   private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
+  /** Whether the chats and groups are known (`know`, `baseline`): a change to them is an event from then on. */
+  private stateKnown = false;
+  /**
+   * Whether the seen set is left unread until a history or a transfer changes (`open` with `seen: false`): until the
+   * baseline, those changes only call `seenNeeded`, once.
+   */
+  private unseen = false;
+  private seenNeeded: (() => void) | null = null;
   /** Chats and groups whose history the baseline did not read whole, and how to read their file rows: until a file event needs them. */
   private unread = new Map<string, (chat: string) => Promise<readonly StoredMessage[]>>();
   /**
@@ -125,8 +133,11 @@ export class EventHub {
   /** `seenDb`: the IndexedDB database of the seen set (tests give each hub its own). */
   constructor(private readonly journalPath: string, private readonly now: () => number = Date.now, private readonly seenDb = SEEN_DB) {}
 
-  /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
-  async open(): Promise<void> {
+  /**
+   * Loads the journal's last seq and the seen set; call before `sink` is attached. `seen: false`: the seen set is read
+   * later (`loadSeen`), when something needs it (`know`).
+   */
+  async open({ seen = true }: { seen?: boolean } = {}): Promise<void> {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
     const reserved = readDropped(this.journalPath + ".reserved") ?? 0;
     try {
@@ -168,6 +179,12 @@ export class EventHub {
       this.seq = reserved;
       this.markDropped(Math.max(this.dropped, reserved));
     }
+    if (seen) await this.loadSeen();
+    else this.unseen = true;
+  }
+
+  /** Reads the seen set (`open` with `seen: false`); call before `baseline`. */
+  async loadSeen(): Promise<void> {
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
       request.onupgradeneeded = () => { request.result.createObjectStore(SEEN); this.firstRun = true; };
@@ -202,7 +219,10 @@ export class EventHub {
    * run, which only learns the history that was already there.
    */
   baseline(state: EngineState, histories: Map<string, readonly StoredMessage[]>, rest?: { newest: Map<string, readonly StoredMessage[]>; files: (chat: string) => Promise<readonly StoredMessage[]> }): void {
+    this.unseen = false;
+    // After `know`, what changed since is told.
     this.stateChanged(state);
+    this.stateKnown = true;
     for (const [chat, messages] of histories) this.messages(chat, messages);
     // `rest.newest`: chats and groups in step (`inStep`), only their newest messages read. Nothing in them is news;
     // a file of an older message is looked up when an event needs it (`rest.files` reads the history's file rows then:
@@ -222,6 +242,25 @@ export class EventHub {
       this.sweeper = setInterval(() => this.sweep(), SWEEP_EVERY_MS);
       this.sweeper.unref?.();
     }
+  }
+
+  /**
+   * The engine as it is at start, for a hub whose seen set is not read (`open` with `seen: false`): the chats and groups
+   * are known, and what changes in them is told from then on (a rename, a removal). A change in a history or a transfer
+   * calls `needed`, once, which reads the seen set (`loadSeen`) and takes the `baseline`: until then it is not told.
+   * An offline one-shot, which nothing reaches while it runs: the seen set, a note per message active in the last 30
+   * days, took a `status` 0.16 s and 56 MB at 50,000 notes, and the next start tells what it did not.
+   */
+  know(state: EngineState, needed: () => void): void {
+    this.seenNeeded = needed;
+    this.stateChanged(state);
+    this.stateKnown = true;
+  }
+
+  private needSeen(): void {
+    const needed = this.seenNeeded;
+    this.seenNeeded = null;
+    needed?.();
   }
 
   /**
@@ -540,6 +579,8 @@ export class EventHub {
   }
 
   private handle(message: EngineEvent | RpcResponse): void {
+    // The seen set not read yet (`know`): the baseline reads the histories again.
+    if (this.unseen && (message.kind === "messages" || message.kind === "message-changes")) { this.needSeen(); return; }
     switch (message.kind) {
       case "state": this.stateChanged(message.state); break;
       case "messages": this.messages(message.linkId, message.messages); break;
@@ -562,7 +603,7 @@ export class EventHub {
   }
 
   private stateChanged(state: EngineState): void {
-    const quiet = !this.baselined;
+    const quiet = !this.stateKnown;
     // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
     // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
@@ -669,6 +710,12 @@ export class EventHub {
    */
   private transferChanged(id: string, transfer: FileTransferView, state: EngineState, quiet: boolean): void {
     const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
+    // The seen set not read yet (`know`): its notes are made, and a change told, by the baseline.
+    if (this.unseen) {
+      if (quiet) this.transfers.set(id, shape);
+      else if (before !== shape) this.needSeen();
+      return;
+    }
     this.transfers.set(id, shape);
     const end = transfer.state === "done" || transfer.state === "failed", underway = this.seen.get(UNDERWAY)?.has(id) ?? false;
     if (!end && !underway) {

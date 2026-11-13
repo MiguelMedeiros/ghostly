@@ -141,6 +141,9 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
+  // A file where a folder is to be made (`store sign --out`, `app publish --key`/`--out`): Node's "EEXIST: file already
+  // exists, mkdir '…'" was `engine`. Named as `file save --dir` names one.
+  if (code === "EEXIST" && (error as { syscall: string }).syscall === "mkdir") return new CliError("not_found", `${where} is a file, not a folder`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
   // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
   // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.
