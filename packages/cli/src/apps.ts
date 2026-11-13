@@ -70,7 +70,7 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   const text = readFileSync(path, "utf8");
   const other: KeyKind = kind === "publisher" ? "store" : "publisher";
   if (text.startsWith(`Ghostly ${other} key`)) {
-    throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
+    throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app or its revocations" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
   }
   const block = PEM.exec(text);
   let seed: Uint8Array | undefined;
@@ -483,7 +483,12 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     files: contents.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(createHash("sha256").update(f.bytes).digest()) })),
   };
   const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
-  if (!checked.ok) throw refused(`${sourcePath} and the folder's files make no valid manifest`, checked);
+  if (!checked.ok) {
+    // A field missing from the source, said where it goes ("kind in ghostly-app.json"), not as a missing --key; the
+    // JSON detail stays the field's name.
+    const said = checked.reason === "missing-key" ? { ...checked, detail: `${checked.detail} in ${APP_SOURCE}` } : checked;
+    throw refused(`${sourcePath} and the folder's files make no valid manifest`, said, checked.detail ? { detail: checked.detail } : {});
+  }
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
   const bundle = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), contents.map((f) => f.bytes));
@@ -557,8 +562,9 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const manifest = read.bundle.manifest;
   const ref = appRef(manifest.publisher, manifest.name);
   // Clients keep a revocation for good: past the newest version (a typo, 30 for 3), it stops versions not made yet.
+  // --force lifts it, so it asks for a confirmation, as every refusal --force lifts does.
   if (what.upTo !== undefined && what.upTo > manifest.sequence && !what.force) {
-    throw new CliError("usage", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
+    throw new CliError("confirm", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
   }
 
   const keyPath = userPath(keyArg);
