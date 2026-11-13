@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -283,6 +283,9 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       if (said) process.stderr.write(said + "\n");
     });
   }
+  // The store a backup wrote for itself (`profile.backup`) and a killed process left: every message and key in the
+  // clear, past what was deleted since. This process holds the profile now, so no backup of it is running.
+  for (const name of existsSync(paths.db) ? readdirSync(paths.db) : []) if (/^backup-store-.*\.bin$/.test(name)) rmSync(join(paths.db, name), { force: true });
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
   // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
