@@ -383,7 +383,7 @@
     "cashuMints": "Cashu のミント",
     "cashuSettings": "Cashu の設定",
     "commentFor": "{{to}} へのコメント（任意）",
-    "confirmWhat": "{{amount}} sats（最大 {{fee}} の手数料を追加）",
+    "confirmWhat": "{{amount}} {{unit}}（最大 {{fee}} {{feeUnit}} の手数料を追加）",
     "connecting": "ソースに接続中…",
     "domainLine": "{{answered}}{{limits}}",
     "done": "完了",
