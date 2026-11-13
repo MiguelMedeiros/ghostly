@@ -15,7 +15,7 @@ const LABEL = "ybndrfg8ejkmcpqxot1uwisza345h769";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); document.body.replaceChildren(); });
 
-async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
+async function bridgeFrame(relayOnly?: boolean, title?: unknown): Promise<HTMLIFrameElement> {
   const dom = (window as unknown as { happyDOM?: { setURL(url: string): void; settings: { disableIframePageLoading: boolean; handleDisabledFileLoadingAsSuccess: boolean } } }).happyDOM!;
   Object.assign(dom.settings, { disableIframePageLoading: true, handleDisabledFileLoadingAsSuccess: true });
   dom.setURL(`https://${LABEL}.svc.ghostly.example/_ghostly-svc/bridge.html`);
@@ -30,7 +30,7 @@ async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
   await import("../../../../web/src/svc/bridge");
   expect(parent.postMessage).toHaveBeenCalled();
   const { port1 } = new MessageChannel();
-  window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
+  window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }), ...(title === undefined ? {} : { title }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
   await vi.waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
   return document.querySelector("iframe")!;
 }
@@ -39,6 +39,16 @@ describe("the bridge's frame of the contact's app", () => {
   it("cannot take the screen from the view's bar: no full screen", async () => {
     const frame = await bridgeFrame();
     expect(frame.getAttribute("allow")).toBe("");
+  });
+
+  it("is named by the view's label in the profile's language, never \"Ghostly\": the bar says the app is not Ghostly", async () => {
+    document.title = "Ghostly";
+    expect((await bridgeFrame(false, "Démo, partagée par Ana")).title).toBe("Démo, partagée par Ana");
+    for (const title of [undefined, 42, ""]) {
+      document.body.replaceChildren();
+      vi.resetModules();
+      expect((await bridgeFrame(false, title)).title, String(title)).toBe("");
+    }
   });
 
   it("runs the WebRTC guard first while Hide my IP from contacts is on: the app's frame, on this origin, reaches this window", async () => {

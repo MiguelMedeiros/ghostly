@@ -110,6 +110,9 @@ function start(): void {
     }
     if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
+    // The view's label in the profile's language ("Demo, shared by Ana"), never this page's English "Ghostly": the
+    // app in it is the contact's, not Ghostly, as the view's bar says.
+    const title = (event.data as { title?: unknown }).title;
     // Hide my IP from contacts: the app's frame is on this origin and reaches this window, so the WebRTC guard runs here
     // too, before the frame is made. Inline, as this page's policy allows it by its hash (`bridgeHtml`).
     if ((event.data as { relayOnly?: unknown }).relayOnly === true) guardHere(VIEWER_GUARD_SCRIPT);
@@ -119,7 +122,7 @@ function start(): void {
       .then(() => workers.ready)
       .then(() => {
         const frame = document.createElement("iframe");
-        frame.title = document.title;
+        if (typeof title === "string") frame.title = title;
         frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
         // This page sends no referrer (its server says so); the worker forwards a navigation only with this origin's.
         frame.setAttribute("referrerpolicy", "same-origin");

@@ -62,7 +62,8 @@ describe("a services host given with a port", () => {
       Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
       dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin, source: inFrame as unknown as Window }));
       expect(inFrame.postMessage).toHaveBeenCalledTimes(1);
-      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT });
+      // With the view's label in the profile's language: the bridge's frame of the app is named by it, not "Ghostly".
+      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT, title: words.label });
       expect(inFrame.postMessage.mock.calls[0]![1]).toBe(origin);
     } finally {
       closeServiceView();
