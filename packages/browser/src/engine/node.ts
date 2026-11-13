@@ -5047,6 +5047,8 @@ export class GhostlyNode implements EngineImplementation {
     if (this.transfers.get(file.id)?.state === "transferring") return;
     const wireId = file.id.slice(`${linkId}-out-`.length);
     if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return refuse("Invalid file id");
+    // Sent, as a text is: whatever this side was typing or recording (a voice note) is done.
+    this.setTyping({ linkId, typing: false });
     // A file too large to hold waits for the chat to be live instead, like one sent where nothing holds it.
     const holdable = file.size <= HOLD_LIMITS.maxBundleBytes - 4096;
     if (!live.link.isDataLinkOpen) this.wakePeer(live);
@@ -7206,7 +7208,10 @@ export class GhostlyNode implements EngineImplementation {
     const live = await this.linkWhenAdded(params.linkId);
     // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
     if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
-    return this.desk.send({ ...params, network: this.net(params.network) });
+    const sent = await this.desk.send({ ...params, network: this.net(params.network) });
+    // Sent, as a text is: whatever this side was typing is done.
+    this.setTyping({ linkId: params.linkId, typing: false });
+    return sent;
   }
 
   /** `network`: the card's network; the request is paid only by a wallet of that network. */
