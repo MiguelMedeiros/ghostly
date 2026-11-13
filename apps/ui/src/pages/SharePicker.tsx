@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { chatTargetKeys, findChatTargets } from "../lib/chatTargets";
 import { Notice } from "../components/ui/Notice";
+import { listText } from "../lib/listText";
 import { SEARCH_STATUS_SETTLE_MS, SearchStatus } from "../components/ui/SearchStatus";
 import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare, type IncomingShare } from "../lib/incomingShare";
 
@@ -43,6 +44,8 @@ export function SharePicker() {
   const [query, setQuery] = useState("");
   const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
   const preview = share ? sharePreview(share) : "";
+  // File names as the language lists them ("a.jpg、b.pdf"), each isolated: an Arabic name beside a Latin one keeps its own order.
+  const names = (list: readonly string[]) => listText(list.map((name) => `⁨${name}⁩`), t);
   const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
 
   // Each share shown (the first, and the next in place of the one just picked or put aside): said, and not acted on before it is.
@@ -97,22 +100,22 @@ export function SharePicker() {
           {/* Files too large to bring in were left out: the picker names them, and how to send them. */}
           {leftOut.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-left-out"
-              title={leftOutNames.length ? t("pwa.shareTooLarge", { names: leftOutNames.join(", ") }) : t("pwa.shareTooLargeUnnamed")} next={t("pwa.shareTooLargeNext")} />
+              title={leftOutNames.length ? t("pwa.shareTooLarge", { names: names(leftOutNames) }) : t("pwa.shareTooLargeUnnamed")} next={t("pwa.shareTooLargeNext")} />
           )}
           {/* Files Android could not read (a revoked permission, a broken stream): named too, never dropped silently. */}
           {unread.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-unread"
-              title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
+              title={t("pwa.shareUnread", { names: names(unread) })} next={t("pwa.shareUnreadNext")} />
           )}
           {/* Files Android had no room to copy (the device is full): sharing again only helps once there is space. */}
           {noRoom.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-no-room"
-              title={t("pwa.shareNoRoom", { names: noRoom.join(", ") })} next={t("pwa.shareNoRoomNext")} />
+              title={t("pwa.shareNoRoom", { names: names(noRoom) })} next={t("pwa.shareNoRoomNext")} />
           )}
           {/* Files past the most one share brings were left out: named apart, as they were not too large. */}
           {pastLimit.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-past-limit"
-              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: pastLimit.join(", ") })} next={t("pwa.sharePastLimitNext")} />
+              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: names(pastLimit) })} next={t("pwa.sharePastLimitNext")} />
           )}
           {/* Shares that came while this one waited, past the most that can wait, were not kept: never dropped without a word. */}
           {dropped > 0 && (
