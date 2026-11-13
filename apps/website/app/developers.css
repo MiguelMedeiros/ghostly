@@ -351,6 +351,20 @@
   background: rgba(3, 16, 24, 0.16);
   color: #031018;
 }
+/* Forced colors replace the cyan fill, the only mark of the chosen preset: it takes the system's selection colours. */
+@media (forced-colors: active) {
+  .preset[aria-checked="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    outline-color: CanvasText;
+  }
+  .preset[aria-checked="true"] .bgrid-preset-n {
+    background: transparent;
+    color: HighlightText;
+  }
+}
 @media (max-width: 760px) {
   .bgrid-row {
     grid-template-columns: 1fr;
@@ -421,6 +435,19 @@
 }
 .stage-node[aria-checked="true"] .stage-dot {
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--l) 25%, transparent);
+}
+/* Forced colors replace a passed stage's fill and drop the current one's halo (a shadow): the dots were all alike. */
+@media (forced-colors: active) {
+  .stage-node[data-passed="true"] .stage-dot {
+    forced-color-adjust: none;
+    background: CanvasText;
+    border-color: CanvasText;
+  }
+  .stage-node[aria-checked="true"] .stage-dot {
+    box-shadow: none;
+    outline: 2px solid CanvasText;
+    outline-offset: 3px;
+  }
 }
 .stage-play {
   padding: 7px 14px;
