@@ -42,9 +42,10 @@ test("the availability map has the headless CLI", async ({ page }) => {
   const cli = (name: string) => table.locator("tr", { has: page.locator("th", { hasText: name }) }).locator("td").last();
   await expect(cli("Text chat, ghostly1 invites")).toHaveText("✓");
   await expect(cli("Fedimint wallets")).toHaveText("✓");
-  await expect(cli("Bark wallets")).toHaveText("No");
+  // A "No" cell reads "Not supported" to a screen reader (sr-only) and shows "No" (aria-hidden).
+  await expect(cli("Bark wallets").locator("[aria-hidden='true']")).toHaveText("No");
   await expect(cli("Voice calls")).toHaveText("✓");
-  await expect(cli("Video calls, screen sharing")).toHaveText("No");
+  await expect(cli("Video calls, screen sharing").locator("[aria-hidden='true']")).toHaveText("No");
   // packages/cli/src/runtime/mainline.ts reads the Mainline DHT beside the relays; packages/cli/src/wallets.ts connects
   // every Lightning source but WebLN.
   await expect(cli("Mainline DHT read directly")).toHaveText("✓");

@@ -42,6 +42,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
     removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
+    removalsPending: () => [],
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
@@ -513,6 +514,34 @@ describe("chat disconnect --hold", () => {
     expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"], ["chat.held", "chat-two"], ["chat.released", "chat-two"]]);
     expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-two", mode: "stream" });
+  });
+
+  // The engine's own calls on the socket (`ghostly engine removeLink|setChatTransport|setDeliveryMode`) left the hold as
+  // it was: a removed chat's end said chat.released for a chat that was gone, and a DHT only chosen meanwhile was taken
+  // back to the live link when the hold's time was up.
+  it("goes with its chat removed by the engine's own call, with no release said", async () => {
+    vi.useFakeTimers();
+    const { ctx, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(emitted.map((e) => [e.type, e.chat])).toEqual([["chat.held", "chat-one"]]);
+  });
+
+  it("ends when the engine's own call chooses the chat's transport, which stays as chosen", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await callApi(ctx, "engine.call", { method: "setChatTransport", params: { linkId: "chat-one", transport: "dht" } });
+    await callApi(ctx, "engine.call", { method: "setDeliveryMode", params: { linkId: "chat-two", mode: "dht" } });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    expect(emitted.filter((e) => e.type === "chat.released").map((e) => [e.chat, e.reason])).toEqual([["chat-one", "lifted"], ["chat-two", "lifted"]]);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(node.setDeliveryMode).toHaveBeenCalledTimes(1);
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
   });
 
   // A one-shot that only read (`chat show`, `chat list`, `status`) opens no chat, and the engine refuses to switch one

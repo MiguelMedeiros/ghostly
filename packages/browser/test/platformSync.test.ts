@@ -193,6 +193,24 @@ describe("keeping links and chats in step", () => {
     expect(forgotten).toContainEqual({ tag: viewerTag("me-gone") });
   });
 
+  it("stops an app still running in a deleted chat (a Desktop app window, which no chat panel stops), and none elsewhere", async () => {
+    const { registerRunningApp } = await import("../../../apps/ui/src/lib/apps/open");
+    const stopped: string[] = [];
+    const running = (name: string, linkId: string | null) => registerRunningApp({ ref: "pk/chess", digest: "d", runAnyway: false, linkId, takeDown: () => {}, stop: () => stopped.push(name) });
+    const unregister = [running("in the deleted chat", "gone"), running("in another chat", "kept"), running("alone", null)];
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-gone" }));
+    storage.saveSession(session({ id: "s2", mySeedB64: "seed-2", peerPubKeyB64: "p-kept" }));
+    await start([link({ id: "gone", peerPubKeyZ32: "p-gone" }), link({ id: "kept", peerPubKeyZ32: "p-kept" })]);
+    expect(stopped).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "gone" }]);
+    expect(stopped).toEqual(["in the deleted chat"]);
+    for (const off of unregister) off();
+  });
+
   it("keeps a link whose chat still exists, and takes its delivery mode", async () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));

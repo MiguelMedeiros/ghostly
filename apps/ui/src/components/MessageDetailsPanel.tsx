@@ -72,7 +72,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="message-details-title" data-testid="message-details" data-side={phone ? "bottom" : "end"}
       data-loaded={view === undefined ? "no" : "yes"}
       className={`message-details-panel fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${
-        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "inset-y-0 end-0 w-[min(400px,100vw)] border-s"}`}>
+        phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "end-panel inset-y-0 end-0 border-s"}`}>
       <div className="flex items-start gap-3 px-4 pt-3 pb-2 border-b border-border shrink-0">
         {phone && <div aria-hidden="true" className="absolute top-1.5 inset-x-0 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
         <div className="min-w-0 flex-1 pt-1">

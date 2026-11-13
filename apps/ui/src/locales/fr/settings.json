@@ -70,6 +70,7 @@
   },
   "incorrectPassword": "Mot de passe incorrect",
   "language": "Langue",
+  "languageNeedsUpdate": "{{language}} a besoin de la nouvelle version de Ghostly.",
   "languageNotLoaded": "Impossible de charger {{language}}. Vérifiez votre connexion.",
   "languageRetry": "Réessayer",
   "license": "Licence",
@@ -187,7 +188,6 @@
   "sharePresenceHint": "Vos contacts voient un point pendant que vous utilisez Ghostly. Un statut défini s'affiche dans tous les cas.",
   "shareProfile": "Partager mon nom et ma photo avec mes contacts",
   "shareProfileHint": "Vos contacts voient le nom et la photo de ce profil. Désactivé, ils voient « Contact » et un motif à la place.",
-  "sourceCode": "Code source",
   "stayConnected": "Rester connecté en arrière-plan",
   "stayConnectedHint": "Les discussions et les groupes restent connectés quand Ghostly n'est pas à l'écran, avec une notification discrète. Consomme plus de batterie.",
   "stayConnectedStopped": "Android a arrêté Ghostly en arrière-plan",
@@ -230,12 +230,6 @@
     "large": "Grande",
     "larger": "Plus grande",
     "small": "Petite"
-  },
-  "theme": "Thème",
-  "themes": {
-    "dark": "Sombre",
-    "light": "Clair",
-    "system": "Système"
   },
   "timeout": "Verrouiller après",
   "timeoutOptions": {

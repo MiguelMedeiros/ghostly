@@ -6,7 +6,7 @@
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
  * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
@@ -191,14 +191,31 @@ async function forward(event: FetchEvent): Promise<Response> {
   const url = new URL(request.url);
   const headers: [string, string][] = [];
   (again?.headers ?? request.headers).forEach((value, name) => { if (name !== "cookie") headers.push([name, value]); });
-  const message: ServiceRequestMessage = { type: "request", method: again?.method ?? request.method, path: url.pathname + url.search, headers, body, destination: request.destination };
+  const message: ServiceRequestMessage = { type: "request", method: again?.method ?? request.method, path: url.pathname + url.search, headers, body, destination: request.destination, flow: true };
   const channel = new MessageChannel();
   const port = channel.port1;
-  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  // The answer's chunks wait here, not in the stream, until the frame reads: the page is told what it read, and sends
+  // only `ANSWER_AHEAD_BYTES` past that, so an answer the frame leaves unread stays on the link.
+  const waiting: Uint8Array[] = [];
+  let last: { error: Error } | "end" | null = null;
+  let read = 0;
+  let wanted: (() => void) | null = null;
+  const give = (c: ReadableStreamDefaultController<Uint8Array>): boolean => {
+    const bytes = waiting.shift();
+    if (bytes) {
+      c.enqueue(bytes);
+      read += bytes.byteLength;
+      port.postMessage({ type: "read", bytes: read } satisfies ServiceRead);
+    } else if (last === "end") c.close();
+    else if (last) c.error(last.error);
+    else return false;
+    return true;
+  };
+  const arrived = () => { wanted?.(); wanted = null; };
   const stream = new ReadableStream<Uint8Array>({
-    start(c) { controller = c; },
-    cancel() { port.postMessage({ type: "cancel" }); port.close(); },
-  });
+    pull(c) { if (!give(c)) return new Promise<void>((resolve) => { wanted = () => { give(c); resolve(); }; }); },
+    cancel() { waiting.length = 0; port.postMessage({ type: "cancel" }); port.close(); },
+  }, { highWaterMark: 0 });
   return new Promise<Response>((resolve) => {
     let answered = false;
     const timer = setTimeout(() => { if (!answered) { answered = true; port.close(); resolve(plain(504, "The app did not answer in time.")); } }, HEAD_TIMEOUT_MS);
@@ -228,14 +245,16 @@ async function forward(event: FetchEvent): Promise<Response> {
         const empty = NULL_BODY.has(status) || request.method === "HEAD";
         if (!settle(() => new Response(empty ? null : stream, { status, headers: out }))) { port.postMessage({ type: "cancel" }); port.close(); }
         else if (empty) port.close();
-      } else if (reply?.type === "chunk" && answered) {
-        try { controller.enqueue(reply.bytes); } catch { /* the page stopped reading */ }
+      } else if (reply?.type === "chunk" && answered && !last) {
+        waiting.push(reply.bytes);
+        arrived();
       } else if (reply?.type === "end") {
-        try { controller.close(); } catch { /* already closed */ }
+        last ??= "end";
+        arrived();
         port.close();
       } else if (reply?.type === "error") {
         if (!answered) settle(() => failed(reply.status, reply.text, reply.lang, reply.dir));
-        else { try { controller.error(new Error(reply.text)); } catch { /* already closed */ } }
+        else { last ??= { error: new Error(reply.text) }; arrived(); }
         port.close();
       }
     };

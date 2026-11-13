@@ -468,7 +468,7 @@ export type DidDhtFetch = (url: string, options?: { maxBytes?: number; signal?: 
 
 export interface ResolveDidDhtOptions {
   fetch: DidDhtFetch;
-  /** Pkarr relays (or did:dht gateways, which answer the same GET) to ask in turn. Default: `DEFAULT_RELAYS`. */
+  /** Pkarr relays (or did:dht gateways, which answer the same GET) to ask, all of them. Default: `DEFAULT_RELAYS`. */
   relays?: string[];
   signal?: AbortSignal;
 }
@@ -513,48 +513,49 @@ function seqDate(seq: bigint): string {
 }
 
 /**
- * Resolves a did:dht through Pkarr relays: one GET per relay, in turn, the next only when one has
- * nothing, fails or serves a packet that does not check out. The answer is bounded to a BEP44 item,
- * its signature checked against the DID's key and its records parsed strictly. A deactivated DID
+ * Resolves a did:dht through Pkarr relays: one GET to each, all at once, and the newest packet that
+ * checks out wins (the highest sequence number; on a tie, the relay listed first), so a relay holding
+ * an older version cannot bring back a removed key or undo a deactivation. Each answer is bounded to
+ * a BEP44 item, its signature checked against the DID's key and its records parsed strictly; a relay
+ * that has nothing, fails or serves a packet that does not check out does not count. A deactivated DID
  * resolves (`metadata.deactivated`); everything else that goes wrong throws a `DidDhtError`.
  */
 export async function resolveDidDht(did: string, options: ResolveDidDhtOptions): Promise<DidDhtResolution> {
   const { z32 } = didDhtKey(did);
   const relays = [...new Set((options.relays ?? DEFAULT_RELAYS).map(normalizeRelayUrl).filter((r): r is string => r !== null))];
   if (relays.length === 0) throw new DidDhtError("No Pkarr relay to ask", "unreachable");
+  options.signal?.throwIfAborted();
+
+  const responses = await Promise.all(relays.map((relay) =>
+    options.fetch(`${relay}/${z32}`, { maxBytes: DID_DHT_MAX_PAYLOAD, signal: options.signal, redirect: "error" }).catch(() => undefined)));
+  options.signal?.throwIfAborted();
 
   let notFound = false;
   let refused: DidDhtError | undefined;
-  for (const relay of relays) {
-    options.signal?.throwIfAborted();
-    let response: DidDhtFetchResponse;
-    try {
-      response = await options.fetch(`${relay}/${z32}`, { maxBytes: DID_DHT_MAX_PAYLOAD, signal: options.signal, redirect: "error" });
-    } catch (error) {
-      if (options.signal?.aborted) throw error;
-      continue;
-    }
-    if (response.status === 404) {
-      notFound = true;
-      continue;
-    }
-    if (response.status !== 200) continue;
+  let newest: (DecodedDidDht & { seq: bigint; relay: string }) | undefined;
+  for (const [i, relay] of relays.entries()) {
+    const response = responses[i];
+    if (response?.status === 404) notFound = true;
+    if (response?.status !== 200) continue;
     try {
       const opened = openDidDhtPayload(did, response.bytes);
-      return {
-        document: opened.document,
-        metadata: {
-          versionId: opened.seq.toString(),
-          updated: seqDate(opened.seq),
-          ...(opened.deactivated ? { deactivated: true as const } : {}),
-          ...(opened.types ? { types: opened.types } : {}),
-        },
-        relay,
-      };
+      if (!newest || opened.seq > newest.seq) newest = { ...opened, relay };
     } catch (error) {
       if (!(error instanceof DidDhtError)) throw error;
       refused = error;
     }
+  }
+  if (newest) {
+    return {
+      document: newest.document,
+      metadata: {
+        versionId: newest.seq.toString(),
+        updated: seqDate(newest.seq),
+        ...(newest.deactivated ? { deactivated: true as const } : {}),
+        ...(newest.types ? { types: newest.types } : {}),
+      },
+      relay: newest.relay,
+    };
   }
   if (refused) throw refused;
   if (notFound) throw new DidDhtError("No document is published for this did:dht", "not-found");

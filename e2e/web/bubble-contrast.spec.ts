@@ -97,7 +97,9 @@ function readings(page: Page): Promise<Reading[]> {
       return `${id} › ${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 32)}"`;
     };
     const visible = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
-    const body = "[data-testid=message-text], [data-testid=message-text] a, [data-testid=file-bubble] p[title]";
+    // A file's and a voice message's line under it (its size, how far it got, its length) are words too: 4.5:1. At
+    // 3:1, the line on a sent bubble read 3.8:1 in Classic dark and 4.3:1 in Cyan light.
+    const body = "[data-testid=message-text], [data-testid=message-text] a, [data-testid=file-bubble] p[title], [data-testid=file-status], [data-testid=voice-time]";
     const out: { what: string; ratio: number; min: number }[] = [];
     for (const bubble of root.querySelectorAll<HTMLElement>("[data-message-bubble]")) {
       const side = bubble.closest("[data-message-row]")?.getAttribute("data-sender") ?? "?";

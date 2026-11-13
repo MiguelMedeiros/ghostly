@@ -470,6 +470,45 @@ describe("a CLI back after a kill, whose contact never hears its WebRTC connecti
   }, 240_000);
 });
 
+/**
+ * A chat live on HyperDHT, one app killed and back 3 s later. The contact still holds the dead session, and HyperDHT
+ * announces no listener of a chat live on it (endpoint.mjs): the restarted app's resume knock finds nothing
+ * (PEER_NOT_FOUND). The lower key then dialled as any attempt, and the app's Iroh, up a moment later, took the held
+ * session over. The higher key took that knock for the resume's one dial whatever the key and waited for the contact
+ * to notice: live again 14.5-15.2 s after the start between two CLI daemons on a loopback HyperDHT (2026-11-12), against
+ * 0.8-1.6 s with the lower key. Its dial after the knock then offered WebRTC, which the contact reads at a live chat's
+ * pace, and the Iroh that joined it waited for the race. Here 27.7 s with the higher key before, 17.2 s with the lower.
+ */
+describe("a CLI back after a kill on HyperDHT, whose contact holds the session with its listener unannounced", () => {
+  // Its Iroh up after the dial's offer went out (0.2-0.6 s after its HyperDHT on the CLI), or before that dial.
+  it.each([["lower", 800], ["higher", 800], ["higher", 100]] as const)("the app with the %s key restarts, its Iroh up %i ms after its start: it dials once its knock found nothing, and knocks on Iroh", async (restarted, irohAfterMs) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    world.native.unannouncedWhileLive = true;
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    // The CLI's: WebRTC, HyperDHT (chosen here, so the chat is live on it) and an Iroh through its relay.
+    const both = (contact: string) => ({ native: {
+      peerDescriptors: { "hyperdht/1": { publicKey: world.native.key("hyperdht/1", contact) }, "iroh/1": { id: world.native.key("iroh/1", contact), relay: "https://relay.test./", addresses: [] } },
+      peerTransports: ["webrtc/1" as const, "hyperdht/1" as const, "iroh/1" as const], peerFallback: true, preferred: "hyperdht/1" as const, automatic: false } });
+    const start = (name: "goes" | "stays", side: Side, contact: { side: Side; name: string }, dhtState: DhtDeliveryState, wasLive: boolean) => {
+      const app = startApp(world, name, side, contact, "webrtc+hyperdht", dhtState, wasLive, undefined, true, {}, both(contact.name));
+      setTimeout(() => app.link.registerEndpoint(world.native.endpoint("iroh/1", name)), irohAfterMs);
+      return app;
+    };
+    let goes = start("goes", goesSide, { side: staysSide, name: "stays" }, emptyDhtDeliveryState(), false);
+    const stays = start("stays", staysSide, { side: goesSide, name: "goes" }, emptyDhtDeliveryState(), false);
+    const transportOf = (app: App) => (app.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport;
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && transportOf(stays) === "hyperdht/1", 120_000), "live on HyperDHT at first").toBeLessThan(Infinity);
+    await run(20_000);
+    const before = channelOf(stays);
+    await quit(world, goes, "crash");
+    await run(RESTART_AFTER_MS);
+    goes = start("goes", goesSide, { side: staysSide, name: "stays" }, goes.dhtState, true);
+    const liveAgainMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== before, 120_000);
+    expect(liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_000);
+  }, 240_000);
+});
+
 describe("a restart whose WebRTC answer the relays' budget holds back", () => {
   const BUDGET_HELD_MS = 45_000;
   beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });

@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useRef, type ReactNode } from "react";
 import type { ListedGroup } from "./ChatRow";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
+import { unreadDot } from "./unreadDot";
 import { invitationStatus, invitationWaitsForMe } from "./GroupInvitation";
 import { useI18n } from "../contexts/I18nContext";
 import { groupChat, mentionsNotify, useChatMute } from "../lib/chatMute";
@@ -137,7 +138,7 @@ const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpe
       className={`h-5 w-5 inline-flex items-center justify-center rounded-full ${badge(!!waiting)}`}><EnvelopeIcon /></span>
     : mention ? <span aria-hidden="true" data-testid="chat-rail-mention" data-muted={mentionQuiet || undefined}
       className={`h-5 w-5 inline-flex items-center justify-center rounded-full text-[12px] font-bold leading-none ${badge(mentionQuiet)}`}>@</span>
-    : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />;
+    : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 ring-2 ring-sidebar-bg forced-colors:ring-[color:Canvas] ${unreadDot(muted)}`} />;
   return (
     <RailItem testId="chat-rail-group" id={groupChat(group.id)} name={name} label={label} active={active} onOpen={onOpen} mark={mark}>
       <GroupAvatar picture={group.picture} size={AVATAR} testId="chat-rail-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />

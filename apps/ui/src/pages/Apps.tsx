@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -61,10 +61,22 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
   const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
+  // Open goes when the app stops (an update check found it revoked or removed): its focus would drop to the page. The
+  // ref's cleanup runs while the button is still there; the row's name, which now says why, takes the focus, never
+  // taken from where the person went meanwhile.
+  const details = useRef<HTMLButtonElement>(null);
+  const openHadFocus = useRef(false);
+  const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!openHadFocus.current) return;
+    openHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) details.current?.focus({ preventScroll: true });
+  });
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -80,7 +92,7 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>}
     </div>
   );
 }

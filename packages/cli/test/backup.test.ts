@@ -78,6 +78,25 @@ it("a profile's files travel with it, large ones too, and a damaged or cut backu
   }
 });
 
+it("--out naming a folder is refused in words that say so, and leaves no file of the folder's name", async () => {
+  const dir = home("backup-folder");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Folder bot"]));
+  // A slash at its end and no such folder: before, the backup was written as a file named "backups".
+  const missing = join(dir, "backups");
+  const slashed = error(await ghostly(["--home", dir, "profile", "backup", "--out", `${missing}/`], { env: PASS }), "bad_request", 1);
+  expect(slashed.message).toBe(`${missing} names a folder: name the backup's file in it, e.g. --out ${join(missing, "<name>.ghostly-backup")} (path over the socket)`);
+  expect(existsSync(missing)).toBe(false);
+  // A folder that is there: before, "exists: choose another name", as if a file were in the way.
+  const folder = join(dir, "kept");
+  mkdirSync(folder);
+  for (const out of [folder, `${folder}/`]) {
+    expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: PASS }), "bad_request", 1).message).toContain(`${folder} names a folder: name the backup's file in it`);
+  }
+  expect(readdirSync(folder)).toEqual([]);
+  // The file in it, as the message says, is made.
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
+});
+
 it("a backup without a passphrase is made only when asked for by name, says so, and restores with none", async () => {
   const dir = home("backup-open");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Open bot"]));
@@ -322,8 +341,26 @@ it("a restored profile keeps auto-join (groups.json) and auto-answer (calls.json
   const none = join(plain, "none.ghostly-backup");
   ok(await ghostly(["--home", plain, "profile", "backup", "--out", none, "--no-passphrase"], { env: NO_PASS }));
   const bare = ok(await ghostly(["--home", plain, "profile", "restore", none, "copy"], { env: NO_PASS })) as { folder: string };
-  expect(["groups.json", "calls.json", "holds.json"].filter((name) => existsSync(join(bare.folder, name)))).toEqual([]);
+  expect(["groups.json", "calls.json", "holds.json", "apps.json"].filter((name) => existsSync(join(bare.folder, name)))).toEqual([]);
   expect(ok(await ghostly(["--home", plain, "--profile", "copy", "group", "auto"]))).toEqual({ autoJoin: { on: false, from: [] } });
+});
+
+// The apps a bot serves (`app serve`) were left out: the restored bot served none and offered apps/1 to no contact.
+it("a restored profile keeps the apps it serves (apps.json)", async () => {
+  const dir = home("backup-served");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "App bot"]));
+  const original = join(dir, "profiles", "default");
+  // As `app serve` writes it.
+  const served = { ref: `${createIdentity().pubKeyZ32}/chess`, title: "Chess", version: "1.2.0", sequence: 3, digest: "d".repeat(64), url: "https://example.com/chess.ghostlyapp", permissions: ["chat"], granted: ["chat"], servedAt: 1 };
+  const apps = JSON.stringify([served], null, 2) + "\n";
+  writeFileSync(join(original, "apps.json"), apps, { mode: 0o600 });
+
+  const file = join(dir, "served.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file, "--no-passphrase"], { env: NO_PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: NO_PASS })) as { folder: string };
+  expect(readFileSync(join(restored.folder, "apps.json"), "utf8")).toBe(apps);
+  expect(statSync(join(restored.folder, "apps.json")).mode & 0o777).toBe(0o600);
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "app", "served"]))).toMatchObject({ apps: [served] });
 });
 
 /** The restored daemon's start over its folder (`resumeHolds`), with these chats on DHT only, as its store has them. */

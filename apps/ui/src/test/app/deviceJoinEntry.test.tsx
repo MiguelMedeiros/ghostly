@@ -475,6 +475,28 @@ describe("a profile made for a code", () => {
     } finally { Reflect.deleteProperty(navigator, "storage"); }
   });
 
+  it("goes on while the browser asks the person whether to keep its data, and opens once they say yes", async () => {
+    const reload = catchReload();
+    sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: activeProfileId(), code: code(), start: "go", name: "Pixel" }));
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    // Firefox's storage.persist() answers once the person does, in a prompt of its own.
+    let answer: (kept: boolean) => void = () => {};
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => false, persist: () => new Promise<boolean>((resolve) => { answer = resolve; }) } });
+    try {
+      renderApp(<JoinHost />);
+      await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+      // Added while the prompt is still up: no reload under it, and no warning before the answer.
+      fakeEngine.on("deviceEnrollView", () => ({ role: "joiner", step: "done", device: "MacBook" }));
+      expect(await screen.findByTestId("device-join-continue", {}, { timeout: 3_000 })).toBeVisible();
+      expect(screen.queryByTestId("device-join-persist")).toBeNull();
+      // Past the pause the dialog takes before it opens the standby screen by itself.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(reload).not.toHaveBeenCalled();
+      act(() => answer(true));
+      await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });
+    } finally { Reflect.deleteProperty(navigator, "storage"); }
+  });
+
   it("reads requests of the older forms", () => {
     sessionStorage.setItem(JOIN_REQUEST, "abc");
     expect(takeJoinRequest("other")).toBeNull();

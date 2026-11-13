@@ -1,16 +1,20 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
 import { PaymentBubble } from "../../components/PaymentBubble";
 import { paymentLine, storedPaymentLine } from "../../components/paymentWords";
 import { loadLocale, translatorFor } from "../../locales";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
+import { servicesPlatform } from "../../lib/platform";
 import { renderApp } from "../render";
-import { lightningSource, liveMainnetInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
+import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose, listOf, readOption } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external, payments.chat.networks
+
+/** Invoices of open requests, not expired yet: an expired one cannot be paid any more (see "an expired request"). */
+const LIVE_MAINNET = liveMainnetInvoice(2_100), LIVE_REGTEST = liveRegtestInvoice(250_000);
 
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
 
@@ -140,6 +144,32 @@ describe("what the bubble says", () => {
     show({ kind: "payment", direction: "in", state: "pending", target: target({ method: "bitcoin", network: "bitcoin", provider: "onchain" }) });
     expect(status()).toHaveTextContent("Waiting for a confirmation…");
     expect(screen.getByTestId("payment-rail")).toHaveTextContent(/^Bitcoin on-chain$/);
+  });
+
+  // The contact has paid: what is left is this wallet's check with its provider, server, chain or federation.
+  it.each([
+    ["Ark", { target: target({ method: "arkade", network: "mutinynet" }) }],
+    ["Bark", { target: target({ method: "bark", network: "signet", address: "tark1bark" }) }],
+    ["Spark", { target: target({ method: "spark", network: "regtest", address: "sparkrt1payee" }) }],
+    ["USDT", { amount: 1_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) }],
+    ["Fedimint", { federation: "fed1test", network: "testnet" as const }],
+  ] as const)("says a %s payment received and still being checked is checked here, not waited on from the contact", (_, patch) => {
+    show({ kind: "payment", direction: "in", state: "pending", ...patch });
+    expect(status()).toHaveTextContent(/^Checking the payment…$/);
+  });
+
+  it.each([
+    ["pt", "Verificando o pagamento…"],
+    ["ar", "جارٍ التحقق من الدفعة…"],
+  ] as const)("says a received payment being checked in %s “%s”", (language, said) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(TEST_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "in", state: "pending", target: target({ method: "arkade", network: "mutinynet" }) }) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language });
+    expect(status()).toHaveTextContent(said);
+  });
+
+  it("still says my own ecash the contact has not taken waits for the contact", () => {
+    show({ kind: "payment", direction: "out", state: "pending", federation: "fed1test", network: "testnet" });
+    expect(status()).toHaveTextContent(/^Waiting for your contact…$/);
   });
 
   it("adds why a payment failed", () => {
@@ -406,7 +436,7 @@ describe("paying a request on other rails", () => {
 
 describe("a way of paying that is off in this chat", () => {
   it("keeps a Cashu request readable but offers nothing to pay it with", () => {
-    show(incomingRequest({ mints: [REAL_MINT], invoice: MAINNET_INVOICE }), { wallet: { mints: [mint(REAL_MINT, 900)] }, link: { paymentMethods: { ...ALL_ON, cashu: false, lightning: false } } });
+    show(incomingRequest({ mints: [REAL_MINT], invoice: LIVE_MAINNET }), { wallet: { mints: [mint(REAL_MINT, 900)] }, link: { paymentMethods: { ...ALL_ON, cashu: false, lightning: false } } });
     expect(screen.getByTestId("payment-off")).toHaveTextContent("This way of paying is off in this chat.");
     expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
   });
@@ -425,7 +455,7 @@ describe("a way of paying that is off in this chat", () => {
 
 describe("paying a request's invoice over Lightning", () => {
   // No mint in common: the invoice is what can be paid, through the Lightning source.
-  const lightningRequest = () => incomingRequest({ amount: 2_100, invoice: MAINNET_INVOICE, mints: ["https://other.example"] });
+  const lightningRequest = () => incomingRequest({ amount: 2_100, invoice: LIVE_MAINNET, mints: ["https://other.example"] });
   const quote = (patch = {}) => ({ quote: "q-1", mint: "", amount: 2_100, feeReserve: 5, source: "cln-1", ...patch });
 
   it("shows what the Mainnet Lightning source would spend, then pays with the fee ceiling once confirmed as real money", async () => {
@@ -435,7 +465,7 @@ describe("paying a request's invoice over Lightning", () => {
     // 3% of the amount, as the engine pays requests under.
     expect(screen.getByRole("textbox", { name: "Maximum fee (sats)" })).toHaveValue("63");
     await user.click(payButton());
-    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: MAINNET_INVOICE, via: undefined, network: "mainnet" }]);
+    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: LIVE_MAINNET, via: undefined, network: "mainnet" }]);
     const review = await screen.findByTestId("payment-review");
     expect(review).toHaveTextContent("Pay 2,100 sats over Lightning");
     expect(review).toHaveTextContent("Through My node · fee up to 5 sats");
@@ -470,7 +500,7 @@ describe("paying a request's invoice over Lightning", () => {
   });
 
   it("goes over Lightning when Cashu is off in this chat, even with a mint in common", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 2_100, invoice: MAINNET_INVOICE, mints: [REAL_MINT] }), {
+    const { user, engine } = show(incomingRequest({ amount: 2_100, invoice: LIVE_MAINNET, mints: [REAL_MINT] }), {
       wallet: { mints: [mint(REAL_MINT, 9_000)] }, link: { paymentMethods: { ...ALL_ON, cashu: false } },
     });
     engine.on("walletQuoteInvoice", () => quote());
@@ -480,15 +510,15 @@ describe("paying a request's invoice over Lightning", () => {
   });
 
   it("says test sats for a regtest invoice, and quotes it on the Testnet wallet", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }));
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }));
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000 }));
     await user.click(payButton());
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Pay 250,000 test sats over Lightning");
-    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: REGTEST_INVOICE, via: undefined, network: "testnet" }]);
+    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: LIVE_REGTEST, via: undefined, network: "testnet" }]);
   });
 
   it("says test sats for every fee of a Testnet request: the ceiling, the fee line and a fee above it", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }));
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }));
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000 }));
     const fee = screen.getByRole("textbox", { name: "Maximum fee (test sats)" });
     await user.click(payButton());
@@ -502,7 +532,7 @@ describe("paying a request's invoice over Lightning", () => {
 
   it("shows the Testnet Lightning source for a Testnet request, not the Mainnet one", async () => {
     // One source per network: the review names the one of the request's network.
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "cln-test", alias: "Test node" }) } });
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "cln-test", alias: "Test node" }) } });
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "cln-test" })).on("payRequest", () => undefined);
     await user.click(payButton());
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Through Test node");
@@ -526,19 +556,19 @@ describe("paying a request's invoice over Lightning", () => {
   });
 
   it("drops the red line of a failed attempt once the request is paid", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => { throw new Error("No route"); });
     await user.click(payButton());
     await user.click(await screen.findByRole("button", { name: "Approve payment" }));
     expect(await screen.findByText("No route")).toBeInTheDocument();
     // Paid all the same (another attempt, another device, the payee's own word): the request says Paid, and only that.
-    act(() => engine.update({ payments: { "pay-1": paymentView(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE, state: "settled" })) } }));
+    act(() => engine.update({ payments: { "pay-1": paymentView(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST, state: "settled" })) } }));
     expect(status()).toHaveTextContent(/^Paid$/);
     expect(screen.queryByText("No route")).not.toBeInTheDocument();
   });
 
   it("never approves more than the card says it holds, and says why", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 100_000 }) } });
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 100_000 }) } });
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
     await user.click(payButton());
     const review = await screen.findByTestId("payment-review");
@@ -554,7 +584,7 @@ describe("paying a request's invoice over Lightning", () => {
   });
 
   it("leaves Approve to the node when the card does not say what it holds", async () => {
-    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: LIVE_REGTEST }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
     await user.click(payButton());
     await screen.findByTestId("payment-review");
@@ -591,16 +621,16 @@ describe("taking ecash back", () => {
 
 describe("paying with another wallet", () => {
   it("shows the invoice to scan or copy, and hides it again", async () => {
-    const { user } = show(incomingRequest({ amount: 2_100, invoice: MAINNET_INVOICE }));
+    const { user } = show(incomingRequest({ amount: 2_100, invoice: LIVE_MAINNET }));
     const toggle = screen.getByRole("button", { name: "Pay with another wallet" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(toggle).toHaveTextContent("Hide");
-    expect(screen.getByText(MAINNET_INVOICE)).toBeInTheDocument();
+    expect(screen.getByText(LIVE_MAINNET)).toBeInTheDocument();
     expect(screen.getByText(/Paid from any Lightning wallet/)).toBeInTheDocument();
     await user.click(toggle);
-    expect(screen.queryByText(MAINNET_INVOICE)).not.toBeInTheDocument();
+    expect(screen.queryByText(LIVE_MAINNET)).not.toBeInTheDocument();
   });
 
   it("shows an on-chain request's address, paid after a confirmation", async () => {
@@ -628,5 +658,96 @@ describe("paying with another wallet", () => {
   it("has nothing to show for an ecash-only request", () => {
     show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
     expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
+  });
+});
+
+describe("an expired request", () => {
+  // REGTEST_INVOICE expired in 2017: with no mint in common, its invoice was the only way to pay the request.
+  const expiredInvoice = (patch: Partial<PaymentView> = {}) => ({ kind: "request" as const, amount: 250_000, invoice: REGTEST_INVOICE, ...patch });
+
+  it("says so to the payer, and offers nothing to pay it with, not even its invoice to another wallet", () => {
+    show(incomingRequest(expiredInvoice()), { wallet: { mints: [mint(TEST_MINT, 0)], lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    expect(status()).toHaveTextContent("Expired · ask your contact for a new request");
+    expect(screen.getByTestId("payment-bubble")).toHaveAttribute("data-expired");
+    expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
+  });
+
+  it("says so to the requester, who asks again", () => {
+    show(expiredInvoice({ direction: "out" }));
+    expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
+  it("stays open while ecash of a mint in common still pays it, without handing out the dead invoice", () => {
+    show(incomingRequest(expiredInvoice({ mints: [TEST_MINT] })), { wallet: { mints: [mint(TEST_MINT, 300_000)] } });
+    expect(status()).toHaveTextContent("Waiting for payment");
+    expect(payButton()).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
+  });
+
+  it("stays open on the requester's side while it names a mint the payer may share", () => {
+    show(expiredInvoice({ direction: "out", mints: [TEST_MINT] }));
+    expect(status()).toHaveTextContent("Waiting for payment");
+  });
+
+  it("goes by its target's deadline on other rails: an Ark request past it reads expired on both sides", () => {
+    const lapsed = target({ expiresAt: Date.now() - 1_000 });
+    const { unmount } = show(incomingRequest({ target: lapsed }));
+    expect(status()).toHaveTextContent("Expired · ask your contact for a new request");
+    expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
+    unmount();
+    show({ kind: "request", direction: "out", target: lapsed });
+    expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
+  it("turns expired while it is shown, once its deadline passes", async () => {
+    show(incomingRequest({ target: target({ expiresAt: Date.now() + 300 }) }));
+    expect(status()).toHaveTextContent("Waiting for payment");
+    expect(screen.getByRole("button", { name: "Pay with another wallet" })).toBeInTheDocument();
+    expect(await screen.findByText("Expired · ask your contact for a new request", undefined, { timeout: 3_000 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
+  });
+
+  it("is not called expired while a payment of it is on its way: that one may still have gone through", () => {
+    show(incomingRequest(expiredInvoice()), { wallet: { mints: [], intents: [{ ...reviewOf({ target: target(), amount: 250_000, feeCap: 10, payee: "peer", linkId: "link-1", requestId: "pay-1" }), state: "submitted" }] } });
+    expect(status()).not.toHaveTextContent("Expired");
+  });
+
+  it("is not called expired on the requester's side while the contact's on-chain payment of it waits for a confirmation", () => {
+    const lapsed = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() - 60_000 });
+    const request = paymentView({ kind: "request", direction: "out", target: lapsed });
+    const receipt = paymentView({ id: "pay-2", requestId: "pay-1", target: lapsed, txid: "ab".repeat(32) });
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": receipt } });
+    const { unmount } = renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).not.toHaveTextContent("Expired");
+    expect(screen.getByTestId("payment-bubble")).not.toHaveAttribute("data-expired");
+    unmount();
+    // Once that payment failed, nothing is on its way any more.
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": { ...receipt, state: "failed" } } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
+  // Every bubble reads the engine's state anew on each change (up to 20 a second while a file moves): looking through
+  // every payment for one on its way before the deadline, when it changes nothing, took ~9 ms per state for 30 open
+  // requests in a wallet of 2,000 payments.
+  it("does not look for the contact's payment of a request you sent before its deadline", () => {
+    const onItsWay = vi.spyOn(servicesPlatform!.wallet!, "paymentOnItsWay");
+    try {
+      const open = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() + 60 * 60_000 });
+      show({ kind: "request", direction: "out", target: open });
+      expect(status()).toHaveTextContent("Waiting for payment");
+      for (let i = 0; i < 10; i++) act(() => fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView({ kind: "request", direction: "out", target: open }) } }));
+      expect(onItsWay).not.toHaveBeenCalled();
+    } finally {
+      onItsWay.mockRestore();
+    }
+  });
+
+  it("says it in the app's language", () => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView(expiredInvoice({ direction: "out" })) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
+    expect(status()).toHaveTextContent("Expirado · peça de novo com um novo pedido");
   });
 });

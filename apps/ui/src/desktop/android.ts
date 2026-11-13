@@ -52,6 +52,19 @@ export function heedInterruptedSignIn(invoke: Invoke, listen: Listen): void {
 }
 
 /**
+ * A page that starts lets go of what the page before it held out of sight: the connection service and its wake lock
+ * (`connection_service`), and files held moving (`keep_awake`). Kotlin keeps what a page said last for the whole
+ * process, and a reload (a profile switch, the standby screen after a handoff, Remove this profile here) runs none of
+ * the old page's cleanups; a page that never mounts the app (its lock screen, the standby screen) would never say
+ * otherwise. The app's hooks say on again once a running, unlocked profile wants it (`useStayConnected`,
+ * `useComputerAwake`). Call it before the page renders.
+ */
+export function letGoOfServices(invoke: Invoke): void {
+  void invoke("connection_service", { on: false, links: false }).catch(() => {});
+  void invoke("keep_awake", { on: false, files: false }).catch(() => {});
+}
+
+/**
  * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
  * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`), with no room for them (`noRoom`)
  * or past the most one share brings (`pastLimit`).
@@ -162,17 +175,18 @@ function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
  * says one arrived. The page shows the Share to… picker, as the web app's share target does, from the files' names
  * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them. At most a paste's
  * size in all: a file that would pass it is left out, and named, as are those Android did not copy. A share taken
- * later wins over one that waits. Once read (or none of it taken, or a later share took its place before it was
- * read), the share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs. Rust hands
+ * later wins over one that waits in the picker; one sent to a chat waits for that chat's composer, whatever comes
+ * after it. Once read (or none of it taken, or a later share took its place in the picker), the share's copies in the
+ * app's cache go (`incoming_share_done`): the page holds what it needs. Rust hands
  * a share over once, so one that waits when the page restarts (a profile switch, `carryIncomingShare`) is kept for the
  * next page in session storage, its tokens with it (the shelf lasts as long as the process); one not kept goes with
  * the page, its copies too.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
-  /** Lets the copies of the share that waits to be read go. */
+  /** Lets the copies of the share that waits in the picker go. */
   let letGo: (() => void) | null = null;
-  /** The share that waits was kept for the next page: its copies stay when this one goes. */
-  let carried = false;
+  /** Let the copies of each share not read yet go (in the picker, or sent to a chat): they go with the page, unless kept. */
+  const withPage = new Set<() => void>();
   const receive = (shared: Shared) => {
     const taken = withinPasteTotal(shared.files);
     const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
@@ -194,6 +208,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
     const done = () => {
       if (!held) return;
       held = false;
+      withPage.delete(done);
       void invoke("incoming_share_done", { tokens: shared.files.map((file) => file.token) }).catch(() => {});
     };
     const share: IncomingShare = {
@@ -218,10 +233,13 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
         // Its copies already let go: nothing of it would read on the next page.
         if (clips.length && !held) return false;
         sessionStorage.setItem(CARRIED_SHARE_KEY, JSON.stringify(shared));
-        carried = true;
+        withPage.delete(done);
         return true;
       },
+      // Out of the picker, waiting for the chat's composer: a later share no longer lets these go under it.
+      sent: () => { if (letGo === done) letGo = null; },
     };
+    withPage.add(done);
     if (!clips.length) done();
     // An empty share is dropped, and never takes the place of the one that waits.
     if (!isEmptyShare(share)) {
@@ -236,7 +254,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
     if (shared) receive(shared);
   };
   // The page goes (a reload, the app closing): a share it never read takes its copies with it, unless it was kept.
-  addEventListener("pagehide", () => { if (!carried) letGo?.(); });
+  addEventListener("pagehide", () => withPage.forEach((letItGo) => letItGo()));
   void listen("incoming-share", () => void take().catch(() => {})).catch(() => {});
   // The share the page before this one kept first: one Rust holds is newer, and takes its place.
   const kept = takeCarriedShare();

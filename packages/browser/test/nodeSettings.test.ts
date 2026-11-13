@@ -483,6 +483,24 @@ describe("shared services", () => {
     expect(node.getState().services[0]).toMatchObject({ requests: 1, sharedWith: [] });
   });
 
+  it("a contact's requests send one state a second with their count, not one each", async () => {
+    const { node, events } = engine();
+    const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });
+    const alice = createIdentity().pubKeyZ32;
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    await vi.waitFor(() => expect(events.onState).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    events.onState.mockClear();
+    vi.useFakeTimers();
+    for (let i = 0; i < 200; i++) {
+      node["hostedService"](serviceId, alice);
+      vi.advanceTimersByTime(5);
+    }
+    vi.advanceTimersByTime(1_100);
+    expect(events.onState.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(events.onState.mock.lastCall?.[0].services[0]).toMatchObject({ requests: 200 });
+  });
+
   it("sharing twice or switching to the same state writes nothing", async () => {
     const { node } = engine();
     const { serviceId } = node.addService({ name: "App", target: "localhost:3000" });

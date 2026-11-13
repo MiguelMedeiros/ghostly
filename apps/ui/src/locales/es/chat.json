@@ -241,7 +241,6 @@
     "newOne": "1 mensaje nuevo, desplazar al final"
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
-  "lastSeen": "Última vez {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -314,7 +313,7 @@
   "online": "en línea",
   "options": "Opciones",
   "payments": {
-    "needLive": "Los pagos necesitan una conexión directa",
+    "needLive": "Enviar necesita a tu contacto en línea: el ecash nunca espera en una cola. Una solicitud puede esperar a que vuelva.",
     "noWallet": "Tu contacto aún no tiene monedero",
     "off": "Desactivado en este chat: activa una forma en Aceptar",
     "offOrOld": "Tu contacto tiene los pagos desactivados en este chat o necesita actualizar Ghostly"
@@ -394,6 +393,7 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
+    "notCopied": "No copiado",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toca para mostrarlo",
@@ -483,7 +483,6 @@
     "showTranslation": "Ver traducción",
     "translate": "Traducir"
   },
-  "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",

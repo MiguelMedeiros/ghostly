@@ -112,4 +112,28 @@ describe("a group frame's wait", () => {
     await vi.advanceTimersByTimeAsync(500);
     await expect(wait).resolves.toBe(0);
   });
+
+  // A member removed while away types as it comes back, before it is told: no edge takes it, and once told it never
+  // goes. The wait sat its whole time, then said "it stays in the group and goes when one opens" and exited 4.
+  it("ends when it learns it is out of the group while it waits", async () => {
+    vi.useFakeTimers();
+    for (const which of [undefined, 2, { reaction: 1 }, { pin: 1 }]) {
+      for (const profile of ["mesh", "community"]) {
+        const groups = [{ id: "g1", profile, status: "active", members: [me, ana] }];
+        let error: unknown;
+        void waitForGroupFrame(fake("daemon", [], groups), "g1", "mine:0:2", which, 30_000).catch((caught: unknown) => { error = caught; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(error).toBeUndefined();
+        Object.assign(groups[0], { status: "removed", statusReason: "You were removed from this group" });
+        await vi.advanceTimersByTimeAsync(500);
+        expect(error).toMatchObject({ code: "refused", message: "You were removed from this group: no member took it, and it no longer goes", details: { messageId: "mine:0:2" } });
+      }
+    }
+  });
+
+  it("still waits in a community that lost its place and asks to be let in again", async () => {
+    vi.useFakeTimers();
+    const groups = [{ id: "g1", profile: "community", status: "lost", statusReason: "Asking to be let in again…", members: [me, ana] }];
+    expect(await timedOut(waitForGroupFrame(fake("daemon", [], groups), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({ code: "timeout" });
+  });
 });

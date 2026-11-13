@@ -1,7 +1,7 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
-import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
+import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
@@ -393,6 +393,7 @@ const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-sa
 
 interface PausedRequest {
   requestId: string;
+  resourceType?: string;
   request: {
     url: string;
     method: string;
@@ -472,8 +473,8 @@ async function closeLeftoverViewers(): Promise<void> {
     const kept = await chrome.storage.local.get(null);
     const targets = await chrome.debugger.getTargets();
     const unbound = async (tabId: number) => !(await bindingOf(tabId));
-    // A tab still at a contact's app address with no binding is one too, recorded or not.
-    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && parseViewerUrl(target.url)).map((target) => target.tabId!));
+    // A tab still on a contact's app's origin with no binding is one too, recorded or not.
+    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && isViewerOrigin(target.url)).map((target) => target.tabId!));
     for (const key of Object.keys(kept)) {
       const tabId = boundTab(key);
       if (tabId === null) continue;
@@ -569,6 +570,27 @@ function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string
 
 const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline", "unknown-peer"]);
 
+/** The types a tab shows as a page; Chrome saves any other as a file. */
+const SHOWN_TYPES = new Set([
+  "text/html", "text/plain", "text/css", "text/javascript", "text/xml", "application/xml", "application/xhtml+xml", "application/json", "application/javascript",
+  "image/svg+xml", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+]);
+
+/**
+ * Whether Chrome would show this answer to a page's navigation, not save it as a file. The sandbox keeps a contact's
+ * page from starting a download, but it comes with a document: the tab's own navigation to the app (`openViewer`, a
+ * reload, back) has none, so an answer it would save is shown as the error page, as Desktop and the web view save no
+ * file a contact's app sends. Fail closed: no type, an unknown one, several, or a disposition other than inline.
+ */
+function shownAsPage(status: number, headers: [string, string][]): boolean {
+  const named = (name: string) => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+  if (status === 204 || status === 205 || (status >= 300 && status < 400 && named("location").length)) return true;
+  if (named("content-disposition").some((value) => value.split(";")[0].trim().toLowerCase() !== "inline")) return false;
+  const types = named("content-type").flatMap((value) => value.split(","));
+  return types.length === 1 && SHOWN_TYPES.has(types[0].split(";")[0].trim().toLowerCase());
+}
+
 async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   const binding = await bindingOf(tabId);
   // Not a tab this worker opened, or not any more: no command goes to it. Chrome only sends events from a
@@ -610,6 +632,9 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
+  }
+  if (reply.ok && paused.resourceType === "Document" && !shownAsPage(reply.status, viewerResponseHeaders(reply.headers))) {
+    reply = { ok: false, code: "download", message: "The app answered a page with a file to save" };
   }
 
   if (reply.ok) {
@@ -654,7 +679,11 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     // Once the tab leaves the virtual origin there is nothing left to serve, and it is no viewer any more.
     const { frame } = params as { frame: { parentId?: string; url: string } };
     if (frame.parentId || frame.url === "about:blank" || parseViewerUrl(frame.url)) return;
-    void forget(tabId).then(() => chrome.debugger.detach({ tabId }).catch(() => {}));
+    // Still the app's origin at an address no closer finds (a `blob:` it made): the app goes with the tab.
+    const close = isViewerOrigin(frame.url);
+    void forget(tabId)
+      .then(() => chrome.debugger.detach({ tabId }).catch(() => {}))
+      .then(() => (close ? chrome.tabs.remove(tabId).catch(() => {}) : undefined));
   }
 });
 
