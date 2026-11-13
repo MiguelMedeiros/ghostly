@@ -1629,7 +1629,7 @@ export class Apps {
     for (const url of urls) {
       try {
         const kept = expect?.digest !== undefined ? this.staged.get(stagedKey(expect.digest, url, fromStore)) : undefined;
-        const { bundle, bytes } = kept && this.now() - kept.at <= STAGED.ms ? kept : await this.fetchBundle(url);
+        const { bundle, bytes } = kept && this.checkedWithin(kept.at, STAGED.ms) ? kept : await this.fetchBundle(url);
         const version = versionOf(bundle.manifest, bundle.digest);
         if (expect) {
           if (version.ref !== expect.ref) fail("other-app", "The URL holds another app");
@@ -1643,10 +1643,13 @@ export class Apps {
     throw last instanceof Error ? last : new Error(String(last));
   }
 
-  /** Drops the staged bundles past `STAGED.ms`, and comes back when the oldest left is due. */
+  /**
+   * Drops the staged bundles past `STAGED.ms` (or staged while the clock ran ahead), and comes back when the oldest left
+   * is due: within `STAGED.ms`, as every one left was staged less than that ago.
+   */
   private sweepStaged(): void {
     this.sweep = null;
-    for (const [key, s] of this.staged) if (this.now() - s.at >= STAGED.ms) this.staged.delete(key);
+    for (const [key, s] of this.staged) if (!this.checkedWithin(s.at, STAGED.ms)) this.staged.delete(key);
     const oldest = this.staged.values().next().value;
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
@@ -1672,7 +1675,7 @@ export class Apps {
     const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
-    for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
+    for (const [d, s] of this.staged) if (!this.checkedWithin(s.at, STAGED.ms)) this.staged.delete(d);
     const stage = stagedKey(digest, from, fromStore);
     this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
@@ -1701,7 +1704,7 @@ export class Apps {
    * bundle waits.
    */
   async install({ stage, digest, grant, asks }: { stage?: string; digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> {
-    const live = [...this.staged].filter(([key, s]) => s.bundle.digest === digest && (stage === undefined || key === stage) && this.now() - s.at <= STAGED.ms);
+    const live = [...this.staged].filter(([key, s]) => s.bundle.digest === digest && (stage === undefined || key === stage) && this.checkedWithin(s.at, STAGED.ms));
     if (live.length > 1) fail("screens", "This app was fetched from more than one place; install it from its screen");
     const [key, staged] = live[0] ?? [stage ?? ""];
     if (!staged) { this.staged.delete(key); fail("expired", "Fetch the app again"); }

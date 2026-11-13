@@ -55,4 +55,30 @@ describe("previewed bundles", () => {
     store.stop();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("one fetched while the clock ran ahead is not installed once the clock is set back", async () => {
+    let now = NOW_MS + 2 * 24 * 60 * MINUTE;
+    const store = apps(net, { now: () => now });
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { stage } = await store.preview({ url: BUNDLE_URL });
+    now = NOW_MS + 60 * MINUTE;
+    await expect(store.install({ stage, digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^expired/);
+    store.stop();
+  });
+
+  it("one fetched with the clock a month ahead goes at its sweep once the clock is set back, with no timer left", async () => {
+    let now = NOW_MS + 30 * 24 * 60 * MINUTE;
+    const store = apps(net, { now: () => now });
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await store.preview({ url: BUNDLE_URL });
+    now = NOW_MS;
+    await vi.advanceTimersByTimeAsync(10 * MINUTE + 200);
+    expect(held(store)).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    store.stop();
+  });
 });
