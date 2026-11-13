@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView, WalletView } from "@ghostly/browser/shared/types";
 import { MessageInput } from "../../components/MessageInput";
@@ -165,7 +165,7 @@ describe("choosing what this chat accepts", () => {
     // The only Cashu and USDT cards are off, so those ways are off in this chat. A network this profile has no card of
     // (Testnet Cashu, Mainnet USDT) keeps its place in the list, for when the way is turned on again.
     expect(onSaveMethods).toHaveBeenCalledWith({ methods: { ...ALL_METHODS_ON, cashu: false, usdt: false }, networks: { ...BOTH_ON, cashu: ["testnet"], usdt: ["mainnet"] } });
-    expect(await screen.findByText("Saved: Alice knows now.")).toBeInTheDocument();
+    await waitFor(() => expect(status()).toHaveTextContent("Saved: Alice knows now."));
     expect(save()).toBeDisabled();
     // Pay shows what is left on.
     await user.click(mode("pay"));
@@ -183,7 +183,7 @@ describe("choosing what this chat accepts", () => {
     await user.keyboard(" ");
     await user.keyboard("{Enter}");
     await user.click(save());
-    await screen.findByText("Saved: Alice knows now.");
+    await waitFor(() => expect(status()).toHaveTextContent("Saved: Alice knows now."));
     expect(onSend).not.toHaveBeenCalled();
     expect(onRequest).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -252,7 +252,7 @@ describe("choosing what this chat accepts", () => {
     expect(hint()).toHaveTextContent("Cashu is on here. It works when Alice has it on too.");
     await user.click(accept("lightning-mainnet"));
     await user.click(save());
-    expect(await screen.findByText("Saved: Alice is told when you next connect.")).toBeInTheDocument();
+    await waitFor(() => expect(status()).toHaveTextContent("Saved: Alice is told when you next connect."));
   });
 
   it("shows why saving failed and keeps what was chosen", async () => {

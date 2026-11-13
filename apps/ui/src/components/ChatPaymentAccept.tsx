@@ -9,6 +9,7 @@ import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { fillNames } from "../lib/fillNodes";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
 export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
@@ -70,17 +71,18 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   const card = cards.find((c) => c.id === active);
   /** What a card's switch does, as a screen reader says it: "Accept Cashu (Testnet) from Alice". */
   const label = (card: InstanceCard) => t("payments.accept.card", { card: t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" }), name: contact });
+  // The card's and the contact's names are each their own <bdi>, as on Pay.
   const hint = (card: InstanceCard) => {
-    const params = { card: card.network === "testnet" ? `Testnet ${card.name}` : card.name, name: contact };
-    if (!draft[card.id]) return t("payments.accept.hint.off", params);
-    if (!on(card, saved)) return t("payments.accept.hint.onceSaved", params);
+    const names = { card: card.network === "testnet" ? `Testnet ${card.name}` : card.name, name: contact };
+    if (!draft[card.id]) return fillNames(t("payments.accept.hint.off"), names);
+    if (!on(card, saved)) return fillNames(t("payments.accept.hint.onceSaved"), names);
     const said = theirs(card);
-    return t(said === "on" ? "payments.accept.hint.both" : said === "off" ? "payments.accept.hint.theyOff" : "payments.accept.hint.unknown", params);
+    return fillNames(t(said === "on" ? "payments.accept.hint.both" : said === "off" ? "payments.accept.hint.theyOff" : "payments.accept.hint.unknown"), names);
   };
   const state = error ? "error" : busy ? "saving" : changed ? "changed" : done ? "saved" : "idle";
   const status = state === "error" ? undefined
-    : state === "changed" || state === "saving" ? t("payments.accept.status.changed", { name: contact })
-    : state === "saved" ? t(connected ? "payments.accept.status.savedLive" : "payments.accept.status.savedLater", { name: contact })
+    : state === "changed" || state === "saving" ? fillNames(t("payments.accept.status.changed"), { name: contact })
+    : state === "saved" ? fillNames(t(connected ? "payments.accept.status.savedLive" : "payments.accept.status.savedLater"), { name: contact })
     : t("payments.accept.status.idle");
   const saveRef = useRef<HTMLButtonElement>(null);
 
