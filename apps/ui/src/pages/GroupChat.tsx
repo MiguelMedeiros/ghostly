@@ -202,11 +202,31 @@ function namelessEvent(event: StoredMessage["event"], text: string, t: Translate
 }
 
 /**
+ * A name in a membership line, between two private-use characters (as `NAME_SLOT` is), for `eventLine` to draw as its
+ * own <bdi>. Not FSI … PDI: a name told apart by its key's end has its own isolates already.
+ */
+const NAMED = /([^]*)/;
+const NAMED_PARAMS = new Set(["name", "by", "group"]);
+/** `t` for membership lines: each name it is given (a member's, the admin's who removed, the group's) set apart. */
+function namesApart(t: Translate): Translate {
+  const apart = (value: string | number) => typeof value === "string" && value !== NAME_SLOT ? `${value.replace(/[]/g, "")}` : value;
+  return Object.assign((key: Parameters<Translate>[0], params?: Record<string, string | number>) =>
+    t(key, params && Object.fromEntries(Object.entries(params).map(([k, v]) => [k, NAMED_PARAMS.has(k) ? apart(v) : v]))), { language: t.language });
+}
+/**
+ * A line's names, each its own <bdi>: one the person gave (Latin in an Arabic line, Arabic in an English one) keeps its
+ * own direction, so the punctuation or emoji at its end stays on its side ("Bob!", not "!Bob").
+ */
+const namedNodes = (text: string): ReactNode => text.split(NAMED).map((part, i) => i % 2 ? <bdi key={i}>{part}</bdi> : part);
+
+/**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
- * the shape the engine writes. Any other text (a reason the core gave) is shown as it is.
+ * the shape the engine writes. Any other text (a reason the core gave) is shown as it is. Its names are set apart
+ * (`namesApart`), for `eventLine`.
  */
 function eventText(message: StoredMessage, group: GroupView, t: Translate, nameSlot?: string): string {
+  const say = namesApart(t);
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
   // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
@@ -216,7 +236,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
   if (message.event === "gone" && message.member && message.by && !me) {
     const name = authorName(group, message.member, t);
     const byMe = message.by === group.myKey || !!group.members.find(m => m.key === message.by)?.me;
-    return byMe ? t("group.event.goneByYou", { name }) : t("group.event.goneBy", { by: authorName(group, message.by, t), name });
+    return byMe ? say("group.event.goneByYou", { name }) : say("group.event.goneBy", { by: authorName(group, message.by, t), name });
   }
   // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
@@ -228,13 +248,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
     // The name stored, in a community told apart from a member's of the same name by the end of its key (`formerName`).
     const nameOf = (stored: string) => message.member && !me ? othersName(formerName(group, message.member, writtenName(stored, t)), t) : writtenName(stored, t);
     const gone = " is no longer a member";
-    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
+    if (message.event === "gone" && text.endsWith(gone)) return say("group.event.gone", { name: nameOf(text.slice(0, -gone.length)) });
     const left = " left";
-    if (message.event === "left" && text.endsWith(left)) return t("group.event.left", { name: nameOf(text.slice(0, -left.length)) });
+    if (message.event === "left" && text.endsWith(left)) return say("group.event.left", { name: nameOf(text.slice(0, -left.length)) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
     // line does, in the shape the engine writes. Said again in the interface's language with that name; a change that
     // credits nobody, without one.
-    const written = message.member ? writtenEvent(message.event, text, t, nameOf) : namelessEvent(message.event, text, t);
+    const written = message.member ? writtenEvent(message.event, text, say, nameOf) : namelessEvent(message.event, text, say);
     if (written) return written;
     // My own removal or fork: the core's reason ("Member … holds a different membership history for epoch 4. …") is
     // English, and its detail is the notice's (behind its ⓘ). The line says what happened, from its kind.
@@ -246,22 +266,22 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate, nameS
   const shown = nameSlot ?? (member ? memberName(member, t, sameNamed(group.members)) : authorName(group, message.member!, t));
   // A member who named themselves as the app calls me is quoted (`othersName`): "“You” joined" is not my "You joined.".
   const name = me || nameSlot ? shown : othersName(shown, t);
-  if (message.event === "joined") return t("group.event.joined", { name });
+  if (message.event === "joined") return say("group.event.joined", { name });
   // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
   // what happened to me in its own words.
-  if (message.event === "gone") return me ? t("group.event.removed") : t("group.event.gone", { name });
-  if (message.event === "left" && !me) return t("group.event.left", { name });
-  if (message.event === "admin") return me ? t("group.event.adminYou") : t("group.event.admin", { name });
+  if (message.event === "gone") return me ? t("group.event.removed") : say("group.event.gone", { name });
+  if (message.event === "left" && !me) return say("group.event.left", { name });
+  if (message.event === "admin") return me ? t("group.event.adminYou") : say("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");
     if (me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
-    return removed ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
+    return removed ? say("group.event.pictureRemoved", { name }) : say("group.event.pictureChanged", { name });
   }
   const marker = " renamed the group to “";
   const renamed = message.event === "renamed" ? text.indexOf(marker) : -1;
   if (renamed >= 0 && text.endsWith("”")) {
     const group = text.slice(renamed + marker.length, -1);
-    return me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
+    return me ? say("group.event.renamedYou", { group }) : say("group.event.renamed", { name, group });
   }
   return text;
 }
@@ -275,10 +295,10 @@ const NAME_SLOT = "";
  */
 function eventLine(message: StoredMessage, group: GroupView, t: Translate): ReactNode {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
-  if (!member || member.me || member.role !== "admin" || message.event === "admin") return eventText(message, group, t);
+  if (!member || member.me || member.role !== "admin" || message.event === "admin") return namedNodes(eventText(message, group, t));
   const [before, after, ...more] = eventText(message, group, t, NAME_SLOT).split(NAME_SLOT);
-  if (after === undefined || more.length) return eventText(message, group, t);
-  return <>{before}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{after}</>;
+  if (after === undefined || more.length) return namedNodes(eventText(message, group, t));
+  return <>{namedNodes(before)}<bdi>{othersName(memberName(member, t, sameNamed(group.members)), t)}</bdi> <AdminMark testId="group-event-admin" />{namedNodes(after)}</>;
 }
 
 /**
