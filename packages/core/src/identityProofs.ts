@@ -228,6 +228,11 @@ export interface SharedIdentity {
   id: string;
   provider: string;
   subject: string;
+  /**
+   * The identity the contact keeps it under (the provider's verified subject: an OIDC binding names the issuer, its
+   * account is the issuer and `sub`). Absent in older ledgers.
+   */
+  account?: string;
   /** queued: the person chose to share, the contact is not connected yet. */
   status: "queued" | "pending" | "accepted" | "rejected" | "withdrawal-pending" | "withdrawn";
   /** Seconds. When the status last changed. */
@@ -270,7 +275,8 @@ export interface IdentityLedger {
 }
 export const emptyIdentityLedger = (): IdentityLedger => ({ challenges: [], shared: [], received: [] });
 
-export interface LocalIdentityProof { statement: IdentityStatement; evidence: unknown; seed: Uint8Array }
+/** `account`: the subject its provider verified (`VerifiedIdentity.subject`); the binding's subject when not given. */
+export interface LocalIdentityProof { statement: IdentityStatement; evidence: unknown; seed: Uint8Array; account?: string }
 
 export interface IdentityExchangeOptions {
   /** This side's view of the authenticated channel; throws when there is none. */
@@ -428,7 +434,7 @@ export class IdentityExchange {
     const local = await this.options.localProof(id);
     if (!local) throw new Error("That identity is no longer in your profile");
     const { provider, subject } = local.statement.binding;
-    const entry: SharedIdentity = { id, provider, subject, status: "queued", at: this.now() };
+    const entry: SharedIdentity = { id, provider, subject, account: local.account ?? subject, status: "queued", at: this.now() };
     await this.setShared(entry, { type: "shared", side: "mine", proof: id, provider, subject });
     if (connected) this.request(entry);
   }
@@ -525,9 +531,12 @@ export class IdentityExchange {
           const error = ok ? undefined : typeof frame.error === "string" && CONTACT_REFUSALS.has(frame.error) ? frame.error : CONTACT_REFUSED;
           const entry: SharedIdentity = { ...s, status: ok ? "accepted" : "rejected", at: this.now(), error };
           // The contact keeps one proof per identity (onPresent): the one it accepted replaced any other of the same
-          // provider and subject it held from here, so that one is no longer shared in this chat.
+          // provider and verified identity it held from here, so that one is no longer shared in this chat. Matched on
+          // the account, not the binding's subject (two OIDC accounts at one issuer are two identities there); one whose
+          // account this side does not know stays shared, so Stop sharing still reaches it.
           // Its share stops on the timeline too, as the contact's does (onPresent).
-          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider && x.subject === s.subject;
+          const replaced = (x: SharedIdentity) => ok && x.status === "accepted" && x.provider === s.provider &&
+            x.account !== undefined && x.account === s.account;
           await this.options.storage.update(l => l.shared.filter(x => x.id !== s.id && replaced(x)).reduce(
             (out, x) => this.log(out, { type: "stopped", side: "mine", proof: x.id, provider: x.provider, subject: x.subject, reason: "withdrawn" }),
             this.log({ ...l, shared: [

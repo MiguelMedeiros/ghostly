@@ -299,7 +299,7 @@ export class EventHub {
       if (next > before + 1 && before < this.dropped)
         out.push({ seq: before, id: `events.gap:${before}:${next}`, type: "events.gap", at: this.now(), from: before + 1, to: Math.min(this.dropped, next - 1) });
     };
-    if (existsSync(this.journalPath)) for (const line of journalTail(this.journalPath).lines) {
+    if (existsSync(this.journalPath)) for (const line of journalAfter(this.journalPath, since)) {
       let event: GhostlyEvent;
       try { event = JSON.parse(line) as GhostlyEvent; } catch { continue; /* torn */ }
       if (event.seq <= before) continue;
@@ -563,12 +563,14 @@ export class EventHub {
 
   private stateChanged(state: EngineState): void {
     const quiet = !this.baselined;
+    // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
+    // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
     for (const [id, link] of links) {
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("chat.created", `chat.created:${id}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
+      if (!before) { this.emit("chat.created", `chat.created:${id}:${this.now()}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
       if (shape.stage && shape.stage !== before.stage) {
         const progress = link.pairingProgress;
         this.emit("chat.pairing", `chat.pairing:${id}:${shape.stage}:${progress?.since ?? this.now()}`, {
@@ -595,7 +597,7 @@ export class EventHub {
     const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
     for (const id of removedChats) {
       this.chats.delete(id);
-      if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
+      if (!quiet) this.emit("chat.removed", `chat.removed:${id}:${this.now()}`, { chat: id });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.
     const chatsGone = new Set(removedChats);
@@ -605,7 +607,7 @@ export class EventHub {
       const shape = groupShape(group), before = this.groups.get(id);
       this.groups.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("group.created", `group.created:${id}`, { group: id, summary: groupJson(group) }); continue; }
+      if (!before) { this.emit("group.created", `group.created:${id}:${this.now()}`, { group: id, summary: groupJson(group) }); continue; }
       if (shape.status !== before.status) this.emit("group.status", `group.status:${id}:${shape.status}:${this.now()}`, { group: id, status: shape.status });
       const joined = shape.members.filter((key) => !before.members.includes(key));
       const left = before.members.filter((key) => !shape.members.includes(key));
@@ -625,7 +627,7 @@ export class EventHub {
     const removedGroups = [...this.groups.keys()].filter((id) => !groups.has(id));
     for (const id of removedGroups) {
       this.groups.delete(id);
-      if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
+      if (!quiet) this.emit("group.removed", `group.removed:${id}:${this.now()}`, { group: id });
     }
     // A group left or forgotten: the same.
     const groupsGone = new Set(removedGroups);
@@ -790,7 +792,7 @@ export class EventHub {
     let twinLines: ReadonlyMap<string, string> | undefined;
     const twins = () => twinLines ??= group
       ? groupPayTwins(messages, new Map(messages.flatMap((m) => (m.groupPay ? [[m.groupPay.id, m.groupPay] as const] : []))), this.state?.payments ?? {},
-        this.state?.groups.find((g) => g.id === group)?.myKey)
+        this.state?.groups.find((g) => g.id === group))
       : new Map();
     for (const message of messages) {
       present.add(message.id);
@@ -1075,6 +1077,70 @@ function journalTail(path: string): { lines: string[]; size: number } {
   return { lines: bytes.toString("utf8", start).split("\n").filter((line) => line.trimStart()), size };
 }
 
+/** What `journalAfter` reads first from the journal's end; each read further back is twice the last. */
+const REPLAY_CHUNK = 64 * 1024;
+/** The bytes of a line's start that hold its seq (`seqAt`), and how they begin. */
+const SEQ_PREFIX = 32;
+const SEQ_START = Buffer.from('{"seq":');
+
+/**
+ * The journal's lines after `since`, within its last `JOURNAL_MAX_BYTES`, as `journalTail` gives them: its end is read
+ * back in growing chunks, each line's seq taken from its `{"seq":N` start (as each event is written), until a line at or
+ * before `since`; only what follows it is made into text. A line with no seq there (blanked by `forget`, torn) is passed
+ * over and given, as `journalTail` gives it.
+ */
+function journalAfter(path: string, since: number): string[] {
+  const fd = openSync(path, "r");
+  const read = (from: number, to: number) => {
+    const bytes = Buffer.alloc(to - from);
+    let done = 0;
+    while (done < bytes.length) {
+      const n = readSync(fd, bytes, done, bytes.length - done, from + done);
+      if (!n) break;
+      done += n;
+    }
+    return bytes.subarray(0, done);
+  };
+  try {
+    const size = fstatSync(fd).size;
+    // From one byte before the cut, as `journalWindow` reads: a line that begins exactly at it is kept whole.
+    const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    // A cursor before the journal's first event (`listen --since 0`, `events`): all of it, with nothing to look for.
+    if (cut === 0 && (seqAt(read(0, Math.min(size, SEQ_PREFIX)), 0) ?? -1) > since) return journalTail(path).lines;
+    // Where the earliest line checked begins in the file: it and every line after it are past `since`, or have no seq.
+    let after = size, found = false, from = size, chunk = REPLAY_CHUNK;
+    // What was read, the earliest first. Each chunk reads the start of the one after it too: a line that begins near
+    // its end has its seq there.
+    const chunks: Buffer[] = [];
+    while (from > cut && !found) {
+      const next = Math.max(cut, from - chunk), bytes = read(next, Math.min(size, from + SEQ_PREFIX));
+      chunks.unshift(bytes.subarray(0, Math.min(bytes.length, from - next)));
+      for (let newline = bytes.lastIndexOf(0x0a, from - next - 1); newline !== -1; newline = newline > 0 ? bytes.lastIndexOf(0x0a, newline - 1) : -1) {
+        const seq = seqAt(bytes, newline + 1);
+        if (seq !== undefined && seq <= since) { found = true; break; }
+        after = next + newline + 1;
+      }
+      // The file's first line, which no newline comes before. Past the window, the line it cut is not whole: left out.
+      if (!found && next === 0 && (seqAt(bytes, 0) ?? Infinity) > since) after = 0;
+      from = next;
+      chunk *= 2;
+    }
+    const bytes = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
+    return bytes.toString("utf8", after - from).split("\n").filter((line) => line.trimStart());
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The seq a journal line begins with (`{"seq":N,` or `{"seq":N}`), read from its first bytes, never made into text. */
+function seqAt(bytes: Buffer, at: number): number | undefined {
+  for (let i = 0; i < SEQ_START.length; i++) if (bytes[at + i] !== SEQ_START[i]) return undefined;
+  let seq = 0, i = at + SEQ_START.length;
+  const end = Math.min(bytes.length, at + SEQ_PREFIX);
+  for (; i < end && bytes[i] >= 0x30 && bytes[i] <= 0x39; i++) seq = seq * 10 + bytes[i] - 0x30;
+  return i > at + SEQ_START.length && (bytes[i] === 0x2c || bytes[i] === 0x7d) ? seq : undefined;
+}
+
 /**
  * What opening needs of the journal: its last seq, its number of lines (as `journalTail` counts them) and its size. The
  * lines are counted by their bytes and only the last whole one is made into text.
@@ -1107,8 +1173,7 @@ function journalEnd(path: string): { seq: number; first: number | undefined; lin
   if (bytes.length > start && bytes[bytes.length - 1] !== 0x0a) {
     const from = Math.max(start, bytes.lastIndexOf(0x0a) + 1);
     // Only the start of a cut line is made into text, for the seq it names.
-    const named = /^\{"seq":(\d+)[,}]/.exec(bytes.toString("latin1", from, Math.min(bytes.length, from + 32)))?.[1];
-    tail = { at: size - bytes.length + from, whole: read === from, seq: named === undefined ? undefined : Number(named) };
+    tail = { at: size - bytes.length + from, whole: read === from, seq: seqAt(bytes, from) };
   }
   return { seq, first, lines, size, tail };
 }

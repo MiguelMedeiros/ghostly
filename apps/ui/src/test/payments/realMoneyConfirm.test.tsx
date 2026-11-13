@@ -34,7 +34,7 @@ describe("a Lightning invoice in a message", () => {
     expect(within(card).getByTestId("invoice-network")).toHaveTextContent("Real money");
     await user.click(within(card).getByTestId("invoice-pay"));
     await user.click(await within(card).findByTestId("invoice-confirm"));
-    expect(confirmStep()).toHaveTextContent("Real money. This sends 2,100 sats (plus a fee of up to 3) that cannot be taken back");
+    expect(confirmStep()).toHaveTextContent("Real money. This sends 2,100 sats (plus a fee of up to 3 sats) that cannot be taken back");
     expect(engine.callsTo("walletPayQuote")).toEqual([]);
     await user.click(screen.getByTestId("review-confirm-back"));
     expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();

@@ -241,7 +241,6 @@
     "newOne": "1 条新消息，滚动到底部"
   },
   "keyChanged": "此聊天已停止：你联系人的密钥已更改。",
-  "lastSeen": "最后上线 {{time}}",
   "listTime": {
     "days": "{{count}}天",
     "hours": "{{count}}小时",
@@ -394,6 +393,7 @@
     "copyCode": "复制代码",
     "hiddenChars": "这段代码包含隐藏字符或改变文字方向的字符，显示为 {{marker}}。复制代码时也会一并复制它们。",
     "localTime": "你的时间 {{time}}",
+    "notCopied": "未复制",
     "showAll": "显示全部",
     "showLess": "收起",
     "spoiler": "隐藏的文字。点按显示",
@@ -483,7 +483,6 @@
     "showTranslation": "显示译文",
     "translate": "翻译"
   },
-  "typeMessage": "输入消息...",
   "typing": "正在输入…",
   "typingRecording": "正在录音…",
   "typingThinking": "正在思考…",

@@ -436,12 +436,23 @@ export function pendingSwitch(): PendingSwitch | null {
 export function clearPendingSwitch(): void {
   try { sessionStorage.removeItem(SWITCH_KEY); } catch { /* nothing kept */ }
 }
+/**
+ * Says a switch to profile `id` is under way: the overlay (ProfileSwitchSplash) covers this page now, and the page that
+ * loads next takes it over until that profile has something to show. Nothing for a profile the registry does not list.
+ */
+export function announceSwitch(id: string, avatar?: string): void {
+  const target = read().profiles.find((p) => p.id === id);
+  if (!target) return;
+  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar, at: Date.now() };
+  try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
+  window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+}
 
 /**
  * Makes another profile the active one and restarts the app, so no peer, wallet or timer of the old
  * profile keeps running beside the new one. Contacts of the old profile see it go offline. The profile
  * left keeps its place; the one opened goes back to its own (`route` overrides it, e.g. a new profile's
- * page). Its lock, if it has one, asks for the password before anything of it shows.
+ * page), or to its Share to… picker when a share goes along. Its lock, if it has one, asks for the password before anything of it shows.
  */
 export function switchProfile(id: string, options: { route?: string; avatar?: string } = {}): void {
   const registry = read();
@@ -451,10 +462,10 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   if (id === activeProfileId()) return;
   // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
   if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
-  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
-  try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
-  window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
-  // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker.
+  announceSwitch(id, options.avatar);
+  // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker. Only that
+  // page asks the web app's worker for it (`askForShare`): on any other route, a tapped notice's chat or a new
+  // profile's page, it would be dropped without a word.
   const shareKept = carryIncomingShare();
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
   // then this page stays the old profile under it (whatever re-renders reads the registry), so the new one
@@ -462,7 +473,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   setTimeout(() => {
     write({ ...read(), active: id }, false);
     // Not through the router: the old profile would try to open the new one's chat first.
-    window.history.replaceState(null, "", `#${options.route ?? (shareKept ? "/shared" : lastRouteOf(id))}`);
+    window.history.replaceState(null, "", `#${shareKept ? "/shared" : options.route ?? lastRouteOf(id)}`);
     window.location.reload();
   }, 80);
 }

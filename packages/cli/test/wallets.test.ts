@@ -425,6 +425,14 @@ describe("real money", () => {
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ code: "refused" });
     expect(node.walletPayQuote).not.toHaveBeenCalled();
   });
+
+  it("an invoice for another amount than --amount is refused before paying", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 5 })).rejects.toMatchObject({ code: "refused", message: expect.stringMatching(/10 sats.*5/) });
+    expect(node.walletPayQuote).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 10 })).resolves.toMatchObject({ amount: 10, paid: true });
+    expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("a chat whose invite nobody took", () => {

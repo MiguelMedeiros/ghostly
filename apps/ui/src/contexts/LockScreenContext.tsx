@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash } from "../lib/settings";
 import { lockRetryAt, tryLockPassword } from "../lib/lockAttempts";
@@ -17,6 +16,7 @@ import { takeUnlockHandover } from "../lib/lockHandover";
 import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
+import { lockSecuresWindow } from "../lib/secureWindow";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -107,11 +107,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
   // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
   // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
-  useEffect(() => {
-    let host: BrowserHost;
-    try { host = getBrowserHost(); } catch { return; }
-    void host.hideFromSwitcher?.(lockActive).catch(() => {});
-  }, [lockActive]);
+  useEffect(() => lockSecuresWindow(lockActive), [lockActive]);
 
   // The lock as stored, not as this page last had it: a password set in another tab locks this one too.
   const lockHere = useCallback(() => {

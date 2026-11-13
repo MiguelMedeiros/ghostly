@@ -121,6 +121,26 @@ describe("many payment words next to web links", () => {
   });
 });
 
+describe("markdown links written end to end, with no space", () => {
+  const unit = "[a](http://a)";
+  const text = unit.repeat(Math.floor(SIZE / unit.length));
+
+  it("are read in linear time: in the bubble and in the list", () => {
+    const [block] = quickly(() => parseMessage(text));
+    const atoms = block.type === "paragraph" ? block.segments.filter((segment) => segment.type === "atom") : [];
+    expect(atoms).toHaveLength(Math.floor(SIZE / unit.length));
+    expect(atoms.every((atom) => atom.type === "atom" && atom.kind === "md-link")).toBe(true);
+    quickly(() => plainText(text));
+    quickly(() => previewText(text));
+  });
+
+  it("still leave a bare link after them a link of its own", () => {
+    const [block] = parseMessage(`${unit}http://b.example/x ${unit}`);
+    const kinds = block.type === "paragraph" ? block.segments.flatMap((segment) => (segment.type === "atom" ? [segment.kind] : [])) : [];
+    expect(kinds).toEqual(["md-link", "link", "md-link"]);
+  });
+});
+
 describe("a sending time no date holds", () => {
   it.each([Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, Number.NaN, Infinity])("leaves a clock time as text when sent at %s", sentAt => {
     const segments = tokenizeInline("see you at 14:00 UTC", DETECTORS, { sentAt });

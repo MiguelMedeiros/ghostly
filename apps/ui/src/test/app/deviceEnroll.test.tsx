@@ -157,6 +157,27 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
 
+  it("a screen reader hears the digits when the other device is found, and that it was added, in one line there from the code on", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView = waiting;
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-code");
+    // A live region is read out when its text changes, not when it comes with the step: the line is there, empty, first.
+    const spoken = screen.getByTestId("device-add-spoken");
+    expect(spoken).toHaveAttribute("role", "status");
+    expect(spoken).toHaveTextContent(/^$/);
+    view = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" };
+    await waitFor(() => expect(spoken).toHaveTextContent("Found Phone. Check that it shows the same digits. 482 913"), { timeout: 3_000 });
+    view = { role: "inviter", step: "done", device: "Phone", published: true };
+    await waitFor(() => expect(spoken).toHaveTextContent("Phone added. It is on standby."), { timeout: 3_000 });
+    expect(screen.getByTestId("device-add-spoken")).toBe(spoken);
+  }, 20_000);
+
   it("the focus stays in the dialog when Next and They match go away with their step", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);

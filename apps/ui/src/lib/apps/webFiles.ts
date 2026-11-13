@@ -533,11 +533,11 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       }
       return added.map(({ entry }) => entry);
     },
-    async list(ref, title, signal) {
+    async list(ref, title, signal, ask = true) {
       await load(ref);
-      // Kept picks the browser asks about again (after a restart): the person is asked once on this page.
+      // Kept picks the browser asks about again (after a restart): the person is asked once on this page, by an app on screen.
       const waiting = [...picks.values()].filter((p) => p.stored.ref === ref && !p.granted);
-      if (waiting.length && !askedAgain.has(ref)) {
+      if (ask && waiting.length && !askedAgain.has(ref)) {
         askedAgain.add(ref);
         // The first of them by name and a count of the rest: a title of every name pushes the buttons off the window.
         const names = waiting.flatMap((p) => keptNames(p.stored.keep));
