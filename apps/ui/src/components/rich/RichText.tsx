@@ -136,7 +136,7 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
       }
       case "atom": {
         // A link marks the words it shows; a name or a time draws its own words, none of them marked.
-        const atomMarks = marks && MARKS_ITSELF.has(segment.kind) ? { term: marks.term, ranges: marks.ranges, start: marks.at } : undefined;
+        const atomMarks = marks && MARKS_ITSELF.has(segment.kind) ? { term: marks.term, ranges: marks.ranges, start: marks.at, spend: (ranges: [number, number][]) => spendMarks(ranges, budget) } : undefined;
         if (marks) marks.at += shown(segment).length;
         // Each atom is isolated from the text around it: a direction control in the message cannot reorder a link,
         // a name or a time, and one inside an atom stops at its edge. A view that isolates its own parts is left bare.
