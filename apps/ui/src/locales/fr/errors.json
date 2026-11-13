@@ -445,6 +445,7 @@
     "noWayHere": "Aucun moyen de payer cette demande n'est autorisé dans cette discussion",
     "notBoth": "{{method}} n'est pas autorisé par vous deux ici",
     "notFromOtherWallet": "Cette demande ne peut pas être payée depuis un autre portefeuille",
+    "notesReceived": "Ces notes ont déjà été reçues",
     "notesRedeemed": "Ces notes ont déjà été encaissées",
     "notesTooSmall": "Ces notes valent moins d'un sat",
     "notesUnknownFederation": "Ces notes viennent d'une fédération que je n'ai pas rejointe",

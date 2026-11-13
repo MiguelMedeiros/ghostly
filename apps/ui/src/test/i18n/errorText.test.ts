@@ -485,6 +485,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["These notes are from a federation I have not joined", `${BROWSER}/engine/payments.ts`],
   ["These notes are worth less than a sat", `${BROWSER}/engine/payments.ts`],
   ["These notes were already redeemed", `${BROWSER}/engine/payments.ts`],
+  // The same notes again under another id, while the first payment of them is still being redeemed or is in.
+  ["These notes were already received", `${BROWSER}/engine/payments.ts`],
   ["The server took too long to answer", `${CORE}/lnurl.ts`],
   ["No way to reach the network here", `${CORE}/lnurl.ts`],
   ["shop.example refused: amount too small", `${CORE}/lnurl.ts`, " refused: "],
@@ -977,8 +979,9 @@ describe("errors in the app's language", () => {
       "Cashu chat recipient missing", "Cashu outbox does not match the reviewed payment", "Fedimint ecash goes to a contact in a chat",
       "The Fedimint payment is not in the journal", "Unsupported payment method", "Removed here", "Choose one member to pay",
     ]);
+    // Also a ternary's other line after a first one (`error: a ? "…" : "…"`).
     const said = ["payments.ts", "communityPay.ts"].flatMap((file) => [...source(`${BROWSER}/engine/${file}`)
-      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
+      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = |["'] : )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
     expect(said.length).toBeGreaterThan(40);
     expect([...new Set(said)].filter((raw) => !INTERNAL.has(raw) && knownErrorText(raw, t) === null)).toEqual([]);
   });

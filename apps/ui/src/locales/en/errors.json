@@ -445,6 +445,7 @@
     "noWayHere": "No way of paying this request is allowed in this chat",
     "notBoth": "{{method}} is not allowed by both of you here",
     "notFromOtherWallet": "This request cannot be paid from another wallet",
+    "notesReceived": "These notes were already received",
     "notesRedeemed": "These notes were already redeemed",
     "notesTooSmall": "These notes are worth less than a sat",
     "notesUnknownFederation": "These notes are from a federation I have not joined",

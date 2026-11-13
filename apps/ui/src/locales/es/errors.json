@@ -445,6 +445,7 @@
     "noWayHere": "No se permite ninguna forma de pagar esta solicitud en este chat",
     "notBoth": "{{method}} no está permitido por ambos aquí",
     "notFromOtherWallet": "Esta solicitud no se puede pagar desde otra billetera",
+    "notesReceived": "Estas notas ya se recibieron",
     "notesRedeemed": "Estas notas ya se canjearon",
     "notesTooSmall": "Estas notas valen menos de un sat",
     "notesUnknownFederation": "Estas notas son de una federación a la que no me he unido",
