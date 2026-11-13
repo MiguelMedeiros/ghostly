@@ -108,7 +108,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
     // The folder it goes in, checked first: a missing one is named, not the file written beside `path`.
     const folder = dirname(path);
-    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
     const paths = ctx.runtime.paths;
     // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
     // any ghostly restores, this one or an older one. Its name is this backup's own: two at once in one daemon shared

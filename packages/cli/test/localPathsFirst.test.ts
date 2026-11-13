@@ -24,7 +24,7 @@ describe("local paths checked before the profile opens", () => {
       [["group", "picture", "Crew", folder], "bad_request", `${folder} is a folder: name a file`],
       [["profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${missing}`],
       [["profile", "backup", "--out", join(missing, "deeper", "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${join(missing, "deeper")}`],
-      [["profile", "backup", "--out", join(file, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${file}`],
+      [["profile", "backup", "--out", join(file, "x.ghostly-backup"), "--no-passphrase"], "not_found", `${file} is a file, not a folder`],
       [["app", "serve", join(missing, "app.ghostlyapp"), "--grant", "chat"], "not_found", `No such file or folder: ${join(missing, "app.ghostlyapp")}`],
       [["app", "serve", folder, "--grant", "chat"], "bad_request", `${folder} is a folder: name a .ghostlyapp file`],
     ];
