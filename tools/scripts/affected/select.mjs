@@ -163,6 +163,28 @@ export const UNIT_PROJECTS = [
   },
 ];
 
+/**
+ * CI's draft tier splits the unit projects over a few runners (`--unit-group <i>/<n>`): a change to core reaches most
+ * of ui, browser and cli, minutes each, and one after another they passed the job's 20 minutes. Each of these gets a
+ * group of its own while there are groups for it; the last group takes every other project.
+ */
+export const UNIT_ALONE = ["ui", "browser", "cli"];
+
+/** `<i>/<n>` (1 ≤ i ≤ n) → { index, count }, or null. */
+export function parseUnitGroup(text) {
+  const m = /^(\d+)\/(\d+)$/.exec(text ?? "");
+  if (!m) return null;
+  const index = Number(m[1]);
+  const count = Number(m[2]);
+  return index >= 1 && index <= count ? { index, count } : null;
+}
+
+/** The group (1-based, of `count`) a unit project runs in. */
+export function unitGroupOf(name, count) {
+  const alone = UNIT_ALONE.indexOf(name);
+  return alone >= 0 && alone < count - 1 ? alone + 1 : count;
+}
+
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
 export const LINT = {
   scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "apps/mini/**", "e2e/**"],
