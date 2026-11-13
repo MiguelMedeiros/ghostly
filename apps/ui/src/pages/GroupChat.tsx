@@ -63,7 +63,7 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType, mayPin, replySnippet, type GroupMention, type RoutineCard, type VoiceMeta } from "@ghostly/core";
 import { servicesPlatform } from "../lib/platform";
-import { useEngineValue } from "../lib/engineState";
+import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
@@ -388,6 +388,8 @@ export function GroupChat() {
   const started = useEngineValue(state => !!state);
   // Who is typing changes all the time, and only the header's line shows it: that line reads it (`GroupTypingLine`).
   const rosterGroup = useEngineValue(state => withoutTyping(state?.groups.find(g => g.id === groupId)));
+  // An extension tab that lost its peer (the Reconnecting notice): who is reachable is the last thing it was told.
+  const peerLost = useEngineReconnecting();
   // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
   const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
@@ -799,6 +801,9 @@ export function GroupChat() {
   const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? problemLine(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
+    // The tab lost its peer: on its way, as the connection icon beside it says, not who was reachable (bug hunt,
+    // 2026-11-13: "3 members · 2 of 2 reachable" beside Connecting…).
+    : peerLost && group.status === "active" && others.length > 0 ? t("group.chat.communityConnecting", { members: count })
     // A community with nobody else in it, as a private group: not "connecting…" (to nobody) nor relaying for others.
     : community && group.status === "active" ? (others.length === 0 ? count : community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
