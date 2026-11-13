@@ -1,6 +1,6 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect, test, type Peer } from "../support/fixtures";
-import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace, turnMine, turnTheirs } from "../support/identities";
 import { LocalOidcIssuer } from "../support/oidcIssuer";
 import { pair } from "../support/paired";
 import { choose } from "../support/select";
@@ -63,6 +63,30 @@ test("a provider-attested account is verified by the contact it is shared with, 
   await alice.page.evaluate((h) => { location.hash = h; }, carolChat);
   await openIdentities(carol);
   await expect(theirCards(carol)).toHaveCount(0);
+});
+
+test("on a 320 px phone the back of a sign-in proof's card shows its whole name and email, mine and the contact's", { tag: ["@feature:proofs.oidc", "@feature:proofs.deck", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const issuer = new LocalOidcIssuer();
+  const phone = { mobile: true, viewport: { width: 320, height: 640 } };
+  const [alice, bob] = await Promise.all([peer("oidc-narrow-alice", phone), peer("oidc-narrow-bob", phone)]);
+  await Promise.all([alice, bob].map((p: Peer) => issuer.attach(p.context)));
+  await pair(alice, bob);
+  const bobChat = await alice.page.evaluate(() => location.hash);
+  // Name and email: on a phone's card face the name is left out, so its back is where it is read.
+  await expect(await addAccountProof(alice.page, issuer, "oidc-profile")).toHaveCount(0);
+  await alice.page.evaluate((h) => { location.hash = h; }, bobChat);
+  await shareIdentity(alice);
+
+  /** The back's name line cut to an ellipsis: wider than its box. */
+  const whole = async (back: Locator) => {
+    const name = back.locator(".id-card-back-name");
+    await expect(name).toContainText("Alice Example · alice@example.test");
+    expect(await name.evaluate((n) => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+  };
+  await whole((await turnMine(alice)).getByTestId("composer-identity-back"));
+  await closeIdentities(alice);
+  await openIdentities(bob);
+  await whole(await turnTheirs(bob));
 });
 
 test("a token the provider signed for another nonce is refused and nothing is saved", { tag: ["@feature:proofs.oidc.nonce"] }, async ({ peer }) => {
