@@ -73,9 +73,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const open = (runAnyway = false) => {
     if (opening) return;
     setError(null); setOpening(runAnyway ? "anyway" : "open");
+    const lacked = app?.run.status === "needs-files";
     // Refused (removed or revoked since the list was read): the list is read again first, so the card says Stopped,
     // and offers Run anyway only for a store's removal, as the Apps page then does.
-    void openApp(card.ref, linkId, { runAnyway }).catch(async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
+    void openApp(card.ref, linkId, { runAnyway })
+      // Opening is what fetched its files (a restored profile): every screen's list says so, and the icon shows.
+      .then(() => { if (lacked) void refreshInstalledApps(); }, async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
       .finally(() => setOpening(null));
   };
   return (
