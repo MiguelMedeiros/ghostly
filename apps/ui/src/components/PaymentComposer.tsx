@@ -332,7 +332,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // money, so no amount is too much for it.
   const tooMuch = canSend && holds !== undefined && value > holds;
   /** What Send and Request do on this card, with this contact. */
-  const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
+  // A card that could Send says why it cannot now (the contact away), where it would say what Send does: a tooltip
+  // alone is never seen on a phone. Lightning only Requests in a chat, and says so.
+  const how = (id: ChatRail) => describe ? describe(id) : sendUnavailable && id !== "lightning" ? sendUnavailable : t(HOW[id], { name: who });
 
   const back = (
     <div className={`payment-back${card ? ` wallet-card-${card.rail}` : ""}`} data-testid="payment-back" data-network={network}>
@@ -349,7 +351,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             <span className="payment-back-meta">{card ? t("payments.composer.balanceWith", { balance: card.balance, name: who }) : t("payments.composer.withTitle", { name: who })}</span>
           </span>
         </div>
-        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
+        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} to={review.method === "cashu" ? who : undefined} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
               aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} />

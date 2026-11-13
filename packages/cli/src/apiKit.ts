@@ -119,6 +119,17 @@ export const CONTACT_KEY = {
 };
 
 /**
+ * The contact key `ref` is once read as a name is (`nameKey`: trimmed, invisible characters dropped, one case), or
+ * undefined for a ref not shaped as one. A key a script or a paste left a line break, a space or capitals on is still
+ * that key, and only ever names by key: never a chat, a group or a member by a name someone else chose. Every ref that
+ * may be a key is read here, so no caller tests the raw string.
+ */
+export function contactKeyOf(ref: string): string | undefined {
+  const key = nameKey(ref);
+  return CONTACT_KEY.test(key) ? key : undefined;
+}
+
+/**
  * A chat's label, its contact's name or a group's name as a ref is compared with it: cleaned as the engine cleans a name
  * it stores (`renameLink`, `groupName`: any run of whitespace one space, invisible and direction-changing characters
  * dropped, trimmed), in one Unicode form (NFC) and one case. The string given to `chat rename` or `group create` finds
@@ -231,8 +242,9 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
   if (exact) return { link: exact, theirName: false };
-  if (CONTACT_KEY.test(ref)) {
-    const byKey = links.filter((link) => link.peerPubKeyZ32 === ref);
+  const contact = contactKeyOf(ref);
+  if (contact !== undefined) {
+    const byKey = links.filter((link) => link.peerPubKeyZ32 === contact);
     if (byKey.length === 1) return { link: byKey[0], theirName: false };
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
     throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
@@ -322,11 +334,10 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     // Nor is it a group's name or a prefix of a group's id (its admin and its creator chose those; a group's own id is
-    // longer): `group:<ref>` names a group.
-    if (CHAT_ID_SHAPED.test(nameKey(ref))) throw error;
+    // longer), nor is a contact's key with no chat: `group:<ref>` names a group.
+    if (CHAT_ID_SHAPED.test(nameKey(ref)) || contactKeyOf(ref) !== undefined) throw error;
     try { return { group: findGroup(groups, ref) }; } catch (inner) {
       if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
-      if (CONTACT_KEY.test(ref)) throw error;
       throw new CliError("not_found", `No chat or group ${JSON.stringify(ref)} (ghostly chat list, ghostly group list)`);
     }
   }
@@ -343,13 +354,13 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
  * Starts the chats a call names (its `chat`, a forward's `to`) in a runtime that left the saved chats unstarted
  * (`RuntimeOptions.deferChats`). A ref that names no chat, or names a group, starts nothing: the call says so itself.
  */
-export function startNamedChats(ctx: ApiContext, params: Params): void {
+export async function startNamedChats(ctx: ApiContext, params: Params): Promise<void> {
   const { links, groups } = state(ctx);
   for (const ref of [params.chat, ...(Array.isArray(params.to) ? params.to : [])]) {
     if (typeof ref !== "string") continue;
     let found: ReturnType<typeof findChatOrGroup>;
     try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
-    if ("link" in found) node(ctx).startDeferredChat(found.link.id);
+    if ("link" in found) await node(ctx).startDeferredChat(found.link.id);
   }
 }
 

@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Add",
     "addMintPlaceholder": "Add a mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Asking the mint…",
     "backupCopied": "Backup copied. Whoever has these tokens has the sats.",
     "contactHint": "Paying a contact? Use ⚡ in the chat.",

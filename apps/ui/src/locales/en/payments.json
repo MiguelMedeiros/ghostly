@@ -35,6 +35,10 @@
       "amountMismatch": "The invoice does not match the requested amount",
       "feeAbove": "The Lightning fee (up to {{fee}} {{unit}}) is above your maximum"
     },
+    "expiredNext": {
+      "mine": "ask again with a new request",
+      "theirs": "ask your contact for a new request"
+    },
     "externalNote": {
       "ark": "Paid from any Ark wallet. Your contact's wallet marks it paid once it sees the money.",
       "bitcoin": "Paid from any Bitcoin wallet. Your contact's wallet marks it paid once it sees the money, after one confirmation.",
@@ -58,6 +62,7 @@
     "preparing": "Preparing…",
     "review": "Review payment",
     "state": {
+      "checking": "Checking the payment…",
       "closed": "Closed",
       "lightningPending": "Lightning payment pending…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "Received"
       },
       "request": {
+        "expired": "Expired",
         "failed": "Failed",
         "pending": "Waiting for payment",
         "settled": "Paid"
@@ -289,6 +295,8 @@
     "payWithFee": "Pay {{amount}} + up to {{fee}} fee",
     "paying": "Paying…",
     "paysThrough": "Pays through {{domain}}",
+    "pending": "Payment pending…",
+    "pendingAtCard": "Payment pending at {{card}}…",
     "pendingAtMint": "Payment pending at the mint…",
     "qrTooLong": "Too long for a QR code: copy it instead.",
     "redeem": "Redeem",

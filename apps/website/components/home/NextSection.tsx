@@ -240,7 +240,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                         <img className="nx-shot" src={shot.src} srcSet={shotSrcSet(shot.src, "desktop")} sizes={shotSizes(shot)} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
                       </div>
                     ) : item.id === "cli" && (
-                      <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
+                      <pre className="nx-term" role="region" aria-label="Example CLI session" tabIndex={0}>
                         <code>{CLI}</code>
                       </pre>
                     )}

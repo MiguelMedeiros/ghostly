@@ -1,6 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { IDENTITY_MEMO_IDLE_MS, IDENTITY_MEMO_MAX, IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64, sign, verify } from "../src/identity";
+import { IDENTITY_MEMO_IDLE_MS, IDENTITY_MEMO_MAX, IDENTITY_MEMO_SIZE, identityFromSeed, identityFromSeedB64, setPublicKeyFastPath, sign, verify } from "../src/identity";
 import { toBase64Url } from "../src/bytes";
 
 // noble's ed25519 is frozen: a spy cannot go on it, so the module hands out a counting getPublicKey.
@@ -20,7 +20,7 @@ const keyOf = (seed: Uint8Array) => { const at = derive.calls; const key = ed255
 const seedOf = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (n * 31 + i * 7) & 0xff);
 
 beforeEach(() => { derive.calls = 0; });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); setPublicKeyFastPath(null); });
 
 describe("identityFromSeed", () => {
   it("derives a seed's public key once, however many times and from however many copies of the seed it is asked", () => {
@@ -107,6 +107,36 @@ describe("identityFromSeed", () => {
 
   it("refuses a seed that is not 32 bytes", () => {
     expect(() => identityFromSeed(new Uint8Array(31))).toThrow("Seed must be exactly 32 bytes");
+  });
+});
+
+describe("a host's faster public key", () => {
+  it("derives the keys noble would not derive, each once, as the memo keeps noble's", () => {
+    const asked: Uint8Array[] = [];
+    setPublicKeyFastPath((seed) => { asked.push(seed.slice()); return keyOf(seed); });
+    const seed = seedOf(2_001);
+    const first = identityFromSeed(seed);
+    expect(identityFromSeed(seed.slice()).pubKeyZ32).toBe(first.pubKeyZ32);
+    expect(asked).toEqual([seed]);
+    expect(derive.calls).toBe(0);
+    expect(first.publicKey).toEqual(keyOf(seed));
+  });
+
+  it("leaves the key to noble when the host's throws or answers something that is not a key", () => {
+    setPublicKeyFastPath(() => { throw new Error("no Ed25519 here"); });
+    expect(identityFromSeed(seedOf(2_002)).publicKey).toEqual(keyOf(seedOf(2_002)));
+    setPublicKeyFastPath(() => new Uint8Array(31));
+    expect(identityFromSeed(seedOf(2_003)).publicKey).toEqual(keyOf(seedOf(2_003)));
+    expect(derive.calls).toBe(2);
+  });
+
+  it("keeps a key of its own: the host's buffer written over later changes nothing", () => {
+    const shared = new Uint8Array(32);
+    setPublicKeyFastPath((seed) => { shared.set(keyOf(seed)); return shared; });
+    const identity = identityFromSeed(seedOf(2_004));
+    shared.fill(0);
+    expect(identity.publicKey).toEqual(keyOf(seedOf(2_004)));
+    expect(identityFromSeed(seedOf(2_004)).publicKey).toEqual(keyOf(seedOf(2_004)));
   });
 });
 

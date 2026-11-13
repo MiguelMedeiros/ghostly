@@ -2,12 +2,13 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
 import { joinLogLine } from "../joinLog";
+import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
@@ -19,6 +20,9 @@ import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
 import { envSwitch } from "../envSwitch";
 import { watchWake } from "./wakeWatch";
+
+// Every chat's keys are derived again at each start, and a one-shot is a start: by Node's Ed25519, not noble's.
+setPublicKeyFastPath(nativePublicKey);
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -220,6 +224,8 @@ export interface RuntimeOptions {
   deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean;
   /** The chats whose group invitations this profile accepts by itself (`group auto`, `NodeOptions.autoJoins`). */
   autoJoins?: (linkId: string) => boolean;
+  /** Whether this run tells its contacts by push that it came online (`NodeOptions.onlineNotices`). Absent: never. */
+  onlineNotices?: () => boolean;
   /** The start keeps each history's newest rows that many, for the host's event check (`EngineServer.takeStartNewest`). */
   keepNewest?: number;
 }
@@ -342,6 +348,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.autoJoins ? { autoJoins: options.autoJoins } : {}),
+    // A headless profile shows no dot unless its daemon says presence: no online notice either (WISP 401 § Online notices).
+    onlineNotices: options.onlineNotices ?? (() => false),
     ...(options.deferGroups ? { deferGroups: true } : {}),
     ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),

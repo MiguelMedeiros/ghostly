@@ -16,6 +16,7 @@ import type { AppTakedown } from "./open";
 import type { Translate } from "../../locales/translate";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { OpenAppOptions } from "./open";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 
 export interface ChatApp {
   ref: string;
@@ -117,6 +118,15 @@ export function useChatAppCovers(linkId: string | undefined): boolean {
     return !!app?.shown && (app.wide || app.view === "full");
   };
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/**
+ * Whether the app in the chat `linkId` is shown over the chat now, the chat's own dialogs (+ → Apps) out of sight under
+ * it: over its whole width or a `full` one, and any on a phone.
+ */
+export function chatAppOver(linkId: string): boolean {
+  const app = apps.get(linkId);
+  return !!app?.shown && (app.wide || app.view === "full" || window.matchMedia(MOBILE_QUERY).matches);
 }
 
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */

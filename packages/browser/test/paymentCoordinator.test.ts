@@ -107,3 +107,36 @@ describe('reviews no Approve can send any more',()=>{
   expect(['b','c','d'].map(id=>[...f.records.values()].find(v=>v.review.requestId===id)?.review.state)).toEqual(['submitted','unknown','settled']);
  });
 });
+describe('news while the payment is being asked about',()=>{
+ /** A gate an adapter call waits on, opened by the test. */
+ const gate=()=>{let open!:()=>void;const opened=new Promise<void>(r=>{open=r;});return{open,opened};};
+ it('the contact taking it while Approve is still asking the mint settles it at once, not at the next poll',async()=>{
+  const f=fixture(),asking=gate(),seen=gate();
+  // Approve sends the token and asks the mint, which reads it not taken yet; the contact takes it meanwhile.
+  vi.mocked(f.adapter.execute).mockImplementationOnce(async()=>{seen.open();await asking.opened;return{txid:'t',settled:false};});
+  vi.mocked(f.adapter.reconcile).mockResolvedValue({txid:'t',settled:true});
+  const r=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  const approved=f.coordinator.approve(r.id);
+  await seen.opened;
+  const news=f.coordinator.reconcile(r.id);
+  asking.open();
+  expect((await approved).state).toBe('submitted');
+  expect((await news).state).toBe('settled');
+  expect(f.records.get(r.id)?.review.state).toBe('settled');
+  expect(f.adapter.reconcile).toHaveBeenCalledOnce();
+ });
+ it('news during a status check asks once more after it, and news from several callers meanwhile shares that one',async()=>{
+  const f=fixture(),asking=gate(),seen=gate();
+  vi.mocked(f.adapter.execute).mockResolvedValue({txid:'t',settled:false});
+  const r=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  await f.coordinator.approve(r.id);
+  vi.mocked(f.adapter.reconcile).mockImplementationOnce(async()=>{seen.open();await asking.opened;return{txid:'t',settled:false,pending:true};}).mockResolvedValue({txid:'t',settled:true});
+  const poll=f.coordinator.reconcile(r.id);
+  await seen.opened;
+  const [a,b]=[f.coordinator.reconcile(r.id),f.coordinator.reconcile(r.id)];
+  asking.open();
+  expect((await poll).state).toBe('submitted');
+  expect([(await a).state,(await b).state]).toEqual(['settled','settled']);
+  expect(f.adapter.reconcile).toHaveBeenCalledTimes(2);
+ });
+});

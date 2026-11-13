@@ -94,9 +94,14 @@ export function paymentLine(t: Translate, payment: ChatPayment, state: WalletSta
  * Where a payment or a request stands, as its bubble's state line says it: "Paid", "Taken back · <why>", "Lightning
  * payment pending…". Empty for a request taken back with nothing to say (its bubble shows no state then).
  */
-export function paymentStateLine(t: Translate, payment: ChatPayment): string {
+export function paymentStateLine(t: Translate, payment: ChatPayment, expired = false): string {
+  const outgoing = payment.direction === "out";
+  // An expired request says so and what is left to do; its old error is no longer the news.
+  if (expired) return `${t("payments.bubble.state.request.expired")} · ${t(outgoing ? "payments.bubble.expiredNext.mine" : "payments.bubble.expiredNext.theirs")}`;
   const label = payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending")
     : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation")
+    // One the contact sent: their part is done, what is left is this wallet's own check of it.
+    : payment.kind === "payment" && payment.state === "pending" && !outgoing ? t("payments.bubble.state.checking")
     : payment.closed ? t("payments.bubble.state.closed")
     : payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`)
     : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);

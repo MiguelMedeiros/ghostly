@@ -242,7 +242,6 @@
     "newOne": "1 mensagem nova, rolar até o fim"
   },
   "keyChanged": "Esta conversa parou: a chave do seu contato mudou.",
-  "lastSeen": "Visto por último {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -315,7 +314,7 @@
   "online": "online",
   "options": "Opções",
   "payments": {
-    "needLive": "Pagamentos precisam de uma conexão direta",
+    "needLive": "Enviar precisa do seu contato online: ecash nunca fica esperando numa fila. Um pedido pode esperar até o contato voltar.",
     "noWallet": "Seu contato ainda não tem carteira",
     "off": "Desligado nesta conversa: ative uma forma em Aceitar",
     "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
@@ -395,6 +394,7 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tem caracteres ocultos ou que mudam a direção do texto, mostrados como {{marker}}. Copiar código copia eles também.",
     "localTime": "{{time}} no seu horário",
+    "notCopied": "Não copiado",
     "showAll": "Mostrar tudo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toque para mostrar",
@@ -484,7 +484,6 @@
     "showTranslation": "Ver tradução",
     "translate": "Traduzir"
   },
-  "typeMessage": "Digite uma mensagem...",
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",

@@ -76,9 +76,10 @@ import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
-import { groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
@@ -715,12 +716,15 @@ export function GroupChat() {
   const nameOf = replyNames(group, t("chat.reply.you"), t);
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf, t);
   const canPin = group.canSend && !!group.myKey && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);
+  // A private group knows my lines by the member key I wrote them under: removed and invited back, I hold a new one,
+  // and the group refuses an edit or a deletion of what I wrote before.
+  const underMyKey = (m: StoredMessage) => group.profile !== "mesh" || !group.myKey || m.id.startsWith(`${group.myKey}:`);
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey) ?? []));
+  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey, linkId => groupMemberOfLink(group, linkId)) ?? []));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
@@ -755,9 +759,9 @@ export function GroupChat() {
     : <MessageRow key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
       onReply={replyTarget(m, true) && group.canSend ? () => replyRow(m) : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
-      onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => editRow(m) : undefined}
+      onEdit={canEditInGroup(m) && !m.card && underMyKey(m) && group.canSend ? () => editRow(m) : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
-      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend ? () => removeRow(m) : undefined}
+      onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && underMyKey(m) && group.canSend ? () => removeRow(m) : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinRow(m) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => saveRow(m.id)} saved={savedHere.has(m.id)} />;
@@ -893,8 +897,9 @@ export function GroupChat() {
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {!noTimeline && <ChatSearchBar search={search} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
@@ -1002,7 +1007,7 @@ export function GroupChat() {
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
             .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
-          const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
+          const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card && underMyKey(m));
           if (last) { setReplyingTo(null); setEditing(last); }
         } : undefined}
         onSendFile={platform?.sendGroupFile ? sendFile : undefined}

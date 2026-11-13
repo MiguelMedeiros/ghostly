@@ -641,6 +641,12 @@ describe("sending Cashu from the chat's wallet", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("names the contact as the review's destination, not their key", async () => {
+    await sendCashu([mint(TEST_MINT, 500)], "30");
+    const review = await screen.findByRole("region", { name: "Payment review" });
+    expect(within(review).getByTestId("review-destination")).toHaveTextContent(/^Alice$/);
+  });
+
   it("pays real sats from a real mint, on the Mainnet wallet", async () => {
     const { engine } = await sendCashu([mint(REAL_MINT, 500)], "30");
     await screen.findByRole("region", { name: "Payment review" });

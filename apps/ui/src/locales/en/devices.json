@@ -253,8 +253,7 @@
     "doneInfo": "It can no longer take this profile. Your other devices get the change the next time they open Ghostly.",
     "fail": {
       "busy": "Something else is changing your devices. Try again in a moment.",
-      "failed": "Something went wrong. Nothing was changed.",
-      "offline": "Go online to change your devices."
+      "failed": "Something went wrong. Nothing was changed."
     },
     "go": "Remove",
     "lost": "Lost or stolen",
@@ -336,7 +335,6 @@
       "unreadable": "Nothing was started."
     },
     "info": "Only one device sends, receives and pays at a time, so your messages and money are never in two places.",
-    "link": "{{device}}: {{status}}",
     "links": "Your devices",
     "notice": {
       "hint": "If this list looks wrong, do not use this device.",

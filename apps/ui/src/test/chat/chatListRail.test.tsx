@@ -69,7 +69,7 @@ describe("the rail", () => {
     expect(screen.queryByTestId("sidebar-resize")).not.toBeInTheDocument();
     const items = within(rail()).getAllByRole("button");
     expect(items.map(b => b.getAttribute("data-chat"))).toEqual(listOrder);
-    expect(rail()).toHaveAccessibleName("Chats");
+    expect(screen.getByRole("navigation", { name: "Chats" })).toContainElement(rail());
 
     const ana = items.find(b => b.getAttribute("data-chat") === "a")!;
     expect(ana).toHaveAttribute("title", "Ana");

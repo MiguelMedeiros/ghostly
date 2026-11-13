@@ -35,6 +35,10 @@
       "amountMismatch": "发票与请求的金额不符",
       "feeAbove": "Lightning 手续费（最多 {{fee}} {{unit}}）超出你的上限"
     },
+    "expiredNext": {
+      "mine": "请用新的请求重新发起",
+      "theirs": "请让联系人重新发送请求"
+    },
     "externalNote": {
       "ark": "可从任何 Ark 钱包支付。你的联系人的钱包看到款项后，会将其标为已付款。",
       "bitcoin": "可从任何 Bitcoin 钱包支付。你的联系人的钱包看到款项并经过一次确认后，会将其标为已付款。",
@@ -58,6 +62,7 @@
     "preparing": "准备中…",
     "review": "查看付款",
     "state": {
+      "checking": "正在核实付款…",
       "closed": "已关闭",
       "lightningPending": "Lightning 付款处理中…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "已收到"
       },
       "request": {
+        "expired": "已过期",
         "failed": "失败",
         "pending": "等待付款",
         "settled": "已付款"
@@ -289,6 +295,8 @@
     "payWithFee": "支付 {{amount}} + 最多 {{fee}} 手续费",
     "paying": "付款中…",
     "paysThrough": "经由 {{domain}} 支付",
+    "pending": "付款处理中…",
+    "pendingAtCard": "{{card}} 正在处理付款…",
     "pendingAtMint": "铸币厂正在处理付款…",
     "qrTooLong": "内容太长，无法生成二维码：请改为复制。",
     "redeem": "兑换",

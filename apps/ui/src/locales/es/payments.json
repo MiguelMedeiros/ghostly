@@ -35,6 +35,10 @@
       "amountMismatch": "La factura no coincide con el importe pedido",
       "feeAbove": "La comisión Lightning (hasta {{fee}} {{unit}}) supera tu máximo"
     },
+    "expiredNext": {
+      "mine": "vuelve a pedir con una nueva solicitud",
+      "theirs": "pide a tu contacto una nueva solicitud"
+    },
     "externalNote": {
       "ark": "Se paga desde cualquier cartera Ark. La cartera de tu contacto lo marca como pagado cuando ve el dinero.",
       "bitcoin": "Se paga desde cualquier cartera Bitcoin. La cartera de tu contacto lo marca como pagado cuando ve el dinero, tras una confirmación.",
@@ -58,6 +62,7 @@
     "preparing": "Preparando…",
     "review": "Revisar pago",
     "state": {
+      "checking": "Comprobando el pago…",
       "closed": "Cerrado",
       "lightningPending": "Pago Lightning pendiente…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "Recibido"
       },
       "request": {
+        "expired": "Caducada",
         "failed": "Falló",
         "pending": "Esperando el pago",
         "settled": "Pagado"
@@ -289,6 +295,8 @@
     "payWithFee": "Pagar {{amount}} + comisión de hasta {{fee}}",
     "paying": "Pagando…",
     "paysThrough": "Se paga mediante {{domain}}",
+    "pending": "Pago pendiente…",
+    "pendingAtCard": "Pago pendiente en {{card}}…",
     "pendingAtMint": "Pago pendiente en el mint…",
     "qrTooLong": "Demasiado largo para un código QR: cópialo.",
     "redeem": "Canjear",

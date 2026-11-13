@@ -606,6 +606,8 @@ export const STARTUP_QUIET_MS = 15_000;
 const START_SLICE_MS = 10;
 /** How long the wallets' changes gather into one view of them (`walletChanged`). */
 const WALLET_CHANGE_MS = 50;
+/** How often the shared services' request counts may send a state while contacts use them (`hostedService`). */
+const REQUEST_COUNTS_MS = 1_000;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 /** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
 export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
@@ -755,6 +757,12 @@ export interface NodeOptions {
    * --from`, `GroupsHost.autoJoins`): one that comes while 32 wait takes the place of another chat's. Default: none.
    */
   autoJoins?: (linkId: string) => boolean;
+  /**
+   * Whether this run tells its contacts by push that it came online (WISP 401 § Online notices), asked each time it
+   * would. Default: yes, as an app does. The CLI says yes only in a daemon that says presence (`daemonPresence`): a
+   * headless profile shows no dot, and a notice would tell more than the dot it hides.
+   */
+  onlineNotices?: () => boolean;
   /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
   watchPeerIdleMs?: number;
   /**
@@ -1106,6 +1114,8 @@ export class GhostlyNode implements EngineImplementation {
   /** `group-wake` frames read per edge, a handful a minute. */
   private readonly groupWakeReceived = new Map<string, RateWindow>();
   private readonly requestCounts = new Map<string, number>();
+  /** A request only moves a counter: the counts go out with the next state, at most once a `REQUEST_COUNTS_MS`. */
+  private requestCountsTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly transfers = new Map<string, FileTransferView>();
   /**
    * Views that go in the next state sent, and then away (`GroupFilesHost.brief`): dropped once a state carried them,
@@ -1137,6 +1147,8 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the snapshot `stateTimer` waits for is due (`emitState`). */
+  private stateDue = 0;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
   /**
    * The reviews whose outcome is still open (submitted, unknown), by id: what the payment poll asks about, so that it
@@ -1145,11 +1157,13 @@ export class GhostlyNode implements EngineImplementation {
    */
   private openReviews: Set<string> | null = null;
   /**
-   * The pace of each submitted Cashu payment the contact has not taken: asked at 10 s while new, then twice as late up
-   * to 10 min (as a payee retries a redeem). At the poll's own 10 s, a contact online whose redeems fail cost the mint
-   * 12 checkstates a minute for each such payment, for as long as the app ran. The contact taking one says so at once.
+   * The pace of each submitted payment whose outcome is still open: asked at 10 s while new, then twice as late up to
+   * 10 min (as a payee retries a redeem). At the poll's own 10 s, a contact online whose redeems fail cost the mint 12
+   * checkstates a minute for each such Cashu payment, and an on-chain payment waiting in the mempool its source 360
+   * reads an hour (each with the Ark, Bark, Spark and USDT wallets read again), for as long as it stayed so. The
+   * contact taking one says so at once.
    */
-  private readonly cashuPayAsk = new AskBackoff(10_000, 600_000);
+  private readonly payAsk = new AskBackoff(10_000, 600_000);
   private noteOpenReviews(reviews: readonly PaymentReview[]): void {
     const open = this.openReviews ??= new Set();
     for (const review of reviews) if (review.state === "submitted" || review.state === "unknown") open.add(review.id);
@@ -1401,6 +1415,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(message.reply && { replyTo: receivedPairedReply(message.reply) }), ...(message.forwarded && { forwarded: message.forwarded }),
       details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: utf8Encode(message.text).length, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }) } }),
     receiveFile: async (linkId, wire, bytes, digest, held) => {
+      if (await this.namesMine(linkId, wire.wireId)) return "duplicate file id";
       const live = this.links.get(linkId);
       if (!live) return "unknown chat";
       if (live.files.wireIds.has(wire.wireId)) return "duplicate file id";
@@ -1872,7 +1887,7 @@ export class GhostlyNode implements EngineImplementation {
     placeAbove: (linkId, id) => this.placeAbove(linkId, id),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
-    emit: () => this.emitState(),
+    emit: delayMs => this.emitState(delayMs),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : frame.t === COMMUNITY_PIN_FRAME ? this.receiveGroupPin(groupId, sender, readPin(frame))
@@ -2308,9 +2323,9 @@ export class GhostlyNode implements EngineImplementation {
       // The whole store once, when nothing has read it yet; after that, the open reviews alone.
       if(!this.openReviews)this.noteOpenReviews((await intentRepository.list()).map((saved)=>saved.review));
       const open=this.openReviews!;
-      this.cashuPayAsk.keepOnly(open);
+      this.payAsk.keepOnly(open);
       for(const id of [...open]){
-        if(!this.cashuPayAsk.due(id,Date.now()))continue;
+        if(!this.payAsk.due(id,Date.now()))continue;
         const saved=await intentRepository.get(id),review=saved?.review;
         if(!review || !["submitted","unknown"].includes(review.state)){open.delete(id);continue;}
         // Each through its own network's wallet, once that one is open.
@@ -2321,10 +2336,11 @@ export class GhostlyNode implements EngineImplementation {
         if(review.method==="cashu" && !prepared.abandoned && !prepared.spentElsewhere && !this.wallet.mintDue(prepared.mint,Date.now()))continue;
         if((review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         const after=await this.reconcilePayment({id:review.id}).catch(()=>review);
-        // A token out and not taken yet: new for its first minute. A swap with no token yet (its mint gave no answer):
-        // new while it may still land, so the mint's word that it never did is asked at once after that.
-        if(review.method==="cashu" && ["submitted","unknown"].includes(after.state)){
-          this.cashuPayAsk.missed(id,Date.now(),Date.now()<(prepared.token?(review.submittedAt ?? review.createdAt)+60_000:swapSettledAt(review,prepared)));
+        // Any payment, and a token out and not taken yet: new for its first minute. A swap with no token yet (its mint
+        // gave no answer): new while it may still land, so the mint's word that it never did is asked at once after that.
+        if(["submitted","unknown"].includes(after.state)){
+          const sent=review.submittedAt ?? review.createdAt;
+          this.payAsk.missed(id,Date.now(),Date.now()<(review.method==="cashu" && !prepared.token?swapSettledAt(review,prepared):sent+60_000));
         }
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
@@ -2391,40 +2407,17 @@ export class GhostlyNode implements EngineImplementation {
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
-    for (let stored of links) {
+    for (const stored of links) {
       if (stored.group) continue;
       await this.settleHistory(stored.id);
-      const messages = await db.getMessages(stored.id);
-      stored = await this.settleJoinLine(stored, messages);
-      const storedFiles = await fileStore.listForLink(stored.id);
-      // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
-      // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
-      // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
-      // delivery wrote the record says "transferring" for good).
-      const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
-      // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
-      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
-        file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
-      // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
-      // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
-      const unreceipted = new Set(messages.flatMap(m => m.sender === "me" && m.file && m.delivery !== "delivered" ? [m.file.id] : []));
-      this.fileDesk.restore(stored.id, storedFiles, unreceipted);
-      const files = linkFilesFrom(stored.id, storedFiles, messages);
-      this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
-      // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
-      this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
-      // So are the cards due to go again: a session that opens reads no history for them when there are none.
-      this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
-      // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
-      this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
-      this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
-      // What the contact's clock was when the chat was last live: its first message of this run is read by it.
-      for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
-      const note = this.noteFromHistory(stored.id, messages);
-      if (note) this.reactionNotes.set(stored.id, note);
-      // The contact's reactions that waited for their message when the engine stopped wait again (or land, if it did).
-      if (stored.reactionsWaiting?.length) await this.reactions.restore(stored.id, stored.reactionsWaiting, messages);
-      if (stored.profile) await this.outboxFor(stored.id).recover(messages);
+      // A chat this run leaves unstarted reads its newest row alone: the rest of its history waits for the command to
+      // name it (`restoreDeferred`). Each read whole cost a one-shot 0.45 s and 80 MB per 50,000 messages in the profile.
+      if (this.deferredChats.has(stored.id)) {
+        this.links.set(stored.id, newLiveLink(stored, (await db.getMessagePage(stored.id, { limit: 1 })).messages[0]?.timestamp ?? 0));
+        this.chatRestores.set(stored.id, null);
+        continue;
+      }
+      await this.restoreChat(stored);
     }
     this.transfersRestored = true;
     // The chats are known now: ecash sent in one deleted before is offered back on the Wallet page.
@@ -2451,6 +2444,65 @@ export class GhostlyNode implements EngineImplementation {
     else if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
     // A restored copy whose turn was not read at the restore: read now, then every 30 seconds while limited.
     if (this.restoreCheck === "checking" && this.limitedMode) this.checkRestoredTurn(0);
+  }
+
+  /**
+   * The chats left unstarted at start (`deferChats`) whose history is not read yet: `null` until the command names one
+   * (`restoreDeferred`), then that read.
+   */
+  private readonly chatRestores = new Map<string, Promise<void> | null>();
+
+  /** A deferred chat's restore (`restoreChat`), read once, before it starts or a command reads it. */
+  private restoreDeferred(linkId: string): Promise<void> {
+    const restore = this.chatRestores.get(linkId);
+    if (restore !== null) return restore ?? Promise.resolve();
+    const live = this.links.get(linkId);
+    const restoring = live ? this.restoreChat(live.stored) : Promise.resolve();
+    this.chatRestores.set(linkId, restoring);
+    return restoring;
+  }
+
+  /**
+   * What a saved 1:1 chat knows from its history, read whole once: its newest message, its files and their transfers, what
+   * waits for it to be live, my edits on their way, when the contact was last heard, its latest reaction, and the
+   * outbox's rows.
+   */
+  private async restoreChat(stored: StoredLink): Promise<void> {
+    const messages = await db.getMessages(stored.id);
+    stored = await this.settleJoinLine(stored, messages);
+    const storedFiles = await fileStore.listForLink(stored.id);
+    // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
+    // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
+    // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
+    // delivery wrote the record says "transferring" for good).
+    const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
+    // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
+    for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
+      file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
+    // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
+    // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
+    const unreceipted = new Set(messages.flatMap(m => m.sender === "me" && m.file && m.delivery !== "delivered" ? [m.file.id] : []));
+    this.fileDesk.restore(stored.id, storedFiles, unreceipted);
+    const files = linkFilesFrom(stored.id, storedFiles, messages);
+    const newest = messages[messages.length - 1]?.timestamp ?? 0;
+    // A chat left unstarted at start keeps its live link: what this run did with it since stays.
+    const left = this.links.get(stored.id);
+    if (left) Object.assign(left, { stored, lastMessageAt: Math.max(left.lastMessageAt, newest), files });
+    else this.links.set(stored.id, newLiveLink(stored, newest, files));
+    // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
+    this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
+    // So are the cards due to go again: a session that opens reads no history for them when there are none.
+    this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
+    // And my edits and removals on their way: the session that opens first reads those rows alone, not the history again.
+    this.editsFor(stored.id).learn([...messages, ...(stored.removals ?? []).map(r => removalRow(stored.id, r))]);
+    this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
+    // What the contact's clock was when the chat was last live: its first message of this run is read by it.
+    for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
+    const note = this.noteFromHistory(stored.id, messages);
+    if (note) this.reactionNotes.set(stored.id, note);
+    // The contact's reactions that waited for their message when the engine stopped wait again (or land, if it did).
+    if (stored.reactionsWaiting?.length) await this.reactions.restore(stored.id, stored.reactionsWaiting, messages);
+    if (stored.profile) await this.outboxFor(stored.id).recover(messages);
   }
 
   // -- a restored copy whose turn could not be read (WISP 06 § A backup restored where a device set exists) ----------
@@ -2878,6 +2930,7 @@ export class GhostlyNode implements EngineImplementation {
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     clearTimeout(this.walletChangeTimer);
+    clearTimeout(this.requestCountsTimer);
     clearInterval(this.staleReviewTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
@@ -2965,7 +3018,12 @@ export class GhostlyNode implements EngineImplementation {
   appStoreRefresh(params: { key?: string } = {}): Promise<AppStoreSummary[]> { return this.appStore.refreshStores(params); }
   appPreview(params: AppSource): Promise<AppPreview> { return this.appStore.preview(params); }
   appInstall(params: { stage?: string; digest: string; grant: string[]; asks?: string[] }): Promise<InstalledAppView> { return this.appStore.install(params); }
-  appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): Promise<InstalledAppView> { return this.appStore.acceptUpdate(params); }
+  /** Installs a waiting update; the pages are told, so another tab's screen drops its Update. */
+  async appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): Promise<InstalledAppView> {
+    const view = await this.appStore.acceptUpdate(params);
+    this.events.onAppsChecked?.();
+    return view;
+  }
   appCheckUpdates(): Promise<AppCheckResult[]> { return this.appStore.checkUpdates(); }
   /** Uninstalls an app. One running then is closed in every chat (the contact hears `close`), and the pages are told, to stop its frames. */
   async appUninstall(params: { ref: string }): Promise<void> {
@@ -3247,7 +3305,7 @@ export class GhostlyNode implements EngineImplementation {
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
       // Joined again in a run that left the saved chats unstarted (`deferChats`): this one is the run's chat now.
-      if (this.deferredChats.delete(existing.stored.id) && this.networkOn) this.startLink(existing.stored.id);
+      await this.startDeferredChat(existing.stored.id);
       return { linkId: await this.existingLink(existing.stored.id) };
     }
     this.refuseOwnInvite(params);
@@ -3667,10 +3725,10 @@ export class GhostlyNode implements EngineImplementation {
    * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
    * target; a group's edge is never told. `WAKE_ONLINE_BATCH` at a time, the rest a `WAKE_ONLINE_BATCH_MS` later (those
    * still away then), so a push relay's minute keeps room for the message and call wake-ups. None while this profile does
-   * not share when it is online (`sharePresence`).
+   * not share when it is online (`sharePresence`), nor while the host says this run is not online to them (`onlineNotices`).
    */
   private sayOnline(now = Date.now()): void {
-    if (!this.networkOn || this.shuttingDown || this.settings.sharePresence === false) return;
+    if (!this.networkOn || this.shuttingDown || this.settings.sharePresence === false || this.options.onlineNotices?.() === false) return;
     let sent = 0;
     for (const live of this.links.values()) {
       const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
@@ -4822,6 +4880,11 @@ export class GhostlyNode implements EngineImplementation {
     return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);
   }
 
+  /** The messages of a 1:1 chat whose removal of mine is still on its way to the contact, by id (`removeMessage`). */
+  removalsPending({ linkId }: { linkId: string }): string[] {
+    return (this.links.get(linkId)?.stored.removals ?? []).map(r => r.id);
+  }
+
   /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
   private readonly deletionWrites = new Map<string, { patch: Partial<StoredLink>; relaxed: boolean; done: Promise<void> }>();
   /** The last such write of each chat, which the next one follows. */
@@ -5199,6 +5262,8 @@ export class GhostlyNode implements EngineImplementation {
    * (its offer came first), or its message was deleted here.
    */
   private async fileAnnounced(linkId: string, said: DhtFileAnnouncement & { timestamp: number; reply?: { i: string }; forwarded?: number }, packet: DhtPacketFacts): Promise<void> {
+    // Under the wire id of a message of mine: dropped, as a text is (`storeNewMessage`).
+    if (await this.namesMine(linkId, said.wireId)) return;
     const live = this.links.get(linkId);
     if (!live) return;
     const id = `peer_${said.wireId}`;
@@ -8375,7 +8440,8 @@ export class GhostlyNode implements EngineImplementation {
     try {
       const target = parseLocalTarget(service.target);
       this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
-      this.emitState();
+      // A page loading its assets asks many times a second: one state a second carries the counts, not one per request.
+      this.requestCountsTimer ??= setTimeout(() => { this.requestCountsTimer = undefined; this.emitState(); }, REQUEST_COUNTS_MS);
       return { id, target };
     } catch {
       return undefined;
@@ -8801,9 +8867,12 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * Starts a chat this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names, once the command has
-   * found it. Any other chat, or one already started, is left as it is.
+   * found it. Its history is read first (`restoreDeferred`), offline too: the command reads what it knows. Any other
+   * chat, or one already started, is left as it is.
    */
-  startDeferredChat(linkId: string): void {
+  async startDeferredChat(linkId: string): Promise<void> {
+    if (!this.deferredChats.has(linkId)) return;
+    await this.restoreDeferred(linkId);
     if (!this.deferredChats.delete(linkId)) return;
     if (this.networkOn && !this.shuttingDown) this.startLink(linkId);
   }
@@ -9475,6 +9544,8 @@ export class GhostlyNode implements EngineImplementation {
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("hyperdht/1")) {
+        // Its error was the old relay's ("unreachable" and its next step, Settings): not said of the new one, nor of none.
+        if (live.transportErrors) delete live.transportErrors["hyperdht/1"];
         if (this.hyperdhtRelay && link && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
         continue;
       }
@@ -10231,16 +10302,23 @@ export class GhostlyNode implements EngineImplementation {
     // meanwhile under the same id: checked after every wait below (`kept`).
     const deletes = this.removedChats.get(message.linkId);
     if (!live && deletes !== undefined) return false;
-    const chat = message.linkId;
-    const kept = () => this.removedChats.get(chat) === deletes;
-    // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
-    if (live?.stored.deletedIds?.includes(message.id)) return false;
-    // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
-    if (message.linkId.startsWith("group:") && this.groups.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
+    const chat = message.linkId, id = message.id;
+    // The peer republishes what it sent for a few minutes: what was deleted here stays deleted. So does one deleted
+    // while it is being stored: a removal that came meanwhile (live, while this came from the hold or the DHT) found
+    // no row to take and was confirmed, so it never comes again. A member's message its author deleted for everyone,
+    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone.
+    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
+    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id));
+    if (!kept()) return false;
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
+    // A paired contact knows my wire ids, and what names one (a pin, a quote, a reaction) looks for their row first: a
+    // text of theirs under one is never stored, as a removal naming one does nothing (`namesMine`). Files: as they come.
+    const mine = live?.stored.profile && !live.stored.group && message.sender === "peer" && !message.file && message.id.startsWith("peer_")
+      ? this.namesMine(chat, message.id.slice("peer_".length)).catch(() => false) : false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
     message = await this.resolveReply(message);
+    if (await mine) return false;
     if (first && isJoinNotice(message.text) && await first) message = { ...message, joinLine: true };
     // Its details begin here: the path a received message came over, or the one a payment goes over right now.
     if (message.sender === "peer" && live && !message.details?.received) message = { ...message, details: { ...message.details, received: { at: Date.now(), ...pathSnapshot(live, message.via) } } };
@@ -10389,11 +10467,19 @@ export class GhostlyNode implements EngineImplementation {
     return { files: true, payments: Object.values(methods).some(Boolean), methods, calls: false, services: false };
   }
 
-  /** State changes arrive in bursts; the UI gets one snapshot per tick. */
+  /**
+   * State changes arrive in bursts; the UI gets one snapshot per tick. `delayMs`: how long this change may wait. One
+   * that may not wait as long as the snapshot already due (a new file behind another's progress) brings it forward.
+   */
   private emitState(delayMs = 50): void {
     // Another device took the turn (WISP 06): the pages show the standby screen, and hear nothing more of this engine.
     if (this.gatedOut) return;
-    if (this.stateTimer) return;
+    const due = Date.now() + delayMs;
+    if (this.stateTimer) {
+      if (due >= this.stateDue) return;
+      clearTimeout(this.stateTimer);
+    }
+    this.stateDue = due;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
       // Asked for just before another device's turn stopped this engine: the pages keep the standby screen.

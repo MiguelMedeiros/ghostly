@@ -20,7 +20,7 @@
  *   So is the runner's `activity`: the person's taps and keys there count for the lock screen of the Ghostly window.
  */
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
-import { appInput, LOCKED, lockedSince, registerRunningApp, type AppOpener } from "./open";
+import { appInput, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
@@ -103,6 +103,8 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
     // The profile locking while it opens (its files downloading, its window being made) stops nothing yet: it never starts.
     const locked = lockedSince();
+    // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
+    const gone = takenDownSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
@@ -123,16 +125,18 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     });
     windows.set(place, opening);
     const label = await opening.catch((e: unknown) => { windows.delete(place); throw e; });
-    if (locked()) {
-      // Its window is there already, over the locked Ghostly window: it closes before the app starts in it.
+    // Its window is there already: locked (over the locked Ghostly window), or taken down, it closes before the app starts in it.
+    const closeWindow = () => {
       if (windows.get(place) === opening) windows.delete(place);
       early.delete(label);
       void invoke("app_close", { label }).catch(() => { /* already gone */ });
-      throw new Error(LOCKED);
-    }
+    };
+    if (locked()) { closeWindow(); throw new Error(LOCKED); }
+    try { gone(ref, entry.digest, options?.runAnyway === true); } catch (e) { closeWindow(); throw e; }
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
-    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
+    // Its chat deleted, its window closes too (`stopAppsIn`).
+    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, linkId, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },

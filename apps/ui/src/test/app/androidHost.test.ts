@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTC_CONFIG } from "@ghostly/core";
 import { cssColorHex, followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares, withoutPublicStun } from "../../desktop/android";
-import { incomingShare, resetIncomingShare, shareFiles } from "../../lib/incomingShare";
+import { incomingShare, resetIncomingShare, sendShareTo, shareFiles, takeShareFor } from "../../lib/incomingShare";
 import { PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
 import { androidApp, touchOnly } from "../../lib/touchOnly";
 
@@ -370,6 +370,32 @@ describe("a share from another app", () => {
     expect(await video).toEqual(["VID_1.mp4 6 B"]);
     expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_1.jpg"]);
     expect(await read(shareFiles(incomingShare()!))).toEqual(["IMG_1.jpg 3 B"]);
+  });
+
+  it("sent to a chat whose composer cannot take files yet, is read whole there after a later share, and goes with the page", async () => {
+    const host = androidHost();
+    host.share([{ name: "IMG_A.jpg", size: 3, mime: "image/jpeg" }]);
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_A.jpg"]));
+    // Picked for a chat that waits (Ghostly offline, an edit open there): it leaves the picker.
+    sendShareTo("chat-x");
+    expect(incomingShare()).toBeNull();
+
+    // Another app shares again: that one takes the picker, the one sent to the chat keeps its copies.
+    host.share([{ name: "IMG_B.jpg", size: 2, mime: "image/jpeg" }]);
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_B.jpg"]));
+    expect([...host.copies.keys()]).toEqual(["paste-1", "paste-2"]);
+
+    // The chat can take files again: the first share reads whole, and its copies go.
+    expect(await read(shareFiles(takeShareFor("chat-x")!))).toEqual(["IMG_A.jpg 3 B"]);
+    expect([...host.copies.keys()]).toEqual(["paste-2"]);
+
+    // One sent to a chat and never read goes with the page, as the one in the picker does.
+    sendShareTo("chat-y");
+    host.share([{ name: "IMG_C.jpg", size: 1, mime: "image/jpeg" }]);
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_C.jpg"]));
+    expect([...host.copies.keys()]).toEqual(["paste-2", "paste-3"]);
+    dispatchEvent(new Event("pagehide"));
+    await vi.waitFor(() => expect([...host.copies.keys()]).toEqual([]));
   });
 
   it("is nothing when none waits", async () => {
