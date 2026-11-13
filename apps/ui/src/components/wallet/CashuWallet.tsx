@@ -341,7 +341,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
                 {/* A memo is text someone else wrote, in any script: laid out by its own direction. */}
                 {quoted?.description && <p className="text-text-secondary text-sm" data-testid="wallet-pay-description"><bdi>{quoted.description}</bdi></p>}
                 {over !== undefined && <p className="text-danger-ink text-xs" data-testid="wallet-pay-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
-                {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
+                {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit, fee: formatAmount(quote.feeReserve, t.language), feeUnit: unitFor(t, unit, quote.feeReserve) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
                   <ButtonGroup fill>
                     <Button variant="primary" data-testid="wallet-pay-confirm" loading={running === "pay"} disabled={busy || over !== undefined} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</Button>
                     <Button onClick={() => { setQuote(null); setQuoted(null); }}>{t("common.cancel")}</Button>
