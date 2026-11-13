@@ -2392,7 +2392,9 @@ export class Groups {
         // No room yet, from the admin's side of my entry session: the knock goes on at its slow pace, and the page says why it waits.
         const invitation = this.stored.get(g)?.invitation, { n, max } = frame;
         if (!invitation?.entry || this.stored.get(g)!.state || invitation.linkId !== linkId || invitation.admin) return;
-        if (!Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        // Numbers that cannot be (more members than it holds, a size past the cap) are not shown.
+        if (!Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (max as number) > GROUP_MEMBER_CAP.max) return;
+        if ((n as number) < 0 || (n as number) > (max as number)) return;
         this.toldFull.set(g, { n: n as number, max: max as number, update: frame.why === "update", at: this.now() });
         traceJoin(g, "full.received");
         this.host.emit();
