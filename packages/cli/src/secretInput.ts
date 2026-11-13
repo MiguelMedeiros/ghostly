@@ -49,6 +49,7 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     // `secretValuesWarning` once the source's form is known.
     const onLine = params.apiKey !== undefined;
     if (params.stdin === true) {
+      if (tty) throw new CliError("usage", "--stdin takes the values as name=value lines piped to it (… | ghostly wallet create <type> --stdin), not a terminal");
       const values = { ...(params.values as Record<string, string> | undefined) };
       for (const line of (await read()).split(/\r?\n/)) {
         if (!line.trim()) continue;
@@ -64,6 +65,18 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     return onLine ? warning("An API key") : undefined;
   }
   return undefined;
+}
+
+/**
+ * `x401 credential add -`: the SD-JWT VC from stdin. Nothing there, or a terminal (a read that would wait on the
+ * keyboard without a word), is the usage error a join gives.
+ */
+export async function credentialFromStdin(read: StdinRead, tty = false): Promise<string> {
+  const missing = () => new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
+  if (tty) throw missing();
+  const credential = await read();
+  if (!credential) throw missing();
+  return credential;
 }
 
 /**

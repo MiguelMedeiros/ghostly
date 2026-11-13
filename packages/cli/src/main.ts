@@ -18,7 +18,7 @@ import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, credentialFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownNameOption, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
@@ -1575,12 +1575,11 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     delete params.evidenceFile; delete params.stdin;
   }
   if (command.method === "x401.credential.add") {
-    try { params.credential = params.file === "-" ? await readStdin() : readInput(params.file as string); }
+    // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin (or a
+    // terminal) as a join or a redeem says it, a usage error.
+    try { params.credential = params.file === "-" ? await credentialFromStdin(readStdin, process.stdin.isTTY === true) : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
     catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
-    // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin as a
-    // join or a redeem says it, a usage error.
-    if (!params.credential && params.file === "-") throw new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
     if (!params.credential) throw new CliError("bad_request", `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
