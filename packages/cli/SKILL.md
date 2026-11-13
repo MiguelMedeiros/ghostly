@@ -206,7 +206,7 @@ ghostly typing alice --kind thinking --status "Transcribing your audio" --for 12
 ghostly file send alice ./answer.ogg --voice --reply <message id>   # a voice note: length and waveform from the file
 ghostly file send alice ./note.m4a --voice 4200      # or its length given in ms (AAC needs ffmpeg for the waveform)
 ghostly file send alice ./report.pdf                 # a file (no daemon: stays until alice has all of it)
-ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout
+ghostly file wait <file id> --timeout 120            # exit 0 when done, 1 when it failed, 4 on timeout, 5 when it waits for file accept
 ghostly file accept <file id>                        # a file over 25 MiB waits for this (file.offered event)
 ```
 

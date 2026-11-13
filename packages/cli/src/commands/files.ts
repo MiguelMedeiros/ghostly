@@ -77,7 +77,7 @@ export const commands: Record<string, Command> = {
     },
   },
   "file wait": {
-    method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",
+    method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error); exit 4 on timeout, 5 at once when a received file waits for file accept",
     args: ["chat?", "file"], options: { timeout: { type: "number", description: "Seconds (default 300)" } },
     params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
