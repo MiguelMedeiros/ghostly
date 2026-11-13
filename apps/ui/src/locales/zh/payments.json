@@ -247,9 +247,16 @@
     "theGroup": "群组",
     "title": {
       "asked": "{{to}} 向 {{from}} 发起请求",
+      "askedByMe": "你向 {{from}} 发起请求",
       "askedGroup": "{{to}} 向群组发起请求",
+      "askedGroupByMe": "你向群组发起请求",
+      "askedMe": "{{to}} 向你发起请求",
       "paying": "{{from}} 正在付款给 {{to}}",
-      "sent": "{{from}} 向 {{to}} 付款"
+      "payingByMe": "你正在付款给 {{to}}",
+      "payingMe": "{{from}} 正在付款给你",
+      "sent": "{{from}} 向 {{to}} 付款",
+      "sentByMe": "你向 {{to}} 付款",
+      "sentToMe": "{{from}} 向你付款"
     },
     "why": {
       "noPayments": "对方的应用不支持群组付款（需要更新），或关闭了所有方式",
