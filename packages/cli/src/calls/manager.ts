@@ -490,8 +490,10 @@ export class CallManager {
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
       await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
-      // Its call.incoming went out: call.ended does too, for the program (or hook) waiting on that call.
-      await this.end(call, "failed", true);
+      // Its call.incoming went out: call.ended does too, for the program (or hook) waiting on that call. The contact's
+      // app still rings: the hang-up says this side could not connect (`r: "u"`), as an app's whose microphone was
+      // refused does, so the contact's chat says the call failed, not that it was declined.
+      await this.end(call, "failed", "unreachable");
       throw error;
     } finally {
       // Unused (the call ended first): closed. Nothing once its connection is the call's.
@@ -683,7 +685,8 @@ export class CallManager {
     call.watcher.unref?.();
   }
 
-  private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
+  /** `tell`: the contact is sent a hang-up; `"unreachable"`, one that says this side could not connect (`r: "u"`, WISP 601). */
+  private async end(call: Call, reason: EndReason, tell: boolean | "unreachable", report = true): Promise<void> {
     if (call.ended) return;
     call.ended = true;
     call.reason = reason;
@@ -709,7 +712,8 @@ export class CallManager {
     // stopping daemon waits for it, below).
     const closing = call.socket?.close();
     if (tell) {
-      await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
+      const hangUp: CallSignal = tell === "unreachable" ? { t: "h", ts: this.stamp(call.chat), r: "u" } : { t: "h", ts: this.stamp(call.chat) };
+      await this.send(call.chat, hangUp).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
           this.clearing.delete(call.chat);
