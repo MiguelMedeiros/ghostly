@@ -7,6 +7,7 @@ import { englishSay, type ApprovalRequest, type IdentityFetch, type ProviderSay 
 import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
 import { PUBKY_RELAYS } from "./pubkyRelays";
+import { loadPubky } from "./pubkySdk";
 
 export { PUBKY_RELAYS };
 
@@ -255,7 +256,7 @@ function cookieSessionTransport(): PubkyCookieSession | undefined {
 export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: (session: PubkyApprovedSession) => Promise<T>): Promise<T> {
   const { signal } = options;
   signal.throwIfAborted();
-  const { AuthFlow, GrantAuthFlow, AuthFlowKind } = await import("@synonymdev/pubky");
+  const { AuthFlow, GrantAuthFlow, AuthFlowKind } = await loadPubky();
   signal.throwIfAborted();
   const relay = options.relay ?? null;
   let grant: GrantAuthFlow, cookie: AuthFlow;

@@ -111,6 +111,14 @@
     "apps/web"
   ],
   "overrides": {
+    "nostr-tools": {
+      "@noble/ciphers": "^2.4.0",
+      "@noble/curves": "^2.4.0",
+      "@noble/hashes": "^2.4.0",
+      "@scure/base": "^2.4.0",
+      "@scure/bip32": "^2.4.0",
+      "@scure/bip39": "^2.4.0"
+    },
     "solc": {
       "tmp": "0.2.7"
     },
