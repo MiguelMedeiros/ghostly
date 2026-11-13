@@ -607,23 +607,35 @@ const METHODS: Record<string, Method> = {
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     const out: { to: string; kind: "group" | "chat"; messageIds: string[]; sent: string[]; error: string | null; edges?: number }[] =
       results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
+    // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
+    // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
+    let short: CliError | undefined;
+    const waited = async <T>(wait: () => Promise<T>, now: () => T): Promise<T> => {
+      if (short) return now();
+      try { return await wait(); } catch (error) { short = asCliError(error); return now(); }
+    };
     // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
     for (const [i, result] of out.entries()) if (to[i]!.group) {
       let edges: number | undefined;
       for (const messageId of result.messageIds) {
-        const took = groupWait === "sent" ? await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+        const took = groupWait === "sent" ? await waited(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken) : taken();
         edges = Math.min(edges ?? took, took);
       }
       result.edges = edges ?? 0;
     }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) continue;
-      const sent = await node(ctx).getMessage(to[i]!.id, messageId);
-      if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-      else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+      await waited(async () => {
+        const sent = await node(ctx).getMessage(to[i]!.id, messageId);
+        if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
+        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+      }, () => undefined);
     }
+    // A refusal first, then what ended a wait: each with every target's result.
     const failed = out.filter((r) => r.error);
     if (failed.length) throw new CliError(failed.length === out.length ? "refused" : "engine", failed.map((r) => `${r.to}: ${r.error}`).join("; "), { from: from.id, results: out });
+    if (short) throw new CliError(short.code, short.message, { ...short.details, from: from.id, results: out });
     return { from: from.id, results: out };
   },
   async "chat.retry"(ctx, params) {

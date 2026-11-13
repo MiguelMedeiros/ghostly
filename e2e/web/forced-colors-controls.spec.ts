@@ -117,6 +117,53 @@ test("forced colors keep Settings' switches, the chosen Mode and Chat list optio
 });
 
 /**
+ * A group's main buttons, filled with the accent alone: forced colors fill them with the page's colour, so New group's
+ * Create and an invitation's Accept (on the chat list's row and on the invitation's page) read as bare bold text. Each
+ * keeps an edge there, and shows none in normal colours.
+ */
+test("forced colors keep an edge on New group's Create and an invitation's Accept", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.create", "@feature:groups.invite"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await pair(alice, bob);
+  async function keepsAnEdge(page: Page, button: Locator, name: string): Promise<void> {
+    await expect(button).toBeVisible();
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    expect((await look(button)).border, `${name} in normal colours`).toBe(0);
+    await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+    const forced = await look(button);
+    expect.soft(forced.border, `${name}: border in forced colors`).toBeGreaterThanOrEqual(1);
+    expect.soft(forced.borderColor, `${name}: border against what it sits on`).not.toBe(forced.around);
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+  }
+
+  await still(alice.page);
+  await alice.page.getByTestId("sidebar-new-more").click();
+  await alice.page.getByTestId("new-group").click();
+  await alice.page.getByTestId("new-group-name").fill("Ghosts");
+  await alice.page.getByTestId("new-group-kind-mesh").click();
+  const create = alice.page.getByTestId("new-group-create");
+  await expect(create).toBeEnabled();
+  await keepsAnEdge(alice.page, create, "New group's Create");
+  await create.click();
+  await alice.page.getByTestId("group-share-done").click();
+  await alice.page.getByTestId("group-members").click();
+  const invite = alice.page.getByTestId("group-invite-contact").first().getByTestId("group-invite");
+  await expect(invite).toBeEnabled({ timeout: 60_000 });
+  await invite.click();
+  await alice.page.keyboard.press("Escape");
+
+  await still(bob.page);
+  const row = bob.page.getByTestId("group-row").filter({ hasText: "Ghosts" });
+  await expect(row.getByTestId("group-accept")).toBeVisible({ timeout: 60_000 });
+  await keepsAnEdge(bob.page, row.getByTestId("group-accept"), "the chat list row's Accept");
+  await row.getByTestId("group-row-open").click();
+  const invitation = bob.page.getByTestId("group-invitation");
+  await keepsAnEdge(bob.page, invitation.getByTestId("group-accept"), "the invitation page's Accept");
+  await bob.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  await bob.page.screenshot({ path: test.info().outputPath("forced-group-invitation.png") });
+});
+
+/**
  * The place you are on (`aria-current`): the chat list's open chat, Saved and Tasks above it, the account bar's page, the
  * rail's open chat and the phone's current tab. Their background and accent colour said it, and forced colors replace
  * both: one mark instead (index.css `current-mark`), a Highlight bar at the place's start side, under it where the

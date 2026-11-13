@@ -1571,6 +1571,20 @@ describe("text in a chat", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_9", via: "datalink" });
   });
 
+  it("a legacy chat's read mark never goes back: the contact's record still carrying an older acknowledgement leaves a delivered text delivered", async () => {
+    const chat = row({ profile: undefined, participationSeed: undefined });
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    link.options.events.onPeerAck(1000);
+    link.isDataLinkOpen = true;
+    await node.sendMessage({ linkId: chat.id, text: "hi", timestamp: 5000 });
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(1000);
+    expect(node.getState().links[0].peerAck).toBe(5000);
+    link.options.events.onPeerAck(6000);
+    expect(node.getState().links[0].peerAck).toBe(6000);
+  });
+
   it("for an away contact that allows it, a text is held in storage, and never above the held-text limit", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);

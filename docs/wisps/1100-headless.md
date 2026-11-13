@@ -137,7 +137,7 @@ A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typin
 | Code | Meaning |
 |---|---|
 | 0 | Done |
-| 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` |
+| 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` (stderr for `call pipe`, whose stdout is the call's audio) |
 | 2 | Usage: unknown command or bad arguments |
 | 3 | Not found (profile, chat, message) |
 | 4 | Timed out waiting (`--wait`, `chat wait`, `file wait`) |
@@ -215,7 +215,7 @@ A bot or an agent joins a voice call with the apps: the CLI takes part in [601](
 | End | The program reads EOF and the socket is removed; `call.ended` says why |
 | Latency added | At most one 20 ms frame going out; coming in, none beyond decoding (and the wait for a late packet) |
 
-**Commands and methods.** `call start <chat>`, `call answer [<chat|call>]`, `call hangup [<chat|call>]` (declines a call that rings), `call list`, `call flush`, `call auto on|off [--from <chat>]…` (kept in the profile's `calls.json`; each `--from` names its chat by the chat's id, its contact's key or this side's label, never only by a prefix of its id or the name the contact gave itself: those are refused, `bad_request` with the chat found), and `call pipe` (the audio on stdin and stdout); on the socket, `call.start|answer|hangup|list|get|flush|auto`. Calls need the daemon: a one-shot command still reports a call that rings, and refuses to place or answer one.
+**Commands and methods.** `call start <chat>`, `call answer [<chat|call>]`, `call hangup [<chat|call>]` (declines a call that rings), `call list`, `call flush`, `call auto on|off [--from <chat>]…` (kept in the profile's `calls.json`; each `--from` names its chat by the chat's id, its contact's key or this side's label, never only by a prefix of its id or the name the contact gave itself: those are refused, `bad_request` with the chat found), and `call pipe` (the audio on stdin and stdout; when the daemon closes the audio it says on stderr why: the call ended, with `call.ended`'s reason, or another program took its audio); on the socket, `call.start|answer|hangup|list|get|flush|auto`. Calls need the daemon: a one-shot command still reports a call that rings, and refuses to place or answer one.
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`, `call.connected` `{call, chat, direction, audio: {socket, token, rate, channels, format, frameMs}}`, `call.stalled` `{call, chat, direction, silentMs}` (a connected call heard no packet from the contact for 5 s: its side may have died, and its audio stopped; `call.get` says `stalled: true`), `call.resumed` `{call, chat, direction, silentMs}` (packets came back after `silentMs` without any), `call.ended` `{call, chat, direction, reason, duration?}`. `reason` is `hangup` (this side hung up, or declined), `remote-hangup` (the contact hung up a connected call), `missed` (an incoming call stopped ringing unanswered), `rejected` (the contact declined), `unanswered` (this side's call rang 60 s), `crossed` (both called at once and the contact's call came first; it rings here next), `failed` (the media did not connect within 30 s, or dropped, or heard no packet from the contact for 15 s, or the contact's app hung up saying it could not connect, `r: "u"`) or `stopped` (the daemon stopped, and hung its calls up first).
 
