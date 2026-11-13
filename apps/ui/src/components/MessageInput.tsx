@@ -108,7 +108,7 @@ interface MessageInputProps {
   linkPreviews?: boolean;
   /**
    * Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent; with
-   * `"recording"` while a voice note is recorded, false when it is sent or thrown away.
+   * `"recording"` while a voice note is recorded, false when it is paused, sent or thrown away.
    */
   onTyping?: (typing: boolean, kind?: TypingKind) => void;
   /**
@@ -1178,8 +1178,9 @@ export function MessageInput({
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
-            // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
-            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
+            // Recording: the composer's pickers close, and the contact sees "recording audio…" while sound is taken.
+            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); }}
+            onRecordingChange={(taking) => onTyping?.(taking, "recording")}
           />
         ) : <button
           aria-label={sendsTranslated && translation?.language ? t("composer.translate.sendTranslated", { language: languageName(translation.language, language) }) : t("composer.sendMessage")}
