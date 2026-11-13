@@ -369,7 +369,13 @@ export async function startNamedChats(ctx: ApiContext, params: Params): Promise<
   }
 }
 
-export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+/**
+ * The chat a call names. `s`: a state the call built already. Each build is a view of every chat (about 15-20 µs a
+ * chat, on the daemon's one thread): one lookup builds one, never one per list it reads.
+ */
+export const chatOf = (ctx: ApiContext, params: Params, s: EngineState = state(ctx)) => findChat(s.links, str(params, "chat", true), s.groups);
+/** `findOwnNamedChat` for the chat a call names, as `chatOf`. */
+export const ownChatOf = (ctx: ApiContext, params: Params, s: EngineState = state(ctx)) => findOwnNamedChat(s.links, str(params, "chat", true), s.groups);
 
 /** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
 export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
@@ -437,9 +443,9 @@ export function transportOffered(link: LinkView, transport: PairedTransport): vo
   if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
 }
 
-/** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
-export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
-  const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);
+/** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. `s`: as for `chatOf`. */
+export function chatOrGroup(ctx: ApiContext, ref: string, { links, groups }: EngineState = state(ctx)): { id: string; linkId: string; group: boolean } {
+  const found = findChatOrGroup(links, groups, ref);
   return "group" in found ? { id: found.group.id, linkId: `group:${found.group.id}`, group: true } : { id: found.link.id, linkId: found.link.id, group: false };
 }
 
@@ -450,11 +456,12 @@ export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId:
  */
 export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const ref = str(params, "group", true);
-  try { return findGroup(state(ctx).groups, ref); } catch (error) {
+  const { links, groups } = state(ctx);
+  try { return findGroup(groups, ref); } catch (error) {
     // `group:<ref>` names a group only: never a chat, as in `findChatOrGroup`.
     if (!(error instanceof CliError) || error.code !== "not_found" || groupPrefixed(ref) !== null) throw error;
     let chat: LinkView;
-    try { chat = findChat(state(ctx).links, ref); } catch { throw error; }
+    try { chat = findChat(links, ref); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
