@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as core from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { canonicalJsonBytes, readAppRevocation, signAppRevocation, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
+import { canonicalJsonBytes, readAppRevocation, readAppRevocationShape, signAppRevocation, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
 import { APP_FETCH_LIMITS } from "../src/engine/appFetch";
 import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, emptyProfile, keyOf, revocation, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
@@ -15,9 +15,10 @@ import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, ap
 
 vi.mock("@ghostly/core", async (importOriginal) => {
   const actual = await importOriginal<typeof core>();
-  return { ...actual, readAppRevocation: vi.fn(actual.readAppRevocation) };
+  return { ...actual, readAppRevocation: vi.fn(actual.readAppRevocation), readAppRevocationShape: vi.fn(actual.readAppRevocationShape) };
 });
 const verifies = vi.mocked(readAppRevocation);
+const shapeChecks = vi.mocked(readAppRevocationShape);
 
 let net: FakeNet;
 beforeEach(async () => {
@@ -73,6 +74,39 @@ describe("a publisher's ghostly-revoke.json", () => {
     expect(verifies).toHaveBeenCalledTimes(0);
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
   });
+
+  it("shared by six installed apps of its publisher: each entry is read once in a check, on an engine that never read it", async () => {
+    const six = await Promise.all([0, 1, 2, 3, 4, 5].map((i) => bundle({ name: `app${i}` })));
+    const installer = apps(net);
+    for (const [i, one] of six.entries()) {
+      net.put(`${REPO}/app${i}.ghostlyapp`, one.bytes);
+      await installer.preview({ url: `${REPO}/app${i}.ghostlyapp` });
+      await installer.install({ digest: one.digest, grant: ["chat"] });
+    }
+    const list: SignedAppRevocation[] = [await revocation(six[0]!.ref, [six[0]!.digest], "Leaked key"), await revocation(six[3]!.ref, [six[3]!.digest], "Lost key")];
+    for (let i = 0; i < 30; i++) list.push(await signAppRevocation({ ghostlyRevoke: 1, app: `${keyOf(PUBLISHER)}/other-${i}`, upTo: 1 + i }, PUBLISHER));
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes(list));
+
+    // The page reloaded: a new engine, its first check.
+    const store = apps(net);
+    verifies.mockClear();
+    shapeChecks.mockClear();
+    await store.checkUpdates();
+    expect(verifies.mock.calls.length + shapeChecks.mock.calls.length, "every entry read once, not once per app").toBe(list.length);
+    expect(await store.runCheck({ ref: six[0]!.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+    expect(await store.runCheck({ ref: six[3]!.ref })).toEqual({ status: "revoked", reason: "Lost key" });
+    for (const i of [1, 2, 4, 5]) expect(await store.runCheck({ ref: six[i]!.ref })).toEqual({ status: "ok" });
+    expect((store as unknown as { revocationSplits: unknown }).revocationSplits, "nothing held past the check").toBeNull();
+
+    // Every app's list dropped: the next check reads the file once more, by its verdict.
+    (store as unknown as { revocationFiles: Map<string, unknown> }).revocationFiles.clear();
+    verifies.mockClear();
+    shapeChecks.mockClear();
+    await store.checkUpdates();
+    expect(verifies).toHaveBeenCalledTimes(0);
+    expect(shapeChecks).toHaveBeenCalledTimes(list.length);
+    expect(await store.runCheck({ ref: six[0]!.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+  }, 60_000);
 
   it("one entry that does not verify still refuses the whole file, even one naming another app", async () => {
     const v1 = await bundle();
