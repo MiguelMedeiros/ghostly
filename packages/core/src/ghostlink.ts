@@ -1048,6 +1048,8 @@ export class GhostLink {
   /** The attempt (its epoch) whose direct transports were knocked on as its offer went out (`knockEarly`), and whether that is under way. */
   private knockedEarly = -1;
   private knockingEarly = false;
+  /** The attempt (its epoch) of a resume over WebRTC whose offer Iroh joined, its endpoint up only after the dial (`joinRace`). */
+  private irohJoinedResume = -1;
   /** When this side's offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
   private answeredAt = 0;
   /** This side's offer is out unanswered, or answered and not connected yet: what is ranked after WebRTC may race it. */
@@ -2912,11 +2914,17 @@ export class GhostLink {
     if (!(this.offered?.resume || missed) || this.offered?.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
     // After a wake, whatever the contact's newest packet: a contact that just ended an attempt of its own, its offer
     // unanswered while this app slept, published a moment ago and still reads at its slow pace (30 s in the background).
-    if (this.dialing || this.channel || this.stopped || !this.offerOut || !(missed || this.offered.woke || this.contactQuiet())) return;
+    if (this.dialing || this.channel || this.stopped || !this.offerOut) return;
+    // On Automatic a resume over WebRTC goes on Iroh where it ranks first (`dial`), the contact maybe still holding the
+    // dead session and reading no offer: one whose Iroh came up only after the dial offered WebRTC knocks on it now, the
+    // contact quiet or not. Before, the higher key (which the engine dials no more once its endpoints are up) was live
+    // again only once the contact noticed: 8.5 to 13.6 s after a kill (two CLI daemons, 2026-11-12), against 0.3 s.
+    const iroh = !missed && this.irohJoinedResume === epoch && this.irohRanksFirst();
+    if (!iroh && !(missed || this.offered.woke || this.contactQuiet())) return;
     // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
     // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
     const relayed = missed || this.upgradesFromRelay() ? [] : this.relayedTransports;
-    const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
+    const direct = iroh ? ["iroh/1" as const] : next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
     if (!direct.length) return;
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
@@ -2959,11 +2967,21 @@ export class GhostLink {
     if (rest.includes(transport)) return;
     this.afterRtc = { epoch: offered.epoch, rest: [...rest, transport] };
     traceLink(this.myPubKeyZ32, "race-join", { transport });
+    if (offered.resume && transport === "iroh/1") this.irohJoinedResume = offered.epoch;
     // The offer of a resume whose knock found nothing (the contact holds the old session, its HyperDHT listener
     // unannounced): it reads offers at a live chat's pace, and a transport up now, relayed or not, reaches it at once,
     // as the resume's knock would have. Before, the higher key's Iroh waited for the race, and the contact noticed first.
     if (offered.knockMissed && this.canDial(transport)) void this.knockEarly(offered.epoch, [transport]);
     if (!this.racing) this.scheduleRace(offered.epoch, offered.at);
+  }
+  /**
+   * On Automatic with no choice standing, Iroh ranks ahead of WebRTC for this contact and can be dialled now (WISP 100,
+   * revision 2026-11-08): where a resume over WebRTC goes on Iroh instead (`dial`).
+   */
+  private irohRanksFirst(): boolean {
+    if (!this.automatic || !this.peerTransports || !this.canDial("iroh/1") || (this.switcher.chosenTarget ?? this.choiceApart?.transport)) return false;
+    const ranked = rankTransports(this.transportOffer(), this.peerFallback ? this.peerTransports : this.peerTransports.slice(0, 1), this.relayedTransports);
+    return ranked.includes("iroh/1") && ranked.indexOf("iroh/1") < ranked.indexOf("webrtc/1");
   }
   /** WebRTC could not start an attempt here: it goes last in the dial order for `RTC_UNSTARTED_MS`, while another transport remains. */
   private rtcUnstarted(): void {

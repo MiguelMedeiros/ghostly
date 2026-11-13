@@ -244,6 +244,18 @@ describe("a chat on Automatic, both apps with WebRTC and an Iroh through its rel
     expect(result.transport).toBe("iroh/1");
     expect(result.requestsPerMin).toBeLessThanOrEqual(10);
   }, 240_000);
+
+  /**
+   * The app's Iroh endpoint is up a moment after its first dial (the CLI's 0.3 s after it, two daemons on loopback): that
+   * dial found no Iroh and offered WebRTC to a contact still holding the dead session, which reads no offer meanwhile.
+   * The lower key dials again once its endpoints are up (node.ts); the higher key waited for the contact to notice: live
+   * again 13.6 s after a kill (two CLI daemons with WebRTC and Iroh only, 2026-11-12), 8.5 s with HyperDHT raced at 8 s.
+   */
+  it.each(["lower", "higher"] as const)("the app with the %s key crashes and its Iroh is up after its first dial: it resumes on Iroh once it is up", async restarted => {
+    const result = await restart("auto+iroh", restarted, "crash", undefined, 300);
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_000);
+    expect(result.transport).toBe("iroh/1");
+  }, 240_000);
 });
 
 /**
