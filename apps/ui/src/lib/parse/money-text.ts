@@ -10,9 +10,9 @@ export const URI_MAX_CHARS = 4 * 1024;
 
 /**
  * A link's own characters, without the sentence's closing punctuation or an unbalanced bracket around it (the web
- * links' rule, linear however many ")" end it).
+ * links' rule, linear however many ")" end it). An emoji at its end stays: a label may end in one.
  */
-export const trimUriEnd = linkEnd;
+export const trimUriEnd = (uri: string) => linkEnd(uri, false);
 
 /** The web links of the last text asked about, as [start, end) in order: every scanner asks once per word it found. */
 let urlSpans: { text: string; spans: [number, number][] } | null = null;

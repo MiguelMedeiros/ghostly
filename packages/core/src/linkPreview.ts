@@ -78,9 +78,10 @@ export function linkStop(url: string): string {
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", in any of
  * the app's languages), an emoji or invisible character (`linkTail`) and a closing bracket or quote the link did not
- * open ("(https://x.example/a)") are left as text. The same rule as the message bubble's links.
+ * open ("(https://x.example/a)") are left as text. The same rule as the message bubble's links. `emoji: false` keeps
+ * the emoji: a payment link's label may end in one ("bitcoin:…?label=ok%20😀").
  */
-export function linkEnd(whole: string): string {
+export function linkEnd(whole: string, emoji = true): string {
   const url = linkStop(whole);
   // Brackets counted once, then taken off as they go: linear in the link, however many ")" a peer puts at its end.
   const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
@@ -89,7 +90,7 @@ export function linkEnd(whole: string): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    const tail = linkTail(url, end);
+    const tail = emoji ? linkTail(url, end) : 0;
     if (tail) { end -= tail; continue; }
     if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;
