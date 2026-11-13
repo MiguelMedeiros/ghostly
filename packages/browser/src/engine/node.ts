@@ -3058,6 +3058,11 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The settings `getState` gives, without the view of every chat it builds (a host reading one setting). */
   getSettings(): Settings { return this.settings; }
+  /** One chat's view as `getState().links` has it (none for a group's edge), without building every chat's. */
+  chatView(linkId: string): LinkView | undefined {
+    const live = this.links.get(linkId);
+    return live && !live.stored.group ? this.viewOf(live) : undefined;
+  }
 
   getState(): EngineState {
     const groups = this.groups.views();

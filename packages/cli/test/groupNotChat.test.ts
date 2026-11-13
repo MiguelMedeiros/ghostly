@@ -6,6 +6,7 @@ import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/t
 import { callApi, type ApiContext } from "../src/api";
 import { CallManager, type CallEngine } from "../src/calls/manager";
 import { allowlist } from "../src/listen";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.groups
 
 /**
@@ -22,10 +23,10 @@ const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 
 function fake(): ApiContext {
-  const node = { getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
+  const node = { chatView: chatViewOf, getState: state, inviteToGroup: vi.fn(), shareIdentityProof: vi.fn(), setServiceShared: vi.fn(), renameLink: vi.fn() };
   const dir = mkdtempSync(join(tmpdir(), "gnc-"));
   dirs.push(dir);
-  const calls = new CallManager({ engine: { getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
+  const calls = new CallManager({ engine: { chatView: chatViewOf, getState: state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: dir });
   return { runtime: { server: { node }, paths: { name: "default", dir }, callsUnavailable: null }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, calls, mode: "daemon", version: "test" } as unknown as ApiContext;
 }
 

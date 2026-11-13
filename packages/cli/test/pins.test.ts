@@ -8,6 +8,7 @@ import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.pins
 
 /** `pin`, and the stream's `chat.pinned` / `group.pinned`. */
@@ -19,7 +20,7 @@ const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Crew", cr
 function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon") {
   const out = { pin: null as number | null, n: 0 };
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     pinMessage: vi.fn(async ({ linkId }: { linkId: string }) => { if (!result.error && !linkId.startsWith("group:")) out.pin = ++out.n; return result; }),
     chatUnconfirmed: vi.fn(() => ({ reactions: [], pin: out.pin })),
   };
@@ -144,7 +145,7 @@ describe("pin in a group waits for an edge, as group react does", () => {
 
 describe("chat show and group show say the pin", () => {
   const ctxOf = (chatPin?: PinView, groupPin?: PinView) => ({
-    runtime: { server: { node: { getState: () => ({ links: [link("chat-one", { label: "Alice", ...(chatPin && { pin: chatPin }) })], groups: [group(groupPin && { pin: groupPin })], settings: {}, transport: {} }) as unknown as EngineState } }, paths: { name: "default" } },
+    runtime: { server: { node: { chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice", ...(chatPin && { pin: chatPin }) })], groups: [group(groupPin && { pin: groupPin })], settings: {}, transport: {} }) as unknown as EngineState } }, paths: { name: "default" } },
     hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, groupAuto: { get: () => ({ on: false, from: [] }) }, mode: "daemon", version: "test",
   }) as unknown as ApiContext;
 

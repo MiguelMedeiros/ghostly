@@ -3,6 +3,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { COMMANDS } from "../src/commands";
 import { parseArgs } from "../src/args";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.chat
 
 /** `chat connect` to a contact that is not there: `--timeout`, and a timeout that says what happens next. */
@@ -10,7 +11,7 @@ const link = { id: "chat-one", label: "bia", peerPubKeyZ32: "pchat-one", created
   textDelivery: "stream", deliveryMode: "stream", pairing: { status: "connecting" } } as unknown as LinkView;
 
 function fake(mode: "one-shot" | "daemon", connect: () => Promise<void>) {
-  const node = { getState: () => ({ links: [link], groups: [], settings: {}, transport: {} }) as unknown as EngineState, connect: vi.fn(connect) };
+  const node = { chatView: chatViewOf, getState: () => ({ links: [link], groups: [], settings: {}, transport: {} }) as unknown as EngineState, connect: vi.fn(connect) };
   const ctx = { runtime: { server: { node }, paths: { name: "default", dir: "/nonexistent" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, emit: () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node };
 }

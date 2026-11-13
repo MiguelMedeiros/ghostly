@@ -9,6 +9,7 @@ import { TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.replies
 
 /** `--reply` on send and group send, and `replyTo` on what the stream says about a message. */
@@ -19,7 +20,7 @@ const WIRE = "-".concat("A".repeat(21));
 
 function fake(sendResult: { error: string | null; refused?: boolean; messageId?: string } = { error: null, messageId: "me_2" }) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => sendResult),

@@ -7,12 +7,13 @@ import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
 import { invoiceNetwork, paymentJson } from "../src/wallets";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
 function fake() {
   const node = {
-    getState: () => ({
+    chatView: chatViewOf, getState: () => ({
       links: [
         { id: "chat-one", label: "Alice", peerPubKeyZ32: "p", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1" },
         // An invite nobody took yet.
