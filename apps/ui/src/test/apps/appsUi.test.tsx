@@ -1356,6 +1356,28 @@ describe("with the apps flag on", () => {
     wraps(within(store).getByText(`${long}6`));
   });
 
+  it("keeps a publisher's, a store's or a contact's name in its own direction inside a line, so its end stays at its end", async () => {
+    // Shared with the line's words, "Chess!" read "!Chess" in Arabic ("إلغاء تثبيت Chess!؟"), "Ana :)" read "(: Ana",
+    // and an Arabic title in English had its "!" at its other end.
+    const own = (line: HTMLElement, name: string) => {
+      expect(within(line).getByText(name)).toMatchObject({ tagName: "BDI" });
+      expect(line).toHaveTextContent(name);
+    };
+    const app = installed({ title: "Chess!" });
+    const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    await details.user.click(screen.getByTestId("app-uninstall-open"));
+    own(within(screen.getByTestId("app-uninstall")).getByRole("heading"), "Chess!");
+    details.unmount();
+    const picker = renderApp(<AppChatPicker app={app} onClose={() => {}} />);
+    own(within(screen.getByTestId("app-chat-picker")).getByRole("heading"), "Chess!");
+    picker.unmount();
+    const listedBy = [{ key: "s", name: "Ana's store :)", kind: "curated" as const }];
+    fakeEngine.on("appPreview", () => preview({ listedBy, unknownPublisher: false }));
+    renderApp(<AppInstallDialog source={{ url: URL_ }} sentBy="Ana :)" onClose={() => {}} />);
+    own(await screen.findByTestId("app-sent-by"), "Ana :)");
+    own(screen.getByTestId("app-store-line"), "Ana's store :)");
+  });
+
   it("names a store not read yet by its whole link, over two lines on a phone, so the part after the host that names it shows", async () => {
     // Cut on one line, a 375 px phone showed "https://raw.githubusercontent.com/MiguelMedei…": two GitHub stores looked the same.
     const unread = "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-store/main/index.json";

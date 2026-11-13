@@ -8,6 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
+import { NAME, withName } from "./aroundName";
 import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
@@ -38,12 +39,13 @@ function hostOf(url: string): string {
 }
 
 /** Where the app stands with the person's stores: "In <store>", "Found by <index>", "Not in any of your stores". */
-function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): string[] {
+function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): { key: string; line: ReactNode }[] {
+  const named = (key: TranslationKey) => (s: AppListedBy) => ({ key: s.key, line: withName(t(key, { name: NAME }), s.name) });
   const curated = listedBy.filter((s) => s.kind === "curated");
-  if (curated.length) return curated.map((s) => t("apps.install.inStore", { name: s.name }));
-  const found = listedBy.map((s) => t("apps.install.foundBy", { name: s.name }));
-  if (builtIn) return builtIn === "installed" ? [...found, t("apps.builtIn.hint")] : found;
-  return [...found, t("apps.install.notListed")];
+  if (curated.length) return curated.map(named("apps.install.inStore"));
+  const found = listedBy.map(named("apps.install.foundBy"));
+  const last = builtIn ? builtIn === "installed" && t("apps.builtIn.hint") : t("apps.install.notListed");
+  return last ? [...found, { key: last, line: last }] : found;
 }
 
 /**
@@ -84,8 +86,8 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
         <span className="ms-auto"><Fingerprint value={fingerprint} /></span>
       </div>
       {unknown && open && <p id={id} className="text-xs text-text-secondary">{t("apps.install.unknownPublisherInfo")}</p>}
-      {storeLines(listedBy, t, builtIn).map((line) => <Line key={line} testId="app-store-line">{line}</Line>)}
-      {sentBy && <Line testId="app-sent-by">{t("apps.install.sentBy", { name: sentBy })}</Line>}
+      {storeLines(listedBy, t, builtIn).map(({ key, line }) => <Line key={key} testId="app-store-line">{line}</Line>)}
+      {sentBy && <Line testId="app-sent-by">{withName(t("apps.install.sentBy", { name: NAME }), sentBy)}</Line>}
     </div>
   );
 }
@@ -439,7 +441,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={keepIt} testId="app-uninstall">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
+        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.app.uninstallTitle", { title: NAME }), app.title)}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">

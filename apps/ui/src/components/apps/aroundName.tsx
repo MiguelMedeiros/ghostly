@@ -14,3 +14,12 @@ export function aroundName(text: string, name: string, testId = "mini-app-with-n
     part && <span key={i} className="shrink-0 max-w-[calc(100%-4ch)] overflow-hidden text-ellipsis whitespace-pre">{part}</span>,
   ]);
 }
+
+/**
+ * A line that wraps with a name in it ("Uninstall Chess!?", "Sent by Ana :)"): the name, an app's, a store's or a
+ * contact's, keeps its own direction. Shared with the line's words, "Chess!" read "!Chess" in Arabic, and an Arabic
+ * title's "!" went to its other end in English.
+ */
+export function withName(text: string, name: string) {
+  return text.split(NAME).flatMap((part, i) => [i > 0 && <bdi key={`name-${i}`}>{name}</bdi>, part]);
+}
