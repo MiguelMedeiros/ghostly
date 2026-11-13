@@ -10,7 +10,7 @@ import { ghostly, home } from "./support/cli";
  * has no profile: anything past the check fails as no profile.
  */
 describe("local paths checked before the profile opens", () => {
-  it("file send, profile picture, group picture and profile backup --out refuse a missing path or a folder first", async () => {
+  it("file send, profile picture, group picture, profile backup --out and app serve refuse a missing path or a folder first", async () => {
     const dir = home("local-paths-first");
     const folder = join(dir, "a-folder"), missing = join(dir, "nodir"), file = join(dir, "a-file");
     mkdirSync(folder);
@@ -25,6 +25,8 @@ describe("local paths checked before the profile opens", () => {
       [["profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${missing}`],
       [["profile", "backup", "--out", join(missing, "deeper", "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${join(missing, "deeper")}`],
       [["profile", "backup", "--out", join(file, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${file}`],
+      [["app", "serve", join(missing, "app.ghostlyapp"), "--grant", "chat"], "not_found", `No such file or folder: ${join(missing, "app.ghostlyapp")}`],
+      [["app", "serve", folder, "--grant", "chat"], "bad_request", `${folder} is a folder: name a .ghostlyapp file`],
     ];
     const seen = [];
     for (const [args] of cases) {
