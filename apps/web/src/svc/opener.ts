@@ -270,6 +270,10 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    // The engine letting go of the answer while the frame leaves it unread ends the wait for it to read on: its place
+    // here goes to the app's next request, and the frame gets the error.
+    let lost = null as Error | null;
+    void answer.failed?.then((error) => { lost = error; wake(); });
     let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
@@ -277,12 +281,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
       // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
-      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted && !lost) await new Promise<void>((resolve) => { readOn = resolve; });
+      if (lost) throw lost;
     }
     post({ type: "end" });
   } catch (error) {
     const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline", "unknown-peer"].includes(error.code);
-    if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
+    const unread = error instanceof GhostlyHttpError && error.code === "unread";
+    if (!gone && !unread && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
     release?.();
