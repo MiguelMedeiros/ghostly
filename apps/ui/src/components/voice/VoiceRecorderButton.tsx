@@ -26,13 +26,14 @@ import { problemLine } from "../../lib/problemText";
 
 /**
  * Whether the browser will ask the person for the microphone before it answers: its question comes up over the page.
- * The iPhone's web app asks again at each launch. False where the browser can't say.
+ * The iPhone's web app asks again at each launch. Undefined where the browser can't say.
  */
-async function microphoneAsks(): Promise<boolean> {
+async function microphoneAsks(): Promise<boolean | undefined> {
   try {
-    return (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state === "prompt";
+    const state = (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state;
+    return state === undefined ? undefined : state === "prompt";
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -143,9 +144,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   /**
    * The browser is asking the person for the microphone of this hold. Its question takes the touch: on an iPhone the
    * page never hears that touch end (no pointerup, no pointercancel), elsewhere it ends to answer. Either way the hold
-   * can't go on, so the recording goes on hands-free once allowed, sent with a tap.
+   * can't go on, so the recording goes on hands-free once allowed, sent with a tap. False when the browser said it will
+   * not ask (a microphone allowed already, only slow to open); undefined while it hasn't said, or can't.
    */
-  const askingRef = useRef(false);
+  const askingRef = useRef<boolean | undefined>(undefined);
   /** Whether the recording was running when Esc asked "discard?", so Keep carries on. */
   const confirmResumeRef = useRef(false);
   const modeRef = useRef<Mode>("idle");
@@ -277,9 +279,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     };
     setModeBoth(next);
     setPhase("starting");
-    askingRef.current = false;
+    askingRef.current = undefined;
     const pressedAt = performance.now();
-    if (next === "hold") void microphoneAsks().then((asks) => { if (asks && recorderRef.current === recorder) askingRef.current = true; });
+    if (next === "hold") void microphoneAsks().then((asks) => { if (recorderRef.current === recorder) askingRef.current = asks; });
     try {
       await recorder.start();
     } catch (error) {
@@ -292,8 +294,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
-    const asked = askingRef.current || performance.now() - pressedAt >= ASKED_MS;
-    askingRef.current = false;
+    const asked = askingRef.current ?? performance.now() - pressedAt >= ASKED_MS;
+    askingRef.current = undefined;
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     // Still held after the browser's question: the finger that answered it is not on the mic any more, whatever the page
@@ -475,7 +477,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const askedDuringHold = () => {
     const recorder = recorderRef.current, gesture = gestureRef.current;
     if (modeRef.current !== "hold" || !recorder || recorder.recording || recorder.paused || recorder.ended) return false;
-    return askingRef.current || (!!gesture && Date.now() - gesture.at >= ASKED_MS);
+    return askingRef.current ?? (!!gesture && Date.now() - gesture.at >= ASKED_MS);
   };
 
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>) => {
