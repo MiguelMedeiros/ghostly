@@ -90,7 +90,11 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
   );
 }
 
-/** One short line, and the longer story behind an ⓘ beside it. */
+/**
+ * One short line, and the longer story behind an ⓘ beside it. The story may be a refusal as it came, naming a file of the
+ * bundle ("assets/ChessBoard_….html", up to 128 characters with no space or dash): it breaks anywhere rather than push
+ * the screen sideways on a phone.
+ */
 function InfoLine({ children, info, testId, className = "text-xs text-text-secondary" }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -100,7 +104,7 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
         <span className="min-w-0">{children}</span>
         {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId && `${testId}-info`} className="-my-0.5" />}
       </div>
-      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border">{info}</p>}
+      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border [overflow-wrap:anywhere]">{info}</p>}
     </div>
   );
 }
