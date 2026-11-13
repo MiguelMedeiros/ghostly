@@ -339,7 +339,30 @@ describe("a one-shot's call", () => {
     const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
     await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
     // A daemon still says why the chat cannot call.
-    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Calls need a live connection" });
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: expect.stringMatching(/^Calls need a live connection/) });
+  });
+});
+
+describe("a call to a contact who is away", () => {
+  // Found in a bug hunt: the daemon's `call start` to a contact whose app was closed answered only "Calls need a live
+  // connection", where `chat connect` and `send --wait` say what comes next.
+  it("says what comes next: wait for the chat to be live, then call again", async () => {
+    const away = (label: string) => ({ id: "chat-ab", label, profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" }) as unknown as LinkView;
+    for (const [label, ref] of [["bia", "bia"], ["Bia Souza", "chat-ab"]]) {
+      const engine: CallEngine = { getState: () => ({ links: [away(label)] }) as unknown as EngineState, setCallSignal: () => {} };
+      const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true });
+      await expect(calls.start("chat-ab", {})).rejects.toMatchObject({
+        code: "unavailable",
+        message: `Calls need a live connection, and your contact's app is not connected now: ghostly chat wait ${ref} --until live waits for it, then call again`,
+        details: { chat: "chat-ab" },
+      });
+    }
+  });
+
+  it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Your contact's app cannot take calls" });
   });
 });
 
