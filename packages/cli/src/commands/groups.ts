@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, groupWait, here, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -73,7 +73,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => {
       if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
       if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
-      return { group: a.group, path: here(a.path || undefined), clear: options.clear === true };
+      return { group: a.group, path: picture(here(a.path || undefined)), clear: options.clear === true };
     },
   },
   "group react": {
