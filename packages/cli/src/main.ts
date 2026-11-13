@@ -54,6 +54,12 @@ function print(value: unknown): void {
   process.stdout.write(jsonOut(value, pretty ? 2 : undefined) + "\n");
 }
 
+/**
+ * Where `run` writes a failure: stdout, unless stdout is the call's audio (`call pipe`). There the error was played as
+ * a click (`call pipe | aplay …`) and the terminal said nothing.
+ */
+let failures: NodeJS.WriteStream = process.stdout;
+
 /** Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer. */
 function printAnswer(result: Record<string, unknown>): void {
   if (typeof result?.warning === "string") {
@@ -1599,6 +1605,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
  * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
  */
 async function callPipeCommand(argv: string[]): Promise<void> {
+  failures = process.stderr;
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
@@ -1763,7 +1770,7 @@ export async function run(argv: string[]): Promise<void> {
     if (code >= 0) exit(code);
   } catch (error) {
     const failure = asCliError(error);
-    print({ error: failure.toJSON() });
+    failures.write(jsonOut({ error: failure.toJSON() }, pretty ? 2 : undefined) + "\n");
     exit(EXIT[failure.code]);
   }
 }

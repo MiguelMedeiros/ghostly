@@ -95,7 +95,8 @@ Bots should run the daemon: a one-shot is offline between commands.
 
 ## Commands
 
-Every command prints one JSON object on stdout. A failure prints `{"error":{"code","message"}}` and exits with:
+Every command prints one JSON object on stdout. A failure prints `{"error":{"code","message"}}` (on stderr for `call pipe`,
+whose stdout is the call's audio) and exits with:
 `1` failed (the engine or the network refused), `2` usage, `3` not found, `4` timed out, `5` needs a confirmation
 (`--force`, `--yes`, `--confirm-real`), `130` stopped with Ctrl-C (`interrupted`: a one-shot closes its profile first,
 and a line on stderr says what became of what it waited on). A daemon that does not answer a read or `daemon status` within 15 seconds, or
