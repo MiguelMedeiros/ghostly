@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, findOwnNamedChat, groupNameOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupNameOf, groupOf, node, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -105,7 +105,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = joined(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },

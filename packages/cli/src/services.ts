@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, findOwnNamedChat, node, num, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, node, num, ownChatOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -309,7 +309,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     const shared = !bool(params, "off");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });

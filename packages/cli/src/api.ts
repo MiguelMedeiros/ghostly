@@ -487,9 +487,10 @@ const METHODS: Record<string, Method> = {
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
     if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
+    const now = state(ctx);
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
       ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
@@ -571,7 +572,8 @@ const METHODS: Record<string, Method> = {
    * took it), each file until its transfer is done. What a chat refused comes back per chat; any refusal fails the call.
    */
   async "chat.forward"(ctx, params) {
-    const from = chatOrGroup(ctx, str(params, "chat", true));
+    const s = state(ctx);
+    const from = chatOrGroup(ctx, str(params, "chat", true), s);
     // Each id once, and the engine's bounds before any row is read: one id given 50,000 times was read and guarded as
     // often (a minute of the daemon's thread) for the one message the engine forwarded.
     const messageIds = [...new Set(list(params, "messages"))];
@@ -580,7 +582,7 @@ const METHODS: Record<string, Method> = {
     // A chat or group named twice (by its name and its id too) is one of them, as the engine counts.
     const to: ReturnType<typeof chatOrGroup>[] = [];
     for (const ref of new Set(list(params, "to"))) {
-      const target = chatOrGroup(ctx, ref);
+      const target = chatOrGroup(ctx, ref, s);
       if (to.some((t) => t.linkId === target.linkId)) continue;
       if (to.length === FORWARD_TARGETS) throw new CliError("bad_request", `Forward to at most ${FORWARD_TARGETS} chats and groups at once`);
       to.push(target);
@@ -913,9 +915,10 @@ const METHODS: Record<string, Method> = {
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
     const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
     if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
+    const now = state(ctx);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      reached: reached(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
       ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
     };
   },
