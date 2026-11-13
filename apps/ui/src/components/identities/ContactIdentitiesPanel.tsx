@@ -28,6 +28,7 @@ import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
 import { sourceWords } from "../../lib/providerWords";
+import { focusLost } from "../../lib/focus";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -149,19 +150,21 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
   const root = useRef<HTMLDivElement>(null);
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
-  // Turned over, the keys go to the back's way back; face up again, to the chosen card.
+  // Turned over, the keys go to the back's way back; face up again, to the chosen card once the deck is back (after the
+  // turn: until then the back is there, with the focus on its Cards), unless the person went elsewhere meanwhile.
+  const turned = useRef(false);
   useEffect(() => {
-    if (side === "back" && flipped) root.current?.querySelector<HTMLElement>("[data-testid=chat-identity-cards]")?.focus({ preventScroll: true });
+    if (side === "back") { turned.current = true; if (flipped) root.current?.querySelector<HTMLElement>("[data-testid=chat-identity-cards]")?.focus({ preventScroll: true }); }
+    else if (turned.current) { turned.current = false; if (focusLost()) root.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true }); }
   }, [side, flipped]);
-  const cards = () => { turnBack(); requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true })); };
   const showing = side === "back" ? entry : undefined;
   return (
     <div ref={root} className={`contact-cards ${tone(entry)}`} data-side={showing ? "back" : "cards"}>
       {showing ? <CardFlip className="contact-identity" flipped={flipped} onSettle={setAtRest} tone={tone(showing)}
         front={<IdCardFace card={showing.card} />}
         back={showing.ghostly
-          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} turning={turning} onCards={cards} />
-          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={cards} />} />
+          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} turning={turning} onCards={turnBack} />
+          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={turnBack} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
           kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
