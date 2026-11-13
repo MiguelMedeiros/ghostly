@@ -1050,6 +1050,8 @@ export class GhostLink {
   private knockingEarly = false;
   /** The attempt (its epoch) of a resume over WebRTC whose offer Iroh joined, its endpoint up only after the dial (`joinRace`). */
   private irohJoinedResume = -1;
+  /** The same for HyperDHT (direct, and already in the race's `afterRtc`). */
+  private hyperdhtJoinedResume = -1;
   /** When this side's offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
   private answeredAt = 0;
   /** This side's offer is out unanswered, or answered and not connected yet: what is ranked after WebRTC may race it. */
@@ -2920,11 +2922,16 @@ export class GhostLink {
     // contact quiet or not. Before, the higher key (which the engine dials no more once its endpoints are up) was live
     // again only once the contact noticed: 8.5 to 13.6 s after a kill (two CLI daemons, 2026-11-12), against 0.3 s.
     const iroh = !missed && this.irohJoinedResume === epoch && this.irohRanksFirst();
-    if (!iroh && !(missed || this.offered.woke || this.contactQuiet())) return;
+    // So does a HyperDHT up only after the dial (Iroh's relay out of reach), which the race would dial 8 s on anyway: the
+    // higher key was live again 8.5 s after a kill (two CLI daemons, Iroh relay down, 2026-11-13), against 0.9 s.
+    const hyperdht = !missed && this.hyperdhtJoinedResume === epoch && next.rest.includes("hyperdht/1")
+      && !this.relayedTransports.includes("hyperdht/1") && this.canDial("hyperdht/1");
+    if (!iroh && !hyperdht && !(missed || this.offered.woke || this.contactQuiet())) return;
     // A relayed transport too where both apps move off it once live (`upgrade/1`): the chat is live over the relay in a
     // second, and on the direct path a moment later, its signaling on the session (WISP 100 § Back to a quiet contact).
     const relayed = missed || this.upgradesFromRelay() ? [] : this.relayedTransports;
-    const direct = iroh ? ["iroh/1" as const] : next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
+    const direct = iroh || hyperdht ? [...(iroh ? ["iroh/1" as const] : []), ...(hyperdht ? ["hyperdht/1" as const] : [])]
+      : next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
     if (!direct.length) return;
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
@@ -2968,6 +2975,7 @@ export class GhostLink {
     this.afterRtc = { epoch: offered.epoch, rest: [...rest, transport] };
     traceLink(this.myPubKeyZ32, "race-join", { transport });
     if (offered.resume && transport === "iroh/1") this.irohJoinedResume = offered.epoch;
+    if (offered.resume && transport === "hyperdht/1") this.hyperdhtJoinedResume = offered.epoch;
     // The offer of a resume whose knock found nothing (the contact holds the old session, its HyperDHT listener
     // unannounced): it reads offers at a live chat's pace, and a transport up now, relayed or not, reaches it at once,
     // as the resume's knock would have. Before, the higher key's Iroh waited for the race, and the contact noticed first.
