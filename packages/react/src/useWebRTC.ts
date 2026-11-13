@@ -397,6 +397,12 @@ export function useWebRTC({
   }, []);
 
   /**
+   * The microphone a video call holds while its camera is asked for alone (`asksEachAlone`): the call can end while
+   * Android's dialog is up (or the chat goes away), and the microphone goes then, not once the dialog is answered.
+   */
+  const askingCameraRef = useRef<MediaStream | null>(null);
+
+  /**
    * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
    * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
    * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
@@ -415,6 +421,7 @@ export function useWebRTC({
           throw error;
         }
         if (cancelled()) return { stream };
+        askingCameraRef.current = stream;
         try {
           const camera = await mediaRef.current.getUserMedia({ audio: false, video: captureFrom("video") });
           camera.getVideoTracks().forEach((track) => stream.addTrack(track));
@@ -424,6 +431,8 @@ export function useWebRTC({
           stream.getTracks().forEach((track) => track.stop());
           setMediaProblemOf("both");
           throw error;
+        } finally {
+          if (askingCameraRef.current === stream) askingCameraRef.current = null;
         }
       }
       try {
@@ -632,6 +641,8 @@ export function useWebRTC({
       });
       localStreamRef.current = null;
     }
+    askingCameraRef.current?.getTracks().forEach((t) => t.stop());
+    askingCameraRef.current = null;
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -1727,6 +1738,7 @@ export function useWebRTC({
         });
         localStreamRef.current = null;
       }
+      askingCameraRef.current?.getTracks().forEach((t) => t.stop());
 
       if (pcRef.current) {
         pcRef.current.close();
