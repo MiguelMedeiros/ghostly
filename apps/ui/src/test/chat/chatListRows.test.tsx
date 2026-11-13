@@ -77,6 +77,18 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(markOf("Gus")).toHaveAccessibleName("Waiting for your contact to be online");
   });
 
+  it("marks my last text of a compatibility chat delivered once the contact's acknowledgement covers it, as its bubble does", () => {
+    saveSession(chat("k", { profile: undefined, nick: "Kim", messages: [message({ sender: "me", text: "on my way", timestamp: 5000 })] }));
+    const { engine } = list();
+    const markOf = () => within(rowOf("Kim")).getByTestId("chat-row-delivery");
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 4999 })] }));
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ links: [linkView({ id: "k", peerPubKeyZ32: key("k"), peerAck: 5000 })] }));
+    expect(markOf()).toHaveAccessibleName("Delivered");
+    expect(markOf()).toHaveAttribute("data-delivery", "delivered");
+  });
+
   it("puts no delivery mark on the contact's message, and counts what is unread beside it", () => {
     saveSession(chat("e", { nick: "Eve", messages: [message({ text: "one" }), message({ text: "two" }), message({ text: "three" })] }));
     list();
