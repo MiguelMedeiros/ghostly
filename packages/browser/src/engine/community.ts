@@ -121,6 +121,11 @@ const AWAIT_EDGE_MS = 2 * 60_000;
  * hub its members a minute, another hub three), and the app dials those that were live once at start (`resume`).
  */
 const RESTORED_EDGE_MS = 60_000;
+/**
+ * Of those, the edges to members (not to hubs, and not up yet) a hub keeps: what its relays' budget brings up in about
+ * a minute. The others close at its first reading of the beacon, and those members ask another hub at once.
+ */
+const RESTORED_MEMBER_EDGES = 6;
 /** After letting someone in, the door keeps its reads at the admitting pace this long. */
 const ADMITTED_QUIET_MS = 30_000;
 const MAX_PENDING_ENTRIES = 8;
@@ -395,6 +400,8 @@ interface Live {
    * `RESTORED_EDGE_MS`, as their other ends are likely watching for this app to come back.
    */
   restored: Map<string, number>;
+  /** The restored edges to members were cut down to `RESTORED_MEMBER_EDGES`, at the first reading of the beacon. */
+  restoredTrimmed?: boolean;
   /** As a hub: keys the chain took out that I keep an edge to until they are told (since when, told when); keys not waited for until; and when each was last told. */
   farewells: Map<string, { since: number; told?: number }>;
   farewellQuiet: Map<string, number>;
@@ -1763,6 +1770,21 @@ export class Communities {
     // Back after a restart: an edge of the last run stays a while, since its other end is likely looking for this app
     // (and, once up, carries the catch-up). Closed as the fresh topology's first pick did not name it, it was one about
     // to come up (2026-09-29).
+    // A hub back after a restart keeps a few of its edges to members, not all of them: each costs 8-10 of its relays'
+    // 60 requests a minute to come up, and with 14 signaling at once none came up in its first minute. Its members waited
+    // a minute for it, then one more on the hub they asked next, then 6 of them stepped up as hubs with nobody on them
+    // (36 members, 230 s until all were back, 2026-11-13). The others' edges close (their side hears this app's goodbye)
+    // and they ask another hub at once, so two hubs bring the edges up side by side.
+    if (!live.restoredTrimmed && live.beaconKnown) {
+      live.restoredTrimmed = true;
+      const hubs = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
+      let kept = 0;
+      for (const key of [...live.restored.keys()]) {
+        const id = existing.get(key);
+        if (hubs.has(key) || (id && this.host.linkReady(id, 2))) continue;
+        if (++kept > RESTORED_MEMBER_EDGES) live.restored.delete(key);
+      }
+    }
     for (const [key, since] of live.restored) {
       if (!since) live.restored.set(key, now);
       if (!existing.has(key) || now - (since || now) >= RESTORED_EDGE_MS || s.wasRemoved(key)) live.restored.delete(key);
