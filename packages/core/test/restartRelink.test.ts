@@ -1119,3 +1119,53 @@ describe("a file's cancel said while Automatic moves the session from Iroh to We
     expect({ goes: records.stays.get(ids.goes)?.state, stays: records.goes.get(ids.stays)?.state }, "the receivers'").toEqual({ goes: "cancelled", stays: "cancelled" });
   }, 240_000);
 });
+
+/**
+ * Automatic, both apps with `upgrade/1`: after a restart the chat is live over Iroh through its relay and then moves to
+ * WebRTC. The Iroh endpoint takes connections from anyone who knows its address; one that dials in the moment the chat
+ * is live there and never authenticates is nobody. It held the move's one place for a candidate: the WebRTC session
+ * that opened for the move was refused as a duplicate, the move failed, and a move off a relay is not planned again.
+ */
+describe("a connection on the chat's Iroh endpoint that never authenticates, as Automatic moves off the relay", () => {
+  const transportOf = (app: App) => (app.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport;
+  /** A dial-in that says nothing: whoever read the endpoint's address, with no key of the chat. */
+  const silent = () => {
+    const channel = { bufferedAmount: 0, drained: async () => {}, send: () => {}, onMessage: null as unknown, onClose: null as (() => void) | null, closed: false,
+      close() { if (this.closed) return; this.closed = true; this.onClose?.(); } };
+    return channel;
+  };
+  it.each([
+    { restarted: "lower", at: "stays" }, { restarted: "lower", at: "goes" },
+    { restarted: "higher", at: "stays" }, { restarted: "higher", at: "goes" },
+  ] as const)("the app with the $restarted key back, dialled in at the app that $at: both still move to WebRTC", async ({ restarted, at }) => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const up = { mine: true, contact: true };
+    const apps = {} as Record<"goes" | "stays", App>;
+    const strangers: ReturnType<typeof silent>[] = [];
+    let armed = false;
+    const events = (who: "goes" | "stays") => ({ events: {
+      onPairingState: (state: { status: string; transport?: string }) => {
+        if (!armed || who !== at || strangers.length || state.status !== "ready" || state.transport !== "iroh/1") return;
+        const endpoint = (apps[who].link as unknown as { endpoints: Map<string, { onConnection: ((c: unknown) => void) | null; descriptor: { id: string } }> }).endpoints.get("iroh/1")!;
+        const channel = silent();
+        strangers.push(channel);
+        endpoint.onConnection?.({ channel, binding: { transport: "iroh/1", context: "c".repeat(64), identities: [endpoint.descriptor.id, "f".repeat(64)] } });
+      },
+    } });
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("goes"));
+    apps.stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, "auto+iroh", emptyDhtDeliveryState(), false, undefined, false, up, events("stays"));
+    expect(await until(() => apps.goes.link.isDataLinkOpen && apps.stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, apps.goes, "graceful");
+    await run(RESTART_AFTER_MS);
+    armed = true;
+    apps.goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, "auto+iroh", apps.goes.dhtState, true, undefined, false, up, events("goes"));
+    expect(await until(() => strangers.length > 0, 60_000), "the stranger dialled in while the chat was live on Iroh").toBeLessThan(Infinity);
+    await run(30_000);
+    // Before: both stayed on Iroh through its relay for the rest of the session.
+    expect([transportOf(apps.goes), transportOf(apps.stays)]).toEqual(["webrtc/1", "webrtc/1"]);
+    expect(strangers[0].closed, "the stranger's connection is closed").toBe(true);
+  }, 240_000);
+});
