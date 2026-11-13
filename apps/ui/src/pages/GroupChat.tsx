@@ -407,9 +407,11 @@ export function GroupChat() {
   // group was left). Until this group's own list comes, what the engine last sent for it.
   const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
+  /** This group's history is here: what comes in it from now on is news to a screen reader (MessageAnnouncer). */
+  const historyIn = loaded.groupId === groupId || engine.messages.has(`group:${groupId}`);
   // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
   // loading, not an empty group.
-  const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
+  const reading = !historyIn && (group?.lastMessageAt ?? 0) > 0;
   const [readReplies] = useState(() => replyIndexer(true));
   const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   /**
@@ -836,7 +838,7 @@ export function GroupChat() {
     {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
     <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
-      <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => groupPayNoteLine(note, group, t)} />
+      <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => groupPayNoteLine(note, group, t)} ready={historyIn} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}
