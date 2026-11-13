@@ -332,6 +332,9 @@ interface Live {
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
+  /** Their invites: key → when sent (`entryReady`), until the accept came; and the accepts being answered. */
+  invitedAt?: Map<string, number>;
+  accepting?: Set<string>;
   /** Knocks whose entry session never came up, given up: key → when (`UNANSWERED_TELL`); and whether the admin is told. */
   unanswered?: Map<string, number>;
   unansweredTold?: boolean;
@@ -1293,7 +1296,17 @@ export class Communities {
         live.pendingEntries.delete(key);
         if (!elsewhere) (live.unanswered ??= new Map()).set(key, now);
       } else if (now - since > ENTRY_TIMEOUT_MS) { live.pendingEntries.delete(key); this.refused.set(key, now + REFUSED_FOR_MS); }
-      else continue;
+      else {
+        // Up and the invite not answered: the joiner took another member's a moment before and ignored mine for
+        // `ENTRY_LINGER_MS` (one admission at a time on its session), and that member's `admit` may have failed since
+        // (the members at their bound). Sent once, it waited for `ENTRY_TIMEOUT_MS` and refused the joiner for
+        // `REFUSED_FOR_MS` (the admin's app opened for the members at their bound: three joiners 180 s pending, then
+        // refused 597 s, at 256 members). Invited again once that window is over.
+        const invited = live.invitedAt?.get(key);
+        if (up && invited !== undefined && now - invited >= ENTRY_LINGER_MS && !live.accepting?.has(key)) this.entryReady(groupId, linkId, key);
+        continue;
+      }
+      live.invitedAt?.delete(key);
       if (linkId) await this.host.closeEdge(linkId);
     }
     if (live.unanswered) {
@@ -1948,6 +1961,7 @@ export class Communities {
       // read is read again in the background, and this knock waits for the next turn of the door: the tick never waits.
       if (this.host.adminTurn && !(await this.host.adminTurn(groupId, { wait: false }))) break;
       live.pendingEntries.set(key, now);
+      live.invitedAt?.delete(key);
       live.doorKey = link.host;
       traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
@@ -2040,6 +2054,7 @@ export class Communities {
   private async closeEntries(groupId: string): Promise<void> {
     const live = this.live.get(groupId), mine = this.stored.get(groupId)?.joining?.linkId;
     live?.pendingEntries.clear();
+    live?.invitedAt?.clear();
     for (const linkId of this.host.entries(groupId).values()) if (linkId !== mine) await this.host.closeEdge(linkId);
   }
 
@@ -2065,6 +2080,7 @@ export class Communities {
       return true;
     }
     try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }
+    (live.invitedAt ??= new Map()).set(peer, now);
     return true;
   }
 
@@ -2105,10 +2121,15 @@ export class Communities {
         if (!live || !peer || frame.key !== peer || !live.pendingEntries.has(peer)) return;
         // Opened through a link replaced since: nobody is admitted on it (the tick closes it).
         if (live.doorKey !== live.session.entryKey) return;
+        // Answered once: an invite sent again meanwhile (an accept slower than `ENTRY_LINGER_MS`) is not a second admission.
+        if (live.accepting?.has(peer)) return;
+        (live.accepting ??= new Set()).add(peer);
+        live.invitedAt?.delete(peer);
         let welcome;
         // Already in the roster (their welcome was lost): the welcome again, with nothing committed.
         try { welcome = rosterHas(live.session.roster, peer) ? await live.session.rewelcome(peer) : await live.session.admit(peer, this.now()); }
         catch { live.pendingEntries.delete(peer); await this.host.closeEdge(linkId); return; }
+        finally { live.accepting.delete(peer); }
         for (const piece of welcome) { try { this.host.sendOnLink(linkId, piece); } catch { /* the joiner knocks again */ } }
         traceJoin(g, "welcome.sent");
         live.pendingEntries.delete(peer);
@@ -2192,7 +2213,7 @@ export class Communities {
       case "group-decline": {
         const live = this.live.get(g);
         const peer = [...this.host.entries(g)].find(([, id]) => id === linkId)?.[0];
-        if (live && peer) { live.pendingEntries.delete(peer); await this.host.closeEdge(linkId); }
+        if (live && peer) { live.pendingEntries.delete(peer); live.invitedAt?.delete(peer); await this.host.closeEdge(linkId); }
         return;
       }
     }
