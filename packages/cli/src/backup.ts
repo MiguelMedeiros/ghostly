@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
@@ -59,6 +59,13 @@ function parseHolds(text: string | undefined): Record<string, unknown> {
  * daemon goes on while a backup runs, and such a file is left out of it, as one the profile no longer has.
  */
 const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; };
+
+/**
+ * The files a backup under way writes (the store in the clear, the backup not complete yet), removed if the process
+ * leaves before the backup's own cleanup: Ctrl-C on a one-shot exits once the profile closed, the backup still running.
+ */
+const leftOnExit = new Set<string>();
+process.on("exit", () => { for (const path of leftOnExit) rmSync(path, { force: true }); });
 
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
@@ -123,8 +130,14 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const text = await readSetting(paths.dir, name);
       if (text !== null) settings.push({ name, text });
     }
-    // The store's copy is removed whatever fails, its export too: one that fails part way (its disk full) has written a
-    // part of every message, and was left beside rows.db, one more each time the backup was tried again.
+    // Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`, the second removed the
+    // first's half-written file as one left by a stopped backup, and the first gave the path the second's file.
+    const partial = `${path}.partial-${process.pid}-${randomBytes(6).toString("hex")}`;
+    let out: FileHandle | null = null, writing = false;
+    // From its export on, the store (every message and key in the clear) goes however the backup ends: an export cut
+    // short, a failure before the backup is written, and a process that leaves first (Ctrl-C on a one-shot), the
+    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`).
+    leftOnExit.add(store).add(partial);
     try {
       await ctx.runtime.store.exportSnapshot(store);
       const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
@@ -145,47 +158,47 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
       const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
 
-      // Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`, the second removed the
-      // first's half-written file as one left by a stopped backup, and the first gave the path the second's file.
-      const partial = `${path}.partial-${process.pid}-${randomBytes(6).toString("hex")}`;
-      let out: FileHandle | null = null;
-      try {
-        out = await open(partial, "wx", 0o600);
-        const handle = out;
-        let writer: BackupWriter;
-        try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
-        const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
-        await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
-        await put({ t: "file", kind: "store", size: storeSize });
-        await copyIn(writer, store, storeSize);
-        // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
-        let copied = 0, copiedBytes = 0;
-        for (const file of files) {
-          const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
-          if (!handle) continue;
-          await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
-          await copyIn(writer, path, file.size, handle);
-          copied++;
-          copiedBytes += file.size;
-        }
-        for (const { name, text } of settings) await put({ t: "setting", name, text });
-        await put({ t: "end", files: copied, bytes: copiedBytes });
-        const written = await writer.finish();
-        await handle.sync();
-        await handle.close();
-        out = null;
-        // Its name only now, and never over a file that appeared meanwhile.
-        try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
-        return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
-      } catch (error) {
-        // A write into the backup that found its disk full names the backup, not Node's bare "write".
-        if ((error as NodeJS.ErrnoException)?.code === "ENOSPC" || (error as NodeJS.ErrnoException)?.code === "EDQUOT") throw localFileError(error, path) ?? error;
-        throw error;
-      } finally {
-        await out?.close().catch(() => {});
-        await rm(partial, { force: true });
+      writing = true;
+      out = await open(partial, "wx", 0o600);
+      const handle = out;
+      let writer: BackupWriter;
+      try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
+      const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
+      await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
+      await put({ t: "file", kind: "store", size: storeSize });
+      await copyIn(writer, store, storeSize);
+      // Each file opened before its record: one removed since the walk is left out, and the end counts what went in.
+      let copied = 0, copiedBytes = 0;
+      for (const file of files) {
+        const path = join(paths.files, file.name), handle = await open(path, "r").catch(unlessGone);
+        if (!handle) continue;
+        await put({ t: "file", kind: "file", path: file.name.split(sep).join("/"), size: file.size });
+        await copyIn(writer, path, file.size, handle);
+        copied++;
+        copiedBytes += file.size;
       }
-    } finally { await rm(store, { force: true }); }
+      for (const { name, text } of settings) await put({ t: "setting", name, text });
+      await put({ t: "end", files: copied, bytes: copiedBytes });
+      const written = await writer.finish();
+      await handle.sync();
+      await handle.close();
+      out = null;
+      // Its name only now, and never over a file that appeared meanwhile.
+      try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
+      return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
+    } catch (error) {
+      // A write into the backup that found its disk full names the backup, not Node's bare "write". The store's export
+      // writes into the profile, maybe on another disk: not named as the backup.
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (writing && (code === "ENOSPC" || code === "EDQUOT")) throw localFileError(error, path) ?? error;
+      throw error;
+    } finally {
+      await out?.close().catch(() => {});
+      await rm(partial, { force: true });
+      await rm(store, { force: true });
+      leftOnExit.delete(store);
+      leftOnExit.delete(partial);
+    }
   },
 };
 
