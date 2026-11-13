@@ -641,10 +641,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   // `app publish` does not write over a bundle it cannot read: its sequence and key are not known, so neither is a rollback.
   let unread: CliError | null = null;
   const heldIndex = existsSync(indexOut) ? new Uint8Array(readFileSync(indexOut)) : null;
-  if (heldIndex || existsSync(sigOut)) {
+  const heldSig = existsSync(sigOut) ? new Uint8Array(readFileSync(sigOut)) : null;
+  if (heldIndex || heldSig) {
     const read = !heldIndex ? { ok: false as const, reason: "missing-file", detail: `no ${STORE_INDEX_FILE}` }
-      : !existsSync(sigOut) ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
-      : readAppStore(heldIndex, new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
+      : !heldSig ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
+      : readAppStore(heldIndex, heldSig, now, undefined, checked);
     if (read.ok) held = read.store;
     else unread = refused(`${heldIndex ? indexOut : sigOut} is there and is not a signed store index: move ${STORE_INDEX_FILE} and ${STORE_SIG_FILE} away, or name another --out`, read);
   }
@@ -669,8 +670,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
-  // Unless the index there is this one's bytes: a run stopped between the index's rename and the signature's, signed again.
-  if (unread && !(heldIndex && Buffer.from(heldIndex).equals(indexBytes))) throw unread;
+  // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
+  // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,
+  // and its own signature is the only trace of the sequence it held.
+  if (unread && !(heldSig && Buffer.from(heldSig).equals(sigBytes))) throw unread;
 
   let previous: number | null = null;
   if (held) {
@@ -684,12 +687,13 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  // The signature after the index is written keeps the key: the index names it, and a run again signs it with it.
+  // The signature first, so a run stopped before the index leaves what a run again tells apart (above); once it is
+  // written the key stays: the signature names it, and a run again signs with it.
   saveKeyThen(keyPath, key, () => {
     mkdirSync(outDir, { recursive: true });
-    writeWhole(indexOut, indexBytes);
+    writeWhole(sigOut, sigBytes);
   });
-  writeWhole(sigOut, sigBytes);
+  writeWhole(indexOut, indexBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
     ...(store.expired ? [`expires (${new Date(store.index.expires * 1000).toISOString()}) is past: clients still install from it and say the store was not updated since then`] : []),
