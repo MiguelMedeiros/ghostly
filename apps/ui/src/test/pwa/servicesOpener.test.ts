@@ -683,6 +683,18 @@ describe("a contact's app shown over the app", () => {
     expect([...document.getElementById(SERVICE_VIEW_ID)!.querySelectorAll("span")].map((el) => el.textContent)).toContain("two");
   });
 
+  it("is one at a time when two opens overlap (Open tapped twice before the first is drawn): the last one wins", async () => {
+    await Promise.all([open("one"), open("two")]);
+    const views = document.querySelectorAll(`#${SERVICE_VIEW_ID}`);
+    expect(views).toHaveLength(1);
+    expect([...views[0]!.querySelectorAll("span")].map((el) => el.textContent)).toContain("two");
+    expect(views[0]!.hasAttribute("inert")).toBe(false);
+    // One close leaves nothing drawn and the app's page in reach again.
+    closeServiceView();
+    expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+
   it("says whose app it is and that it is not Ghostly, always on screen, never the contact's name for it alone", async () => {
     // The contact names their app freely: "Ghostly" is as easy as "Demo".
     await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Ghostly", send: async () => answer(200, [], []), words });

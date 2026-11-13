@@ -309,6 +309,8 @@ const ENTRY = "ghostlyServiceView";
 const isViewEntry = (state: unknown) => !!state && typeof state === "object" && (state as Record<string, unknown>)[ENTRY] === true;
 /** Set while a second open closes the first: the new view keeps the entry. */
 let handingOver = false;
+/** Counts the opens: one overtaken by a later open while it waits draws nothing (the last one wins). */
+let opens = 0;
 
 /**
  * Back to the entry the view was opened on. Straight to it where the browser can (the Navigation API): the contact's
@@ -345,9 +347,12 @@ function watchDeadEntries(): void {
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
   const locked = serviceWindowsClosedSince();
+  const open = ++opens;
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
+  // Open tapped again, or another app opened, before this one was drawn: that one is shown, this one never is.
+  if (open !== opens) return;
   if (locked()) throw new Error(SERVICE_LOCKED);
   // Drawn over everything, a call's windows too: not over a call on screen (one that comes later closes it).
   if (callWindowOn()) throw new Error(options.words.callOn);
