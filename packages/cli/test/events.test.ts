@@ -411,6 +411,55 @@ describe("the event stream", () => {
     expect(later.events.map((e) => e.id)).toEqual(["message.delivery:c2:m1999:failed", "message.received:c2:fresh"]);
   });
 
+  it("an offline one-shot reads no seen set while nothing changes; a history or a transfer that does reads it then, and what changed is told", async () => {
+    const files = (entries: Record<string, unknown>, label?: string) => ({ ...state([link("c1", label ? { label } : {})]), transfers: entries }) as unknown as EngineState;
+    const queued = { "c1-in-v": { state: "transferring", transferred: 0, size: 900, direction: "in", stage: "queued" } };
+    const known = [message("c1", "m1"), message("c1", "peer_v", { file: { id: "c1-in-v", name: "a", size: 900, mime: "text/plain" } })];
+    const first = await hub("unread.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", known]]));
+    first.h.release();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const proto = Object.getPrototypeOf(first.h["db"].transaction("seen").objectStore("seen")) as IDBObjectStore;
+    const reads = [vi.spyOn(proto, "getAllKeys"), vi.spyOn(proto, "getAll"), vi.spyOn(proto, "get"), vi.spyOn(proto, "openCursor")];
+    const opened = async () => {
+      const h = new EventHub(join(dir, "unread.jsonl"), () => 1000, "unread.jsonl");
+      await h.open({ seen: false });
+      const events: GhostlyEvent[] = [], needed = vi.fn();
+      h.onEvent((e) => events.push(e));
+      h.know(files(queued), needed);
+      return { h, events, needed };
+    };
+    // A rename (a change of this device only) is told; the seen set is never read.
+    const quiet = await opened();
+    quiet.h.sink.post({ kind: "state", state: files(queued, "bot") });
+    expect(quiet.events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000"]);
+    expect(quiet.needed).not.toHaveBeenCalled();
+    expect(reads.reduce((n, spy) => n + spy.mock.calls.length, 0)).toBe(0);
+    quiet.h.release();
+
+    // A history that changes: the seen set is asked for once, and the baseline then tells only what is new.
+    const changed = await opened();
+    changed.h.sink.post({ kind: "messages", linkId: "c1", messages: [...known, message("c1", "m2")] });
+    changed.h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m3")], deleted: [] });
+    expect(changed.needed).toHaveBeenCalledTimes(1);
+    expect(changed.events).toEqual([]);
+    vi.restoreAllMocks();
+    await changed.h.loadSeen();
+    changed.h.baseline(state([link("c1")]), new Map([["c1", [...known, message("c1", "m2"), message("c1", "m3")]]]));
+    expect(changed.events.map((e) => e.id)).toEqual(["message.received:c1:m2", "message.received:c1:m3"]);
+    changed.h.release();
+
+    // A transfer that moves: the same, and the baseline tells its step.
+    const moved = await opened();
+    moved.h.sink.post({ kind: "state", state: files({ "c1-in-v": { ...queued["c1-in-v"], stage: "downloading" } }) });
+    expect(moved.needed).toHaveBeenCalledTimes(1);
+    expect(moved.events).toEqual([]);
+    await moved.h.loadSeen();
+    moved.h.baseline(files({ "c1-in-v": { ...queued["c1-in-v"], stage: "downloading" } }), new Map([["c1", [...known, message("c1", "m2"), message("c1", "m3")]]]));
+    expect(moved.events.map((e) => [e.type, e.file, e.stage, e.messageId])).toEqual([["file.stage", "c1-in-v", "downloading", "peer_v"]]);
+  });
+
   it("says when the journal no longer holds what a listener asks for", async () => {
     const { h } = await hub("d.jsonl");
     const lines = [5, 6].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n";
