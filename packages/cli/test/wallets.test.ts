@@ -389,6 +389,18 @@ describe("real money", () => {
     expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
   });
 
+  // Found in a bug hunt: a request with no --rail, which carries mints and an invoice and is paid in ecash by a plain
+  // `chat pay-request`, was listed as `lightning`, even once paid in ecash.
+  it("a request names every way it can be paid, ecash first as chat pay-request pays it", () => {
+    const request = { id: "r", linkId: "l", kind: "request", direction: "in", amount: 50, unit: "sat", state: "settled", createdAt: 1, network: "testnet" } as const;
+    expect(paymentJson({ ...request, mints: ["https://mint.test"], invoice: "lntbs1x" })).toMatchObject({ method: "cashu", methods: ["cashu", "lightning"] });
+    expect(paymentJson({ ...request, mints: ["https://mint.test"] })).toMatchObject({ method: "cashu", methods: ["cashu"] });
+    expect(paymentJson({ ...request, invoice: "lntbs1x" })).toMatchObject({ method: "lightning", methods: ["lightning"] });
+    expect(paymentJson({ ...request, federations: ["f"], invoice: "lntbs1x" })).toMatchObject({ method: "fedimint", methods: ["fedimint", "lightning"] });
+    // A payment row is paid one way: it has no list.
+    expect(paymentJson({ ...request, kind: "payment", mint: "https://mint.test" })).not.toHaveProperty("methods");
+  });
+
   it("no spend on Mainnet without confirmReal, and confirmedReal only with it", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "pay", { target: "lnbc10u1pxyz", network: "mainnet" })).rejects.toMatchObject({ code: "confirm" });
