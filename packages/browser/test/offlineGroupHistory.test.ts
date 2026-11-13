@@ -27,7 +27,7 @@ async function profile(): Promise<{ mesh: string; community: string }> {
   return { mesh: mesh.id, community: community.id };
 }
 
-function engine(offline: boolean): { node: GhostlyNode; read: string[] } {
+function engine(offline: boolean, deferGroups = false): { node: GhostlyNode; read: string[] } {
   const read: string[] = [];
   const whole = db.getMessages.bind(db);
   vi.spyOn(db, "getMessages").mockImplementation(async (linkId, ...rest) => {
@@ -35,7 +35,7 @@ function engine(offline: boolean): { node: GhostlyNode; read: string[] } {
     return whole(linkId, ...rest);
   });
   node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
-    { transport: fixture as never, automaticWallets: false, nativeTransports: {}, singleDevice: true, offline });
+    { transport: fixture as never, automaticWallets: false, nativeTransports: {}, singleDevice: true, offline, deferGroups });
   return { node, read };
 }
 
@@ -53,6 +53,18 @@ it("an offline run reads each group's newest message at start, not its history",
   expect(Object.fromEntries(node.getState().groups.map(g => [g.id, g.lastMessageAt]))).toEqual({ [mesh]: 1002, [community]: 2002 });
   // A command that reads a group's history reads it then.
   expect((await node.groupMessages({ groupId: mesh })).map(m => m.id)).toEqual([`m-${mesh}-0`, `m-${mesh}-1`, `m-${mesh}-2`, `e-${mesh}`]);
+}, 30000);
+
+/**
+ * A one-shot about one 1:1 chat (`chat send`, `invite create`) leaves the groups' sessions unstarted (`deferGroups`):
+ * no edge comes up, so no group message, edit or sync comes and nothing is handed on. It read every history whole too.
+ */
+it("a run that leaves the groups unstarted reads each group's newest message at start, not its history", async () => {
+  const { mesh, community } = await profile();
+  const { node, read } = engine(false, true);
+  await node.start();
+  expect(read).toEqual([]);
+  expect(Object.fromEntries(node.getState().groups.map(g => [g.id, g.lastMessageAt]))).toEqual({ [mesh]: 1002, [community]: 2002 });
 }, 30000);
 
 it("a run that may start the groups reads each history whole at start, as before", async () => {

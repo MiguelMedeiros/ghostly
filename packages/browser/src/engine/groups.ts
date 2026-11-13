@@ -346,9 +346,9 @@ export function loadMarks(marks: GroupMarks, group: Pick<StoredGroup, "id" | "ca
 }
 
 /**
- * What `load` reads of a group's history in a run that starts no group (`NodeOptions.offline`): its newest message,
- * read from the newest back, for the list's order, as a 1:1 chat left unstarted reads its newest row. The other marks
- * and what the rest of the history gives a session are of no use to a run that takes and sends nothing.
+ * What `load` reads of a group's history in a run that starts no group (`NodeOptions.offline`, `deferGroups`): its
+ * newest message, read from the newest back, for the list's order, as a 1:1 chat left unstarted reads its newest row.
+ * The other marks and what the rest of the history gives a session are of no use to a run that takes and sends nothing.
  */
 export async function loadNewest(marks: GroupMarks, store: Pick<GroupStore, "getMessages" | "getMessagePage">, groupId: string): Promise<void> {
   const { last } = await newestMarkedOf(store, MESSAGE_LINK(groupId), "", { last: true, peer: false, mention: false });
@@ -868,8 +868,9 @@ export class Groups {
 
   /**
    * `asItIs`: a copy that must stay as it was stored (limited mode, WISP 06), so nothing left over is cleared from it.
-   * `newestOnly`: a run that starts no group (`NodeOptions.offline`) reads each history's newest message alone
-   * (`loadNewest`): read whole, 50,000 rows in a group cost every `status` or `chat history` 0.4 s and 80 MB.
+   * `newestOnly`: a run that starts no group (`NodeOptions.offline`, `deferGroups`) reads each history's newest message
+   * alone (`loadNewest`): read whole, 50,000 rows in a group cost every `status`, `chat history` or `chat send` 0.4 s
+   * and 80 MB.
    */
   async load(asItIs = false, newestOnly = false): Promise<void> {
     const all = await this.store.getGroups();

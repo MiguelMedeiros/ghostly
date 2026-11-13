@@ -405,6 +405,31 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(world.peers.get("alice")!.store.groups.size).toBe(0);
     expect(await alice.send(groupId, "anyone?")).toEqual({ error: "You are not in this group yet" });
   });
+
+  it("an admission over a contact chat in a run that read each history's newest message alone (`chat send`) lets the member in", async () => {
+    const { world, alice, others: [bob], groupId } = await groupOf(["bob"]);
+    for (const text of ["one", "two"]) { await alice.send(groupId, text); await bob.send(groupId, `${text}?`); await world.settle(); }
+    const carol = world.add("carol");
+    world.chats.set("chat-ac", ["alice", "carol"]);
+    await carol.load();
+    await alice.invite(groupId, "chat-ac"); await world.settle();
+    // Alice's app starts again as a one-shot about her chat with Carol (`deferGroups`): no frame, no counter, no marks read.
+    const peer = world.peers.get("alice")!;
+    peer.edges.clear(); peer.entries.clear();
+    peer.groups = new Groups(peer.host, peer.store, peer.timings);
+    await peer.groups.load(false, true);
+    await carol.accept(groupId); await world.settle();
+    expect(view(peer.groups, groupId).members).toHaveLength(3);
+    expect(view(carol, groupId).status).toBe("active");
+    // Her next full start sends on from where her own rows left off: what she says reaches both.
+    const again = await world.restart("alice");
+    await world.meet();
+    expect(await again.send(groupId, "welcome carol")).toEqual({ error: null, messageId: expect.any(String) });
+    await world.settle();
+    expect(world.texts("bob")).toContain("welcome carol");
+    expect(world.texts("carol")).toContain("welcome carol");
+    expect(new Set(world.texts("alice")).size).toBe(world.texts("alice").length);
+  });
 });
 
 describe("invitations: what the admission exchange ignores", () => {
