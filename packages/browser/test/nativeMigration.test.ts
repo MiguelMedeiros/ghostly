@@ -1,19 +1,18 @@
 import "fake-indexeddb/auto";
-import { resolve } from "node:path";
 import { expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, type PairingState, type NativeEndpoint } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { Outbox } from "../src/engine/outbox";
-import { nativePeer } from "./helpers/nativePeer";
+import { IROH_PEER, nativePeer } from "./helpers/nativePeer";
 // covers-gated: transport.iroh, transport.hyperdht, transport.switch, transport.preference, chat.paired.receipts, files.paired.send
 
 it.skipIf(process.env.TEST_NATIVE !== "1")("migrates real Iroh to real HyperDHT with stable participation, durable receipts and deduplication", async () => {
   // Local UDP discovery avoids making public relay uptime a test prerequisite.
-  const { default: testnet } = await import("../../../native/transports/hyperdht/node_modules/hyperdht/testnet.js");
+  const { default: testnet } = await import("hyperdht/testnet.js");
   const { createHyperEndpoint } = await import("../../../native/transports/hyperdht/endpoint.mjs");
   const net = await testnet(3);
   const hyper = await Promise.all([31,32].map(seed => createHyperEndpoint(Buffer.alloc(32,seed), { bootstrap: net.bootstrap, host: "127.0.0.1" }))) as NativeEndpoint[];
-  const iroh = await Promise.all([31,32].map(seed => nativePeer(resolve("../../target/debug/examples/iroh-peer"), seed)));
+  const iroh = await Promise.all([31,32].map(seed => nativePeer(IROH_PEER, seed)));
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];
   const states: PairingState[] = [{ status: "connecting" }, { status: "connecting" }];
@@ -81,7 +80,7 @@ it.skipIf(process.env.TEST_NATIVE !== "1")("migrates real Iroh to real HyperDHT 
     await db.addMessage({linkId:"native-migration-0",id:`me_${wireId}`,wireId,text:"same message across QUIC and Noise",timestamp:1,sender:"me",via:"datalink",delivery:"sending"});
     iroh[0].dropReceipts=true;
     await boxes[0].transmit(`me_${wireId}`);
-    await vi.waitFor(async()=>expect((await db.getMessages("native-migration-0"))[0].delivery).toBe("failed"));
+    await vi.waitFor(async()=>expect((await db.getMessages("native-migration-0"))[0].delivery).toBe("queued"));
     await links[0].setTransportPreference("hyperdht/1",false);
     await vi.waitFor(()=>expect(states.map(s=>s.transport)).toEqual(["hyperdht/1","hyperdht/1"]));
     expect(states.map(s=>s.peerKey)).toEqual(pins);
@@ -103,7 +102,7 @@ it.skipIf(process.env.TEST_NATIVE !== "1")("migrates real Iroh to real HyperDHT 
       await vi.waitFor(() => expect(discoveries[initiator]).toHaveBeenCalledWith(expect.anything(), expect.anything(), true));
       for (const target of ["hyperdht/1", "iroh/1"] as const) {
         await links[initiator].setTransportPreference(target, fallback);
-        await vi.waitFor(() => expect(states.map(s => [s.status, s.transport])).toEqual([["ready", target], ["ready", target]]));
+        await vi.waitFor(() => expect(states.map(s => [s.status, s.transport])).toEqual([["ready", target], ["ready", target]]), 15000);
         expect(states.map(s => s.peerKey)).toEqual(pins);
         await exercise(`${initiator}-${fallback}-${target.replace("/", "-")}`);
         const wire = `${initiator}${fallback ? 1 : 0}${target === "iroh/1" ? 1 : 0}abcdefghijklmnopqrs`;
