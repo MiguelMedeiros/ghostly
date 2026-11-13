@@ -4,17 +4,19 @@ import { afterEach, expect, it } from "vitest";
 import { Root } from "../../Root";
 import { takeDeviceLink } from "../../lib/devices";
 import { listSessions } from "../../lib/storage";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: invite.link
 
 /*
- * A link with a doubled `#` before its code (`##ghostly1…`, or the app's own `#/` with a `#ghostly1…` after it) is
- * the same link: the router reads it as home with a hash, and the code was left in the address with nothing opened.
+ * A link with a doubled `#` before it (`##ghostly1…`, or the app's own `#/` with a `#…` after it) is the same link, for
+ * every kind the intakes take: the router read it as home with a hash, and the link was left in the address with
+ * nothing opened.
  */
 
 afterEach(() => { window.location.hash = ""; takeDeviceLink(); });
 
-it.each(["##{code}", "#/#{code}", "##{code}/"])("an invite opened as %s joins, and leaves the address", async (form) => {
+it.each(["##{code}", "#/#{code}", "##{code}/", "##/chat/{code}", "#/#/chat/{code}", "##web+ghostly:{code}", "#/#web%2Bghostly%3A{code}"])("an invite opened as %s joins, and leaves the address", async (form) => {
   const code = createChatInvite().inviteCode;
   window.history.replaceState(null, "", form.replace("{code}", code));
   render(<Root />);
@@ -39,4 +41,11 @@ it.each(["##{code}", "#/#{code}"])("a device code given to the open app as %s go
   await waitFor(() => expect(window.location.hash).toBe("#/"));
   expect(await screen.findByTestId("device-join-confirm")).toBeInTheDocument();
   expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+}, 60_000);
+
+it.each(["##/join/group2/abc", "#/#/join/group2/abc"])("a group's link opened as %s joins, and leaves the address", async (form) => {
+  fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+  window.history.replaceState(null, "", form);
+  render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
 }, 60_000);

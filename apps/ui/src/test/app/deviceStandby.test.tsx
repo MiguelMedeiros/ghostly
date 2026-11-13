@@ -82,6 +82,11 @@ describe("the app on a device that is not the active one", () => {
     await waitFor(() => expect(window.location.hash).toBe("#/"));
     act(() => { window.location.hash = "#web%2Bghostly%3Aghostly1abc"; });
     await waitFor(() => expect(window.location.hash).toBe("#/"));
+    // With a doubled `#` before it (a `#` typed after the app's own `#/`) too.
+    for (const doubled of ["##/join/group2/abc", "#/#/join/group2/abc", `#/#/chat/${encodeInviteCode(createLink().invite)}`]) {
+      act(() => { window.location.hash = doubled; });
+      await waitFor(() => expect(window.location.hash).toBe("#/"));
+    }
     // An ordinary page's address is left as it is.
     act(() => { window.location.hash = "#/settings"; });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
