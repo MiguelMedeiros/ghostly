@@ -872,8 +872,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       // A separator at its end names a folder: kept for the backup to refuse, as resolving the path drops it. Before,
       // "--out backups/" with no backups folder wrote the backup as a file named backups.
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
-      // The folder it goes in, as the backup checks it (backup.ts): a missing one is named before the profile opens.
-      if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${dirname(path)}`);
+      // The folder it goes in, as the backup checks it (backup.ts): a missing one, or a file in its place, is named before the profile opens.
+      if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `${dirname(path)} is a file, not a folder`);
       const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
