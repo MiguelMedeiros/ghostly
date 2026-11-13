@@ -98,4 +98,34 @@ describe("the bridge's frame of the contact's app", () => {
     Object.defineProperty(frame, "contentDocument", { get: () => ({ URL: "about:blank" }) });
     expect(guardedPage(frame)).toBe(false);
   });
+
+  it("hands the app's page each link the app opens in a new window, which the view's sandbox would drop with no word", async () => {
+    vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+    vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+    const { forwardLinks } = await import("../../../../web/src/svc/bridge");
+    const realOpen = window.open;
+    const asked: string[] = [];
+    try {
+      forwardLinks(window, (url) => asked.push(url));
+      const link = (attributes: Record<string, string>) => {
+        const a = document.createElement("a");
+        for (const [name, value] of Object.entries(attributes)) a.setAttribute(name, value);
+        a.textContent = "link";
+        document.body.append(a);
+        return a;
+      };
+      link({ href: "https://docs.example/a", target: "_blank" }).click();
+      link({ href: "https://docs.example/b", target: "_BLANK" }).click();
+      // Its own page's links, and one the app took itself, stay the app's.
+      link({ href: "#next" }).click();
+      const taken = link({ href: "https://docs.example/taken", target: "_blank" });
+      taken.addEventListener("click", (event) => event.preventDefault());
+      taken.click();
+      expect(window.open("https://docs.example/c")).toBeNull();
+      window.open("/relative", "_blank");
+      expect(asked).toEqual(["https://docs.example/a", "https://docs.example/b", "https://docs.example/c", new URL("/relative", document.baseURI).href]);
+    } finally {
+      window.open = realOpen;
+    }
+  });
 });
