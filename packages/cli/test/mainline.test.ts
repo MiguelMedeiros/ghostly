@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, RelaysFailedError, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { createSocket, type Socket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -602,5 +603,60 @@ describe("the Mainline DHT node starts when it is asked something", { timeout: 6
     }
     await settle();
     expect(received).toBe(0);
+  });
+});
+
+// A DHT node a lookup asks answers `get` with what it likes, signed with its own key (or the contact's, for their own
+// record). Before, a reply with a number for `salt` threw in bittorrent-dht's reply handler (`Buffer.concat`), and one
+// with no `seq` or with a dictionary for `v` threw in `get`'s callback: an uncaught error each time, and the lookup
+// stalled to its timeout. Now such a reply is no record: the lookup ends, null.
+describe("a DHT node that answers get with a malformed signed record", { timeout: 30_000 }, () => {
+  const encode = (value: unknown): Buffer => {
+    if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
+    if (typeof value === "string") return encode(Buffer.from(value));
+    if (typeof value === "number") return Buffer.from(`i${value}e`);
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : 1));
+    return Buffer.concat([Buffer.from("d"), ...entries.flatMap(([k, v]) => [encode(k), encode(v)]), Buffer.from("e")]);
+  };
+  /** A fake node on loopback: answers every query, `get` with the record `signed` makes (signed with `seed`). */
+  const fakeNode = async (seed: Uint8Array, record: { salt?: unknown; seq?: number; v: unknown }) => {
+    const socket = createSocket("udp4");
+    const id = randomBytes(20), k = Buffer.from(ed25519.getPublicKey(seed));
+    // What bittorrent-dht checks: the bencoded dictionary of salt, seq (0 when absent) and v, without its d...e.
+    const signed = encode({ salt: record.salt, seq: record.seq ?? 0, v: record.v });
+    const sig = Buffer.from(ed25519.sign(signed.subarray(1, -1), seed));
+    socket.on("message", (message, peer) => {
+      const t = /1:t(\d+):/.exec(message.toString("latin1"));
+      if (!t) return;
+      const start = t.index + t[0].length, tid = message.subarray(start, start + Number(t[1]));
+      const get = message.includes("1:q3:get");
+      const r = get ? { id, k, salt: record.salt, seq: record.seq, sig, token: Buffer.from("tok"), v: record.v } : { id, nodes: Buffer.alloc(0) };
+      socket.send(encode({ r, t: tid, y: "r" }), peer.port, peer.address);
+    });
+    await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
+    return socket;
+  };
+
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown) => { uncaught.push(error); };
+  beforeAll(() => { process.prependListener("uncaughtException", onUncaught); });
+  afterAll(() => { process.off("uncaughtException", onUncaught); });
+
+  for (const [name, record, ownKey] of [
+    ["a number for salt (any key looked up)", { salt: 7, seq: 1, v: "x" }, false],
+    ["the contact's own record with no seq", { v: "x" }, true],
+    ["the contact's own record with a dictionary for v", { seq: 1, v: { a: "b" } }, true],
+  ] as const) it(`${name}: the lookup ends null, with no uncaught error`, async () => {
+    uncaught.length = 0;
+    const contact = createIdentity();
+    const socket = await fakeNode(ownKey ? contact.seed : createIdentity().seed, record);
+    const node = new Mainline({ bootstrap: [`127.0.0.1:${socket.address().port}`], host: "127.0.0.1", timeoutMs: 5_000 });
+    try {
+      await expect(node.get(contact.pubKeyZ32)).resolves.toBeNull();
+      expect(uncaught).toEqual([]);
+    } finally {
+      await node.destroy();
+      socket.close();
+    }
   });
 });

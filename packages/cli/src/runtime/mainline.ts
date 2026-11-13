@@ -27,6 +27,14 @@ export interface MainlineOptions {
 
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
+/**
+ * What a `get` takes from the nodes that answer: a record signed without salt (Pkarr has none). bittorrent-dht reads a
+ * reply's `salt` (`Buffer.concat` with the key) only once it is verified, and a number there threw in its socket handler:
+ * any node a lookup asked, signing with its own key, raised an error nobody caught. Signed data is `4:salt…` with a salt.
+ */
+const SALTED = Buffer.from("4:salt");
+const verifyUnsalted = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) =>
+  !Buffer.from(message.buffer, message.byteOffset, Math.min(message.length, SALTED.length)).equals(SALTED) && verify(sig, message, key);
 
 /** Queries the node answers, a second: from each address (as libtorrent's default), and from all of them together. */
 const QUERY_LIMITS = { perAddress: 5, perAddressBurst: 20, total: 50, totalBurst: 200 };
@@ -184,14 +192,18 @@ export class Mainline {
     // A mutable item without salt is found under the SHA-1 of its public key (BEP44).
     const target = createHash("sha1").update(k).digest();
     return this.bounded(new Promise((resolve, reject) => {
-      this.dht.get(target, { cache: false }, (error, found) => {
+      this.dht.get(target, { cache: false, verify: verifyUnsalted }, (error, found) => {
         if (error) return reject(error);
-        if (!found?.v || !found.sig) return resolve(null);
-        const timestamp = new Uint8Array(TIMESTAMP);
-        new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
-        const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
-        payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
-        try { resolve(parseRelayPayload(pubKeyZ32, payload)); } catch { resolve(null); }
+        // A record is what its node sent, checked only by its signature: one signed with no `seq` (bittorrent-dht signs
+        // `seq || 0`) or with a dictionary for `v` threw here, out of the socket's handler.
+        if (!found || !Buffer.isBuffer(found.v) || !Buffer.isBuffer(found.sig) || !Number.isSafeInteger(found.seq) || found.seq < 0) return resolve(null);
+        try {
+          const timestamp = new Uint8Array(TIMESTAMP);
+          new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
+          const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
+          payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
+          resolve(parseRelayPayload(pubKeyZ32, payload));
+        } catch { resolve(null); }
       });
     }));
   }
