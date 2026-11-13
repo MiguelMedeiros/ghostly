@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
+import { fileBytes } from "../src/shared/fileBytes";
 import { BUNDLE_URL, FakeNet, NOW_MS, STORE_URL, apps, bundle, emptyProfile, listing, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
@@ -102,6 +103,21 @@ describe("an update whose whole read is refused", () => {
     }
     expect([whole(SOURCE), whole(MIRRORS[0]!)]).toEqual([1, 1]);
     expect((await store.list())[0]!.equivocation, "the mark is not rewritten").toEqual(marked);
+  });
+
+  // A restored profile (installed list, no files): each check fetches the installed version's files first.
+  it("for the installed version's missing files is read whole once while its URL serves the same, again an hour later", async () => {
+    const { net, store, v1, whole } = await setup();
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    net.put(BUNDLE_URL, broken(v1.bytes));
+    for (let visit = 0; visit < 3; visit++) expect((await store.checkUpdates())[0]!.run).toEqual({ status: "needs-files" });
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(whole(BUNDLE_URL), "read whole once, then only peeked").toBe(2);
+
+    net.put(BUNDLE_URL, v1.bytes);
+    now += APP_CHECK_TIMINGS.freshMs + 1;
+    expect((await store.checkUpdates())[0]!.run).toEqual({ status: "ok" });
+    expect(whole(BUNDLE_URL)).toBe(3);
   });
 
   it("is read again after a failed read that brought no bundle (the host down)", async () => {
