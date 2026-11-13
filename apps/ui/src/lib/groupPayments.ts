@@ -14,13 +14,24 @@ function who(group: GroupView, key: string, t: Translate, capital = true): strin
   return member.me ? t(capital ? "payments.group.you" : "payments.group.youObject") : othersName(memberName(member, t, sameNamed(group.members)), t);
 }
 
-/** Who pays whom, in the group's words. */
+/**
+ * Who pays whom, in the group's words. When I am the payer or the payee the line is a sentence of its own: "You" slotted
+ * into "{{from}} is paying {{to}}" reads "You is paying Alice", and "Vous a demandé à Bob" or "Tú pidió a Bob" elsewhere.
+ */
 export function groupPayTitle(note: GroupPayNote, group: GroupView, t: Translate = english): string {
-  if (note.kind === "payment") return t("payments.group.title.sent", { from: who(group, note.from, t), to: who(group, note.to, t, false) });
-  if (note.from === "*") return t("payments.group.title.askedGroup", { to: who(group, note.to, t) });
+  const mine = (key: string) => group.members.some(m => m.me && m.key === key);
+  const fromMe = mine(note.from), toMe = mine(note.to);
+  if (note.kind === "payment") return fromMe ? t("payments.group.title.sentByMe", { to: who(group, note.to, t, false) })
+    : toMe ? t("payments.group.title.sentToMe", { from: who(group, note.from, t) })
+    : t("payments.group.title.sent", { from: who(group, note.from, t), to: who(group, note.to, t, false) });
+  if (note.from === "*") return toMe ? t("payments.group.title.askedGroupByMe") : t("payments.group.title.askedGroup", { to: who(group, note.to, t) });
   // An ask: the payer started it, the payee answered with where to pay.
-  if (note.ask) return t("payments.group.title.paying", { from: who(group, note.from, t), to: who(group, note.to, t, false) });
-  return t("payments.group.title.asked", { to: who(group, note.to, t), from: who(group, note.from, t, false) });
+  if (note.ask) return fromMe ? t("payments.group.title.payingByMe", { to: who(group, note.to, t, false) })
+    : toMe ? t("payments.group.title.payingMe", { from: who(group, note.from, t) })
+    : t("payments.group.title.paying", { from: who(group, note.from, t), to: who(group, note.to, t, false) });
+  return toMe ? t("payments.group.title.askedByMe", { from: who(group, note.from, t, false) })
+    : fromMe ? t("payments.group.title.askedMe", { to: who(group, note.to, t) })
+    : t("payments.group.title.asked", { to: who(group, note.to, t), from: who(group, note.from, t, false) });
 }
 
 /** Where it stands: `data-state` and the words. */

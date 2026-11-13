@@ -247,9 +247,16 @@
     "theGroup": "the group",
     "title": {
       "asked": "{{to}} asked {{from}}",
+      "askedByMe": "You asked {{from}}",
       "askedGroup": "{{to}} asked the group",
+      "askedGroupByMe": "You asked the group",
+      "askedMe": "{{to}} asked you",
       "paying": "{{from}} is paying {{to}}",
-      "sent": "{{from}} sent {{to}}"
+      "payingByMe": "You are paying {{to}}",
+      "payingMe": "{{from}} is paying you",
+      "sent": "{{from}} sent {{to}}",
+      "sentByMe": "You sent {{to}}",
+      "sentToMe": "{{from}} sent you"
     },
     "why": {
       "noPayments": "Their app takes no payments in groups (it needs an update), or they turned every way off",
