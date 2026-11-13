@@ -101,6 +101,8 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const close = bool(params, "close");
   const newText = str(params, "text");
   if (chosen === undefined && !close && newText === undefined) throw new CliError("bad_request", "Nothing to update: give chosen, close or text");
+  // The engine fills a card's blank text with its fallback line ("Reply: Yes / No"): the question's words were lost.
+  if (newText !== undefined && !newText.trim()) throw new CliError("bad_request", "The new text is blank: give the question's new words, or leave text out to keep them");
   // A new text is a message like any other: the same size check and guard as `send` and `edit`.
   if (newText !== undefined) checkTextSize(newText);
   if (newText !== undefined && !bool(params, "force")) {
