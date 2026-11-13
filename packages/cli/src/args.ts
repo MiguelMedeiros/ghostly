@@ -176,6 +176,30 @@ function distance(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
+/** The kind of value each key `settings set` takes has (api.ts `SETTABLE`). */
+export type SettingKind = "strings" | "string" | "boolean" | "ice";
+const SETTINGS_SET = "ghostly settings set <key> <json-value> [--force]";
+
+/**
+ * A key `settings set` does not take is a usage error that names the nearest one (whatever its case: `sendtyping`)
+ * and lists them, before stdin is read and the profile opens. Before, the API answered it once a one-shot was online
+ * (bad_request, exit 1), with no "did you mean". The API keeps its own check for a socket's callers.
+ */
+export function checkSettingKey(key: string, kinds: Record<string, SettingKind>): SettingKind {
+  if (Object.hasOwn(kinds, key)) return kinds[key];
+  const byLower = new Map(Object.keys(kinds).map((name) => [name.toLowerCase(), name]));
+  const near = byLower.get(nearest(key.toLowerCase(), byLower.keys()) ?? "");
+  throw new CliError("usage", `${key} is not a setting the CLI changes${near ? ` (did you mean ${near}?)` : ""}: ghostly settings set takes ${Object.keys(kinds).join(", ")} (ghostly help settings set)`);
+}
+
+/** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */
+export function checkSettingValue(key: string, kind: SettingKind, value: unknown, typed: string): void {
+  if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${JSON.stringify(typed)}: ${SETTINGS_SET}`);
+  // Not echoed: a TURN password may be in it.
+  if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings: ${SETTINGS_SET}`);
+  if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers: ${SETTINGS_SET}`);
+}
+
 /** Words as a sentence lists them: "a", "a or b", "a, b or c". */
 const listed = (words: readonly string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words.at(-1)}` : words[0]);
 

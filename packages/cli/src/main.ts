@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
+import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
@@ -1445,13 +1445,16 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     const [key, given] = parsed.positionals;
     if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value> [--force]");
     noMoreThan(2, parsed.positionals, "settings set <key> <json-value> [--force]");
+    // readRelays stays the API's to refuse: it says why the CLI does not follow it.
+    const kind = key === "readRelays" ? undefined : checkSettingKey(key, (await engineApi()).SETTABLE);
     // `-`, or no value on a pipe: the value from stdin, out of ps and the shell's history (a TURN password).
     const { value, warning } = await settingValue(key, given, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
     if (warning) process.stderr.write(`ghostly: ${warning}\n`);
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
-    if ((await engineApi()).SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
+    if (kind === "string" && typeof parsedValue !== "string") parsedValue = value;
+    if (kind) checkSettingValue(key, kind, parsedValue, value);
     const force = parsed.options.force === true ? { force: true } : {};
     printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue, ...force }), { offline: LOCAL_SETTINGS.has(key) }) as Record<string, unknown>);
     return;
