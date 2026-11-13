@@ -123,6 +123,8 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   const { code, path } = error as { code?: unknown; path?: unknown };
   const where = typeof path === "string" ? path : file ?? "the path";
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
+  // A symbolic link to itself (or a ring of them) leads nowhere: before, Node's raw "ELOOP: …, stat" as `engine`.
+  if (code === "ELOOP") return new CliError("not_found", `No such file or folder: ${where} (its symbolic links go round in a loop)`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
