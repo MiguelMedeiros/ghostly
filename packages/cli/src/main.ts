@@ -666,7 +666,7 @@ function helpRow(label: string, text: string, at: number, columns: number | unde
 const FIRST_STEPS = [
   "First steps:",
   "  $ ghostly invite create --label alice             make an invite for a contact",
-  "  $ printf '%s' \"$INVITE\" | ghostly invite join   join one, from stdin",
+  "  $ printf '%s' \"$INVITE\" | ghostly invite join     join one, from stdin",
   "  $ ghostly daemon --detach                         keep the profile online",
   "  $ ghostly help <command>                          one command and its options",
 ];
