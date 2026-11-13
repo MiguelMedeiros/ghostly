@@ -622,8 +622,9 @@ export class CallManager {
         }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
-        // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
-        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", false);
+        // contact closed was still a hang-up; one that failed ends the call, and the contact is told, as the apps tell
+        // it: its side may still say "Connecting..." or "Reconnecting..." (WISP 601 "Couldn't connect").
+        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", state !== "closed");
       },
     });
     if (call.ended || attempt !== call.attempt) {
