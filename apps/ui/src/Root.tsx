@@ -54,6 +54,15 @@ const Saved = menuPage(() => import("./pages/Saved").then((m) => m.Saved));
 const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
+ * The route a link with a doubled `#` before its code names (`##ghostly1…`, or the app's own `#/` with a
+ * `#ghostly1…` after it): the router reads it as home with the code as its hash. The pathname for anything else.
+ */
+function doubledHashRoute(pathname: string, hash: string): string {
+  const rest = hash.replace(/^#+/, "");
+  return pathname === "/" && /^\/?ghostly1/i.test(rest) ? rest : pathname;
+}
+
+/**
  * A device code's link that names the profile, `#<profile>#ghostly1z…` (WISP 06 § Adding a device), as the router reads
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
@@ -135,7 +144,7 @@ function ChatLinkIntake() {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
     if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
-    const rest = inviteRouteCode(pathname);
+    const rest = inviteRouteCode(doubledHashRoute(pathname, hash));
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
     if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
