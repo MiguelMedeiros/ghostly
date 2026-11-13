@@ -103,14 +103,16 @@ describe("the clipboard guard's rule", () => {
 /**
  * A fake window for the guard's rule: events carry an own `isTrusted` getter (as a browser's do, unforgeable), are
  * dispatched in phases (the guard's capture listener first, then the page's, then the default action with the phase
- * back at 0), and the tasks the guard queues to close a tap's window run only when the test ends the task.
+ * back at 0), and the tasks the guard queues to close a tap's window run only when the test ends the task. Time
+ * passes only when the test says so (`spin`); an event's own `timeStamp` is the time it was dispatched unless given.
  */
 function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boolean } = { channel: true }) {
   const tasks: (() => void)[] = [];
   const urgent: (() => void)[] = [];
   const frames: (() => void)[] = [];
   class Doc { execCommand(command: string) { return command !== ""; } }
-  class Ev { phase = 0; get eventPhase() { return this.phase; } }
+  let now = 10_000;
+  class Ev { phase = 0; stamp = now; get eventPhase() { return this.phase; } get timeStamp() { return this.stamp; } }
   class Port {
     other: Port | null = null;
     onmessage: (() => void) | null = null;
@@ -135,6 +137,7 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     MutationObserver: class { observe() {} },
     get length() { return 0; },
     document: null,
+    performance: { now: () => now },
   };
   if (closers.channel) Object.assign(w, { MessageChannel: Channel, MessagePort: Port });
   if (closers.postTask) w.scheduler = { postTask(task: () => void, options: { priority?: string }) { if (options.priority === "user-blocking") urgent.push(task); return Promise.resolve(); } };
@@ -145,8 +148,9 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const doc = w.document as Doc;
   const copy = () => doc.execCommand("copy");
   /** Dispatches one event; `copied` holds what a copy in the page's own listener (or in its default action) got. */
-  const dispatch = (type: string, trusted: boolean, page?: () => void, then?: () => void) => {
+  const dispatch = (type: string, trusted: boolean, page?: () => void, then?: () => void, stamp = now) => {
     const event = new Ev();
+    event.stamp = stamp;
     Object.defineProperty(event, "isTrusted", { get: () => trusted, enumerable: true });
     event.phase = 1;
     for (const listener of listeners.get(type) ?? []) listener(event);
@@ -158,6 +162,9 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const run = (queue: (() => void)[]) => { for (const task of queue.splice(0)) task(); };
   return {
     copy, dispatch, listeners,
+    /** The page keeps the thread for `ms` (a busy loop): time passes, no task runs. */
+    spin: (ms: number) => { now += ms; },
+    now: () => now,
     /** The page's own `requestAnimationFrame`: one frame's callbacks run in the order they were asked for. */
     requestFrame: (frame: () => void) => { frames.push(frame); },
     endTask: () => run(tasks),
@@ -277,6 +284,37 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     page.dispatch("click", true, undefined, () => page.requestFrame(() => page.dispatch("submit", true, () => { got.after = page.copy(); })));
     page.runFrame();
     expect(got).toEqual({ before: true, after: false });
+  });
+
+  it("refuses a copy that comes long after the tap, though the page kept the tap's dispatch going all that time", () => {
+    // Chromium lets execCommand("copy") write for seconds after a tap: a page that spins in its own click listener
+    // keeps that click being dispatched, and the person may copy something of their own meanwhile.
+    const page = tapWindow({ channel: true, postTask: true, frame: true });
+    const got: Record<string, boolean> = {};
+    page.dispatch("click", true, () => { page.spin(900); got.quick = page.copy(); });
+    page.endTask();
+    page.dispatch("click", true, () => { page.spin(3000); got.spun = page.copy(); });
+    page.endTask();
+    // A submit or a change the tap's default action fires counts from the tap, not from itself.
+    page.dispatch("click", true, () => page.spin(3000), () => page.dispatch("submit", true, () => { got.submit = page.copy(); }));
+    page.endTask();
+    page.dispatch("pointerdown", true, () => page.spin(3000), undefined);
+    page.dispatch("change", true, () => { got.change = page.copy(); });
+    page.endTask();
+    expect(got).toEqual({ quick: true, spun: false, submit: false, change: false });
+  });
+
+  it("counts from the input's own time when the page kept it waiting, and from its dispatch when that time is off", () => {
+    const page = tapWindow();
+    const got: Record<string, boolean> = {};
+    // The person released the button while the page spun in its pointerdown: the click is dispatched 3 s late.
+    page.dispatch("click", true, () => { got.late = page.copy(); }, undefined, page.now() - 3000);
+    page.endTask();
+    // A time on another clock (ahead of now): the dispatch's own start counts.
+    page.dispatch("click", true, () => { got.ahead = page.copy(); }, undefined, page.now() + 1e12);
+    page.endTask();
+    page.dispatch("click", true, () => { page.spin(3000); got.aheadSpun = page.copy(); }, undefined, page.now() + 1e12);
+    expect(got).toEqual({ late: false, ahead: true, aheadSpun: false });
   });
 
   it("counts no submit or change at all where it can queue no closing task", () => {

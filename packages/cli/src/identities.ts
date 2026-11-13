@@ -1,5 +1,6 @@
 import { identityStatement, type IdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
+import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
 import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
@@ -47,7 +48,7 @@ function headless(s: IdentitySigner<unknown>): boolean {
 function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown> {
   const usable = p.signers.filter(headless);
   const found = id ? p.signers.find((s) => s.id === id) : usable[0];
-  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label} proofs need a browser window: make them in the app`);
+  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label}: this kind of proof needs a browser window, make it in the app`);
   if (!headless(found)) {
     const instead = usable.length ? ` (here: --signer ${usable.map((s) => s.id).join(" or ")})` : "";
     throw new CliError("unavailable", `${found.label} needs a browser window: make this proof in the app${instead}`);
@@ -130,6 +131,13 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       const values = (params.fields ?? {}) as Record<string, string>;
       if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
+      // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
+      const bunker = signer.fields?.find((f) => f.name === "bunker");
+      if (bunker && values.bunker) {
+        try { parseProofBunker(values.bunker); } catch (error) {
+          throw new CliError("bad_request", `${bunker.name} (${bunker.label}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
       const signal = AbortSignal.timeout(seconds * 1000);
       const proof = await signer.run({

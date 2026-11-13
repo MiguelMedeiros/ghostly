@@ -71,7 +71,8 @@ class ResolverUnavailable extends IdentityCheckUnavailable {}
  * finished, never the host, port or status seen here.
  */
 
-/** One RFC 8484 GET to one resolver. The query has ID 0 and no client subnet, so it carries only the name. */
+/** One RFC 8484 GET to one resolver. The query has ID 0 and a client subnet of 0/0, so it carries only the name and
+ * the resolver passes no part of this device's address on to the name's servers. */
 async function askResolver(resolver: DohResolver, name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse> {
   let response: Awaited<ReturnType<DomainFetch>>;
   try {

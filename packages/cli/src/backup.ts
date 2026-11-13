@@ -33,14 +33,15 @@ type BackupRecord =
   | { t: "end"; files: number; bytes: number };
 
 /**
- * The profile's settings kept beside its store, which name its chats and their contacts' keys: auto-join (`groups.json`),
- * auto-answer (`calls.json`) and the chats held off their direct link (`holds.json`, `chat disconnect --hold`: the
+ * The profile's settings kept beside its store: auto-join (`groups.json`) and auto-answer (`calls.json`), which name its
+ * chats and their contacts' keys, the chats held off their direct link (`holds.json`, `chat disconnect --hold`: the
  * store has such a chat on DHT only, and only this file says it comes back; the restored daemon ends a hold whose time
- * passed meanwhile at its start). Each travels as a `setting` record (an older CLI skips it); a backup without them
- * restores with auto-join and auto-answer off and no hold.
+ * passed meanwhile at its start), and the apps it serves as a bot (`apps.json`, `app serve`: the engine offers apps/1
+ * only while it holds one). Each travels as a `setting` record (an older CLI skips it); a backup without them restores
+ * with auto-join and auto-answer off, no hold and no app served.
  */
 const HOLDS = "holds.json";
-const SETTINGS = ["groups.json", "calls.json", HOLDS];
+const SETTINGS = ["groups.json", "calls.json", HOLDS, "apps.json"];
 
 /** A setting's text, or null for one the profile never wrote. */
 const readSetting = (dir: string, name: string) => readFile(join(dir, name), "utf8").catch(unlessGone);
@@ -94,7 +95,12 @@ export const BACKUP_METHODS: Record<string, Method> = {
    * the files over the cut (`keptInLight`) are left out, their records kept.
    */
   async "profile.backup"(ctx, params) {
-    const path = resolve(str(params, "path", true));
+    const asked = str(params, "path", true), path = resolve(asked);
+    // A folder is no name for the backup: one there was "exists: choose another name", as if a file were in the way,
+    // and one with a separator at its end and no folder there became a file of that name (resolve() drops the slash).
+    if (asked.endsWith("/") || asked.endsWith(sep) || (await stat(path).catch(() => undefined))?.isDirectory()) {
+      throw new CliError("bad_request", `${path} names a folder: name the backup's file in it, e.g. --out ${join(path, "<name>.ghostly-backup")} (path over the socket)`);
+    }
     // `refused`, not `confirm` (exit 5, "pass --force"): backup takes no flag that writes over a file.
     if (existsSync(path)) throw new CliError("refused", `${path} exists: choose another name`);
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");

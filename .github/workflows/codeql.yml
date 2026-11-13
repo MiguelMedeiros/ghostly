@@ -54,15 +54,26 @@ jobs:
       # language, so a change to it is tried on all three. Names are read NUL-separated and unquoted: by default git
       # C-quotes a name with a non-ASCII byte, a `"` or a `\` ("a\303\247.rs"), which no pattern below would match.
       # `shell: bash` runs with pipefail, so a git that fails is not read as a short list.
+      # A merge train batch (batch/<base>-<stamp>, from this repository) analyses nothing: each pull request in it was
+      # analysed on its own pull request, the train lands each of them as its own merge, never the batch, and reads no
+      # CodeQL result. A fork's pull request is analysed whatever its branch is called.
       - name: Which languages this change needs
         id: plan
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
         run: |
           all='["actions","javascript-typescript","rust"]'
           if [[ "$EVENT" != "pull_request" ]]; then
             echo "languages=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$HEAD_REF" == batch/* && -n "$REPO" && "$HEAD_REPO" == "$REPO" ]]; then
+            echo "::notice::A merge train batch: each pull request in it was analysed on its own pull request, and the batch is never merged: nothing analysed"
+            echo "languages=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! files=$(git -c core.quotePath=false diff -z --name-only --no-renames HEAD^1 HEAD | tr '\0' '\n') || [[ -z "$files" ]]; then

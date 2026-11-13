@@ -45,14 +45,15 @@ const rows = [
   { id: "peer_v", sender: "peer", timestamp: 1_700_000_005_000, sentAt: 1_700_000_000_000, file: { id: "chat-one-in-v" } },
   { id: "peer_far", sender: "peer", timestamp: 1_700_000_100_000, file: { id: "chat-one-in-far" } },
 ];
-// Past the newest 200: only in the whole history.
+// Past the newest 200: only in the whole history, and among the history's file rows.
 const older = { id: "peer_old", sender: "peer", timestamp: 1_600_000_005_000, file: { id: "chat-one-in-old" } };
 const node = {
   getState: () => ({ links: [], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
   messagePage: vi.fn(async ({ linkId }: { linkId: string }) => ({ messages: linkId === "chat-one" ? rows : [], more: true })),
   getMessages: vi.fn(async (linkId: string) => linkId === "chat-one" ? [older, ...rows] : []),
+  fileMessages: vi.fn(async (linkId: string) => linkId === "chat-one" ? [older, ...rows] : []),
 };
-beforeEach(() => { node.messagePage.mockClear(); node.getMessages.mockClear(); });
+beforeEach(() => { node.messagePage.mockClear(); node.getMessages.mockClear(); node.fileMessages.mockClear(); });
 const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
 
 describe("file save to a folder", () => {
@@ -115,7 +116,7 @@ describe("file save to a folder", () => {
     expect(node.getMessages).not.toHaveBeenCalled();
   });
 
-  it("a voice message older than the chat's newest is named from its row all the same", async () => {
+  it("a voice message older than the chat's newest is named from its row all the same, read among the file rows only", async () => {
     await fileStore.put({
       id: "chat-one-in-old", linkId: "chat-one", blob: new Blob(["old"]), createdAt: 1, direction: "in",
       metadata: { name: "old.webm", size: 3, mime: "audio/webm", timestamp: 1_600_000_000_000, voice: { duration: 1_000, peaks: [] } },
@@ -125,7 +126,9 @@ describe("file save to a folder", () => {
     mkdirSync(folder);
     const name = voiceDownloadName("audio/webm", 1_600_000_005_000);
     expect(await callApi(ctx, "file.save", { file: "chat-one-in-old", dir: folder })).toMatchObject({ path: join(folder, name) });
-    expect(node.getMessages).toHaveBeenCalledWith("chat-one");
+    // The messages that carry a file (the store's file index), never the whole history: 1 s at 100,000 messages.
+    expect(node.fileMessages).toHaveBeenCalledWith("chat-one");
+    expect(node.getMessages).not.toHaveBeenCalled();
   });
 
   it("two voice messages of one second both go into --dir: the second under a free name, as a browser's Download picks", async () => {

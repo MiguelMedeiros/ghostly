@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} new messages from {{name}}",
     "notSent": "Your message “{{text}}” was not sent",
     "notSentCount": "{{count}} messages not sent",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
     "rowMoved": "Moved to place {{place}} of {{count}}",
     "waiting": "Your message “{{text}}” is waiting for your contact to be online",
@@ -241,7 +242,6 @@
     "newOne": "1 new message, scroll to bottom"
   },
   "keyChanged": "This chat stopped: your contact's key changed.",
-  "lastSeen": "Last seen {{time}}",
   "listTime": {
     "days": "{{count}}d",
     "hours": "{{count}}h",
@@ -394,6 +394,7 @@
     "copyCode": "Copy code",
     "hiddenChars": "This code holds hidden or direction-changing characters, shown as {{marker}}. Copy code copies them too.",
     "localTime": "{{time}} your time",
+    "notCopied": "Not copied",
     "showAll": "Show all",
     "showLess": "Show less",
     "spoiler": "Hidden text. Tap to show it",
@@ -483,7 +484,6 @@
     "showTranslation": "Show translation",
     "translate": "Translate"
   },
-  "typeMessage": "Type a message...",
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",

@@ -29,8 +29,11 @@ export const STORE_URL = "https://raw.githubusercontent.com/MiguelMedeiros/ghost
 export const STORE_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"];
 export const LIMITS = {
   indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4, totalBytes: 64 * 1024 * 1024,
-  /** One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the build reads together. */
-  revocationsBytes: 16 * 1024 * 1024, revocationsTotalBytes: 64 * 1024 * 1024,
+  /**
+   * One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the listings of one publisher read: a
+   * bound of each, so one publisher's files never leave another's unread (a file not kept revokes nothing).
+   */
+  revocationsBytes: 16 * 1024 * 1024, revocationsPublisherBytes: 64 * 1024 * 1024,
   /** The `sources` one manifest may name (core's appBundle.ts). */
   sources: 8,
 };
@@ -130,15 +133,31 @@ export async function fromStore(fetcher = fetch) {
       }
     }
   }
-  let revocationsTotal = 0;
-  for (const url of new Set(listings.flatMap((listing) => revocationUrls(listing, readBundles)))) {
-    try {
-      const bytes = await read(url, LIMITS.revocationsBytes, fetcher);
-      if (revocationsTotal + bytes.length > LIMITS.revocationsTotalBytes) throw new Error(`${url}: over the ${LIMITS.revocationsTotalBytes} bytes all revocation files may take`);
-      revocationsTotal += bytes.length;
-      revocations[url] = b64(bytes);
-    } catch (error) {
-      if (!error?.missing) problems.push(String(error?.message ?? error));
+  // By publisher (the reference's key, as core's appRefPublisher reads it): the URLs its listings read, and their bytes.
+  const publishers = new Map();
+  const kept = new Map();
+  const failed = new Set();
+  for (const listing of listings) {
+    const key = typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "";
+    if (!publishers.has(key)) publishers.set(key, { urls: new Set(), bytes: 0 });
+    const publisher = publishers.get(key);
+    for (const url of revocationUrls(listing, readBundles)) {
+      if (publisher.urls.has(url) || failed.has(url)) continue;
+      publisher.urls.add(url);
+      try {
+        const bytes = kept.get(url) ?? await read(url, LIMITS.revocationsBytes, fetcher);
+        // Over this publisher's bound, the file is not kept for it; another publisher whose listings read it still may.
+        if (publisher.bytes + bytes.length > LIMITS.revocationsPublisherBytes) {
+          problems.push(`${url}: over the ${LIMITS.revocationsPublisherBytes} bytes one publisher's revocation files may take`);
+          continue;
+        }
+        publisher.bytes += bytes.length;
+        kept.set(url, bytes);
+        revocations[url] = b64(bytes);
+      } catch (error) {
+        failed.add(url);
+        if (!error?.missing) problems.push(String(error?.message ?? error));
+      }
     }
   }
   return { source: "store", index: b64(index), sig: b64(sig), bundles, revocations, problems };

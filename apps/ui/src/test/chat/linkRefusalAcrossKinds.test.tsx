@@ -37,6 +37,21 @@ it("a group link's refusal goes when a good invite link opens its chat next", as
   expect(screen.queryByTestId("group-link-invalid")).toBeNull();
 }, 60_000);
 
+it("a group link's join refused after a good invite link opened its chat is not said over that chat", async () => {
+  let refuse: (cause: Error) => void = () => {};
+  fakeEngine.on("joinGroupByLink", () => new Promise((_, reject) => { refuse = reject; }));
+  render(<Root />);
+  await screen.findByTestId("sidebar");
+  go("#/join/group2/abc");
+  await waitFor(() => expect(fakeEngine.callsTo("joinGroupByLink")).toHaveLength(1));
+
+  go(`#${createChatInvite().inviteCode}`);
+  await waitFor(() => expect(listSessions()).toHaveLength(1));
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${listSessions()[0].id}`));
+  await act(async () => { refuse(new Error("Go online to join a group")); });
+  expect(screen.queryByTestId("group-link-invalid")).toBeNull();
+}, 60_000);
+
 it("an invite link's refusal goes when a group's link opens its group next", async () => {
   fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
   render(<Root />);

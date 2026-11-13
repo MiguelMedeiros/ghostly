@@ -22,8 +22,9 @@
 //   request, in order ("<title> (#n)"). One that conflicts with the base drops out: `queue:conflict`, one comment, `queue`
 //   taken off (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). One that merges cleanly onto
 //   the base by itself but conflicts with one aboard ahead of it stays in line and keeps its place: its position comment
-//   names that one, and it boards the next batch (merging the base into it, as the conflict comment asks, changes
-//   nothing while that one is not on the base yet). The batch is a pull request from
+//   names that one (merging the base into it, as the conflict comment asks, changes nothing while that one is not on
+//   the base yet), and says that once that one lands it conflicts with the base and leaves the line as above; if that
+//   one does not land, it boards the next batch. The batch is a pull request from
 //   `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull request boards on its fast tier
 //   alone, and its own full CI run still going is cancelled (when the token may cancel runs; else one log line), which
 //   frees runners for the batch. So is the run of one still waiting in line on a green fast tier whose head is behind
@@ -482,9 +483,11 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
     !why && own && pr.fast === "success"
       ? ` It can board on its fast tier (CI Success (draft)): while its head is behind \`${base}\`, the train cancels its own full CI run, which it would not land on.${cancelled}`
       : "";
-  // Behind one aboard the batch in flight that it conflicts with (`git.build`'s "ahead"): it boards once that one lands.
+  // Behind one aboard the batch in flight that it conflicts with (`git.build`'s "ahead"). Once that one lands, the base
+  // holds it, so this one conflicts with the base and leaves the line as any other: said now, not "it boards next".
+  const ahead = pr.behind?.with ?? [];
   const after = !why && pr.behind
-    ? ` Waiting for the next batch: it merges cleanly onto \`${base}\` by itself, but conflicts with ${pr.behind.with.map((n) => `#${n}`).join(" ")} in batch #${pr.behind.batch}, ahead of it, so it boards once that batch is done (merging \`origin/${base}\` into it now changes nothing). It keeps its place.`
+    ? ` Waiting for the next batch: it merges cleanly onto \`${base}\` by itself, but conflicts with ${ahead.map((n) => `#${n}`).join(" ")} in batch #${pr.behind.batch}, ahead of it (merging \`origin/${base}\` into it now changes nothing). Once ${ahead.length === 1 ? `#${ahead[0]} is` : "they are"} on \`${base}\`, it conflicts with \`${base}\` and leaves the line with \`${LABEL.conflict}\`: then merge \`origin/${base}\` into it, push, and add \`queue\` again once CI is green. If batch #${pr.behind.batch} ends without ${ahead.length === 1 ? "it" : "them"} on \`${base}\`, it keeps its place and boards the next batch.`
     : "";
   const wait = !why && company
     ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at the train's first run after ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC. It keeps its place.`
@@ -762,6 +765,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     await w.closePull(batch.number);
     if (batch.branch.startsWith("batch/")) await w.deleteBranch(batch.branch);
     done.closed.push(batch.number);
+    // Its pull requests no longer in line (`queue` taken off by a person, closed) are not read again: the place it gave
+    // them ("in batch #N, waiting for its CI") would stay for good. The ones in line get a new place in this run.
+    for (const s of readState(batch.body).prs) {
+      if (byNumber.has(s.number)) continue;
+      const sticky = (await gh.comments(s.number)).find((c) => isPosition(c, login));
+      if (sticky) await w.deleteComment(sticky.id);
+    }
   };
 
   /** Logs whether GitHub shows a commit it just made as verified, with a warning when it does not: a regression shows in the log. */
@@ -1192,7 +1202,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (base === "dev") {
       const { title, message } = squashMessage(p, await gh.pullCommits(p.number));
       r = await w.squash(p.number, p.sha, title, message);
-    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
+    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p);
     if (r.ok) {
       say(`MERGED #${p.number} alone`);
       done.merged.push(p.number);
@@ -1967,10 +1977,14 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
       }
     },
-    /** An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it). */
-    async landPull(base, number, sha) {
-      fetch([`+refs/pull/${number}/head:${ns}/pr-${number}`]);
-      return this.land(base, sha);
+    /**
+     * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
+     * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     */
+    async landPull(base, p) {
+      if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      return this.land(base, p.sha);
     },
   };
 }

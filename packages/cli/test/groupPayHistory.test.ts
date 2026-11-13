@@ -25,7 +25,7 @@ const members = [
 /** The group as `who` sees it. */
 const groupOf = (who: string) => ({
   id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: who === "mekey", canSend: true, lastMessageAt: 0, invited: [], memberLinks: {}, myKey: who,
-  members: members.map((m) => ({ ...m, me: m.key === who })),
+  members: members.map((m) => ({ ...m, me: m.key === who, ...(m.key !== who && { edge: { linkId: `edge-${m.key}`, state: "open" } }) })),
 }) as unknown as GroupView;
 
 const REQUESTED = "⚡ Requested 50 test sats";
@@ -102,6 +102,26 @@ describe("a group payment note in group history", () => {
     expect((await history(ctx)).map((m) => m.twinOf ?? null)).toEqual([null, null]);
     const { ctx: none } = fake("anakey", [edgeRequest], { req12345: { id: "req12345", kind: "request", direction: "in" } });
     expect((await history(none))[0].twinOf).toBeUndefined();
+  });
+
+  it("marks a payment that pays a member's request as its twin, never one whose request reuses another member's note's id", async () => {
+    // Ana pays a request that came over an edge; the payment's line on her profile, and its record.
+    const myPayment: StoredMessage = { linkId: "group:g1", id: "edge-x:me_4", text: "50 test sats", sender: "me", timestamp: 4, via: "datalink", paymentId: "pay1" };
+    const paying = (edge: string) => ({ pay1: { id: "pay1", kind: "payment" as const, direction: "out" as const, requestId: "req12345", linkId: edge } });
+    const twins = async (who: string, line: StoredMessage, payments: Record<string, Partial<PaymentView>>, fields: Partial<GroupPayNote> = {}) =>
+      (await history(fake(who, [noteLine(who, fields), line], payments).ctx)).map((m) => m.twinOf ?? null);
+    // The requester's own request, paid over the edge with them: said once.
+    expect(await twins("anakey", myPayment, paying("edge-mekey"))).toEqual([null, "gpay:req12345"]);
+    // Bo asked Ana under the id of the requester's note: Ana's payment to Bo is no twin of it, both lines show.
+    expect(await twins("anakey", myPayment, paying("edge-bokey"))).toEqual([null, null]);
+    // Nor of a request someone else was asked to pay, nor of a payment note.
+    expect(await twins("anakey", myPayment, paying("edge-mekey"), { from: "bokey" })).toEqual([null, null]);
+    expect(await twins("anakey", myPayment, paying("edge-mekey"), { kind: "payment", from: "anakey" })).toEqual([null, null]);
+    // A payment that came in answering a request: the twin of my request only, not of a note of another member's.
+    const paidMe: StoredMessage = { linkId: "group:g1", id: "edge-bokey:peer_5", text: "50 test sats", sender: "peer", member: "bokey", timestamp: 5, via: "datalink", paymentId: "pay2" };
+    const came = { pay2: { id: "pay2", kind: "payment" as const, direction: "in" as const, requestId: "req12345", linkId: "edge-bokey" } };
+    expect(await twins("mekey", paidMe, came)).toEqual([null, "gpay:req12345"]);
+    expect(await twins("mekey", paidMe, came, { to: "anakey" })).toEqual([null, null]);
   });
 
   it("in listen's group events", async () => {

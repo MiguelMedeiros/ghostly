@@ -2,6 +2,7 @@ import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_PERMISSIONS, appCardUrl, appRef, isAppRef, isAppUrl, type AppPermission } from "@ghostly/core";
 import { list, str, type ApiContext, type Method } from "./apiKit";
+import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { checkedBundle } from "./apps";
 import { CliError } from "./errors";
 
@@ -69,6 +70,9 @@ export function servedApp(apps: readonly ServedApp[], ref: string): ServedApp {
   return matches[0];
 }
 
+/** A link a contact's app reads a card's bundle from. */
+const readable = (url: string | undefined): url is string => isAppFetchUrl(url) && appCardUrl(url) !== undefined;
+
 /** Whether this engine offers apps/1 now: it read the list when it started, so the first app served waits for a restart. */
 const offered = (ctx: ApiContext, apps: ServedApp[]) => ({ offered: ctx.runtime.apps, ...(apps.length > 0 && !ctx.runtime.apps && { restart: true }) });
 
@@ -82,6 +86,9 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     const given = str(params, "url");
     if (given !== undefined && !isAppUrl(given)) throw new CliError("bad_request", "url is where a contact's app reads the bundle: https only, no user or password, jsDelivr only at a full commit");
     if (given !== undefined && /[?#]/.test(given)) throw new CliError("bad_request", "url goes to contacts on the app's card: no query or fragment (a private repository's token rides there); publish the app in a public repository");
+    // A contact's app installs a card's app only from the hosts it reads from (isAppFetchUrl), and a card's link has no
+    // space or control character (appCardUrl): any other link went on the card, or off it without a word.
+    if (given !== undefined && !readable(given)) throw new CliError("bad_request", "url is where a contact's app reads the bundle: raw.githubusercontent.com, or cdn.jsdelivr.net at a full commit, with no port and no space");
     const { bundle, url } = await checkedBundle(source);
     const m = bundle.manifest;
     if (!m.permissions.includes("chat")) throw new CliError("refused", `${m.title} does not ask for chat: it talks to no contact, so a bot has nothing to speak for it`);
@@ -91,8 +98,9 @@ export const APP_SERVE_METHODS: Record<string, Method> = {
     if (missing.length)
       throw new CliError("confirm", `${m.title} asks for ${missing.join(" and ")}: serve it with ${missing.map((p) => `--grant ${p}`).join(" ")} to allow that`, { asks: m.permissions, missing });
     const ref = appRef(m.publisher, m.name);
-    // The card's link never carries the query of the URL the bundle was read from (a private file's token).
-    const cardUrl = appCardUrl(given ?? url ?? m.sources?.[0]);
+    // The card's link never carries the query of the URL the bundle was read from (a private file's token). Without
+    // --url, the first link a contact's app can read from: where the bundle was read, else the manifest's sources.
+    const cardUrl = appCardUrl(given ?? [url, ...(m.sources ?? [])].find(readable));
     const app: ServedApp = {
       ref, title: m.title, version: m.version, sequence: m.sequence, digest: bundle.digest, ...(cardUrl !== undefined && { url: cardUrl }),
       permissions: m.permissions, granted: m.permissions.filter((p) => grant.includes(p)), servedAt: Date.now(),

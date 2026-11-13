@@ -429,6 +429,25 @@ describe("the contact's edits", () => {
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
 
+  // A message from the hold or the DHT while its removal comes on the live link: the removal finds no row and is
+  // confirmed, so it never comes again; the row written after it stayed, deleted text and all.
+  it("a removal that comes while its message is being stored still takes it", async () => {
+    const t = await setup();
+    const inner = t.node as unknown as { storeMessage(m: StoredMessage): Promise<unknown>; receiveEdit(linkId: string, edit: WireEdit): Promise<boolean>; resolveReply(m: StoredMessage): Promise<StoredMessage> };
+    let removal: Promise<boolean> | undefined;
+    const resolveReply = inner.resolveReply.bind(t.node);
+    // The removal runs while the store looks for a reply's original, after the store's own check of deleted ids.
+    inner.resolveReply = async message => {
+      removal ??= inner.receiveEdit(t.id, { id: WIRE("Z"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true });
+      await removal;
+      return resolveReply(message);
+    };
+    await inner.storeMessage({ linkId: t.id, id: `peer_${WIRE("Z")}`, text: "deleted for everyone", sender: "peer", timestamp: Date.now(), via: "pkarr" });
+    expect(await removal).toBe(true);
+    expect(t.node.deletedIdsOf(t.id)).toContain(`peer_${WIRE("Z")}`);
+    expect((await t.messages()).map(m => m.text)).not.toContain("deleted for everyone");
+  });
+
   it("a removal after a refusal line is here leaves it: the line has no paymentId, its id says what it is", async () => {
     const t = await setup();
     const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
@@ -995,9 +1014,25 @@ describe("what an edit keeps", () => {
     expect(m.edit!.history.at(-1)!.text).toBe(`v${EDIT_HISTORY_KEEP + 4}`);
     const big = "x".repeat(EDIT_HISTORY_MAX_BYTES / 2);
     m = withEdit(withEdit(withEdit(base, { seq: 1, at: 1, text: big + "1" }), { seq: 2, at: 2, text: big + "2" }), { seq: 3, at: 3, text: "small" });
-    expect(m.edit!.history.map(v => v.text.length)).toEqual([big.length + 1]);
+    expect(m.edit!.history.map(v => v.text.length)).toEqual([2, big.length + 1]);
     // The same text again only moves the number on.
     expect(withEdit(base, { seq: 1, at: 5, text: "v0" }).edit!.history).toEqual([]);
+  });
+
+  it("the first version stays as it came: a card does not drop it, a chosen time does not date another, many edits do not push it out", () => {
+    const sent: StoredMessage = { ...base, sender: "peer", preview: undefined };
+    // A status card on a text that had none keeps the text it replaces; a plain edit dated back to the send comes after it.
+    let m = withEdit(sent, { seq: 1, at: 100, text: "Forged", card: { kind: "task", title: "x" } as StatusCard });
+    m = withEdit(m, { seq: 2, at: 50, text: "v2" });
+    expect(m.edit!.history).toEqual([{ at: 100, text: "v0" }, { at: 101, text: "Forged" }]);
+    // A card updating a card still keeps none.
+    const carded = withEdit(m, { seq: 3, at: 300, text: "c1", card: { kind: "task", title: "y" } as StatusCard });
+    expect(withEdit(carded, { seq: 4, at: 400, text: "c2", card: { kind: "task", title: "z" } as StatusCard }).edit!.history).toHaveLength(3);
+    // Past the bounds, the newest go and the first stays; no later version shares its time.
+    for (let i = 3; i <= EDIT_HISTORY_KEEP + 5; i++) m = withEdit(m, { seq: i, at: 100, text: `v${i}` });
+    expect(m.edit!.history).toHaveLength(EDIT_HISTORY_KEEP);
+    expect(m.edit!.history[0]).toEqual({ at: 100, text: "v0" });
+    expect(m.edit!.history.slice(1).every(v => v.at > 100)).toBe(true);
   });
 
   it("only for texts: mine to edit, the contact's to take edits", () => {
@@ -1141,6 +1176,31 @@ describe("deleting many of my group messages for everyone", () => {
       // Never here and not removed: what the wire said, unchecked.
       { id: kept, snippet: "the original words", from: "me", member: me },
     ]);
+  });
+
+  // A copy from a catch-up or a hub while its author's removal comes live: the removal finds no row to take, so the
+  // row written after it stayed, deleted text and all (the 1:1 chat's `kept` checked its own deleted ids only).
+  it("a member's removal that comes while its message is being stored still takes it", async () => {
+    const bob = createIdentity().pubKeyZ32, g = `arriving-${crypto.randomUUID()}`, chat = `group:${g}`, id = `${bob}:1:1`;
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { isRemoved(groupId: string, id: string): boolean };
+      storeMessage(m: StoredMessage): Promise<unknown>;
+      resolveReply(m: StoredMessage): Promise<StoredMessage>;
+      forgetGroupMessage(chat: string, id: string): Promise<void>;
+    };
+    let removed = false;
+    vi.spyOn(inner.groups, "isRemoved").mockImplementation((group, at) => removed && group === g && at === id);
+    const resolveReply = inner.resolveReply.bind(node);
+    // The removal runs while the store looks for a reply's original, after the store's own check of removed ids.
+    inner.resolveReply = async message => {
+      removed = true;
+      await inner.forgetGroupMessage(chat, id);
+      return resolveReply(message);
+    };
+    await inner.storeMessage({ linkId: chat, id, text: "deleted for everyone", sender: "peer", member: bob, timestamp: 1, via: "datalink" });
+    expect((await db.getMessages(chat)).map(m => m.text)).not.toContain("deleted for everyone");
   });
 
   it("a member's removals of ids never here, or said again, read the group for their quotes once a while, not once each", async () => {
