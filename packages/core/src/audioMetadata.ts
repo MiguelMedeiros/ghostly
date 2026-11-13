@@ -16,16 +16,25 @@
  * - WAV (RIFF, RF64 or BW64): every chunk but its format, data and the ones of the sound itself (`fact`, `cue `,
  *   `smpl`, `inst`, an RF64's `ds64`) becomes `JUNK`, zeroed (an INFO list, an `id3 ` chunk, a broadcast `bext` with
  *   its date and originator, iXML, XMP).
+ * - AIFF and AIFF-C: every chunk but its sound's (`COMM`, `SSND`, `FVER`, `MARK`, `INST`, `AESD`, `chan`) becomes
+ *   `JUNK`, zeroed (NAME, AUTH, ANNO, `(c) `, COMT, an `ID3 ` chunk, an app's `APPL`).
+ * - CAF: every chunk but its sound's (`desc`, `data`, `pakt`, `kuki`, `chan`, `peak`, `ovvw`) becomes `free`, zeroed
+ *   (its `info` strings, a marker's names in `strg`, `edct` comments, `uuid` chunks).
+ * - WavPack: its APEv2 and ID3v1 tags at the end as an MP3's, and the source file's header and trailer each block may
+ *   keep for a lossless restore (a WAV's INFO list, an AIFF's NAME) made a sub-block that says nothing, zeroed.
+ * - TTA: its tags at the end (and an ID3v2 before it) as an MP3's.
+ * - Sun AU: its annotation, zeros.
  * - WebM and Matroska, audio or video: `Tags`, `Attachments`, `Chapters`, the title, the date, the file names and each
  *   track's name become `Void` elements (and the SeekHead's entries for them); the muxer's and the writing app's names
  *   are zeroed. A Vorbis, Theora or FLAC track's CodecPrivate (its Ogg headers or its FLAC metadata blocks) has its
  *   comments emptied as an Ogg's or a FLAC's. Clusters, cues and other track settings are kept as they are.
  *
  * Fail-closed: a file that is one of these by its bytes and whose tags cannot be removed (truncated, malformed) is
- * refused with `NO_AUDIO_METADATA`, never sent as it was. Any other file goes as it is (other audio formats too).
+ * refused with `NO_AUDIO_METADATA`, never sent as it was. So is a WMA (ASF): its title, place and date are not removed
+ * here. Any other file goes as it is (other audio formats too).
  */
 import { baseMime } from "./voice";
-import { NO_VIDEO_METADATA, readingAhead, videoMetadataPatches, type VideoPatch, type VideoSource } from "./videoMetadata";
+import { NO_VIDEO_METADATA, isAsf, readingAhead, videoMetadataPatches, type VideoPatch, type VideoSource } from "./videoMetadata";
 
 export const AUDIO_METADATA_LIMITS = {
   /** The largest header, element or tag read whole (an Ogg comment header with a picture in it): past this the file is refused. */
@@ -44,6 +53,7 @@ const ZEROS = new Blob([new Uint8Array(1024 * 1024)]);
 
 const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
 const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 const syncsafe = (b: Uint8Array, at: number) => (b[at]! << 21) | (b[at + 1]! << 14) | (b[at + 2]! << 7) | b[at + 3]!;
 const latin = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
@@ -353,6 +363,88 @@ async function wav(read: Read, size: number, rf64: boolean, patches: VideoPatch[
   }
 }
 
+// AIFF, CAF, WavPack, Sun AU.
+
+/** The chunks an AIFF's or AIFF-C's sound is made of, kept; any other becomes `JUNK`. */
+const AIFF_KEEPS = new Set(["COMM", "SSND", "FVER", "MARK", "INST", "AESD", "chan"]);
+
+/** An AIFF's chunks from its form type: big-endian sizes, each padded to an even length. */
+async function aiff(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  for (let at = 12; at + 8 <= size;) {
+    count();
+    const head = await read(at, 8);
+    const id = text(head, 0, 4), length = u32be(head, 4);
+    let end = at + 8 + length + (length % 2);
+    // Sound that runs to the end: a recorder's that never wrote its size, or one cut short.
+    if (id === "SSND") end = length ? Math.min(end, size) : size;
+    else check(at + 8 + length <= size);
+    if (!AIFF_KEEPS.has(id)) {
+      if (id !== "JUNK") patches.push({ start: at, end: at + 4, bytes: latin("JUNK") });
+      if (length) patches.push({ start: at + 8, end: at + 8 + length });
+    }
+    at = Math.min(end, size);
+  }
+}
+
+/** The chunks a CAF's sound is made of, kept; any other becomes `free`. */
+const CAF_KEEPS = new Set(["desc", "data", "pakt", "kuki", "chan", "peak", "ovvw"]);
+
+/** A CAF's chunks after its 8-byte header: big-endian 64-bit sizes, `data`'s -1 when it runs to the end. */
+async function caf(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const count = counter();
+  for (let at = 8; at + 12 <= size;) {
+    count();
+    const head = await read(at, 12);
+    const id = text(head, 0, 4), high = u32be(head, 4), length = high * 2 ** 32 + u32be(head, 8);
+    const toEnd = id === "data" && high === 0xffffffff && u32be(head, 8) === 0xffffffff;
+    check(toEnd || (Number.isSafeInteger(length) && at + 12 + length <= size));
+    const end = toEnd ? size : at + 12 + length;
+    if (!CAF_KEEPS.has(id)) {
+      if (id !== "free") patches.push({ start: at, end: at + 4, bytes: latin("free") });
+      if (end > at + 12) patches.push({ start: at + 12, end });
+    }
+    at = end;
+  }
+}
+
+/** A WavPack sub-block's own id (its flags apart): the source file's header and trailer, a WAV's or another's. */
+const WAVPACK_SOURCE = new Set([0x21 /* RIFF header */, 0x22 /* RIFF trailer */, 0x23 /* other header */, 0x24 /* other trailer */]);
+
+/** A WavPack's blocks from `at`, their source file's header and trailer emptied; returns where they end (its tags). */
+async function wavpack(read: Read, size: number, at: number, patches: VideoPatch[]): Promise<number> {
+  const count = counter();
+  while (at + 32 <= size && text(await read(at, 4), 0, 4) === "wvpk") {
+    count();
+    const end = at + 8 + u32le(await read(at + 4, 4), 0);
+    check(end >= at + 32 && end <= size);
+    for (let sub = at + 32; sub < end;) {
+      count();
+      const head = await read(sub, Math.min(4, end - sub));
+      // Its size in 16-bit words: one byte, or three for a large one.
+      const large = (head[0]! & 0x80) !== 0, body = sub + (large ? 4 : 2);
+      check(body <= end);
+      const length = (large ? head[1]! | (head[2]! << 8) | (head[3]! << 16) : head[1]!) * 2;
+      check(body + length <= end);
+      // An optional sub-block of no id (its flags kept), its body zeros: a decoder skips it, and makes a header of its own.
+      if (WAVPACK_SOURCE.has(head[0]! & 0x3f)) {
+        patches.push({ start: sub, end: sub + 1, bytes: Uint8Array.of((head[0]! & 0xc0) | 0x20) });
+        if (length) patches.push({ start: body, end: body + length });
+      }
+      sub = body + length;
+    }
+    at = end;
+  }
+  return at;
+}
+
+/** A Sun AU's annotation: from its 24-byte header to its sound. */
+async function au(read: Read, size: number, patches: VideoPatch[]): Promise<void> {
+  const offset = u32be(await read(4, 4), 0);
+  check(offset >= 24 && offset <= size);
+  if (offset > 24) patches.push({ start: 24, end: offset });
+}
+
 // WebM and Matroska.
 
 const EBML_HEADER = 0x1a45dfa3, SEGMENT = 0x18538067, CLUSTER = 0x1f43b675, VOID = 0xec, CRC32 = 0xbf;
@@ -563,9 +655,15 @@ export async function audioMetadataPatches(file: VideoSource, mime: string): Pro
   } else if (text(head, 0, 4) === "OggS") await ogg(read, size, patches);
   else if (head.length >= 12 && ["RIFF", "RF64", "BW64"].includes(text(head, 0, 4)) && text(head, 8, 4) === "WAVE") await wav(read, size, text(head, 0, 4) !== "RIFF", patches);
   else if (text(head, 0, 4) === "\x1a\x45\xdf\xa3") await matroska(source, read, patches);
+  else if (head.length >= 12 && text(head, 0, 4) === "FORM" && ["AIFF", "AIFC"].includes(text(head, 8, 4))) await aiff(read, size, patches);
+  else if (head.length >= 8 && text(head, 0, 4) === "caff") await caf(read, size, patches);
+  else if (head.length >= 24 && text(head, 0, 4) === ".snd") await au(read, size, patches);
+  else if (text(head, 0, 4) === "wvpk") await trailingTags(read, size, await wavpack(read, size, 0, patches), patches);
+  else if (text(head, 0, 4) === "TTA1") await trailingTags(read, size, 0, patches);
+  else if (isAsf(head)) check(false);
   else if (text(head, 0, 4) === "fLaC") await trailingTags(read, size, await flac(read, size, 0, patches), patches);
   else if (isId3(head) || isFrame(head, 0)) {
-    // ID3v2 tags before the sound (one after another, as some taggers leave them), then a FLAC's blocks or MPEG frames.
+    // ID3v2 tags before the sound (one after another, as some taggers leave them), then a FLAC's or a WavPack's blocks, or MPEG frames.
     let at = 0;
     const count = counter();
     for (let next = head; isId3(next); next = at + 10 <= size ? await read(at, 10) : new Uint8Array(0)) {
@@ -573,6 +671,7 @@ export async function audioMetadataPatches(file: VideoSource, mime: string): Pro
       at = await emptyId3(read, size, at, next, patches);
     }
     if (at + 4 <= size && text(await read(at, 4), 0, 4) === "fLaC") at = await flac(read, size, at, patches);
+    else if (at + 4 <= size && text(await read(at, 4), 0, 4) === "wvpk") at = await wavpack(read, size, at, patches);
     await trailingTags(read, size, at, patches);
   } else if (MPEG_AUDIO.has(baseMime(mime))) {
     // An MP3 or AAC that starts with neither (junk before its first frame, a stream cut): a player finds its frames past
