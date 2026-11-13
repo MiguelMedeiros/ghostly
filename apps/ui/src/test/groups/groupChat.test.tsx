@@ -1097,6 +1097,19 @@ describe("GroupChat: leaving", () => {
     expect(await leaveFromMenu(user)).toHaveTextContent(line);
   });
 
+  // The last one in: nobody is left to answer the link or let anyone in, so leaving (or Delete) ends the group for good.
+  it.each([
+    ["mesh", "group-leave"], ["community", "group-leave"], ["mesh", "group-forget"], ["community", "group-forget"],
+  ] as const)("tells the last member of a %s group that it ends, not how to come back (%s)", async (profile, item) => {
+    const { user } = openGroup(active({ profile, isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" })] }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId(item));
+    const dialog = screen.getByTestId("group-leave-dialog");
+    expect(dialog).toHaveTextContent("You are the only member: the group and its history end here, and nobody can join it again.");
+    expect(dialog).not.toHaveTextContent("come back");
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
+  });
+
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
     const { user, engine } = openGroup(active());
     engine.on("leaveGroup", () => ({}));
