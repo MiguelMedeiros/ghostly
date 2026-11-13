@@ -380,6 +380,21 @@ function meets(ranges: [number, number][], start: number, end: number): boolean 
 }
 
 /**
+ * Whether `start` to `end` of the file is within one of `boxes` (in file order, apart): the first one that ends at or
+ * past `end` is the only one that can hold it, found by halves, so a caption run per fragment is not checked against
+ * every fragment's `mdat`.
+ */
+function within(boxes: Box[], start: number, end: number): boolean {
+  let low = 0, high = boxes.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (boxes[middle]!.end >= end) high = middle;
+    else low = middle + 1;
+  }
+  return low < boxes.length && start >= boxes[low]!.body;
+}
+
+/**
  * `source` read a window at a time: a read that fits in `readAhead` bytes reads that many from where it starts, and
  * the reads after it within them (the next boxes' headers, a fragment's `moof`) are served from it, as copies (they
  * are changed in place). A Blob's read costs most for being one (in Chromium ~0.3 ms, and ~0.9 ms per MiB), so a
@@ -552,7 +567,7 @@ export async function videoMetadataPatches(file: VideoSource, mime: string, audi
   const mdats = top.filter((box) => box.type === "mdat");
   const merged: [number, number][] = [];
   for (const [start, end] of zeroed.sort((a, b) => a[0] - b[0])) {
-    check(mdats.some((mdat) => start >= mdat.body && end <= mdat.end));
+    check(within(mdats, start, end));
     const last = merged[merged.length - 1];
     if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
