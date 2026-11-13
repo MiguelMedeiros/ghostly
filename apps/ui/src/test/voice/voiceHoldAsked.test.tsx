@@ -150,4 +150,19 @@ describe("holding the mic while the browser asks for the microphone", () => {
     await wait(0);
     expect(onSendFile).toHaveBeenCalledOnce();
   });
+
+  it("a microphone already allowed that is slow to open (a Bluetooth headset) is still held and sent on release", async () => {
+    permission("granted");
+    const real = media.getUserMedia.getMockImplementation()!;
+    media.getUserMedia.mockImplementation(async (constraints) => { await new Promise((resolve) => setTimeout(resolve, 2_000)); return real(constraints); });
+    renderApp(<MessageInput onSend={onSend} onSendFile={onSendFile} />);
+    fireEvent.pointerDown(mic(), touch);
+    await wait(2_000);
+    await wait(0);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "hold");
+    await wait(2_000);
+    fireEvent.pointerUp(mic(), touch);
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
 });
