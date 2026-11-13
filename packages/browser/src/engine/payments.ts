@@ -1599,7 +1599,7 @@ export class PaymentDesk {
   private async receiveArk(linkId:string,payment:Payment):Promise<void> {
     if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
     const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
-    if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
+    if(!link?.supportsArkPayments || request?.target?.method!=="arkade" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
