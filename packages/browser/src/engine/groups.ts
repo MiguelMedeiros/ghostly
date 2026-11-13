@@ -907,7 +907,7 @@ export class Groups {
   private record(groupId: string): StoredGroup | undefined { return this.isCommunity(groupId) ? this.communities.record(groupId) : this.stored.get(groupId); }
 
   views(): GroupView[] {
-    return [...this.meshViews(), ...this.communities.views()].map(view => this.pinned(view))
+    return [...this.meshViews(), ...this.communities.views()].map(view => this.recorded(view))
       .sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
   }
 
@@ -917,7 +917,15 @@ export class Groups {
    */
   view(groupId: string): GroupView | undefined {
     const view = this.isCommunity(groupId) ? this.communities.view(groupId) : this.meshView(this.stored.get(groupId));
-    return view && this.pinned(view);
+    return view && this.recorded(view);
+  }
+
+  /** The view with what the group's record keeps beside its session: its pin, and my removals not said to it yet. */
+  private recorded(view: GroupView): GroupView {
+    const pinned = this.pinned(view);
+    // Only while I am in it: out of it, nothing of mine is said to it any more, and nothing waits on leaving.
+    const pending = view.status === "active" ? this.record(view.id)?.removals?.filter(r => r.pending).map(r => r.id) : undefined;
+    return pending?.length ? { ...pinned, removalsPending: pending } : pinned;
   }
 
   private pinned(view: GroupView): GroupView {

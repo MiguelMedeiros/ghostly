@@ -914,6 +914,35 @@ describe("group leave", () => {
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
   });
 
+  // Leave and forget took a removal of mine not said to the group yet with the group's record: the members kept the
+  // message for good. Refused as `chat remove` is, naming the messages, until --force.
+  it("leave and forget are refused while a delete for everyone has not been said to the group, until --force", async () => {
+    const { ctx, node } = fake();
+    const leaveGroup = vi.fn(async () => ({})), forgetGroup = vi.fn(async () => undefined);
+    const state = node.getState();
+    Object.assign(node, { leaveGroup, forgetGroup, getState: () => ({ ...state, groups: [{ ...group, removalsPending: ["mekey:1"] }] }) });
+    for (const [method, now] of [["group.leave", "leaving the group now"], ["group.forget", "forgetting the group now"]] as const) {
+      await expect(callApi(ctx, method, { group: "g1", yes: true })).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining(now), details: { messages: ["mekey:1"] } });
+    }
+    expect(leaveGroup).not.toHaveBeenCalled();
+    expect(forgetGroup).not.toHaveBeenCalled();
+    // The engine's own calls, as `engine removeLink` is.
+    for (const method of ["leaveGroup", "forgetGroup"]) {
+      await expect(callApi(ctx, "engine.call", { method, params: { groupId: "g1" }, yes: true })).rejects.toMatchObject({ code: "confirm", details: { messages: ["mekey:1"] } });
+    }
+    expect(leaveGroup).not.toHaveBeenCalled();
+    expect(forgetGroup).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "group.leave", { group: "g1", yes: true, force: true })).toEqual({ left: "g1" });
+    expect(await callApi(ctx, "group.forget", { group: "g1", yes: true, force: true })).toEqual({ forgotten: "g1" });
+    await callApi(ctx, "engine.call", { method: "forgetGroup", params: { groupId: "g1" }, yes: true, force: true });
+    expect(forgetGroup).toHaveBeenCalledTimes(2);
+    for (const name of ["group leave", "group forget"]) {
+      const command = COMMANDS[name]!;
+      expect(command.usage).toBe(`${name} <group> --yes [--force]`);
+      expect(command.params!(parseArgs(["g1", "--yes", "--force"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: true, force: true });
+    }
+  });
+
   // An admin's leave hands the role on: the engine says to whom, and the answer names that member from the roster.
   it("an admin's leave names the member who became the admin", async () => {
     const { ctx, node } = fake();
@@ -923,10 +952,10 @@ describe("group leave", () => {
 
   it("the command takes --yes and its help says what goes", () => {
     const command = COMMANDS["group leave"]!;
-    expect(command.usage).toBe("group leave <group> --yes");
+    expect(command.usage).toBe("group leave <group> --yes [--force]");
     expect(command.summary).toMatch(/history and files/);
-    expect(command.params!(parseArgs(["g1", "--yes"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: true });
-    expect(command.params!(parseArgs(["g1"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: false });
+    expect(command.params!(parseArgs(["g1", "--yes"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: true, force: false });
+    expect(command.params!(parseArgs(["g1"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: false, force: false });
   });
 });
 

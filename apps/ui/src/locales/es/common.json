@@ -15,6 +15,7 @@
   "delete": "Eliminar",
   "deleteChatCallOn": "Hay una llamada en este chat. Termínala primero y luego elimina el chat.",
   "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
+  "deleteChatRemovalPending": "Un mensaje que eliminaste para todos aún no ha llegado a tu contacto: si eliminas el chat ahora, tu contacto lo conserva.",
   "deleteChatTitle": "¿Eliminar chat?",
   "goHome": "Ir al inicio",
   "loading": "Cargando...",

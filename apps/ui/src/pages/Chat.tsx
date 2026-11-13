@@ -1388,7 +1388,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
-      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={onCall} />}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={onCall} peerKey={params.peerPubKeyB64} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">

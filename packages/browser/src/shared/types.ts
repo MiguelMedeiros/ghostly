@@ -442,6 +442,11 @@ export interface GroupView {
   lastReaction?: ReactionNote;
   /** The group's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
   pin?: PinView;
+  /**
+   * My messages deleted for everyone whose removal was not said to the group yet, by id (`engine/removals.ts`), while I
+   * am in it: leaving or forgetting the group now drops the removal, and the members keep the message. Absent for none.
+   */
+  removalsPending?: string[];
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
@@ -1917,6 +1922,11 @@ export interface LinkView {
   lastReaction?: ReactionNote;
   /** The chat's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
   pin?: PinView;
+  /**
+   * My messages deleted for everyone whose removal has not reached the contact yet, by id (`engine/removals.ts`):
+   * deleting the chat now drops the removal, and the contact keeps the message. Absent for none.
+   */
+  removalsPending?: string[];
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

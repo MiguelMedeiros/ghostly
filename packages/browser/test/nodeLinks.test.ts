@@ -1865,6 +1865,20 @@ describe("a 1:1 session that opens (agents#2468)", () => {
     } finally { whole.mockRestore(); }
   });
 
+  // Delete chat said nothing of a removal still on its way: the chat's row took it with it, and the contact kept the
+  // message for good. The chat's view names it, so the app can say so before the chat goes.
+  it("a removal of mine on its way is in the chat's view until it goes, and not before one is made", async () => {
+    const chat = await chatWithHistory();
+    const WIRE_GONE = "g".repeat(22);
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_GONE}`, wireId: WIRE_GONE, text: "to delete", sender: "me", timestamp: 950, via: "datalink", delivery: "delivered" });
+    const { node, linkOf } = await hosted(chat);
+    closes(linkOf(chat.id));
+    expect(node.getState().links.find((l) => l.id === chat.id)?.removalsPending).toBeUndefined();
+    expect(await node.removeMessage({ linkId: chat.id, messageId: `me_${WIRE_GONE}` })).toMatchObject({ error: null });
+    await settle();
+    expect(node.getState().links.find((l) => l.id === chat.id)?.removalsPending).toEqual([`me_${WIRE_GONE}`]);
+  });
+
   it("an edit made after the start, before the session opens, goes when it opens", async () => {
     const chat = await chatWithHistory();
     const whole = vi.spyOn(db, "getMessages");

@@ -62,6 +62,18 @@ describe("removals in a group", { timeout: 120_000 }, () => {
     expect(alice.groups.removals(id)).toEqual([{ ...removal, pending: undefined }]);
   });
 
+  // Leaving or forgetting the group took a removal not said to it yet with the record, and the members kept the message.
+  it.each(["mesh", "community"] as const)("in a %s group: a removal of mine not said yet is in the group's view, one said is not", async (kind) => {
+    const { world, alice, id } = await groupOf(kind);
+    expect(alice.groups.view(id)?.removalsPending).toBeUndefined();
+    const removal: Removal = { id: "mine:1", e: 1, at: world.now, pending: true };
+    await alice.groups.setRemovals(id, [removal, { ...removal, id: "mine:0", pending: undefined }]);
+    expect(alice.groups.view(id)?.removalsPending).toEqual(["mine:1"]);
+    expect(alice.groups.views().find(g => g.id === id)?.removalsPending).toEqual(["mine:1"]);
+    await alice.groups.setRemovals(id, [{ ...removal, pending: undefined }]);
+    expect(alice.groups.view(id)?.removalsPending).toBeUndefined();
+  });
+
   it.each(["mesh", "community"] as const)("in a %s group: one member's many removals push out only their own, not another's", async (kind) => {
     const { world, alice, id } = await groupOf(kind);
     // Bob's removal came before his message (back from away): his late copy is to stay gone.

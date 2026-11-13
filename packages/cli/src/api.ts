@@ -246,10 +246,22 @@ const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-s
  */
 function noRemovalOnItsWay(ctx: ApiContext, linkIds: readonly string[], clearing = false): void {
   const pending = linkIds.flatMap((linkId) => node(ctx).removalsPending({ linkId }));
+  removalsRefused(pending, clearing ? ["clearing the profile", "clear it then", "clear it"] : ["removing the chat", "remove the chat then", "remove it"]);
+}
+
+/**
+ * The same for a group (`group leave`, `group forget`): its record goes with my removals not said to it yet
+ * (`GroupView.removalsPending`), and the members kept the message for good.
+ */
+function noGroupRemovalOnItsWay(group: GroupView, leaving: boolean): void {
+  removalsRefused(group.removalsPending ?? [], leaving ? ["leaving the group", "leave it then", "leave it"] : ["forgetting the group", "forget it then", "forget it"], true);
+}
+
+function removalsRefused(pending: readonly string[], [now, then, go]: readonly [string, string, string], group = false): void {
   if (!pending.length) return;
   const n = pending.length, one = n === 1;
-  const [now, then, go] = clearing ? ["clearing the profile", "clear it then", "clear it"] : ["removing the chat", "remove the chat then", "remove it"];
-  throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: ${now} now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: pending });
+  const [who, where, until] = group ? ["the group", "the members' devices", "a member"] : ["the contact", "their device", "the contact"];
+  throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached ${who} yet: ${now} now leaves ${one ? "it" : "them"} on ${where}. Keep this profile online until ${until} is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: [...pending] });
 }
 
 const METHODS: Record<string, Method> = {
@@ -910,6 +922,7 @@ const METHODS: Record<string, Method> = {
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
+    if (!bool(params, "force")) noGroupRemovalOnItsWay(group, true);
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -918,6 +931,7 @@ const METHODS: Record<string, Method> = {
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
+    if (!bool(params, "force")) noGroupRemovalOnItsWay(group, false);
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
   },
@@ -974,6 +988,11 @@ const METHODS: Record<string, Method> = {
         if (!bool(params, "force")) noRemovalOnItsWay(ctx, [args.linkId]);
       }
       else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
+    }
+    // Leaving or forgetting the group is refused while my removals wait to be said to it, as `group leave` and `group forget` are.
+    if ((method === "leaveGroup" || method === "forgetGroup") && typeof args?.groupId === "string" && !bool(params, "force")) {
+      const group = state(ctx).groups.find((g) => g.id === args.groupId);
+      if (group) noGroupRemovalOnItsWay(group, method === "leaveGroup");
     }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));

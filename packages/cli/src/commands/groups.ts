@@ -3,6 +3,7 @@ import { type Command, groupWait, here, picture, refs, showSecret, secret, curso
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
+const notSaidForce = { type: "boolean", description: "Go on even if a message you deleted for everyone has not been said to the group yet" } as const;
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -31,8 +32,8 @@ export const commands: Record<string, Command> = {
   },
   "group decline": { method: "group.decline", usage: "group decline <group>", summary: "Decline an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
   "group forget": {
-    method: "group.forget", usage: "group forget <group> --yes", summary: "Leave and delete a group's history here", args: ["group"],
-    options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
+    method: "group.forget", usage: "group forget <group> --yes [--force]", summary: "Leave and delete a group's history here; refused while a message you deleted for everyone has not been said to the group, unless --force", args: ["group"],
+    options: { yes: { type: "boolean", description: "Confirm" }, force: notSaidForce }, params: ({ options }, { group }) => ({ group, yes: options.yes === true, force: options.force === true }),
   },
   "group history": {
     method: "group.history", usage: "group history <group> [--limit n] [--before id|ms] [--after id|ms]", summary: "A group's messages (a page)", args: ["group"],
@@ -55,8 +56,8 @@ export const commands: Record<string, Command> = {
   },
   "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
   "group leave": {
-    method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
-    options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
+    method: "group.leave", usage: "group leave <group> --yes [--force]", summary: "Leave a group; its history and files go from this device; refused while a message you deleted for everyone has not been said to the group, unless --force", args: ["group"],
+    options: { yes: { type: "boolean", description: "Confirm" }, force: notSaidForce }, params: ({ options }, { group }) => ({ group, yes: options.yes === true, force: options.force === true }),
   },
   "group link": {
     method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],

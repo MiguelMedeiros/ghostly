@@ -15,6 +15,7 @@
   "delete": "Supprimer",
   "deleteChatCallOn": "Un appel est en cours dans cette conversation. Raccrochez d’abord, puis supprimez-la.",
   "deleteChatLocal": "La conversation et son historique seront supprimés de cet appareil, pas chez votre contact.",
+  "deleteChatRemovalPending": "Un message que vous avez supprimé pour tous n’est pas encore parvenu à votre contact : si vous supprimez la conversation maintenant, il le garde.",
   "deleteChatTitle": "Supprimer la conversation ?",
   "goHome": "Aller à l’accueil",
   "loading": "Chargement...",

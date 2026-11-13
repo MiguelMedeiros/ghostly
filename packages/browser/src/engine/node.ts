@@ -10404,6 +10404,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && live.link?.peerStatus?.status ? { peerStatus: live.link.peerStatus.status } : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
+      ...(stored.removals?.length && { removalsPending: stored.removals.map(r => r.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
       ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),

@@ -15,6 +15,7 @@
   "delete": "Excluir",
   "deleteChatCallOn": "Há uma chamada nesta conversa. Encerre-a primeiro e depois exclua a conversa.",
   "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
+  "deleteChatRemovalPending": "Uma mensagem que você apagou para todos ainda não chegou ao seu contato: se excluir a conversa agora, ela continua com o contato.",
   "deleteChatTitle": "Excluir conversa?",
   "goHome": "Ir para o início",
   "loading": "Carregando...",

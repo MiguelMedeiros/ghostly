@@ -627,6 +627,7 @@ export function Sidebar() {
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         callOn={deleteOnCall}
+        peerKey={sessions.find(s=>s.id===confirmDeleteId)?.peerPubKeyB64}
         onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
