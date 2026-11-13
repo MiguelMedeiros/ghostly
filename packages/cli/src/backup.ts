@@ -262,7 +262,7 @@ async function restoringFolder(home: string, name: string): Promise<ProfilePaths
  * The keys a profile answers its contacts with, from the store in `db` (the app's `identityKeysOf`): each chat's
  * participation key (its chat key for an older chat) and the DID key. A seed sealed with a key is not compared.
  */
-function identityKeys(db: string): Set<string> {
+export function identityKeys(db: string): Set<string> {
   const stores = peekStores(db, PEER_DB, ["links", "settings"]);
   const keys = new Set<string>();
   for (const link of stores.get("links")!.values()) {
@@ -282,7 +282,7 @@ function identityKeys(db: string): Set<string> {
  * and wallets race on the same funds. Refused, naming them, unless `copy` says to make it anyway. Each profile's store
  * is read from its files, a running one's too; one that cannot be read is no match.
  */
-function refuseSameProfile(home: string, db: string, copy: boolean): void {
+export function refuseSameProfile(home: string, db: string, copy: boolean): void {
   if (copy) return;
   const theirs = identityKeys(db);
   if (!theirs.size) return;
