@@ -285,6 +285,9 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     if (!line.trim()) return;
     let request: Request;
     try { request = JSON.parse(line) as Request; } catch { write({ id: null, error: new CliError("bad_request", "Not JSON").toJSON() }); return; }
+    // `null` threw below (an uncaught exception), and the lines that came with it in one chunk went unanswered; a list
+    // or a number was told "method is required".
+    if (typeof request !== "object" || request === null || Array.isArray(request)) { write({ id: null, error: new CliError("bad_request", 'A request is a JSON object: {"id", "method", "params"}').toJSON() }); return; }
     const id = typeof request.id === "number" || typeof request.id === "string" ? request.id : null;
     if (typeof request.method !== "string") { write({ id, error: new CliError("bad_request", "method is required").toJSON() }); return; }
     if (request.method === HELLO) {
