@@ -1782,6 +1782,19 @@ describe("a green batch landing on dev", () => {
     expect(pending.repo.merges).toEqual([]);
   });
 
+  it("takes the position comment off a pull request whose `queue` a person took off while it was aboard", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13, 14]);
+    repo.runs.set(repo.pulls.get(b)!.sha, running);
+    const placed = (n: number) => repo.comments.get(n)!.filter((c) => c.body.startsWith("<!-- merge-train:position -->"));
+    expect(placed(12)).toHaveLength(1);
+    repo.pulls.get(12)!.labels = [];
+    expect((await repo.run()).closed).toEqual([b]);
+    expect(last(repo, b)).toMatch(/#12 changed or left the line/);
+    expect(placed(12)).toEqual([]); // no "in batch #N, waiting for its CI" for good
+    expect(repo.members()).toEqual([11, 13, 14]);
+    for (const n of [11, 13, 14]) expect(placed(n)).toHaveLength(1);
+  });
+
   it("falls back to the rebase merge of the batch, with a warning, while the train may not merge past dev's rule", async () => {
     const { repo, b } = await greenBatch([11, 12], { behind: true });
     repo.rules.bypass = false;
