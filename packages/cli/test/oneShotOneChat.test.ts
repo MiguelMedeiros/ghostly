@@ -121,6 +121,11 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
  * out after 60 s, exit 4, with nothing said. Nor does it start the edges of the other groups saved: with six more
  * groups shared with Erin, each put its records and read hers, and one `group send` asked the relay about three times
  * what the group alone does. Dave's requests come to a relay of his own, as Bob's above.
+ *
+ * Erin's daemon has no relay budget (`GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE`): only Dave's requests are measured. With
+ * it, her seven edges to Dave all watched him once his daemon stopped, their reads shared the watch share (2 in 10 s,
+ * the key read longest ago first), and the edge the send's goodbye had just read read Dave's next offer last: the
+ * `group react` waited 28 to 52 s for an edge on one busy core, and past its 60 s on CI (exit 4).
  */
 describe("a one-shot about one group", { timeout: 300_000 }, () => {
   let daveRelay: Awaited<ReturnType<typeof relays>>[number], erinRelay: typeof daveRelay;
@@ -134,7 +139,7 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     [daveRelay, erinRelay] = await relays(2);
     dht = await hyperdhtTestnet();
     daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
-    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" };
     const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
     const daveDaemon = new Running(["--home", dave, "daemon"], daveEnv);
     running.push(erinDaemon, daveDaemon);
