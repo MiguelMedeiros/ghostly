@@ -197,7 +197,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const why = (e: Entry) => {
     if (e.add || e.ghostly || e.on) return undefined;
     if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt, t.language) });
-    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider) });
+    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider, t) });
     if (unsupported) return t("identities.picker.cannotReceive", { contact });
     if (!ids) return t("identities.picker.connectFirst");
     return undefined;
