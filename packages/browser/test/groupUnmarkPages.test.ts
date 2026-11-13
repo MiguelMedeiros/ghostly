@@ -51,6 +51,21 @@ describe("a group's newest line deleted for everyone", { timeout: 120_000 }, () 
     expect(paged).toBeLessThan(whole);
   });
 
+  it("my only \"@\" deleted reads a few pages, then the history whole: not 1,500 rows a page at a time", async () => {
+    const rows: StoredMessage[] = Array.from({ length: 1_500 }, (_, i) => ({ linkId: LINK, id: `m${String(i).padStart(5, "0")}`, text: `line ${i}`, sender: i % 3 ? "bob" : "me", timestamp: 1_000 + i, via: "datalink", ...(i === 1_499 && { mentioned: true }) }));
+    for (const m of rows) await db.putMessage(m);
+    const marks = fresh();
+    groups.loadMarks(marks, { id: GROUP }, rows);
+    const read = { pages: 0, whole: 0 };
+    await groups.unmark(marks, undefined, GROUP, {
+      getMessages: linkId => { read.whole++; return db.getMessages(linkId); },
+      getMessagePage: (linkId, page) => { read.pages++; return db.getMessagePage(linkId, page); },
+    }, rows[1_499]!);
+    expect(marks.lastMentionAt.has(GROUP)).toBe(false);
+    expect(marks.lastMessageAt.get(GROUP)).toBe(rows[1_498]!.timestamp);
+    expect(read).toEqual({ pages: groups.UNMARK_PAGES, whole: 1 });
+  });
+
   it("puts back the marks the whole history says, for any line deleted (seeded fuzz)", async () => {
     const next = random(11);
     const rows: StoredMessage[] = [];
