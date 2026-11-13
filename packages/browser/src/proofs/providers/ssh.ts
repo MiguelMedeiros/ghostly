@@ -40,9 +40,12 @@ function normalizeLogin(forge: SshForge, input: string): string {
   return login;
 }
 
-/** The armored block, without what the terminal showed around it (ssh-keygen's "Signing data on standard input", a prompt). */
-const ARMOR = /-----BEGIN SSH SIGNATURE-----[\s\S]*?-----END SSH SIGNATURE-----/;
-const armorIn = (pasted: string) => pasted.length > 4 * SSHSIG_MAX_ARMOR ? pasted : ARMOR.exec(pasted)?.[0] ?? pasted;
+/**
+ * The armored block, without what the terminal showed around it (ssh-keygen's "Signing data on standard input", a prompt);
+ * the last one when the command ran more than once there (Add started over, a run without -n ghostly).
+ */
+const ARMOR = /-----BEGIN SSH SIGNATURE-----[\s\S]*?-----END SSH SIGNATURE-----/g;
+const armorIn = (pasted: string) => pasted.length > 4 * SSHSIG_MAX_ARMOR ? pasted : pasted.match(ARMOR)?.pop() ?? pasted;
 
 /** The armor, re-wrapped canonically, so evidence is the same whatever the clipboard did to it. */
 function canonicalArmor(pasted: string): string {
