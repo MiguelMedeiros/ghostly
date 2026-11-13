@@ -160,6 +160,38 @@ describe("a secret is copied as one where the platform marks it", () => {
     expect(secret).toHaveBeenCalledTimes(2);
   });
 
+  it("a code block's and a long key's Copy, when they hold a seed or a key; other code stays plain", async () => {
+    const seed = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    const { user, unmount } = renderApp(<MessageBubble message={message("```\n" + seed + "\n```")} peerPubKey="peer" />);
+    watchPage();
+    await user.click(screen.getByTestId("rich-codeblock-copy"));
+    await waitFor(() => expect(secret).toHaveBeenCalledWith(seed));
+    unmount();
+
+    // BIP32's first test vector: a public example, not a key anyone holds.
+    const xprv = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
+    const blob = renderApp(<MessageBubble message={message(`my key ${xprv}`)} peerPubKey="peer" />);
+    await blob.user.click(screen.getByTestId("rich-blob-copy"));
+    await waitFor(() => expect(secret).toHaveBeenCalledWith(xprv));
+    expect(page).not.toHaveBeenCalled();
+    blob.unmount();
+
+    const plain = renderApp(<MessageBubble message={message("```py\nprint('hi')\n```")} peerPubKey="peer" />);
+    watchPage();
+    await plain.user.click(screen.getByTestId("rich-codeblock-copy"));
+    await waitFor(() => expect(page).toHaveBeenCalledWith("print('hi')"));
+    expect(secret).toHaveBeenCalledTimes(2);
+  });
+
+  it("a code block's Copy that the platform refuses to mark copies nothing and says so", async () => {
+    secret.mockRejectedValue(new Error("refused"));
+    const { user } = renderApp(<MessageBubble message={message("```\nabandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\n```")} peerPubKey="peer" />);
+    watchPage();
+    await user.click(screen.getByTestId("rich-codeblock-copy"));
+    await waitFor(() => expect(screen.getByTestId("rich-codeblock-copy")).toHaveTextContent("Not copied"));
+    expect(page).not.toHaveBeenCalled();
+  });
+
   it("anything else is copied by the page, unmarked", async () => {
     const { user } = renderApp(<button onClick={() => void copyText("hello there")}>Copy text</button>);
     watchPage();

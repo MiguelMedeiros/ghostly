@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, forgetServicesOfGone, noteOpened, openedServices } from "../../../../web/src/svc/forget";
+import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, forgetServicesOfChatsGone, forgetServicesOfGone, noteOpened, openedServices } from "../../../../web/src/svc/forget";
 import { clearSite, dropSharedCookies } from "../../../../web/src/svc/clearSite";
 import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PAGE, BRIDGE_READY, CLEAR_COOKIES, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
 
@@ -124,6 +124,28 @@ describe("the contacts' apps this device opened", () => {
     } finally { bridge.stop(); }
     expect(bridge.asked).toEqual([...("abc")].map((c) => serviceOrigin(host, label(c))));
     expect(openedServices()).toEqual([{ profile: "work000001", tag: "chat-w", label: label("w") }, { profile: "", tag: "chat-y", label: label("y") }]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  it("of a chat deleted while no bridge answered are cleared at the next start, never a chat's it still has or another profile's", async () => {
+    vi.useFakeTimers();
+    noteOpened({ profile: "", tag: "chat-a", label: label("a") });
+    noteOpened({ profile: "", tag: "chat-a", label: label("b") });
+    noteOpened({ profile: "", tag: "chat-y", label: label("y") });
+    noteOpened({ profile: "work000001", tag: "chat-w", label: label("w") });
+    // Delete chat on a device that is offline: no bridge loads, and the chat and its link go all the same.
+    const done = forgetServices(host, { tag: "chat-a" });
+    await vi.advanceTimersByTimeAsync(CLEAR_ORIGIN_MS);
+    await done;
+    expect(openedServices().filter((o) => o.tag === "chat-a")).toHaveLength(2);
+    vi.useRealTimers();
+    // The next start, online, once the engine has loaded the chats: the profile "" has chat-y only.
+    const bridge = bridges();
+    try {
+      await forgetServicesOfChatsGone(host, "", ["chat-y"]);
+    } finally { bridge.stop(); }
+    expect(bridge.asked).toEqual([serviceOrigin(host, label("a")), serviceOrigin(host, label("b"))]);
+    expect(openedServices()).toEqual([{ profile: "", tag: "chat-y", label: label("y") }, { profile: "work000001", tag: "chat-w", label: label("w") }]);
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 

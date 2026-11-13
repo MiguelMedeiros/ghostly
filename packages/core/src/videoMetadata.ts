@@ -28,6 +28,8 @@ export const VIDEO_METADATA_LIMITS = {
   headBytes: 64,
   /** Bytes read at once for a box's header or a small box, so the next headers and `moof`s are read with it. */
   readAhead: 64 * 1024,
+  /** The most a walk going on from its window reads at once (an Ogg's pages, a live WebM's blocks: the whole file). */
+  readAheadMax: 4 * 1024 * 1024,
 } as const;
 
 /** Why a video is refused: its metadata could not be removed, so it does not go at all. */
@@ -380,18 +382,26 @@ function meets(ranges: [number, number][], start: number, end: number): boolean 
 /**
  * `source` read a window at a time: a read that fits in `readAhead` bytes reads that many from where it starts, and
  * the reads after it within them (the next boxes' headers, a fragment's `moof`) are served from it, as copies (they
- * are changed in place). A Blob's read costs about the same whatever its size, so a fragment costs one, not three.
+ * are changed in place). A Blob's read costs most for being one (in Chromium ~0.3 ms, and ~0.9 ms per MiB), so a
+ * fragment costs one, not three.
+ *
+ * A walk that goes on from its window (an Ogg's pages, a live WebM's blocks: headers less than a window apart, through
+ * the whole file) reads twice as much each time, up to `readAheadMax`, so it makes a few large reads, not one per
+ * 64 KiB. One that jumps farther (over a fragment's samples) or back reads `readAhead` again.
  */
 export function readingAhead(source: VideoSource): VideoSource {
-  let start = 0, window: Uint8Array = new Uint8Array(0);
+  let start = 0, window: Uint8Array = new Uint8Array(0), ahead = VIDEO_METADATA_LIMITS.readAhead;
   return {
     size: source.size,
     async read(offset, length) {
       const end = start + window.length;
       if (offset < start || (offset + length > end && end < source.size)) {
-        if (length > VIDEO_METADATA_LIMITS.readAhead) return source.read(offset, length);
+        // Going on: forward, past less than a window (a page's or a block's body skipped).
+        const goesOn = window.length > 0 && offset >= start && offset - end < ahead;
+        ahead = goesOn ? Math.min(ahead * 2, VIDEO_METADATA_LIMITS.readAheadMax) : VIDEO_METADATA_LIMITS.readAhead;
+        if (length > ahead) return source.read(offset, length);
         start = offset;
-        window = await source.read(offset, VIDEO_METADATA_LIMITS.readAhead);
+        window = await source.read(offset, ahead);
       }
       return window.slice(offset - start, offset - start + length);
     },

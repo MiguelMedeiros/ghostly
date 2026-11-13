@@ -162,7 +162,8 @@ export interface GroupsHost {
    * in a history they hold, so a group joined again showed the old one under what came after, until a reload.
    */
   historyGone?(groupId: string): void;
-  emit(): void;
+  /** Something the pages show changed: they get a state. `delayMs`: how long it may wait (the engine's own wait when not given). */
+  emit(delayMs?: number): void;
   /** My name, sealed with my messages in every group: past 16 members, most members hold no edge with me to hear it there. */
   myNick?(): string | undefined;
   /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
@@ -795,7 +796,7 @@ export class Groups {
         membership: groupId => this.fileMembership(groupId),
         out: groupId => this.fileOut(groupId),
         sendApp: (groupId, frame) => this.communities.sendApp(groupId, frame),
-        changed: () => host.emit(),
+        changed: delayMs => host.emit(delayMs),
         now: () => this.now(),
       });
       this.communities.files = this.files;

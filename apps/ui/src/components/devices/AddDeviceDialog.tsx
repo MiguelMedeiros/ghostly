@@ -167,10 +167,17 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     );
   }
 
+  // The digits to check and the device added are plain lines, and the focus stays on the body: a screen reader hears them
+  // from a line that is there from the code on and changes its text (one that comes with its step is often not read).
+  const spoken = view?.role !== "inviter" ? ""
+    : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{`${view.digits.slice(0, 3)} ${view.digits.slice(3)}`}</span></>
+    : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
+
   return (
     <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
+      <p role="status" className="sr-only" data-testid="device-add-spoken">{spoken}</p>
       {/* Try again, until the engine answers: a new code, or why there is none. */}
       {!view && busy && <Status testId="device-add-preparing" step="preparing">{t("devices.join.preparing")}</Status>}
       {view?.role === "inviter" && view.step === "waiting" && <>

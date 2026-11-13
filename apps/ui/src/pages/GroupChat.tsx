@@ -75,9 +75,10 @@ import { usePageShown } from "../hooks/usePageShown";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove } from "@ghostly/browser/shared/edits";
-import { groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
@@ -722,7 +723,7 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey) ?? []));
+  const ownNotes = new Set(paymentRows.flatMap(m => groupPayTwin(m, payments[m.paymentId!], id => notes.get(id), group.myKey, linkId => groupMemberOfLink(group, linkId)) ?? []));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, links, faceOf));
@@ -895,8 +896,9 @@ export function GroupChat() {
         </div>
       </div>
 
-      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
+      <ReconnectingBanner inChat />
       {!noTimeline && <ChatSearchBar search={search} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 

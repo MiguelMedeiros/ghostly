@@ -12,7 +12,7 @@
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
-import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
 
@@ -60,6 +60,8 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (linkId && already?.ref === ref && !already.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
+    // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
+    const gone = takenDownSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
@@ -70,6 +72,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     if (policy === null) throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
+    gone(ref, entry.digest, options?.runAnyway === true);
     replace?.();
 
     const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };

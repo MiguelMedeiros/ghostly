@@ -14,7 +14,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { openRow, openRows, proofKey, RowSeals, sealRow, sealedStore } from "./sealedRows";
 import { hasDataKey } from "./dataKey";
-import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, stripHidden, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, keysetRefused, mintFailed, mintRefused } from "./paymentAdapters/cashu";
 import { AskBackoff } from "./askBackoff";
 import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
@@ -294,7 +294,7 @@ const backInWallet = (lost: number) => lost > 0
 
 /** A mint's own words for a refusal, as one short line: the reason at the end of `lightningRefused`. */
 const mintReason = (error: unknown) =>
-  (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
+  stripHidden((error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ")).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
 
 /** Every proof and swap stored, as `CashuWallet.readStored` read them. */
 export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }

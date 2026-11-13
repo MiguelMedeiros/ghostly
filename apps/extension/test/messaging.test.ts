@@ -313,7 +313,7 @@ describe("viewer tabs", () => {
       postData: '{"name":"ç"}',
     });
     expect(answer.method).toBe("Fetch.fulfillRequest");
-    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }] });
+    expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }, { name: "permissions-policy", value: expect.stringContaining("geolocation=()") }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
 
     const [request] = engine().requests;
@@ -342,6 +342,47 @@ describe("viewer tabs", () => {
       throw offline;
     };
     expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+  });
+
+  it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {
+    // The worker opens the app (`tabs.update`), and so do the person's reload and back: Chrome saves such an answer
+    // with no question. Desktop and the web view save no file a contact's app sends either.
+    const tabId = await openViewer(world);
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    const page = async (headers: [string, string][], status = 200, resourceType = "Document") => {
+      engineControl().respond = async () => okResponse("#!/bin/sh\n", status, headers);
+      return (await pauseRequest(world, tabId, { url }, resourceType)).params;
+    };
+    const refused = (params: Record<string, unknown>) => {
+      expect(params.responseCode).toBe(502);
+      expect(params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+      expect(params.responseHeaders).not.toContainEqual(expect.objectContaining({ name: expect.stringMatching(/^content-disposition$/i) }));
+      expect(bodyText(params)).not.toContain("#!/bin/sh");
+    };
+    refused(await page([["Content-Type", "application/octet-stream"], ["Content-Disposition", 'attachment; filename="Ghostly-update.command"']]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "ATTACHMENT"]]));
+    refused(await page([["content-type", "text/html"], ["content-disposition", "x-other; filename=a.exe"]]));
+    refused(await page([["content-type", "application/octet-stream"]]));
+    refused(await page([["content-type", "application/x-sh"]]));
+    refused(await page([["content-type", "text/html, application/zip"]]));
+    refused(await page([["content-type", "text/html"], ["content-type", "application/zip"]]));
+    refused(await page([]));
+    refused(await page([["content-type", "application/octet-stream"]], 404));
+    refused(await page([["content-type", "application/octet-stream"]], 302));
+
+    // What a tab shows goes through as before, and so does a redirect: its target is asked for as a page too.
+    const served = (params: Record<string, unknown>, status = 200) => {
+      expect(params.responseCode).toBe(status);
+      expect(bodyText(params)).toBe("#!/bin/sh\n");
+    };
+    served(await page([["Content-Type", "text/html; charset=utf-8"]]));
+    served(await page([["content-type", "text/plain"], ["content-disposition", "inline; filename=notes.txt"]]));
+    served(await page([["content-type", "image/png"]]));
+    served(await page([["content-type", "application/json"]]));
+    served(await page([["location", "/f"]], 302), 302);
+    served(await page([], 204), 204);
+    // A script's fetch or a picture is no navigation: it saves nothing, whatever it says.
+    served(await page([["content-type", "application/octet-stream"], ["content-disposition", "attachment"]], 200, "XHR"));
   });
 
   it("lets the app open no window of its own, the error page neither: one would be a tab on its origin, outliving the viewer and the lock", async () => {
@@ -492,6 +533,7 @@ describe("viewer tabs", () => {
       { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
@@ -514,6 +556,7 @@ describe("viewer tabs", () => {
       { name: "Content-Type", value: "text/html" },
       { name: "X-Kept", value: "fine; really" },
       { name: "content-security-policy", value: expect.any(String) },
+      { name: "permissions-policy", value: expect.stringContaining("camera=()") },
     ]);
   });
 
@@ -616,6 +659,18 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
     // The tab is no viewer any more: coming back to the virtual origin is not served.
     expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+  });
+
+  it("closes the tab when its page goes to a document of its own origin that is no viewer address", async () => {
+    const tabId = await openViewer(world);
+    // `location = URL.createObjectURL(blob)`: the app's code would go on running on its origin, out of every closer's reach.
+    fire(world.chrome.debugger.onEvent, { tabId }, "Page.frameNavigated", {
+      frame: { url: `blob:https://${SERVICE}.${PEER}.${TAG}.invalid/0b7e2f4c-5a1d-4e8b-9c3f-2d6a1b0e7f45` },
+    });
+    await settle();
+    expect(world.tabs.has(tabId)).toBe(false);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+    expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
   });
 
   it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {
