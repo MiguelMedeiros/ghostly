@@ -353,7 +353,8 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean): Hook 
 const RETRY_MAX_MS = 60_000;
 
 /**
- * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, three times).
+ * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
+ * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
  * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
  * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
@@ -374,7 +375,7 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
     } catch { /* not there: tried again */ }
-    if (!down && attempt >= 2) return status;
+    if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
       process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
