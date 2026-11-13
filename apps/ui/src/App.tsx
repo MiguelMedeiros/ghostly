@@ -41,6 +41,7 @@ import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
 import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
+import { focusLost } from "./lib/focus";
 
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
@@ -218,6 +219,16 @@ export function App() {
   // The chat on screen that is not live keeps dialling by itself: nobody has to press Reconnect for it.
   useChatRedial(onScreen?.startsWith("group:") ? null : onScreen);
   const mainRef = useRef<HTMLElement>(null);
+  // A page's own control that opened another page (Back, a Profile tile) went with its page, and the focus fell to the
+  // document: the next Tab would start again at the top. The open page takes it, as the skip link gives it. After the
+  // pages' own effects (children first), so a page that puts the focus somewhere keeps it there. Not at the start: the
+  // first Tab goes to the skip link.
+  const shownPath = useRef(pathname);
+  useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
+    if (!isMobile && focusLost()) mainRef.current?.focus({ preventScroll: true });
+  }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
   useEffect(() => () => stopHeld(), []);
