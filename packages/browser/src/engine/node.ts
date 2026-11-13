@@ -1781,6 +1781,10 @@ export class GhostlyNode implements EngineImplementation {
       const membership = this.membership(chat.slice("group:".length));
       return !!membership?.members.has(by) && by !== membership.me;
     },
+    memberKey: chat => {
+      const groupId = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
+      return groupId && !this.groups.isCommunityGroup(groupId) ? this.membership(groupId)?.me : undefined;
+    },
   });
 
   /**

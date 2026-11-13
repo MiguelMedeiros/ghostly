@@ -6,7 +6,7 @@ import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: groups.edit, groups.remove-member
+// covers: groups.edit, groups.remove-member, groups.protocol.reactions
 
 /*
  * Removed from a private group and invited back, I come in with a new member key: the group knows my lines from
@@ -47,6 +47,23 @@ describe("my lines in a private group written under the key I had before I was i
     await user.click(within(row(NOW)!).getByTestId("message-options"));
     expect(screen.getByTestId("message-edit")).toBeInTheDocument();
     expect(screen.getByTestId("message-delete-everyone")).toBeInTheDocument();
+  });
+
+  it("offer no reaction on a member's line I reacted to before I was invited back; one I reacted to since still does", async () => {
+    // The group keeps my reaction from before under my old key: changed or taken back here, it stayed for everyone else.
+    const joined = stored({ id: "event:3:joined:1700000000500", sender: "peer", event: "joined", text: "You joined again", timestamp: 1_700_000_000_500 });
+    const alices = (id: string, text: string, timestamp: number, at: number) =>
+      stored({ id, text, sender: "peer", member: ALICE, timestamp, reactions: { me: { e: "👍", n: at, at } } });
+    const before = alices(`${ALICE}:1:0`, "kestrel note 3390", 1_700_000_000_100, 1_700_000_000_200);
+    const since = alices(`${ALICE}:3:0`, "plover note 5521", 1_700_000_000_600, 1_700_000_000_700);
+    const { user } = openGroup([before, joined, since]);
+    await screen.findByText("kestrel note 3390");
+    await user.click(within(row(before.id)!).getByTestId("message-options"));
+    expect(screen.getByTestId("message-reply")).toBeInTheDocument();
+    expect(screen.queryByTestId("message-react")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(within(row(since.id)!).getByTestId("message-options"));
+    expect(screen.getByTestId("message-react")).toBeInTheDocument();
   });
 
   it("↑ in an empty composer edits nothing when my only lines are from before", async () => {
