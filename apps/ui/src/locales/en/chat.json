@@ -395,6 +395,7 @@
     "hiddenChars": "This code holds hidden or direction-changing characters, shown as {{marker}}. Copy code copies them too.",
     "localTime": "{{time}} your time",
     "notCopied": "Not copied",
+    "notCopiedHint": "Not copied. Select the text and copy it.",
     "showAll": "Show all",
     "showLess": "Show less",
     "spoiler": "Hidden text. Tap to show it",
