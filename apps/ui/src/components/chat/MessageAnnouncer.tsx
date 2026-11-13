@@ -6,7 +6,7 @@ import { useOnline } from "../../hooks/useOnline";
 import { filePreview, previewText } from "../../lib/chatList";
 import { fileMoment, fileMomentLine, fileOfferLine, type FileMoment } from "../../lib/fileAnnounce";
 import { isGroupFile } from "../../lib/fileStatus";
-import { servicesPlatform } from "../../lib/platform";
+import { servicesPlatform, type ChatPayment } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { paymentLine, paymentStateLine, storedPaymentLine } from "../paymentWords";
 import { appCardLine, appCardsShown, cardLine, showsCard } from "../../lib/statusCards";
@@ -84,14 +84,15 @@ const heardNow = (message: Announceable & { file: ChatFile }, since: number): Fi
 
 /**
  * A payment or a request of the chat, as last seen: its state line (`paymentStateLine`, as its bubble says it; null
- * while the wallet does not know it) and the language it was said in, so another language is no step of its own.
+ * while the wallet does not know it) and the language it was said in, so another language is no step of its own. The
+ * payment it was worked out of: an engine state that brings that one back unchanged is no reason to work it out again.
  */
-interface PaymentHeard { paymentId: string; line: string | null; language?: string }
+interface PaymentHeard { paymentId: string; line: string | null; language?: string; payment?: ChatPayment }
 /** A message whose payment's state is followed: a group's note says its own (`noteLine`). */
 const paid = (m: Announceable): m is Announceable & { paymentId: string } => !!m.paymentId && !m.groupPay;
 const paymentNow = (paymentId: string, t: Translate): PaymentHeard => {
   const payment = servicesPlatform?.wallet?.getPayment(paymentId);
-  return { paymentId, line: payment ? paymentStateLine(t, payment) : null, language: t.language };
+  return { paymentId, line: payment ? paymentStateLine(t, payment) : null, language: t.language, payment: payment ?? undefined };
 };
 
 /** Where a group's payment note stands, in no language: a member named again is no step of it. */
@@ -193,7 +194,8 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
     const wallet = servicesPlatform?.wallet;
     for (const heard of payments.current.values()) {
       const payment = wallet?.getPayment(heard.paymentId);
-      if (!payment) continue;
+      if (!payment || (payment === heard.payment && heard.language === t.language)) continue;
+      heard.payment = payment;
       const line = paymentStateLine(t, payment);
       if (line === heard.line && heard.language === t.language) continue;
       const before = heard.line, sameLanguage = heard.language === t.language;
