@@ -48,7 +48,7 @@ function headless(s: IdentitySigner<unknown>): boolean {
 function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown> {
   const usable = p.signers.filter(headless);
   const found = id ? p.signers.find((s) => s.id === id) : usable[0];
-  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label} proofs need a browser window: make them in the app`);
+  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label}: this kind of proof needs a browser window, make it in the app`);
   if (!headless(found)) {
     const instead = usable.length ? ` (here: --signer ${usable.map((s) => s.id).join(" or ")})` : "";
     throw new CliError("unavailable", `${found.label} needs a browser window: make this proof in the app${instead}`);
