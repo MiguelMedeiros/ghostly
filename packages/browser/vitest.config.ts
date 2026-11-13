@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
-import { maxWorkers } from '../../tools/vitest.shared.ts';
+import { maxWorkers, reporters } from '../../tools/vitest.shared.ts';
 
 // OpenPGP.js publishes its lightweight build under a "browser" condition only. It
 // runs in Node too, so tests load the very code the apps ship (WebCrypto and
@@ -18,5 +18,5 @@ export default defineConfig({
       { find: /^\.\/store-snapshot\.json$/, replacement: storeSnapshot },
     ],
   },
-  test: { maxWorkers },
+  test: { maxWorkers, reporters },
 });
