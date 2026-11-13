@@ -1,6 +1,7 @@
 import { HANDOFF_OFFER, HANDOFF_PAKE, turnKeys, type DeviceFrame, type TurnRelease } from "@ghostly/core";
 import { viewOf, type DeviceGateView } from "./gate";
 import { HandoffGiver, HandoffTaker, STOPPED_STEP, type HandoffLinks, type HandoffRecords } from "./handoff";
+import { LeftFilesServer } from "./handoffFiles";
 import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./handoffHost";
 import type { DeviceHandoffHandler, DeviceLinks } from "./links";
 import { deviceIdentity } from "./setup";
@@ -107,10 +108,13 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
   // The standby screen follows the record: a device that released is on standby now, not moving.
   let shown = record.state;
   const follow = () => void readDeviceRecord(options.profile).then((now) => { if (now && now.state !== shown) { shown = now.state; options.show(viewOf(now)); } }).catch(() => {});
+  const source = host.source(options.profile);
+  // The files a move left here for later, served to the active device from the frozen copy (`handoffFiles.ts`).
+  const server = new LeftFilesServer({ links, records, read: (id, offset, length) => source.read(id, offset, length) });
   const giver = new HandoffGiver({
     ...common,
     onChange: follow,
-    source: host.source(options.profile),
+    source,
     verifier: async () => null,
     busy: async () => null,
     dropDatabases: (names) => dropBreezDatabases(names),
@@ -166,9 +170,10 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
       // An offer is always the taker's. A giver that released to the device offering it hears it too: that device
       // holds the turn, which is what the `handoff-done` it never got would have said.
       if (frame.t === HANDOFF_OFFER) { void giver.receive(from, frame); void taker.receive(from, frame); return; }
+      if (server.takes(from, frame)) { void server.receive(from, frame); return; }
       void route(from, frame).receive(from, frame);
     },
-    linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); },
+    linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); server.linkChanged(key, live); },
     // "Active on <device>": the record of the device this one released to is out, so it took the turn.
     turnRead: (outcome) => {
       const taken = outcome.kind === "show" && outcome.screen === "active-on" ? outcome.read.record : undefined;
@@ -208,7 +213,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
         default: return undefined;
       }
     },
-    stop: () => { giver.stop(); taker.stop(); },
+    stop: () => { giver.stop(); taker.stop(); server.stop(); },
   };
 }
 

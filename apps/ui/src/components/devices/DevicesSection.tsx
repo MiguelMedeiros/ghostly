@@ -212,7 +212,7 @@ export function DevicesSection() {
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
-      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setGone(removing.key); setRemoved(removing.name); setFocusRemoved(true); }} />}
+      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} later={view?.devices.find((device) => device.key === removing.key)?.later} onClose={() => setRemoving(null)} onRemoved={() => { setGone(removing.key); setRemoved(removing.name); setFocusRemoved(true); }} />}
       {lost && <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />}
     </Section>
   );

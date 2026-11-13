@@ -557,6 +557,11 @@ export interface EngineApi {
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
   /**
+   * "Get them now", on the active device: the files a move left for later on the device with this signing key come over
+   * its link while it is on, on mobile data too (without it they wait for a connection that is not metered).
+   */
+  deviceFetchLeftFiles(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
    * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
    * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,
    * a control, invisible or direction-changing character) is refused. Errors start with `rename-<reason>:`.

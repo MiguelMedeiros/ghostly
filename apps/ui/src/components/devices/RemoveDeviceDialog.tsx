@@ -8,16 +8,25 @@ import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
+import { sizeText } from "../../lib/handoff";
 
 /**
  * Remove (WISP 06 § User experience, Remove): "Remove <device>?", what it means, and "Lost or stolen", which shows the
- * money checklist first.
+ * money checklist first. A device that still holds files a move left for later (`later`) says so first, with "Get them
+ * now": removed, that device's copy is the only one they had.
  */
-export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { device: string; deviceKey: string; onClose(): void; onRemoved?(): void }) {
+export function RemoveDeviceDialog({ device, deviceKey, later, onClose, onRemoved }: { device: string; deviceKey: string; later?: { bytes: number }; onClose(): void; onRemoved?(): void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<Problem | null>(null);
+  const fetchNow = () => {
+    if (fetching) return;
+    setFetching(true); setFetchError(null);
+    void engine.call("deviceFetchLeftFiles", { key: deviceKey }).catch((cause: unknown) => { setFetching(false); setFetchError(problemText(cause, t)); });
+  };
   const remove = async () => {
     setBusy(true); setError(null);
     try {
@@ -38,6 +47,15 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
     <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={close} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
+      {later && (
+        <div data-testid="device-remove-later" className="space-y-2">
+          <Notice tone="warning" className="" title={fillNames(t("devices.remove.later", { size: sizeText(later.bytes, t) }), { device })} next={t("devices.remove.laterNext")} />
+          {fetching
+            ? <p role="status" data-testid="device-remove-fetching" className="text-xs text-text-secondary">{t("devices.remove.fetching")}</p>
+            : <button type="button" data-testid="device-remove-fetch" disabled={busy} onClick={fetchNow} className={quietButton}>{t("devices.remove.fetch")}</button>}
+          {fetchError && <Notice problem={fetchError} testId="device-remove-fetch-error" className="" />}
+        </div>
+      )}
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
       <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>
