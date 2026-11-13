@@ -97,6 +97,31 @@ it("--out naming a folder is refused in words that say so, and leaves no file of
   expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(folder, "bot.ghostly-backup")], { env: PASS }))).toMatchObject({ path: join(folder, "bot.ghostly-backup") });
 });
 
+it("a passphrase on the command line is refused in the same words however it comes, for backup and restore, and never echoed", async () => {
+  const dir = home("backup-passphrase-line");
+  const file = join(dir, "bot.ghostly-backup");
+  const secret = "a secret on the line";
+  // Before, only a bare --passphrase got these words: with a value, "Too many arguments" (the secret read as a
+  // positional), "--passphrase takes no value" (as if the flag existed), and restore "Unknown option --passphrase".
+  // Compared as booleans: a failure names the case, never the output, which could hold the secret.
+  for (const [name, line] of [
+    ["backup --passphrase", ["profile", "backup", "--out", file, "--passphrase"]],
+    ["backup --passphrase <secret>", ["profile", "backup", "--out", file, "--passphrase", secret]],
+    ["backup --passphrase=<secret>", ["profile", "backup", "--out", file, `--passphrase=${secret}`]],
+    ["restore --passphrase", ["profile", "restore", file, "copy", "--passphrase"]],
+    ["restore --passphrase <secret>", ["profile", "restore", file, "copy", "--passphrase", secret]],
+    ["restore --passphrase=<secret>", ["profile", "restore", file, "copy", `--passphrase=${secret}`]],
+  ] as const) {
+    const run = await ghostly(["--home", dir, ...line], { env: NO_PASS });
+    const failure = run.json.error as { code?: string; message?: string } | undefined;
+    expect(run.code === 2 && failure?.code === "usage", `${name}: a usage error`).toBe(true);
+    expect(failure?.message === "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line", `${name}: the refusal for a passphrase on the line`).toBe(true);
+    expect(run.stdout.includes(secret) || run.stderr.includes(secret), `${name}: the secret is not echoed`).toBe(false);
+  }
+  expect(readdirSync(dir).filter((name) => name.includes("ghostly-backup"))).toEqual([]);
+  expect(existsSync(join(dir, "profiles", "copy"))).toBe(false);
+});
+
 it("a backup without a passphrase is made only when asked for by name, says so, and restores with none", async () => {
   const dir = home("backup-open");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Open bot"]));
