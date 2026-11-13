@@ -799,7 +799,15 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
-  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
+  let parsed: Parsed;
+  try {
+    parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
+  } catch (e) {
+    // A passphrase on the line gets the words for it whichever way it comes. Before, `--passphrase=<secret>` was
+    // "--passphrase takes no value" on backup (as if it took one) and restore's every form "Unknown option --passphrase".
+    if ((sub === "backup" || sub === "restore") && passphraseOnLine(argv)) throw new CliError("usage", PASSPHRASE_ON_LINE);
+    throw e;
+  }
   // These replace or list `<home>/current`: a name there that is no profile's does not stop them, they are the way out.
   const g = globals(parsed, { ownProfile: ["create", "list", "use", "restore"].includes(sub ?? "") });
   pretty = g.pretty;
@@ -863,12 +871,13 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "backup": {
+      // Before the positionals are counted: `--passphrase <secret>` was "Too many arguments", the secret read as one.
+      if (parsed.options.passphrase === true) throw new CliError("usage", PASSPHRASE_ON_LINE);
       noMoreThan(0, parsed.positionals, "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       const out = parsed.options.out;
       if (typeof out !== "string") throw new CliError("usage", "Missing --out: ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       // Encrypted unless --no-passphrase says otherwise, and never a guess: a passphrase and --no-passphrase together are refused.
       const unsealed = parsed.options.passphrase === false;
-      if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
       // The passphrase is read before the profile opens, and the backup only reads the store: offline.
@@ -927,6 +936,12 @@ function onStopSignals(stop: () => void): void {
 const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters). For a backup that is not encrypted, say so with --no-passphrase";
 /** Restore takes no --no-passphrase: a backup made without one says so itself. */
 const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
+const PASSPHRASE_ON_LINE = "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line";
+/** `--passphrase` or `--passphrase=<value>` before any `--` (after it, words are positionals). */
+const passphraseOnLine = (argv: readonly string[]): boolean => {
+  const end = argv.indexOf("--");
+  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg === "--passphrase" || arg.startsWith("--passphrase="));
+};
 
 /**
  * The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). The
