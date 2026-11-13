@@ -20,6 +20,7 @@ function fake() {
   const node = {
     getState: vi.fn(() => s),
     getSettings: vi.fn(() => s.settings),
+    chatView: vi.fn((id: string) => links.find((link) => link.id === id)),
     sendMessage: vi.fn(async () => ({ messageId: "me_1" })),
     getMessage: vi.fn(async (linkId: string, id: string) => ({ linkId, id, text: "hi", sender: "me", timestamp: 1, delivery: "sent" })),
     forwardMessages: vi.fn(async () => ({})),
@@ -40,6 +41,10 @@ describe("a command naming a chat", () => {
     expect(await builds("chat.send", { chat: "Friend 1", text: "hi", wait: "none" })).toBe(1);
     expect(await callApi(ctx, "payment.list", { chat: "Friend 0" })).toMatchObject({ payments: [{ id: "pay1" }] });
     expect(await builds("payment.list", { chat: "Friend 0" })).toBe(1);
+    // By its id (as a bot names it, from an event), only that chat's view is built.
+    node.chatView.mockClear();
+    expect(await builds("chat.send", { chat: "chat1", text: "hi", wait: "none" })).toBe(0);
+    expect(node.chatView).toHaveBeenCalledWith("chat1");
     expect(await builds("chat.forward", { chat: "Friend 0", messages: ["me_1"], to: ["Friend 1", "Friend 2", "Crew"] })).toBe(1);
     expect(node.getMessage).toHaveBeenCalled();
   });

@@ -9,6 +9,7 @@ import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.reactions
 
 /** `react` and `group react`, reactions in history, and the stream's `message.reaction` / `group.reaction`. */
@@ -19,7 +20,7 @@ const group = { id: "g1", name: "Crew", createdAt: 1, profile: "community", isAd
 /** `unconfirmed`: the numbers of my reactions the contact has not confirmed; a reaction made adds the next one. */
 function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon", unconfirmed: number[] = []) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     react: vi.fn(async () => { if (!result.error) unconfirmed.push(Math.max(0, ...unconfirmed) + 1); return result; }),
     chatUnconfirmed: vi.fn(() => ({ reactions: [...unconfirmed], pin: null })),
   };

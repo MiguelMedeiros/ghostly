@@ -375,9 +375,24 @@ export async function startNamedChats(ctx: ApiContext, params: Params): Promise<
  * The chat a call names. `s`: a state the call built already. Each build is a view of every chat (about 15-20 µs a
  * chat, on the daemon's one thread): one lookup builds one, never one per list it reads.
  */
-export const chatOf = (ctx: ApiContext, params: Params, s: EngineState = state(ctx)) => findChat(s.links, str(params, "chat", true), s.groups);
+export function chatOf(ctx: ApiContext, params: Params, s?: EngineState): LinkView {
+  const ref = str(params, "chat", true);
+  if (!s) { const chat = byId(ctx, ref); if (chat) return chat; }
+  const { links, groups } = s ?? state(ctx);
+  return findChat(links, ref, groups);
+}
 /** `findOwnNamedChat` for the chat a call names, as `chatOf`. */
-export const ownChatOf = (ctx: ApiContext, params: Params, s: EngineState = state(ctx)) => findOwnNamedChat(s.links, str(params, "chat", true), s.groups);
+export function ownChatOf(ctx: ApiContext, params: Params, s?: EngineState): LinkView {
+  const ref = str(params, "chat", true);
+  if (!s) { const chat = byId(ctx, ref); if (chat) return chat; }
+  const { links, groups } = s ?? state(ctx);
+  return findOwnNamedChat(links, ref, groups);
+}
+/**
+ * The chat whose id `ref` is, built alone: a chat's own id names it before anything else does (`chatBy`), and a bot
+ * names its chats by the ids its events give. Undefined for any other ref, which the whole list is read for.
+ */
+const byId = (ctx: ApiContext, ref: string): LinkView | undefined => node(ctx).chatView(ref);
 
 /** A chat of mine whose invite nobody took yet: no contact's key, so nothing goes out until they join. */
 export const nobodyJoined = (link: LinkView): boolean => !!(link.profile && link.inviteCode && !link.peerParticipationKey);
@@ -446,7 +461,10 @@ export function transportOffered(link: LinkView, transport: PairedTransport): vo
 }
 
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. `s`: as for `chatOf`. */
-export function chatOrGroup(ctx: ApiContext, ref: string, { links, groups }: EngineState = state(ctx)): { id: string; linkId: string; group: boolean } {
+export function chatOrGroup(ctx: ApiContext, ref: string, s?: EngineState): { id: string; linkId: string; group: boolean } {
+  const chat = s ? undefined : byId(ctx, ref);
+  if (chat) return { id: chat.id, linkId: chat.id, group: false };
+  const { links, groups } = s ?? state(ctx);
   const found = findChatOrGroup(links, groups, ref);
   return "group" in found ? { id: found.group.id, linkId: `group:${found.group.id}`, group: true } : { id: found.link.id, linkId: found.link.id, group: false };
 }
