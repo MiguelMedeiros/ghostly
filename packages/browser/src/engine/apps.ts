@@ -969,12 +969,14 @@ export class Apps {
    * only the records written before it. A revocation the record gained since `was` (`keepStoreRevocations`) is kept:
    * one `app` leaves out on purpose (the check's, of a version gone) was on `was` already. So is what the person's stores
    * revoke of the versions written, as held at the write: a version fetched while a store's index revoked it was not on
-   * the record `keepStoreRevocations` read.
+   * the record `keepStoreRevocations` read. A store removed since keeps no index: what it revoked of this app is among
+   * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too.
    */
   private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const stores = await this.records();
-    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
+    const tx = (await openDb()).transaction([STORES.apps, STORES.settings], "readwrite");
     let put = false;
+    const kept = tx.objectStore(STORES.settings).get(APP_REVOCATIONS_KEY);
     const read = tx.objectStore(STORES.apps).get(app.ref);
     read.onsuccess = () => {
       const now = read.result as InstalledApp | undefined;
@@ -982,7 +984,7 @@ export class Apps {
       const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
-      app = withRevocations(app, stopping(this.versionsOf(app), revoked));
+      app = withRevocations(app, stopping(this.versionsOf(app), [...revoked, ...keptRevocations(kept.result, app.ref).mine]));
       const { store: pin, ...unpinned } = app;
       tx.objectStore(STORES.apps).put(pin !== undefined && stores.get(pin)?.removed ? unpinned : app);
       put = true;
@@ -1022,13 +1024,21 @@ export class Apps {
   /**
    * Keeps on each installed app the revocations a store's index carries of its versions: a client keeps every
    * revocation it verified (WISP 1200 § Publisher keys), so the store's next index without it, or the store removed,
-   * does not let that version run again.
+   * does not let that version run again. Those of an installed app's other versions are kept with the profile's
+   * (`APP_REVOCATIONS_KEY`): a version the update check or Install is writing meanwhile is not on the record yet.
    */
   private async keepStoreRevocations(record: AddedAppStore): Promise<void> {
     const revoked = record.index?.revoked ?? [];
     if (!revoked.length) return;
     const reread = async (ref: string) => wrap<InstalledApp | undefined>((await store(STORES.apps, "readonly")).get(ref));
-    for (const first of await this.installed()) {
+    const installed = await this.installed();
+    const mine = installed.map((app) => [app.ref, revoked.filter((r) => r.statement.app === app.ref)] as const).filter(([, r]) => r.length);
+    if (mine.length) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      for (const [ref, r] of mine) keepRevocations(tx.objectStore(STORES.settings), ref, r);
+      await done(tx);
+    }
+    for (const first of installed) {
       // A record changed meanwhile (the update check wrote it) is read again: the revocation is not dropped.
       for (let app: InstalledApp | undefined = first; app; app = await reread(first.ref)) {
         const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
@@ -1793,7 +1803,8 @@ export class Apps {
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
         // A store's index read while the files were written that revokes or removes it: judged again from the top.
-        if (this.runStatus(version, await this.heldViews(), [...(installed?.revocations ?? []), ...known]).status !== "ok") continue;
+        // One of a store removed meanwhile is among the ones kept.
+        if (this.runStatus(version, await this.heldViews(), [...(installed?.revocations ?? []), ...known, ...await this.keptRevocationsOf(version.ref)]).status !== "ok") continue;
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
         // It starts with the revocations read for the preview and the ones kept (of other versions: a later one may name one).
         const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), known);
