@@ -20,7 +20,8 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * a few seconds in, and the record went out a third time: that hid that the second one, with the descriptors, was
  * refused by the DHT while the first was still being put (apps/desktop/src/pkarr_network.rs `put_newest`).
  *
- * Neither page may freeze on the way: no gap over a second in its event loop from the join to the live chat. Each
+ * Neither page may freeze on the way: no gap over a second in its event loop from the join to the live chat, but the
+ * one in which the joiner's page draws the chat (`MAX_CHAT_DRAW_MS`). Each
  * app's first sounds of the chat (the knock, the text, "connected") held the page of WebKitGTK before 2.52 for 5 to 10 s
  * inside `AudioContext.resume()` (r11k, apps/ui/src/lib/sounds.ts `SoundsRelease`).
  */
@@ -38,6 +39,27 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * A second leaves over 300 ms above the worst squeezed gap and stays far under the 5 to 10 s freeze.
  */
 const MAX_FREEZE_MS = 1_000;
+
+/**
+ * The one gap in which the joiner's page draws the new chat, held to a limit of its own. Join's press closes the dialog,
+ * and the move to the chat renders and mounts the whole chat page in that one task: a move to another page is drawn at
+ * once, not as a transition (Root.tsx `AppRouter`), and WebKit then lays it out and paints it. Its timeline, marked in
+ * the page (React's Profiler, the engine's steps): 91-156 ms of render, 50-360 ms of commit, effects and layout, nothing
+ * of the DHT path (the link starts 400-900 ms later, in tasks of its own, 24-64 ms each). On this host it took 180-830
+ * ms with 8 busy workers beside the run (30 runs), up to 1450 ms with 12 (2 of 20 over a second), up to 1717 ms with 14
+ * (2 of 20), and 1031 ms in a loop round at load 12: the cost of drawing a chat on a loaded machine, not a freeze. The
+ * other gaps from the join on stayed at 422 ms or less under the same load, and keep the second.
+ * Three seconds leaves over a second above the worst of these and stays under the 5 to 10 s freeze.
+ */
+const MAX_CHAT_DRAW_MS = 3_000;
+
+/** Stamps, in the page, the moment the open chat's message field is first drawn: inside the task that draws it. */
+const watchChatDrawn = (p: DesktopPerson) => p.app.execute(`
+  window.__chatDrawn = null;
+  const drawn = () => !!document.querySelector('[placeholder="Message…"]');
+  if (drawn()) return;
+  new MutationObserver((_, observer) => { if (drawn()) { window.__chatDrawn = Date.now(); observer.disconnect(); } })
+    .observe(document.body, { childList: true, subtree: true });`);
 
 /** How many times the open conversation shows this exact text. */
 const count = (p: DesktopPerson, text: string) => p.app.execute<number>(`
@@ -86,6 +108,7 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
 
     await a.press("New chat");
     const invite = await a.copyInvite();
+    await watchChatDrawn(b);
     join.at = Date.now();
     await b.join(invite);
     for (const p of [a, b]) {
@@ -100,14 +123,19 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     // Before the panels: a run that fails on a panel still says how each page ran.
     for (const p of [a, b]) {
       const gaps = await longestEventLoopGap(p.app);
-      test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms from ${gaps?.at} (${gaps?.count} over 300 ms)` });
-      // Each gap over 300 ms, from the join: "+ms after the join: length (h = page hidden, b = not focused)".
-      const each = (gaps?.gaps ?? []).map((g) => `+${g.at - join.at}:${g.ms}${g.visible ? "" : "h"}${g.focused ? "" : "b"}`);
+      const drawn = p === b ? await p.app.execute<number | null>(`return window.__chatDrawn ?? null;`) : null;
+      const drawing = (g: { at: number; ms: number }) => drawn !== null && g.at <= drawn && drawn <= g.at + g.ms;
+      test.info().annotations.push({ type: "event-loop", description: `${p.name} longest gap ${gaps?.longest} ms from ${gaps?.at} (${gaps?.count} over 300 ms)${drawn !== null ? `, chat drawn +${drawn - join.at}` : ""}` });
+      // Each gap over 300 ms, from the join: "+ms after the join: length (h = page hidden, b = not focused, c = the chat drawn)".
+      const each = (gaps?.gaps ?? []).map((g) => `+${g.at - join.at}:${g.ms}${g.visible ? "" : "h"}${g.focused ? "" : "b"}${drawing(g) ? "c" : ""}`);
       test.info().annotations.push({ type: "event-loop-gaps", description: `${p.name} ${each.join(" ") || "none"}` });
       expect(gaps, `${p.name}'s page was watched throughout`).not.toBeNull();
       // A gap counts if it ends after the join. With more gaps than the list keeps, the longest of all is held instead.
       const since = gaps!.count > gaps!.gaps.length ? [{ at: gaps!.at, ms: gaps!.longest }] : gaps!.gaps.filter((g) => g.at + g.ms > join.at);
-      const worst = since.reduce((w, g) => (g.ms > w.ms ? g : w), { at: join.at, ms: 0 });
+      // The gap that drew the joiner's chat is held to its own limit, every other one to the second.
+      const longest = (list: { at: number; ms: number }[]) => list.reduce((w, g) => (g.ms > w.ms ? g : w), { at: join.at, ms: 0 });
+      const draw = longest(since.filter(drawing)), worst = longest(since.filter((g) => !drawing(g)));
+      expect(draw.ms, `${p.name}'s page froze drawing the chat at ${draw.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_CHAT_DRAW_MS);
       // `at` is the app's clock, as ghostly.log's: the link steps just before it say what the page was doing.
       expect(worst.ms, `${p.name}'s page froze at ${worst.at} (see ${p.name}'s ghostly.log)`).toBeLessThanOrEqual(MAX_FREEZE_MS);
     }
