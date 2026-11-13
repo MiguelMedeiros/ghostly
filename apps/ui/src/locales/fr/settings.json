@@ -118,6 +118,7 @@
   "noticesMisplaced": "Placez Ghostly dans Applications pour les autoriser",
   "noticesOpenSettings": "Ouvrir les réglages",
   "noticesRunning": "Lorsque Ghostly est ouvert",
+  "noticesRunningExtension": "Lorsque le navigateur est ouvert, même sans onglet Ghostly",
   "noticesUnavailable": "Indisponible ici",
   "notificationSounds": "Sons",
   "notificationSoundsDescription": "Messages, appels et paiements confirmés",
