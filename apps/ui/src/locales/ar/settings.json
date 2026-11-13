@@ -118,6 +118,7 @@
   "noticesMisplaced": "انقل Ghostly إلى التطبيقات للسماح بها",
   "noticesOpenSettings": "فتح الإعدادات",
   "noticesRunning": "أثناء فتح Ghostly",
+  "noticesRunningExtension": "أثناء فتح المتصفح، حتى دون أي علامة تبويب لـ Ghostly",
   "noticesUnavailable": "غير متاحة هنا",
   "notificationSounds": "الأصوات",
   "notificationSoundsDescription": "الرسائل والمكالمات والمدفوعات المؤكدة",
