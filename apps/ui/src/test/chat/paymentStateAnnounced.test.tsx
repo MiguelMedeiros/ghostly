@@ -159,6 +159,14 @@ describe("a group's payment note that changes where it stands", () => {
     expect(heard).toEqual(["sent bob", "paid bob by bob"]);
   });
 
+  it("a note that arrives is said in the group's words, not the engine's English line", async () => {
+    const view = renderApp(<MessageAnnouncer chat="g" messages={HISTORY} nameOf={nameOf} noteLine={noteLine} />);
+    listen();
+    view.rerender(<MessageAnnouncer chat="g" messages={[...HISTORY, { id: "g1", sender: "peer", text: "⚡ Requested 21 test sats", member: "alice", groupPay: note({ amount: "21" }) }]} nameOf={nameOf} noteLine={noteLine} />);
+    await wait(ANNOUNCE_WINDOW_MS + ANNOUNCE_CLEAR_MS + 200);
+    expect(heard).toEqual(["Alice: open"]);
+  });
+
   it("a note already paid as the group opens is not said", async () => {
     const view = draw(note({ state: "paid", by: "bob" }));
     draw(note({ state: "paid", by: "bob" }), view);
