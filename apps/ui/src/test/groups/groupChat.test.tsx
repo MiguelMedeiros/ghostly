@@ -1241,7 +1241,7 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "e2", event: "gone", member: gone, text: "Caio is no longer a member" }),
     ]);
     expect(await screen.findByText("~Caio")).toBeInTheDocument();
-    expect(screen.getByText("Caio joined")).toBeInTheDocument();
+    expect(screen.getAllByTestId("group-event")[0]).toHaveTextContent(/^Caio joined$/);
     expect(screen.queryByText(/Member goneyyyy/)).not.toBeInTheDocument();
   });
 
