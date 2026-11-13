@@ -568,6 +568,55 @@ test("on a phone every control in Settings, Profile, Services and the first dial
 });
 
 /**
+ * Share to… (something another app shared, waiting for a chat) opens only from a share, so no walk above reaches it:
+ * its Cancel took taps on 76 × 40 px (56 × 40 in Arabic) in the Android app. A text and a file shared into the installed
+ * web app on a phone, its picker's controls measured each in view.
+ */
+test("on a phone the Share to… picker's chats and Cancel are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.pwa.share-target"] }, async ({ peer }) => {
+  test.skip(!!process.env.E2E_WEB_URL, "posts a form to the share target, which the deployed CSP refuses");
+  const { page } = await peer("share-targets", { mobile: true, viewport: { width: 375, height: 667 }, serviceWorkers: "allow" });
+  await page.getByTestId("sidebar-new-more").click();
+  await page.getByTestId("new-group").click();
+  await page.getByTestId("new-group-name").fill("Shared here");
+  await page.getByTestId("new-group-create").click();
+  await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+  await page.goto("/#/");
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+  await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? "")).toMatch(/\/sw\.js$/);
+  // What the system does when a person shares into the installed app: a navigation that posts the manifest's form.
+  await page.evaluate(() => {
+    const form = Object.assign(document.createElement("form"), { method: "post", enctype: "multipart/form-data", action: "/share-target" });
+    form.append(Object.assign(document.createElement("input"), { type: "hidden", name: "text", value: "Look at this" }));
+    const files = Object.assign(document.createElement("input"), { type: "file", name: "files", multiple: true });
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["boo"], "ghost.txt", { type: "text/plain" }));
+    files.files = transfer.files;
+    form.append(files);
+    document.body.append(form);
+    form.submit();
+  });
+  const picker = page.getByTestId("share-picker");
+  await expect(picker.getByTestId("share-files")).toHaveText("ghost.txt");
+  await expect(picker.getByTestId("share-group")).toBeVisible();
+
+  const small: string[] = [];
+  const controls = await picker.locator("button, a[href], [role=button]").all();
+  for (const control of controls) {
+    if (!(await control.isVisible())) continue;
+    await control.evaluate((el) => { el.scrollIntoView({ block: "center" }); el.setAttribute("data-measured", ""); });
+    // Only a control a tap reaches is measured: the page's fade-in over it first gone.
+    await expect.poll(() => control.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })).toBe(true);
+    for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${target.name} ${target.width}×${target.height} (${target.stops})`);
+    await control.evaluate((el) => el.removeAttribute("data-measured"));
+  }
+  expect(controls.length, "the picker's controls").toBeGreaterThanOrEqual(2);
+  expect(small, "the Share to… picker's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
  * The composer's emoji panel, a sheet on a phone: its category icons took taps on 45 × 40 px (38 × 40 at 320 px), the
  * skin tone on 36 × 36, Emoji and GIF on 57 × 32, and at 320 px each emoji on 43 × 40. In English and in Arabic, at 375
  * and 320 px, each in turn brought into view and measured; the grid still never scrolls sideways, seven emoji to a row
