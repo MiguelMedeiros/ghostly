@@ -99,8 +99,11 @@ function groupSpelling(group) {
  * A fragment's section and bullets, or a list of what is wrong with it. `version` is the repository's (package.json):
  * before a guard's `from`, an entry about that flag must be held for its release.
  */
-export function parseFragment(name, text, version) {
+export function parseFragment(name, saved, version) {
   const problems = [];
+  // Read as written whatever the editor saved: Git for Windows checks files out with CRLF, and some editors start a
+  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with.
+  const text = saved.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
   const fields = {};
