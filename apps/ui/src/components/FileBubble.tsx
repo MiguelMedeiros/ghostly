@@ -233,8 +233,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
-          <p dir="auto" className="chat-text-media-name leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. Whole,
+              wrapping anywhere: cut with … at its end, a long name hid its extension on a phone (no tooltip there). */}
+          <p dir="auto" data-testid="file-name" className="chat-text-media-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
           {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). At 75 %, as words
