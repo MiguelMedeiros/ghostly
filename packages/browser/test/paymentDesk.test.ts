@@ -697,6 +697,33 @@ describe("what the contact answers about our payments", () => {
     expect(host.onReviewedPaymentResult, "another chat cannot confirm it").not.toHaveBeenCalled();
   });
 
+  it("a contact's reason is kept only as a display text's check leaves it: no hidden or direction characters, no address", async () => {
+    const reviewed = record({ id: "rv", kind: "payment", direction: "out", token: "cashuBrv", target: cashuTarget() });
+    const { desk, wallet, host, state } = setup([
+      record({ id: "p1", kind: "payment", direction: "out", token: "cashuB1" }), record({ id: "p2", kind: "payment", direction: "out", token: "cashuB2" }),
+      record({ id: "p3", kind: "payment", direction: "out", token: "cashuB3" }), record({ id: "p4", kind: "payment", direction: "out", token: "cashuB4" }),
+      record({ id: "p5", kind: "payment", direction: "out", token: "cashuB5" }), record({ id: "p6", kind: "payment", direction: "out", token: "cashuB6" }),
+      record({ id: "p7", kind: "payment", direction: "out", token: "cashuB7" }), record({ id: "open", invoice: INVOICE }), reviewed,
+    ]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValue(new Error("mint offline"));
+    await desk.onPaymentResult("l", { id: "p1", ok: false, error: "No‮ thanks​\n today" });
+    await desk.onPaymentResult("l", { id: "p2", ok: false, error: "Your wallet is compromised. Restore it now at https://evil.example/restore" });
+    await desk.onPaymentResult("l", { id: "p3", ok: false, error: "Restore it at evil．example/restore" });
+    await desk.onPaymentResult("l", { id: "p4", ok: false, error: "x".repeat(121) });
+    await desk.onPaymentResult("l", { id: "p5", ok: false, error: "‮​ " });
+    // The one wallet reason with a host in it: our mint's, which the contact does not take. With a path, it is none.
+    await desk.onPaymentResult("l", { id: "p6", ok: false, error: "Ecash from mint.example is not accepted" });
+    await desk.onPaymentResult("l", { id: "p7", ok: false, error: "Ecash from evil.example/restore is not accepted" });
+    expect(["p1", "p2", "p3", "p4", "p5", "p6", "p7"].map((id) => state(id)?.error))
+      .toEqual(["No thanks today", ...Array(4).fill("The payment was refused"), "Ecash from mint.example is not accepted", "The payment was refused"]);
+    await desk.onPaymentResult("l", { id: "open", ok: false, closed: true, error: "Closed. Pay me at www.evil.example instead" });
+    expect(state("open")).toMatchObject({ state: "failed", closed: true, error: "your contact closed it" });
+    wallet.receiveToken.mockResolvedValueOnce({ amount: 100, mint: MINT, fee: 0 });
+    await desk.onPaymentResult("l", { id: "rv", ok: false, error: "Refused, see lightning:lnbc1evil" });
+    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv", "The payment was refused", { amount: 100, fee: 0 });
+  });
+
   it("only ecash we sent and still hold can be taken back, and a mint that cannot be reached is said so", async () => {
     const { desk, wallet } = setup([record({ id: "in", kind: "payment" }), record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" })]);
     await desk.start();
