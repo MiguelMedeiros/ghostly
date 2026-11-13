@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
-  readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
@@ -128,6 +128,15 @@ function madeKeyNote(path: string, kind: KeyKind, key: string): string {
 
 const refused = (what: string, reading: { reason: string; detail?: string }, extra: Record<string, unknown> = {}) =>
   new CliError("refused", `${what} (${reading.reason}${reading.detail ? `: ${reading.detail}` : ""})`, { reason: reading.reason, ...(reading.detail ? { detail: reading.detail } : {}), ...extra });
+
+/**
+ * Refuses JSON that writes a key twice in one object, as `readAppListing` does: JSON.parse keeps the last value, where a
+ * person reading the file sees the first, so what is signed is not what was read. `text` is JSON that JSON.parse took.
+ */
+function refuseRepeatedKey(path: string, text: string): void {
+  const twice = repeatedJsonKey(text);
+  if (twice !== null) throw refused(`${path} writes a key twice`, { reason: "not-json", detail: `${JSON.stringify(twice)} is written twice` });
+}
 
 /** A bundle file's bytes: its size is checked before it is read, so a huge file is refused unread. */
 function readBundleFile(path: string): Uint8Array {
@@ -383,8 +392,9 @@ const WRITTEN = ["publisher", "files"] as const;
 
 function readSource(path: string): Record<string, unknown> {
   if (!existsSync(path)) throw new CliError("not_found", `No ${APP_SOURCE} in ${dirname(path)}: it holds the manifest's fields (name, version, title, tagline, entry, permissions, runtime, license, ...) but publisher, sequence and files, which publish writes`);
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(path, "utf8")); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  let text: string, value: unknown;
+  try { text = readFileSync(path, "utf8"); value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  refuseRepeatedKey(path, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${path} is not a JSON object`);
   const draft = value as Record<string, unknown>;
   const written = WRITTEN.filter((k) => k in draft);
@@ -590,11 +600,12 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const indexPath = userPath(indexArg);
   const keyPath = userPath(keyArg);
   const outDir = userPath(outArg ?? dirname(indexPath));
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(indexPath, "utf8")); } catch (error) {
+  let text: string, value: unknown;
+  try { text = readFileSync(indexPath, "utf8"); value = JSON.parse(text); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
     throw localFileError(error, indexPath) ?? error;
   }
+  refuseRepeatedKey(indexPath, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
   // The folder is published (a repository served raw): a store key there signs any index for every client of the store.
