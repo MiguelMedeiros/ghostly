@@ -156,7 +156,8 @@ test("forced colors keep an edge on New group's Create and an invitation's Accep
   const row = bob.page.getByTestId("group-row").filter({ hasText: "Ghosts" });
   await expect(row.getByTestId("group-accept")).toBeVisible({ timeout: 60_000 });
   await keepsAnEdge(bob.page, row.getByTestId("group-accept"), "the chat list row's Accept");
-  await row.getByTestId("group-row-open").click();
+  // The row opens it: its `group-row-open` is a focus target that takes no pointer (ChatRow.tsx `RowOpen`).
+  await row.getByTestId("group-row-avatar").click();
   const invitation = bob.page.getByTestId("group-invitation");
   await keepsAnEdge(bob.page, invitation.getByTestId("group-accept"), "the invitation page's Accept");
   await bob.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });

@@ -434,7 +434,8 @@ test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
   await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
-  await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version.");
+  // With the publisher's reason, isolated in its own direction (U+2068 ... U+2069).
+  await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version: \u2068Leaked the game to the wrong chat\u2069");
   await expect(details.getByTestId("app-open")).toHaveCount(0);
   await expect(details.getByTestId("app-run-anyway")).toHaveCount(0);
   await expect(details.getByTestId("app-keep-stopped")).toBeVisible();
