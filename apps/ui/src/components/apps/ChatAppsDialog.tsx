@@ -74,7 +74,9 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-apps-title" data-testid="chat-apps"
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
-        <div>
+        {/* The contact's name (one long word, a nickname of 20 W's) breaks anywhere: unbroken, the sheet scrolled
+            sideways on a phone, and in Arabic the name's end was drawn off the screen. */}
+        <div className="[overflow-wrap:anywhere]">
           <h2 id="chat-apps-title" className="text-lg font-medium text-text-primary">{t("apps.composer.title", { name })}</h2>
           {waiting && <p className="text-xs text-text-secondary mt-1" data-testid="chat-apps-waiting">{waiting}</p>}
         </div>
