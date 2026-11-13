@@ -583,6 +583,20 @@ describe("errors", () => {
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });
 
+  // Found in a bug hunt: `chat request bob 100 --method arkade` to a contact with a Cashu wallet only was `engine`, "Your
+  // contact has no Testnet Ark wallet", while one with no wallet at all is `refused` with its reason and the next step.
+  it("say a contact with no wallet of the way or network asked as a contact with no wallet: refused, its next step", () => {
+    const noWallet = (message: string) => asCliError(new Error(message)).toJSON();
+    expect(noWallet("Your contact has no Testnet Ark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Ark wallet (on a CLI: ghostly wallet create arkade)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Testnet on-chain Bitcoin wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet on-chain Bitcoin wallet (on a CLI: ghostly wallet create bitcoin)", details: { reason: "contact_no_wallet" } });
+    expect(noWallet("Your contact has no Mainnet Cashu wallet")).toEqual({ code: "refused", message: "Your contact has no Mainnet Cashu wallet (on a CLI: ghostly wallet create cashu --network mainnet)", details: { reason: "contact_no_wallet" } });
+    for (const rail of ["USDT", "Fedimint", "Spark", "Lightning"]) expect(noWallet(`Your contact has no Testnet ${rail} wallet`).message, rail).toBe(`Your contact has no Testnet ${rail} wallet (on a CLI: ghostly wallet create ${rail.toLowerCase()})`);
+    // Bark runs in the app only: no command to give, the reason still.
+    expect(noWallet("Your contact has no Testnet Bark wallet")).toEqual({ code: "refused", message: "Your contact has no Testnet Bark wallet", details: { reason: "contact_no_wallet" } });
+    // A way of paying the engine does not name keeps its words and code.
+    expect(noWallet("Your contact has no Testnet Gold wallet").code).toBe("engine");
+  });
+
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
     // Found in bug hunt r3a: `file save --dir` into a folder that did not exist was `engine`, exit 1, with Node's words.
     const { open } = await import("node:fs/promises");
