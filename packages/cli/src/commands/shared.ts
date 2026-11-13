@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync } from "node:fs";
+import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
@@ -145,6 +146,19 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * The `<emoji>` of `react` and `group react`: one emoji (core's `reactionEmoji`), or none with `--remove`. Anything else
+ * is a usage error (exit 2) before the profile opens, as `status set --emoji` is. Before, a one-shot opened the profile
+ * and went online first, then the engine answered "A reaction is one emoji" (`bad_request`, exit 1), and a missing one
+ * "Give one emoji" (exit 2) only from there. The API keeps its checks for socket callers.
+ */
+export function reaction(options: Parsed["options"], emoji: string | undefined): string | undefined {
+  if (options.remove === true) return emoji;
+  if (!emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
+  if (!reactionEmoji(emoji)) throw new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`);
+  return emoji;
 }
 
 /**

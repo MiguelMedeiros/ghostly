@@ -304,6 +304,19 @@ describe("the argument parser", () => {
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
+  it("react and group react refuse an <emoji> that is not one emoji as a usage error, before the profile opens", () => {
+    const params = (name: string, ...argv: string[]) => { const c = COMMANDS[name], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    for (const [name, target] of [["react", "bob"], ["group react", "team"]]) {
+      // Before, a one-shot opened the profile and went online, then the engine answered "A reaction is one emoji" (exit 1).
+      for (const emoji of ["notanemoji", "ab", "1", "👍👍", "👍 👍", ":+1:"]) {
+        expect(() => params(name, target, "m1", ...emoji.split(" ")), `${name} ${emoji}`).toThrow(new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`));
+      }
+      for (const argv of [[target, "m1"], [target, "m1", ""]]) expect(() => params(name, ...argv), `${name} ${JSON.stringify(argv)}`).toThrow(new CliError("usage", "Give one emoji, or --remove to take yours back"));
+      for (const emoji of ["👍", "❤", "👨‍👩‍👧", "🇧🇷"]) expect(params(name, target, "m1", emoji).emoji, `${name} ${emoji}`).toBe(emoji);
+      expect(params(name, target, "m1", "--remove").remove).toBe(true);
+    }
+  });
+
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
     expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
     expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
