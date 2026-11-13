@@ -1,4 +1,4 @@
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
 import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
@@ -51,6 +51,28 @@ export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm 
 export function here(path: unknown): string | undefined {
   if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? userPath(path) : undefined;
+}
+
+/**
+ * A path on this machine a command reads (`file send`, a picture, `profile backup --out`'s folder), looked at before the
+ * profile opens: one not there is not_found (`missing`, or "No such file or folder"), one not allowed refused. Before, a
+ * one-shot opened the profile and went online first (~1 s on a big profile) to say so. The API keeps its check for
+ * socket callers; through a daemon it reads the same path.
+ */
+export function localStat(path: string, missing?: string): Stats {
+  try { return statSync(path); } catch (error) {
+    const known = localFileError(error, path);
+    throw known?.code === "not_found" && missing ? new CliError("not_found", missing) : known ?? error;
+  }
+}
+
+/**
+ * A picture's file (`profile picture`, `group picture`), in the API's words (groupAdmin.ts) when it is not there or a
+ * folder. Only a folder is refused here: a pipe (`<(…)`) is read as a file.
+ */
+export function picture(path: string | undefined): string | undefined {
+  if (path !== undefined && localStat(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a file`);
+  return path;
 }
 
 /** The most a command reads of stdin or of a file it sends: the longest request line a daemon reads (client.ts `MAX_LINE`). */
