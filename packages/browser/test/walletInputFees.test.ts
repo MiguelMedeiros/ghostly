@@ -96,6 +96,26 @@ describe("a send at a mint that charges for each coin it takes in", () => {
     expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "ecash-out", amount, fee: 1 + sent.length }]);
     expect(await cashu.balanceAt(FEE_MINT)).toBe(64 - amount - 1 - sent.length);
   });
+
+  // A chat payment is reviewed before it is sent: the whole balance there failed with cashu-ts' own English words
+  // ("Not enough funds available to send: 100 available, 102 required…"), where a send says what fits.
+  it("says how much fits with the fees when a reviewed payment asks for more", async () => {
+    seed("proofs", coins(FEE_MINT, [64, 32, 4]));
+    const cashu = wallet([FEE_MINT]);
+    const refusal = await cashu.prepareReviewedCashu(FEE_MINT, 100).then(() => "", (error: Error) => error.message);
+    const room = Number(refusal.match(/^Not enough sats in your wallet: (\d+) sats leave room for the fee$/)?.[1]);
+    // The number said is what a reviewed payment there can be: that much goes, one more does not.
+    expect(room).toBeGreaterThan(0);
+    expect((await cashu.prepareReviewedCashu(FEE_MINT, room)).fee).toBeLessThanOrEqual(100 - room);
+    await expect(cashu.prepareReviewedCashu(FEE_MINT, room + 1)).rejects.toThrow(`Not enough sats in your wallet: ${room} sats leave room for the fee`);
+    await expect(cashu.prepareReviewedCashu(FEE_MINT, 150)).rejects.toThrow(`Not enough sats in your wallet: ${room} sats leave room for the fee`);
+  });
+
+  it("says there are not enough sats when a reviewed payment's mint holds none", async () => {
+    seed("proofs", coins(FREE_MINT, [64]));
+    const cashu = wallet([FEE_MINT, FREE_MINT]);
+    await expect(cashu.prepareReviewedCashu(FEE_MINT, 10)).rejects.toThrow(/^Not enough sats in your wallet$/);
+  });
 });
 
 describe("two payments at once from coins only one of them can have", () => {

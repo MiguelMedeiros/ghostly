@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { StayConnectedRow } from "../../components/settings/StayConnected";
 import { StoppedInBackgroundBanner } from "../../components/StoppedInBackgroundBanner";
+import { letGoOfServices } from "../../desktop/android";
 import { connectionNeed, dismissStoppedInBackground, TELL_AGAIN_MS, useStayConnected } from "../../lib/stayConnected";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -18,8 +19,23 @@ import { renderApp } from "../render";
 
 const tauri = vi.hoisted(() => ({
   killed: false,
+  // What Kotlin keeps for the whole process, whatever page runs (GhostlyHostPlugin's companion), and whether the
+  // connection service runs by it (ConnectionHolds.connectionHolds).
+  kotlin: { wanted: false, links: false, files: false, running: false },
   invoke: vi.fn(async (command: string, _args?: unknown): Promise<unknown> => {
-    if (command === "connection_service") return { held: (_args as { on: boolean }).on, killed: tauri.killed };
+    const kotlin = tauri.kotlin;
+    if (command === "connection_service") {
+      const { on, links } = _args as { on: boolean; links: boolean };
+      Object.assign(kotlin, { wanted: on, links: on && links });
+      kotlin.running = kotlin.wanted || (kotlin.files && kotlin.running);
+      return { held: on, killed: tauri.killed };
+    }
+    if (command === "keep_awake") {
+      const { on, files } = _args as { on: boolean; files?: boolean };
+      kotlin.files = on && !!files;
+      kotlin.running = kotlin.wanted || (kotlin.files && kotlin.running);
+      return kotlin.files;
+    }
     return undefined;
   }),
 }));
@@ -41,6 +57,7 @@ const state = (patch: Partial<EngineState>) => ({ settings: { online: true }, li
 
 beforeEach(() => {
   tauri.killed = false;
+  tauri.kotlin = { wanted: false, links: false, files: false, running: false };
   tauri.invoke.mockClear();
 });
 afterEach(() => {
@@ -174,6 +191,23 @@ describe("the Android connection service", () => {
     await waitFor(() => expect(last()).toEqual({ on: true, links: true }));
     act(() => answer());
     expect(await screen.findByTestId("stopped-in-background-banner")).toHaveTextContent("Android stopped Ghostly in the background");
+  });
+
+  it("is let go when the page restarts into a page that never mounts the app (its lock screen, the standby screen)", async () => {
+    android(true);
+    fakeEngine.update({ links: [link("open")] });
+    renderHook(() => useStayConnected());
+    await waitFor(() => expect(tauri.kotlin).toMatchObject({ wanted: true, links: true, running: true }));
+    // A file was moving too (`useComputerAwake`, Android's "Sending and receiving files").
+    await tauri.invoke("keep_awake", { on: true, files: true });
+
+    // The page restarts (a profile switch into a locked profile, the standby screen after a handoff): a reload runs
+    // none of the old page's cleanups, and the new page mounts neither hook. It runs main.tsx's Android lines only.
+    tauri.invoke.mockClear();
+    letGoOfServices(tauri.invoke as never);
+    await waitFor(() => expect(tauri.kotlin).toEqual({ wanted: false, links: false, files: false, running: false }));
+    expect(tauri.invoke).toHaveBeenCalledWith("connection_service", { on: false, links: false });
+    expect(tauri.invoke).toHaveBeenCalledWith("keep_awake", { on: false, files: false });
   });
 
   it("holds nothing outside the Android app", async () => {

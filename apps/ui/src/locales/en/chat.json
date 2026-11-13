@@ -241,7 +241,6 @@
     "newOne": "1 new message, scroll to bottom"
   },
   "keyChanged": "This chat stopped: your contact's key changed.",
-  "lastSeen": "Last seen {{time}}",
   "listTime": {
     "days": "{{count}}d",
     "hours": "{{count}}h",
@@ -314,7 +313,7 @@
   "online": "online",
   "options": "Options",
   "payments": {
-    "needLive": "Payments need a live connection",
+    "needLive": "Send needs your contact online: ecash never waits in a queue. A request can wait until they are back.",
     "noWallet": "Your contact has no wallet yet",
     "off": "Off in this chat: turn a way on in Accept",
     "offOrOld": "Your contact has payments off in this chat, or needs an updated Ghostly"
@@ -394,6 +393,7 @@
     "copyCode": "Copy code",
     "hiddenChars": "This code holds hidden or direction-changing characters, shown as {{marker}}. Copy code copies them too.",
     "localTime": "{{time}} your time",
+    "notCopied": "Not copied",
     "showAll": "Show all",
     "showLess": "Show less",
     "spoiler": "Hidden text. Tap to show it",
@@ -483,7 +483,6 @@
     "showTranslation": "Show translation",
     "translate": "Translate"
   },
-  "typeMessage": "Type a message...",
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",

@@ -165,6 +165,37 @@ describe("the app's height and the keyboard", () => {
     }
   });
 
+  it("turned with the keyboard up on Android, which gives the whole height first: the keyboard goes down there", () => {
+    // As the API 35 emulator reports it: upright 412×842, on its side 866×364, the keyboard laid out after the turn.
+    viewport.width = 412;
+    viewport.height = 842;
+    inner = 842;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(530, 530);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      // Back takes the keyboard down, the field keeps the focus.
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+      resize(842, 842, 412);
+      expect(keyboard()).toBe("false");
+      // On its side once more, a height seen there now.
+      resize(530, 530);
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
   it("a window made shorter with nothing focused is not a keyboard (split screen, a quarter of the screen)", () => {
     renderHook(() => useViewportHeight());
     const field = document.body.appendChild(document.createElement("textarea"));

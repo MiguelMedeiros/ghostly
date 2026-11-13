@@ -16,7 +16,6 @@
   "deleteChatCallOn": "C’è una chiamata in questa chat. Chiudila prima, poi elimina la chat.",
   "deleteChatLocal": "La chat e la cronologia saranno eliminate da questo dispositivo, non da quello del contatto.",
   "deleteChatTitle": "Eliminare la chat?",
-  "error": "Errore",
   "goHome": "Vai all'inizio",
   "loading": "Caricamento...",
   "moreInfo": "Maggiori informazioni",
@@ -35,7 +34,6 @@
     "mb": "{{n}} MB",
     "tb": "{{n}} TB"
   },
-  "success": "Successo",
   "unnamedContact": "Contatto · {{key}}",
   "unnamedContactShort": "Contatto",
   "viewPhoto": "Vedi la foto di {{name}}"

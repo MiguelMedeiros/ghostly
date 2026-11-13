@@ -100,6 +100,9 @@ export function useViewportHeight() {
       const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
       tallest.set(width, whole);
       const measured = touch ? Math.max(window.innerHeight - viewport.height, whole - viewport.height) : 0;
+      // Measured at this width now: Android gives the whole height first at a turn and lays the keyboard out after it,
+      // so the height carried was that whole one, and the keyboard down again there did not grow past it.
+      if (measured > KEYBOARD) carried = 0;
       let covered = measured;
       if (typing && measured > SHORTCUT_BAR && measured <= KEYBOARD) bar = measured;
       // Once the screen has turned with the bar up, iOS reports the whole height again a moment later and keeps it,

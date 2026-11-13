@@ -1,4 +1,4 @@
-import { groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import { groupMemberOfLink, groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import type { GroupPayNote, GroupView, LinkView, MessageFile, PaymentView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
 
@@ -297,12 +297,12 @@ export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, 
  * tells them (`groupPayTwin`): the requester's own request, the request as it came over the edge, a payment answering
  * it. Only for a note whose line is in `notes` (the group's, by note id): a twin of nothing is no twin.
  */
-export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId"> | undefined>>,
-  myKey: string | undefined): Map<string, string> {
+export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId" | "linkId"> | undefined>>,
+  group: Pick<GroupView, "members" | "myKey"> | undefined): Map<string, string> {
   const twins = new Map<string, string>();
   for (const m of messages) {
     if (!m.paymentId || m.groupPay) continue;
-    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), myKey);
+    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), group?.myKey, (linkId) => groupMemberOfLink(group, linkId));
     if (note && notes.has(note)) twins.set(m.id, groupPayLineId(note));
   }
   return twins;

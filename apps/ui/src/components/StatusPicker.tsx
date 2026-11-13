@@ -91,6 +91,14 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   const [past, setPast] = useState(false);
   const [linkLike, setLinkLike] = useState(false);
   const [moreEmoji, setMoreEmoji] = useState(false);
+  // An emoji picked from More emoji closes that panel, the focus in it: the chosen chip takes it, not the page.
+  const chips = useRef<HTMLDivElement>(null);
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) return;
+    picked.current = false;
+    chips.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+  }, [moreEmoji]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
@@ -141,7 +149,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
 
         <div role="group" aria-labelledby={`${id}-emoji`} className="space-y-1.5">
           <p id={`${id}-emoji`} className="text-xs font-semibold text-text-secondary">{t("status.emoji")}</p>
-          <div className="flex flex-wrap items-center gap-0.5">
+          <div ref={chips} className="flex flex-wrap items-center gap-0.5">
             {emojiChoices.map((choice) => (
               <button key={choice} type="button" aria-label={choice} aria-pressed={emoji === choice} onClick={() => setEmoji(emoji === choice ? undefined : choice)}
                 className={`${chip} ${emoji === choice ? "bg-accent/25" : ""}`}>{choice}</button>
@@ -153,7 +161,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
           </div>
           {moreEmoji && (
             <div className="expression-panel" style={{ height: 300, border: 0, boxShadow: "none" }}>
-              <EmojiTab onPick={(picked) => { setEmoji(picked); setMoreEmoji(false); }} autoFocus={!touchOnly()} />
+              <EmojiTab onPick={(choice) => { picked.current = true; setEmoji(choice); setMoreEmoji(false); }} autoFocus={!touchOnly()} />
             </div>
           )}
         </div>

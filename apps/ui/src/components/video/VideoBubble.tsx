@@ -417,7 +417,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         )}
       </div>
       {offered && typeof transfer.room === "number" && (
-        <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
+        <p className={`chat-text-media-meta m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="video-room">
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
         </p>
       )}
@@ -431,7 +431,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
           ) : null}
           {status && (
-            <p className={`flex items-center gap-1 min-w-0 chat-text-media-meta m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
+            <p className={`flex items-center gap-1 min-w-0 chat-text-media-meta m-0 ${failed ? "text-danger-ink" : "text-text-primary/75"}`}>
               {/* Wraps, as a file's line: cut, it lost its speed and time left. */}
               <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
@@ -448,7 +448,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="video-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
-        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
+        <p className={`chat-text-media-line m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/75" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
             <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer">{t("chat.message.download")}</button>

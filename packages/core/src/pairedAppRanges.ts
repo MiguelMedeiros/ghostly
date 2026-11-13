@@ -36,6 +36,11 @@ export const APP_RANGE_LIMITS = {
    * are asked, so a cancelled one counts as the read it started. Twice the asking app's own budget (16 MiB a second).
    */
   bytesPerSecond: 32 * 1024 * 1024,
+  /**
+   * The least one ask counts in `bytesPerSecond`, however few bytes it asked or the file held from its offset: each is
+   * a read on this device, so a contact gets at most 512 a second.
+   */
+  askFloorBytes: 64 * 1024,
 } as const;
 
 /**
@@ -288,10 +293,11 @@ export class AppRanges {
     // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
     const at = this.now();
     while (this.taken.length && this.taken[0]!.at <= at - 1000) { const old = this.taken.shift()!; old.out = true; this.takenBytes -= old.bytes; }
-    if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
-    const charge: Taken = { at, bytes: frame.n };
+    const bytes = Math.max(frame.n, APP_RANGE_LIMITS.askFloorBytes);
+    if (this.takenBytes + bytes > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    const charge: Taken = { at, bytes };
     this.taken.push(charge);
-    this.takenBytes += frame.n;
+    this.takenBytes += bytes;
     const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true, charge };
     this.serving.set(slot(app, request), task);
     return task;
@@ -308,8 +314,8 @@ export class AppRanges {
     if (!this.take(task)) return;
     // Read and sent whole: it counts what the file held from its offset, not the length asked. An app reading small
     // files at remote.read's 1 MiB was refused `busy` from the 33rd read in a second, having moved ~1 MiB (agents#1766).
-    // A cancelled ask is never finished, and keeps counting the read it started.
-    const charge = (task as Serving).charge, sent = Math.max(0, Math.min(task.length, size - task.offset));
+    // A cancelled ask is never finished, and keeps counting the read it started. Never under `askFloorBytes`.
+    const charge = (task as Serving).charge, sent = Math.max(APP_RANGE_LIMITS.askFloorBytes, Math.min(task.length, size - task.offset));
     if (charge && !charge.out && charge.bytes > sent) { this.takenBytes -= charge.bytes - sent; charge.bytes = sent; }
     this.send(appRangeEndFrame(task.app, task.request, size));
   }

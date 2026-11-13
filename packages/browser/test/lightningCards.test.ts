@@ -177,6 +177,22 @@ describe("several cards on one network", () => {
     await expect(registry.rename(a, "x".repeat(33))).rejects.toThrow("At most 32 characters");
   });
 
+  it("names: invisible and direction characters from the wallet or typed in do not make a name that reads like another", async () => {
+    const { registry } = cards();
+    await registry.start();
+    const name = (card: string) => registry.views().find((v) => v.card === card)?.name;
+    const hub = await registry.add("fake-node", { alias: "Alby Hub" });
+    const twin = await registry.add("fake-node", { alias: "Alby\u200b Hub\ufeff" });
+    const flipped = await registry.add("fake-node", { alias: "\u202eHome\u2066" });
+    expect(name(hub)).toBe("Alby Hub (Fake node)");
+    expect(name(twin)).toBe("Alby Hub (Fake node) 2");
+    expect(name(flipped)).toBe("Home (Fake node)");
+    await expect(registry.rename(twin, "Alby\u200b Hub (Fake\u200d node)")).rejects.toThrow("Another card has that name");
+    await expect(registry.rename(twin, "\u200b\u202e\u200c")).rejects.toThrow("Enter a name");
+    await registry.rename(twin, "Office\u2067 LND\u061c");
+    expect(name(twin)).toBe("Office LND");
+  });
+
   it("names: a long wallet name is cut after a whole word with …; only an NWC name loses its \" via \" part", async () => {
     const { registry } = cards();
     await registry.start();

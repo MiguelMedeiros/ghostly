@@ -67,11 +67,22 @@ export const nobodyElseIn = (ctx: ApiContext, groupId: string): boolean => {
 };
 
 /**
+ * Why I am no longer in a group (removed, say), or null while I am. A member removed while away learns it only after
+ * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
+ * out: it asks to be let in again by itself.
+ */
+const outOf = (ctx: ApiContext, groupId: string): string | null => {
+  const group = state(ctx).groups?.find((g) => g.id === groupId);
+  return group?.status && group.status !== "active" && group.status !== "lost" ? group.statusReason ?? "You are not in this group" : null;
+};
+
+/**
  * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`, or my
  * pin numbered `pin` (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a
  * private group, an edge to one of my hubs in a community. In a private group with nobody else in it, 0 at once: no
  * edge will ever take it, and the wait sat its whole time, then said "it goes when one opens" and exited 4, which a
- * bot retries, sending it again each time.
+ * bot retries, sending it again each time. Refused as soon as I learn I am out of the group: it sat its whole time
+ * there too and said the same, though nothing goes any more.
  */
 export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | { pin: number } | undefined, ms: number): Promise<number> {
   const until = performance.now() + ms;
@@ -79,6 +90,8 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
     if (taken > 0 || nobodyElseIn(ctx, groupId)) return taken;
+    const out = outOf(ctx, groupId);
+    if (out) throw new CliError("refused", `${out}: no member took it, and it no longer goes`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, known(ctx, { messageId, ...("edit" in which ? { edits: which.edit } : which) }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

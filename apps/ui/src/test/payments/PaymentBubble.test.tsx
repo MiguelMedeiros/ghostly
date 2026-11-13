@@ -1,11 +1,12 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
 import { PaymentBubble } from "../../components/PaymentBubble";
 import { paymentLine, storedPaymentLine } from "../../components/paymentWords";
 import { loadLocale, translatorFor } from "../../locales";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
+import { servicesPlatform } from "../../lib/platform";
 import { renderApp } from "../render";
 import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose, listOf, readOption } from "../select";
@@ -143,6 +144,32 @@ describe("what the bubble says", () => {
     show({ kind: "payment", direction: "in", state: "pending", target: target({ method: "bitcoin", network: "bitcoin", provider: "onchain" }) });
     expect(status()).toHaveTextContent("Waiting for a confirmation…");
     expect(screen.getByTestId("payment-rail")).toHaveTextContent(/^Bitcoin on-chain$/);
+  });
+
+  // The contact has paid: what is left is this wallet's check with its provider, server, chain or federation.
+  it.each([
+    ["Ark", { target: target({ method: "arkade", network: "mutinynet" }) }],
+    ["Bark", { target: target({ method: "bark", network: "signet", address: "tark1bark" }) }],
+    ["Spark", { target: target({ method: "spark", network: "regtest", address: "sparkrt1payee" }) }],
+    ["USDT", { amount: 1_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) }],
+    ["Fedimint", { federation: "fed1test", network: "testnet" as const }],
+  ] as const)("says a %s payment received and still being checked is checked here, not waited on from the contact", (_, patch) => {
+    show({ kind: "payment", direction: "in", state: "pending", ...patch });
+    expect(status()).toHaveTextContent(/^Checking the payment…$/);
+  });
+
+  it.each([
+    ["pt", "Verificando o pagamento…"],
+    ["ar", "جارٍ التحقق من الدفعة…"],
+  ] as const)("says a received payment being checked in %s “%s”", (language, said) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(TEST_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "in", state: "pending", target: target({ method: "arkade", network: "mutinynet" }) }) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language });
+    expect(status()).toHaveTextContent(said);
+  });
+
+  it("still says my own ecash the contact has not taken waits for the contact", () => {
+    show({ kind: "payment", direction: "out", state: "pending", federation: "fed1test", network: "testnet" });
+    expect(status()).toHaveTextContent(/^Waiting for your contact…$/);
   });
 
   it("adds why a payment failed", () => {
@@ -685,6 +712,37 @@ describe("an expired request", () => {
   it("is not called expired while a payment of it is on its way: that one may still have gone through", () => {
     show(incomingRequest(expiredInvoice()), { wallet: { mints: [], intents: [{ ...reviewOf({ target: target(), amount: 250_000, feeCap: 10, payee: "peer", linkId: "link-1", requestId: "pay-1" }), state: "submitted" }] } });
     expect(status()).not.toHaveTextContent("Expired");
+  });
+
+  it("is not called expired on the requester's side while the contact's on-chain payment of it waits for a confirmation", () => {
+    const lapsed = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() - 60_000 });
+    const request = paymentView({ kind: "request", direction: "out", target: lapsed });
+    const receipt = paymentView({ id: "pay-2", requestId: "pay-1", target: lapsed, txid: "ab".repeat(32) });
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": receipt } });
+    const { unmount } = renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).not.toHaveTextContent("Expired");
+    expect(screen.getByTestId("payment-bubble")).not.toHaveAttribute("data-expired");
+    unmount();
+    // Once that payment failed, nothing is on its way any more.
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": request, "pay-2": { ...receipt, state: "failed" } } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+    expect(status()).toHaveTextContent("Expired · ask again with a new request");
+  });
+
+  // Every bubble reads the engine's state anew on each change (up to 20 a second while a file moves): looking through
+  // every payment for one on its way before the deadline, when it changes nothing, took ~9 ms per state for 30 open
+  // requests in a wallet of 2,000 payments.
+  it("does not look for the contact's payment of a request you sent before its deadline", () => {
+    const onItsWay = vi.spyOn(servicesPlatform!.wallet!, "paymentOnItsWay");
+    try {
+      const open = target({ method: "bitcoin", provider: "onchain", address: "tb1qpayee", expiresAt: Date.now() + 60 * 60_000 });
+      show({ kind: "request", direction: "out", target: open });
+      expect(status()).toHaveTextContent("Waiting for payment");
+      for (let i = 0; i < 10; i++) act(() => fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView({ kind: "request", direction: "out", target: open }) } }));
+      expect(onItsWay).not.toHaveBeenCalled();
+    } finally {
+      onItsWay.mockRestore();
+    }
   });
 
   it("says it in the app's language", () => {
