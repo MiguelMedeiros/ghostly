@@ -879,6 +879,13 @@ export class Apps {
   private async keptRevocationsOf(ref: string): Promise<SignedAppRevocation[]> {
     return keptRevocations(await wrap((await store(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)), ref).mine;
   }
+  /** Keeps on an installed app's record those of these revocations that stop one of its versions (as `keepStoreRevocations` does). */
+  private async keepOnRecord(first: InstalledApp, revoked: readonly SignedAppRevocation[]): Promise<void> {
+    for (let app: InstalledApp | undefined = first; app; app = await this.app(first.ref)) {
+      const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
+      if ((next.revocations?.length ?? 0) <= (app.revocations?.length ?? 0) || await this.putAppIfUnchanged(next, app)) break;
+    }
+  }
 
   /**
    * The built-in apps this profile is offered (WISP 1200 § Built-in apps): shown with the installed ones, with nothing
@@ -1768,6 +1775,9 @@ export class Apps {
       const tx = (await openDb()).transaction(STORES.settings, "readwrite");
       keepRevocations(tx.objectStore(STORES.settings), version.ref, stops);
       await done(tx);
+      // On the installed app too, when they stop a version of it: what runs it and Update judge with its record.
+      const installed = await this.app(version.ref);
+      if (installed) await this.keepOnRecord(installed, stops);
     }
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
@@ -1931,7 +1941,8 @@ export class Apps {
       }
       fail("unlisted", "The store no longer lists this update");
     }
-    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), installed.revocations);
+    // With the ones this profile kept too (`APP_REVOCATIONS_KEY`): an install screen that showed it revoked kept them.
+    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), [...(installed.revocations ?? []), ...await this.keptRevocationsOf(ref)]);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     const plan = planAppUpdate(installed, { ...versionOf(read.bundle.manifest, pending.digest), permissions: read.bundle.manifest.permissions });
@@ -2252,7 +2263,8 @@ export class Apps {
 
   private async runCheckOf(app: InstalledApp, stores: AddedAppStore[]): Promise<AppRunStatus> {
     if (!(await this.hasBundle(app.bytes, app.digest, app.manifest))) return { status: "needs-files" };
-    return this.runStatus(app, this.storeViews(stores), app.revocations);
+    // The kept ones judge too: one kept before its install screen wrote it on the record (a profile from an older build).
+    return this.runStatus(app, this.storeViews(stores), [...(app.revocations ?? []), ...await this.keptRevocationsOf(app.ref)]);
   }
 
   /** Before an app runs (WISP 1200 § Takedowns): revoked stops it, removed by a store of the person's warns. No request. */

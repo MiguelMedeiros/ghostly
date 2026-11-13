@@ -122,6 +122,65 @@ describe("revocations an app's uninstall leaves", () => {
   });
 });
 
+describe("revocations kept while the app is installed", () => {
+  it("of the update waiting, shown revoked on a copy's install screen: Update refuses it", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+
+    net.put(MIRROR_URL, v2.bytes);
+    net.put(`${MIRROR}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Leaked key")]));
+    expect((await store.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([expect.objectContaining({ digest: v1.digest })]);
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "ok" });
+  });
+
+  it("of the installed version, shown revoked on a copy's install screen: it no longer opens or runs", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+
+    net.put(MIRROR_URL, v1.bytes);
+    net.put(`${MIRROR}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest], "Leaked key")]));
+    expect((await store.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+    await expect(store.storageGet({ ref: v1.ref, scope: "chat-1", key: "k" })).rejects.toThrow(/^stopped/);
+    await expect(store.chatRunnable({ ref: v1.ref })).rejects.toThrow(/^stopped/);
+    // A new engine (the page reloaded) and the next check, with no file answering beside its URL: still revoked.
+    const again = apps(net);
+    await again.checkUpdates();
+    expect(await again.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+  });
+
+  it("kept by an older build, only beside the installed list: Update refuses the waiting version, and the installed one does not open", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    const kept = [await revocation(v1.ref, [v1.digest, v2.digest], "Leaked key")];
+    await wrap((await dbStore(STORES.settings, "readwrite")).put([[v1.ref, kept]], APP_REVOCATIONS_KEY));
+
+    const again = apps(net);
+    await expect(again.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] })).rejects.toThrow(/^revoked/);
+    expect(await again.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(again.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+  });
+});
+
 describe("how many are kept", () => {
   it("another publisher's install screens, revoking their own apps up to the cap, push out none of this publisher's", async () => {
     const v1 = await bundle();
