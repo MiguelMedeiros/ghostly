@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
+import { mockMutinynetArk } from "../support/ark-mainnet";
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
@@ -8,7 +9,8 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
 
-  const [alice, bob] = await Promise.all([peer("ark-alice", { offlineMainnet: true }), peer("ark-bob", { offlineMainnet: true })]);
+  // Mutinynet is answered here: New makes the wallet there first, and a slow public server would fail New or hold the move to Regtest, not this test's server.
+  const [alice, bob] = await Promise.all([peer("ark-alice", { offlineMainnet: true, beforeOpen: mockMutinynetArk }), peer("ark-bob", { offlineMainnet: true, beforeOpen: mockMutinynetArk })]);
   await link(alice, bob);
   await connect(alice, bob);
   const panel = (p: Peer) => p.page.getByTestId("ark-wallet");
