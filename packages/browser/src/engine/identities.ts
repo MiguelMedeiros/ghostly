@@ -327,7 +327,7 @@ export class IdentityProofs {
 
   private async local(id: string): Promise<LocalIdentityProof | undefined> {
     const p = this.proofs.find(x => identityStatement(x.binding).id === id);
-    return p && { statement: identityStatement(p.binding), evidence: p.evidence, seed: await this.seedOf(id, p.seed) };
+    return p && { statement: identityStatement(p.binding), evidence: p.evidence, seed: await this.seedOf(id, p.seed), account: p.verified.subject };
   }
 
   // -- the profile's proofs --------------------------------------------------------------------

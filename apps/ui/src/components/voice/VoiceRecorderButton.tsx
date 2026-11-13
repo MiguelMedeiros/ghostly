@@ -23,6 +23,18 @@ import { LiveWaveform, PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine } from "../../lib/problemText";
 
+/**
+ * Whether the browser will ask the person for the microphone before it answers: its question comes up over the page.
+ * The iPhone's web app asks again at each launch. False where the browser can't say.
+ */
+async function microphoneAsks(): Promise<boolean> {
+  try {
+    return (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state === "prompt";
+  } catch {
+    return false;
+  }
+}
+
 type Mode = "idle" | "hold" | "locked";
 type Phase = "starting" | "recording" | "paused" | "sending";
 
@@ -38,6 +50,11 @@ const CANCEL_PX = 110;
 const LOCK_PX = 80;
 const HINT_MS = 2500;
 const PREVIEW_BARS = 40;
+/**
+ * A held press whose microphone took this long to answer: a person answered the browser's question about it, not a
+ * microphone waking up. Used where the browser can't say beforehand that it will ask (no Permissions API for it).
+ */
+const ASKED_MS = 1500;
 /** Esc throws away a recording shorter than this at once; a longer one asks first. */
 const CONFIRM_MS = 3000;
 /** How long the bin shows after a slide throws a recording away. */
@@ -116,6 +133,12 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const sendingRef = useRef(false);
   /** Send was asked for before the microphone answered: it sends once it does. */
   const pendingSendRef = useRef(false);
+  /**
+   * The browser is asking the person for the microphone of this hold. Its question takes the touch: on an iPhone the
+   * page never hears that touch end (no pointerup, no pointercancel), elsewhere it ends to answer. Either way the hold
+   * can't go on, so the recording goes on hands-free once allowed, sent with a tap.
+   */
+  const askingRef = useRef(false);
   /** Whether the recording was running when Esc asked "discard?", so Keep carries on. */
   const confirmResumeRef = useRef(false);
   const modeRef = useRef<Mode>("idle");
@@ -206,6 +229,14 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     }
   }, [cancel, reset, focusOutOfBar, stopPreview, showHint, onSend, onError, t]);
 
+  const lock = useCallback(() => {
+    gestureRef.current = null;
+    setDrag({ x: 0, y: 0 });
+    setModeBoth("locked");
+    setAnnounce(t("chat.voice.handsFree"));
+    buttonRef.current?.focus();
+  }, [t]);
+
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
     if (unavailable) { onError(unavailable); return; }
@@ -227,6 +258,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     };
     setModeBoth(next);
     setPhase("starting");
+    askingRef.current = false;
+    const pressedAt = performance.now();
+    if (next === "hold") void microphoneAsks().then((asks) => { if (asks && recorderRef.current === recorder) askingRef.current = true; });
     try {
       await recorder.start();
     } catch (error) {
@@ -239,10 +273,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
+    const asked = askingRef.current || performance.now() - pressedAt >= ASKED_MS;
+    askingRef.current = false;
     setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
+    // Still held after the browser's question: the finger that answered it is not on the mic any more, whatever the page
+    // heard. It records hands-free, to send with a tap, rather than running on with nothing to let go of.
+    if (modeRef.current === "hold" && asked) lock();
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, t]);
+  }, [disabled, unavailable, onError, reset, showHint, send, focusOutOfBar, lock, t]);
 
   // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
@@ -367,14 +406,6 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     };
   }, [mode, askDiscard, keep, send]);
 
-  const lock = useCallback(() => {
-    gestureRef.current = null;
-    setDrag({ x: 0, y: 0 });
-    setModeBoth("locked");
-    setAnnounce(t("chat.voice.handsFree"));
-    buttonRef.current?.focus();
-  }, [t]);
-
   const bin = useCallback(() => {
     if (binTimer.current) clearTimeout(binTimer.current);
     setBinned(true);
@@ -404,6 +435,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setDrag({ x: Math.min(0, x), y: Math.min(0, y) });
   };
 
+  /** A hold whose microphone has not answered yet because the browser asks the person for it (or took a person's time). */
+  const askedDuringHold = () => {
+    const recorder = recorderRef.current, gesture = gestureRef.current;
+    if (modeRef.current !== "hold" || !recorder || recorder.recording || recorder.paused || recorder.ended) return false;
+    return askingRef.current || (!!gesture && Date.now() - gesture.at >= ASKED_MS);
+  };
+
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     // Hands-free: the send button sends as the press ends on it, whether or not a click follows.
     if (modeRef.current === "locked") {
@@ -416,6 +454,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     const gesture = gestureRef.current;
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     suppressClickRef.current = true;
+    // Let go to answer the browser's question about the microphone: what it allows is recorded hands-free.
+    if (askedDuringHold()) return lock();
     gestureRef.current = null;
     const tap = Date.now() - gesture.at < TAP_MS;
     if (gesture.mouse) {
@@ -431,7 +471,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const onPointerCancel = () => {
     sendPressRef.current = null;
-    if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
+    // The browser's question about the microphone took the touch: the recording it allows goes on hands-free.
+    if (askedDuringHold()) lock();
+    else if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
   };
 
   const onClick = () => {

@@ -7,7 +7,7 @@ import { tabbables, useBackdropDismiss, useDialogFocus } from "../../hooks/useDi
 import { useMoneyCopy } from "../../hooks/useMoneyCopy";
 import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
-import { Button, Notice, input } from "../wallet/ui";
+import { Button, Notice, chosenInForcedColors, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { Select } from "../ui/Select";
@@ -273,7 +273,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
                   {provider.subject.options.map((o, i) => (
                     <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
-                      className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? "border-accent bg-accent/5 text-text-primary" : "border-border text-text-secondary hover:bg-surface-alt"}`}>
+                      className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? `border-accent bg-accent/5 text-text-primary ${chosenInForcedColors}` : "border-border text-text-secondary hover:bg-surface-alt"}`}>
                       <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
                     </button>
                   ))}

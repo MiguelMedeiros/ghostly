@@ -18,10 +18,14 @@ import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type S
 export interface SshEvidence { signature: string }
 
 const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+/** The line `ssh-keygen -l -f key.pub` prints: bits, fingerprint, comment, type ("256 SHA256:… me@laptop (ED25519)"). */
+const KEYGEN_LIST_LINE = /^\d+ (SHA256:[A-Za-z0-9+/]{43}) .* \([A-Z0-9-]+\)$/;
 
 function normalizeKeySubject(input: string): string {
   const value = input.trim();
   if (FINGERPRINT.test(value)) return value;
+  const listed = KEYGEN_LIST_LINE.exec(value);
+  if (listed) return listed[1];
   try { return parseSshPublicKey(value).fingerprint; }
   catch (e) {
     // Say why a real key is refused (a DSA key, a small RSA key); anything else gets the instruction.
@@ -44,15 +48,15 @@ function canonicalArmor(pasted: string): string {
   return `-----BEGIN SSH SIGNATURE-----\n${body.match(/.{1,70}/g)!.join("\n")}\n-----END SSH SIGNATURE-----\n`;
 }
 
-/** Exactly the statement; or with one trailing newline, which an editor adds when the statement is
- * saved to a file and signed there (the Windows route). Nothing else is accepted. */
+/** Exactly the statement; or with one trailing newline ("\r\n" on Windows), which an editor adds when the
+ * statement is saved to a file and signed there (the Windows route). Nothing else is accepted. */
 async function verifyStatementSignature(statement: IdentityStatement, evidence: SshEvidence): Promise<SshSignatureCheck> {
-  try { return await verifySshSignature(evidence.signature, statement.bytes); }
-  catch (e) {
-    if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e;
-    try { return await verifySshSignature(evidence.signature, utf8Encode(`${statement.text}\n`)); }
-    catch (again) { throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: again }); }
+  let last: unknown;
+  for (const bytes of [statement.bytes, utf8Encode(`${statement.text}\n`), utf8Encode(`${statement.text}\r\n`)]) {
+    try { return await verifySshSignature(evidence.signature, bytes); }
+    catch (e) { if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e; last = e; }
   }
+  throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: last });
 }
 
 const keyKind = (c: SshSignatureCheck) => c.securityKey

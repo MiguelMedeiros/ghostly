@@ -107,7 +107,10 @@ for (const { name, release, tag } of RELEASES) for (const host of ["current", "o
       for (let i = 1; i <= 3; i++) texts.push([nina, `live from nina ${i}`], [olga, `live from olga ${i}`]);
       for (const [from, text] of texts) await from.say(text);
       for (const [, text] of texts) for (const p of [nina, olga]) await shownOnce(p, text, 60_000);
-      for (const p of [nina, olga]) expect(await p.awaitingReceipt(), `${p.name} has nothing awaiting a receipt`).toBe(false);
+      // The last text shows on both sides before its receipt is back with its sender: wait for it, as over the DHT.
+      for (const p of [nina, olga]) {
+        await expect.poll(() => p.awaitingReceipt(), { timeout: 60_000, message: `${p.name} has nothing awaiting a receipt` }).toBe(false);
+      }
     } finally {
       for (const done of cleanup.reverse()) await done();
     }

@@ -74,7 +74,7 @@ export function AndroidPage({ version }: { version: string }) {
         </h2>
         <p className="muted an-prose">{t.verify.lead}</p>
         <div className="cl-line">
-          <pre tabIndex={0} aria-label="SHA-256">
+          <pre tabIndex={0} role="region" aria-label="SHA-256">
             <code>{ANDROID_CERT_SHA256}</code>
           </pre>
           <CopyButton text={ANDROID_CERT_SHA256} label={t.verify.copy} done={t.verify.copied} />

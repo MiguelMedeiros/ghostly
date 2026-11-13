@@ -6,8 +6,9 @@ import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { appStopped, refreshInstalledApps, sendAppCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
+import { chatAppOver } from "../../lib/apps/running";
 import { appErrorText } from "../../lib/apps/errors";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
@@ -19,13 +20,15 @@ const opens = (app: InstalledAppView) => !appStopped(app);
  * "Ana opened Chess" and can install the same app; then the app opens in this chat. Nothing is advertised before.
  * An app that comes with Ghostly and was never opened here is listed too: choosing it shows what it asks first.
  */
-export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose }: {
+export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose, onCovered }: {
   linkId: string;
   name: string;
   waiting?: string | null;
   /** Why an app opened here from the Apps page did not open. */
   error?: string | null;
   onClose: () => void;
+  /** Why the app `title` failed, once it shows over this dialog: the chat says it over the app. */
+  onCovered?: (why: string, title: string) => void;
 }) {
   const { t } = useI18n();
   const nav = useAppNavigation();
@@ -47,14 +50,19 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
       // Opened first: an app that cannot start here sends no card. Then the contact is told, with what to install.
       const shown = await openApp(app.ref, linkId);
       opened.current = true;
-      // Already running in this chat, and shown again: the contact was told when it opened.
-      const failed = shown === "shown" ? null : await sendAppCard(linkId, app, true);
+      // Already running in this chat, and shown again: the contact was told when it opened (or is told now, if that failed).
+      const failed = await sendOpenedCard(linkId, app, shown);
       if (failed) throw new Error(failed);
       // The panel closed while the card was on its way (an Escape there) and gave the focus back to Open, gone with this
       // dialog: the chat's message field has it.
       if (ref.current?.contains(document.activeElement)) document.querySelector<HTMLElement>(".chat-column textarea")?.focus({ preventScroll: true });
       onClose();
-    } catch (e) { setError(appErrorText(e, t)); } finally {
+    } catch (e) {
+      const why = appErrorText(e, t);
+      // The app opened over this dialog (a phone, a full-screen app) and then the card failed: why is said over the app,
+      // and this goes, never to come up with it once the person goes Back.
+      if (onCovered && chatAppOver(linkId)) { onCovered(why, app.title); onClose(); } else setError(why);
+    } finally {
       setBusy(null);
       // Opening is what fetched its files: every screen's list says so (or that they are still missing).
       if (app.run.status === "needs-files") void refreshInstalledApps();

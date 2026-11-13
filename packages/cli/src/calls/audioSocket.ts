@@ -106,7 +106,12 @@ export class AudioSocket {
       this.unproven.delete(socket);
       const before = this.client;
       this.client = socket;
-      before?.end();
+      // The program it replaces reads EOF and is let go 2 s later, as `close` lets the last one go: one that kept its
+      // side open held its connection until it died, and the socket's close (a stopping daemon's) waited on it.
+      if (before) {
+        before.end();
+        setTimeout(() => before.destroy(), 2000).unref();
+      }
       handlers.onClient?.(true);
     };
     let timer: ReturnType<typeof setTimeout> | null = null;

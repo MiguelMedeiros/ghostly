@@ -51,6 +51,23 @@ describe("file save of a sent file", () => {
     expect(readFileSync(restored, "utf8")).toBe("quarterly data");
   });
 
+  it("with --wait, saves at once whatever the contact does with it", async () => {
+    const { ctx, transfers } = world();
+    const path = join(dir, "notes.txt");
+    writeFileSync(path, "meeting notes!");
+    const sent = await callApi(ctx, "file.send", { chat: "Alice", path }) as { file: { id: string } };
+    // Still offered: before, --wait waited for the contact to take it, then failed with timeout.
+    transfers[sent.file.id] = { state: "transferring", transferred: 0, size: 14, direction: "out", stage: "asking" } as unknown as FileTransferView;
+    const waiting = join(dir, "waiting.txt");
+    expect(await callApi(ctx, "file.save", { file: sent.file.id, path: waiting, wait: true, timeout: 1 })).toMatchObject({ size: 14 });
+    expect(readFileSync(waiting, "utf8")).toBe("meeting notes!");
+    // Declined: before, --wait failed with the contact's "Declined by the contact" (exit 1).
+    transfers[sent.file.id] = { state: "failed", error: "Declined by the contact", transferred: 0, size: 14, direction: "out" } as unknown as FileTransferView;
+    const declined = join(dir, "declined.txt");
+    expect(await callApi(ctx, "file.save", { file: sent.file.id, path: declined, wait: true })).toMatchObject({ size: 14 });
+    expect(readFileSync(declined, "utf8")).toBe("meeting notes!");
+  });
+
   it("a received file part way in is still not all here", async () => {
     const { ctx } = world();
     await fileStore.put({ id: "chat-one-in-x", linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "in.txt", size: 10, mime: "text/plain", timestamp: 1 }, transfer: { state: "transferring", transferred: 4, size: 10 } } as never);

@@ -70,6 +70,24 @@ describe("the app on a device that is not the active one", () => {
     expect(fakeEngine.calls.filter((call) => !String(call.method).startsWith("device"))).toEqual([]);
   });
 
+  it("drops an invite's keys and a group's link from the address and the history, opened before or after", async () => {
+    page.gate = standbyPage({ state: "standby" });
+    window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
+    const depth = window.history.length;
+    render(<Root />);
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    expect(window.history.length).toBe(depth);
+    // One opened while the standby screen is up: its own entry is replaced too, so Back never comes to it.
+    act(() => { window.location.hash = "#/join/group2/abc"; });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    act(() => { window.location.hash = "#web%2Bghostly%3Aghostly1abc"; });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    // An ordinary page's address is left as it is.
+    act(() => { window.location.hash = "#/settings"; });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(window.location.hash).toBe("#/settings");
+  });
+
   it("the same link on a device that runs the profile is taken in (what the standby must not do)", async () => {
     window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
     const before = Object.keys(localStorage).length;

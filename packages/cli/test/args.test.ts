@@ -295,6 +295,12 @@ describe("the argument parser", () => {
     expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
     expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
     expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
+    // A word --networks does not take is a usage error before the profile opens. Before, the API answered it after the
+    // one-shot had opened the profile and asked the relays: bad_request (exit 1), "networks must list mainnet and/or testnet".
+    for (const networks of ["foo", "Testnet", "testnet,foo", "testnet;mainnet"]) expect(() => accept("bob", "cashu", "--networks", networks), networks).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${JSON.stringify(networks)}`));
+    for (const networks of ["", ",", " , "]) expect(() => accept("bob", "cashu", "--networks", networks), JSON.stringify(networks)).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${JSON.stringify(networks)}`));
+    expect(accept("bob", "cashu", "--networks", "mainnet, testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["mainnet", "testnet"] });
+    expect(accept("bob", "cashu", "--networks", "testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["testnet"] });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
