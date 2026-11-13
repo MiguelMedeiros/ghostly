@@ -106,12 +106,27 @@ export function stopRunningApps(): void {
   for (const entry of [...running]) entry.stop();
 }
 
+/** How many times each chat was deleted (`stopAppsIn`): an open still on its way in it when it goes never starts. */
+const deletions = new Map<string, number>();
+
 /**
  * Stops every app still running in the chat `linkId` and says nothing: the chat was deleted, and the engine refuses its
  * storage and its frames from now on. The web's panel went with the chat already; a Desktop app window has no panel.
  */
 export function stopAppsIn(linkId: string): void {
+  deletions.set(linkId, (deletions.get(linkId) ?? 0) + 1);
   for (const entry of [...running]) if (entry.linkId === linkId) entry.stop();
+}
+
+/**
+ * Read by an opener before its first wait, as `lockedSince`: the returned function says whether the chat `linkId` was
+ * deleted since (never, for an app alone). A Desktop app is registered only once its window is there, so a deletion in
+ * between stops nothing of it: the opener asks after every wait, and stops what it made.
+ */
+export function chatDeletedSince(linkId: string | null): () => boolean {
+  if (linkId === null) return () => false;
+  const at = deletions.get(linkId) ?? 0;
+  return () => (deletions.get(linkId) ?? 0) !== at;
 }
 
 const inputListeners = new Set<() => void>();
