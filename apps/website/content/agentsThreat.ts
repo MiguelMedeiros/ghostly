@@ -37,8 +37,8 @@ export const threat = {
       { id: "wake", text: "Wake it, unless their chat or group is on the allowlist.", cmd: "ghostly listen --turns --from owner" },
       // packages/cli/src/listen.ts (toTurn: untrusted; --exec takes the event on stdin).
       { id: "args", text: "Put their words in a command line. A turn reaches your hook on stdin, the words under untrusted.", cmd: "ghostly listen --turns --from owner --exec ./on-turn.sh" },
-      // packages/cli/src/listen.ts (checkWebhook: 127.0.0.1, localhost or [::1]).
-      { id: "webhook", text: "Send events off the machine. A webhook can only be on this machine.", cmd: "ghostly listen --webhook http://127.0.0.1:8787/turn" },
+      // packages/cli/src/listen.ts (checkWebhook: 127.0.0.1, localhost or [::1]); packages/cli/src/main.ts (a URL with a path or a query is warned about: it goes in GHOSTLY_WEBHOOK, out of ps).
+      { id: "webhook", text: "Send events off the machine. A webhook can only be on this machine.", cmd: "ghostly listen --turns --from owner --webhook http://127.0.0.1:8787" },
       // packages/cli/src/runtime/engine.ts (automaticWallets: false); packages/browser/src/engine/payments.ts (requests kept pending).
       { id: "pay", text: "Make it pay. A CLI profile has no wallet until you create one, a payment request waits until you pay it, and Mainnet needs --confirm-real.", cmd: "ghostly wallet list" },
       // packages/browser/src/shared/buttons.ts (a press only from the chat's contact, on an open question).
