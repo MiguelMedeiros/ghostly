@@ -501,6 +501,8 @@ const isPosition = (c, login) => c.user?.login === login && (c.body ?? "").start
 
 export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
+const PRIORITY_TOO = ` It had \`${LABEL.priority}\`, which the train took off with \`${LABEL.queue}\`: add both again, or only \`${LABEL.queue}\` if it no longer goes first.`;
+
 const newCommitsText = (what) =>
   `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
 
@@ -734,6 +736,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   const leave = async (p, label, text) => {
     gone.add(p.number);
+    // `queue:priority` comes off with `queue`: a comment that says to add `queue` again says so, or the fix for a red
+    // base comes back without it and waits behind the batch held for that red.
+    if (text && p.labels.includes(LABEL.priority) && /`queue` again/i.test(text)) text += PRIORITY_TOO;
     if (label) await w.addLabel(p.number, label);
     for (const l of Object.values(LABEL)) if (l !== label && p.labels.includes(l)) await w.removeLabel(p.number, l);
     if (p.sticky ?? p.stale) await w.deleteComment((p.sticky ?? p.stale).id);
