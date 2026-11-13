@@ -12,7 +12,7 @@ export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-sho
 /**
  * The wait a one-shot does when no `--wait` is given (`ctx.mode === "one-shot"` defaults in api.ts, files.ts, buttons.ts
  * and statusCards.ts): what is not out yet leaves with the process, so it stays. A daemon answers those at once. A ref
- * written `group:<id>` is a group's, whose file, card or button press does not wait; a group named otherwise is told
+ * written `group:<id>` is a group's, whose card or button press does not wait; a group named otherwise is told
  * only by the engine, and its notice comes only if the call is still going after WAIT_NOTICE_MS.
  */
 function oneShotWait(method: string, params: Record<string, unknown>): string | undefined {
@@ -22,7 +22,9 @@ function oneShotWait(method: string, params: Record<string, unknown>): string | 
     // going after WAIT_NOTICE_MS.
     case "chat.send": return "sent";
     case "chat.edit": return "confirmed";
-    case "file.send": case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
+    // A group's file waits until a member's edge took its message.
+    case "file.send": return "sent";
+    case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
     // `--all` reports to each 1:1 chat in turn, each waiting as one named would.
     case "usage.send": return group ? undefined : "sent";
     case "task.update": case "routine.update": return group ? undefined : "confirmed";

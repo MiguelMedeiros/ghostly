@@ -60,7 +60,7 @@ export const commands: Record<string, Command> = {
     args: ["chat", "path"],
     options: {
       name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
-      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat (default: none with a daemon, sent without; a group: none)" },
+      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat; in a group until a member's edge took its message (default: none with a daemon, sent without)" },
       timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
       force: { type: "boolean", description: "Send even if --name looks like a seed, a key or ecash" },
     },
