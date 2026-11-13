@@ -76,19 +76,24 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     // An offline one-shot: nothing reaches it while it runs, so the seen set is read only if a history or a transfer
     // changes here (`EventHub.know`).
     const later = mode === "one-shot" && !!options.offline;
-    await hub.open({ seen: !later });
     const { server, store } = runtime, node = server.node;
+    // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
+    // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+    // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
+    const closed = !store.recovered;
+    // An online one-shot hears a few chats at most: each one's notes are read, and it is caught up, when its history's
+    // first event comes (`EventHub.perChat`). Not after a crash, which reads every history whole.
+    const oneByOne = mode === "one-shot" && !later && closed;
+    await hub.open({ seen: !later && !oneByOne });
+    const perChat = oneByOne && await hub.loadOwnNotes();
+    if (oneByOne && !perChat) await hub.loadSeen();
     const kept = server.takeStartNewest();
+    const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
     const baseline = async () => {
       const now = node.getState();
       // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
       const mark = server.historyMark;
       const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
-      const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
-      // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
-      // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
-      // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
-      const closed = !store.recovered;
       for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
         const page = closed && !server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
         if (page && !page.more) histories.set(id, page.messages);
@@ -110,6 +115,19 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
         baselining = hub.loadSeen().then(baseline).then((read) => server.attach(hub.sink, read))
           .catch((error: unknown) => { process.stderr.write(`ghostly: event error: ${error instanceof Error ? error.stack : String(error)}\n`); });
       });
+    } else if (perChat) {
+      const now = node.getState();
+      const ids = [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)];
+      // Each history read when it is caught up, from the attach on: one changed before it is read whole then.
+      read = { mark: server.historyMark, ids };
+      const untouched = new Set(ids.filter((id) => !server.historyChanged(id)));
+      hub.perChat(now, {
+        newest: async (id) => (untouched.has(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null),
+        whole,
+        files: (id) => node.fileMessages(id),
+      });
+      await hub.ended((id) => fileStore.get(id));
+      announceJoins(hub, node);
     } else read = await baseline();
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
@@ -151,6 +169,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       await baselining;
       presence?.stop();
       runtime.server.detach(hub.sink);
+      // The chats still being caught up (`EventHub.perChat`) read their histories: before the engine closes.
+      await hub.caughtUp();
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
       hub.release();
       await runtime.close().catch(() => {});
