@@ -668,6 +668,11 @@ export interface ClientResponse {
   body: AsyncIterable<Uint8Array>;
   /** Collects the whole body, bounded by `maxResponseBytes`. */
   bytes(): Promise<Uint8Array>;
+  /**
+   * Settles with the error the body ends in (let go unread, reset, timed out, the link closed), read up to it or not:
+   * a reader that waits on someone else before reading on learns of it. Never settles for a body that arrived whole.
+   */
+  failed?: Promise<Error>;
 }
 
 export class GhostlyHttpError extends Error {
@@ -697,6 +702,9 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private wake: (() => void) | null = null;
   /** Bytes received and not yet read. */
   held = 0;
+  private fail!: (error: Error) => void;
+  /** `ClientResponse.failed`. */
+  readonly failed = new Promise<Error>((resolve) => (this.fail = resolve));
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
@@ -708,6 +716,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     if (this.done) return;
     this.done = true;
     this.error = error ?? null;
+    if (error) this.fail(error);
     this.wake?.();
   }
 
@@ -717,6 +726,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     this.held = 0;
     this.done = true;
     this.error = error;
+    this.fail(error);
     this.wake?.();
   }
 
@@ -843,6 +853,7 @@ export class HttpClient {
         for await (const part of queue) parts.push(part);
         return concatBytes(...parts);
       },
+      failed: queue.failed,
     });
   }
 

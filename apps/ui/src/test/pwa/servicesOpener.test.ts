@@ -550,6 +550,33 @@ describe("a contact's answer on its way to the services worker", () => {
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
   });
+
+  it("gives back a request's place once the link lets go of the answer its frame left unread: the app's next request goes out", async () => {
+    const link = linkClient();
+    const jar = new CookieJar();
+    const requests = Array.from({ length: MAX_PENDING_REQUESTS + 1 }, (_, i) => {
+      const { port, replies } = workerPort();
+      const done = serve(port, { type: "request", method: "GET", path: `/video/${i}.mp4`, headers: [], body: null, flow: true }, (request) => link.client.request("app", request), jar, words);
+      return { replies, done };
+    });
+    // Each request on the link is answered with 6 MiB, none of it read by the app's frame (a paused video).
+    const answered = new Set<number>();
+    const answer = () => {
+      for (const frame of link.controls()) {
+        if (frame.t !== "req" || answered.has(frame.id)) continue;
+        answered.add(frame.id);
+        link.client.handleResponse({ t: "res", id: frame.id, st: 200, h: [], b: true });
+        for (let left = 6 * 1024 * 1024; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) link.chunk(frame.id, new Uint8Array(Math.min(MAX_CHUNK_PAYLOAD_BYTES, left)), false);
+      }
+      return answered.size;
+    };
+    await vi.waitFor(() => expect(answer()).toBe(MAX_PENDING_REQUESTS + 1), { timeout: 3_000 });
+    await Promise.all(requests.map((r) => r.done));
+    for (const r of requests) {
+      expect(r.replies[0]?.type).toBe("head");
+      expect(r.replies[r.replies.length - 1]).toEqual({ type: "error", status: 502, text: "Failed" });
+    }
+  });
 });
 
 describe("a contact's app shown over the app", () => {
