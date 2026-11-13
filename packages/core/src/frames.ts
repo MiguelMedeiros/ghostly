@@ -51,6 +51,12 @@ export const LIMITS = {
    * worker), is not cut: it holds up to the response's own bound.
    */
   unreadStallMs: 2_000,
+  /**
+   * Response-body bytes a client holds for all its responses before their readers took them. Past it, a response over
+   * `maxUnreadResponseBytes` is reset at once, its reader's pace aside: one slow reader keeps its whole response (as
+   * much as `maxResponseBodyBytes`), but many cannot add up (a contact's app reading each answer a chunk at a time).
+   */
+  maxClientUnreadResponseBytes: 64 * 1024 * 1024,
   maxChatMessageBytes: 16 * 1024,
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */
