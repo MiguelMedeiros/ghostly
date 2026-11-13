@@ -459,6 +459,10 @@ export const FILE_METHODS: Record<string, Method> = {
     if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
       throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
     }
+    // Offered here and not taken yet: the engine takes these and does nothing, and it still waits for the answer.
+    if ((action === "pause" || action === "resume" || action === "request") && view?.stage === "asking" && view.direction === "in") {
+      throw new CliError("refused", "Not taken yet: it waits for you to take it (file accept, or file decline)");
+    }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
