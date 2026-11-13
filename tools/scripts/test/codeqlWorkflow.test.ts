@@ -100,11 +100,13 @@ process.stdout.write(Buffer.concat(files.flatMap((f) => [z ? Buffer.from(f) : qu
   writeFileSync(join(dir, "git"), fake);
   chmodSync(join(dir, "git"), 0o755);
 
-  const plan = (files: string[] | null, event = "pull_request"): string[] => {
+  /** head: the pull request's branch, and the repository it comes from (this one unless a fork's). */
+  const plan = (files: string[] | null, event = "pull_request", head = { ref: "issue-1-a-fix", repo: "o/ghostly" }): string[] => {
     const output = join(dir, "github-output");
     writeFileSync(output, "");
+    const pull = event === "pull_request" ? { HEAD_REF: head.ref, HEAD_REPO: head.repo } : {};
     execFileSync("bash", ["-e", "-o", "pipefail", "-c", script], {
-      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, EVENT: event, FILES: files ? JSON.stringify(files) : "", FAIL: files ? "" : "1", GITHUB_OUTPUT: output },
+      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, EVENT: event, REPO: "o/ghostly", ...pull, FILES: files ? JSON.stringify(files) : "", FAIL: files ? "" : "1", GITHUB_OUTPUT: output },
       stdio: "ignore",
     });
     const line = readFileSync(output, "utf8");
@@ -160,6 +162,25 @@ process.stdout.write(Buffer.concat(files.flatMap((f) => [z ? Buffer.from(f) : qu
     expect(plan([".github/workflows/codeql.yml"])).toEqual(ALL);
     expect(plan(null)).toEqual(ALL);
     expect(plan([])).toEqual(ALL);
+  });
+
+  it("a merge train batch analyses nothing: each pull request in it was analysed on its own, and the batch is never merged", () => {
+    const batch = { ref: "batch/dev-20261113-0912", repo: "o/ghostly" };
+    expect(plan(["apps/ui/src/App.tsx", "apps/desktop/src/viewer.rs", ".github/workflows/ci.yml"], "pull_request", batch)).toEqual([]);
+    expect(plan(null, "pull_request", batch)).toEqual([]);
+  });
+
+  it("a fork's pull request is analysed whatever its branch is called, and so is a branch that only looks like a batch's", () => {
+    expect(plan(["apps/ui/src/App.tsx"], "pull_request", { ref: "batch/dev-20261113-0912", repo: "someone/ghostly" })).toEqual(["javascript-typescript"]);
+    expect(plan(["apps/ui/src/App.tsx"], "pull_request", { ref: "batch/dev-20261113-0912", repo: "" })).toEqual(["javascript-typescript"]);
+    expect(plan(["apps/ui/src/App.tsx"], "pull_request", { ref: "fix/batch/dev-1", repo: "o/ghostly" })).toEqual(["javascript-typescript"]);
+  });
+
+  it("reads the branch and both repositories from the event into env, never into the script", () => {
+    expect(step).toContain("          HEAD_REF: ${{ github.head_ref }}\n");
+    expect(step).toContain("          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}\n");
+    expect(step).toContain("          REPO: ${{ github.repository }}\n");
+    expect(script).not.toContain("${{");
   });
 });
 
