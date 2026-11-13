@@ -366,7 +366,7 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 | 405 | `method-not-allowed` | |
 | 408 | `request-timeout` | request body brought less than 16 KiB in 30 s without ending (stalled or trickling) |
 | 413 | `request-too-large` | request body above 8 MiB |
-| 502 | `unreachable`, `redirect-blocked` | local service down, or it redirected off the target |
+| 502 | `unreachable`, `redirect-blocked`, `headers-too-large` | local service down, it redirected off the target, or it answered with headers past the frame limits (more than 128, a name over 256 characters, a value over 16 KiB) |
 | 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it), or more than 128 MiB of its request bodies held at once (a body counts from its first chunk until the local service has answered it) |
 | 504 | `timeout` | local service did not answer within 60 s |
 

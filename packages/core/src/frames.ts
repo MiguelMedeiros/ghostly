@@ -252,7 +252,11 @@ export function encodeControl(frame: ControlFrame): string {
   return json;
 }
 
-function isHeaderList(value: unknown): value is HeaderList {
+/**
+ * A `req` or `res` header list the link takes: at most `maxHeaderCount` headers, names of 256 characters and values of
+ * `maxHeaderValueBytes` at most. A frame past it is dropped by the receiver, so a sender checks first.
+ */
+export function isHeaderList(value: unknown): value is HeaderList {
   if (!Array.isArray(value) || value.length > LIMITS.maxHeaderCount) return false;
   return value.every(
     (h) =>

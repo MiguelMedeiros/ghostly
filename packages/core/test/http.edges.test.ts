@@ -632,7 +632,8 @@ describe("HttpClient", () => {
 
   it("refuses a control frame that would exceed the frame limit", async () => {
     const c = client();
-    await expect(c.client.request("atlas", { method: "GET", path: "/", headers: [["x", "v".repeat(LIMITS.maxControlFrameBytes)]] })).rejects.toThrow(
+    const headers = Array.from({ length: 4 }, (_, i): [string, string] => [`x-${i}`, "v".repeat(LIMITS.maxHeaderValueBytes)]);
+    await expect(c.client.request("atlas", { method: "GET", path: "/", headers })).rejects.toThrow(
       "Control frame too large",
     );
   });
