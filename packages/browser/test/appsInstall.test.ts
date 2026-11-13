@@ -1640,6 +1640,25 @@ describe("files only partly written back (the page went away while they were wri
     expect(await storageRows()).toEqual(data);
   });
 
+  it("files fetched back by an Open tell the pages, as files dropped do: every card and row then reads it as here", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    const checked = vi.fn();
+    const store = apps(net, { checked });
+    net.files.delete(BUNDLE_URL);
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(checked, "nothing came back: nothing to read again").not.toHaveBeenCalled();
+    net.put(BUNDLE_URL, v1.bytes);
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(checked, "the pages read the list again: its files are here now").toHaveBeenCalledTimes(1);
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect(checked, "already here: nothing new").toHaveBeenCalledTimes(1);
+  });
+
   it("a whole file costs the list and the check before a run its size, no read and no hash", async () => {
     const v1 = await bundle({ data: big(2_500_000) });
     net.put(BUNDLE_URL, v1.bytes);
