@@ -17,7 +17,8 @@
 //   node tools/scripts/test-shards.mjs --record a.json …  # tools/scripts/test-durations.json from Vitest JSON reports
 //
 // CI's packages shards upload their JSON reports (artifact "packages-test-reports-<shard>"): download them all and
-// --record them after adding a slow test file. --plan and shard 1 warn when over a tenth of the files have no time.
+// --record them after adding a slow test file. --plan and shard 1 warn when over a tenth of the files have no time, and
+// with --report-dir each shard warns, after its run, of a file that took far more than its record (see slowWarnings).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,9 +133,43 @@ function units() {
  */
 export function staleWarning(units, seconds) {
   const files = units.flatMap((u) => u.files);
-  const missing = files.filter((f) => !(f in seconds)).length;
-  if (missing * 10 <= files.length) return null;
-  return `::warning::${missing} of the ${files.length} test files have no time in tools/scripts/test-durations.json, so the packages shards are uneven: download the packages-test-reports-* artifacts of a green run and node tools/scripts/test-shards.mjs --record them.`;
+  const missing = files.filter((f) => !(f in seconds)).sort();
+  if (missing.length * 10 <= files.length) return null;
+  const named = missing.slice(0, 10).join(", ") + (missing.length > 10 ? ` and ${missing.length - 10} more` : "");
+  return `::warning::${missing.length} of the ${files.length} test files have no time in tools/scripts/test-durations.json (${named}), so the packages shards are uneven: download the packages-test-reports-* artifacts of a green run and node tools/scripts/test-shards.mjs --record them.`;
+}
+
+/** A file's seconds in Vitest JSON reports, by repository path: the passed files only, as --record keeps them. */
+export function reportTimes(reportFiles) {
+  const times = {};
+  for (const file of reportFiles) {
+    for (const result of JSON.parse(readFileSync(file, "utf8")).testResults) {
+      if (result.status !== "passed" || !result.endTime) continue;
+      // A report from CI names the runner's checkout: the file is the longest end of its path that is here.
+      const parts = result.name.split("/");
+      const path = parts.map((_, i) => parts.slice(i).join("/")).find((p) => p && existsSync(join(root, p)));
+      if (path) times[path] = Math.round((result.endTime - result.startTime) / 100) / 10;
+    }
+  }
+  return times;
+}
+
+/** Seconds a file may take before its run asks for a --record: with no record, or this much over twice its record. */
+export const SLOW = 30;
+
+/**
+ * Warnings for the files of a shard's reports that the split weighed far too light: one with no recorded time that
+ * took over SLOW seconds (it counted as a typical file, under a second), or one that took over twice its record and
+ * SLOW seconds more. A few such files unbalance the shards long before a tenth of them miss a time (staleWarning), so
+ * this names them on the run of the PR that adds them, when their author can --record them.
+ * @param {string[]} reportFiles
+ * @param {Record<string, number>} seconds
+ */
+export function slowWarnings(reportFiles, seconds) {
+  return Object.entries(reportTimes(reportFiles))
+    .filter(([file, took]) => (file in seconds ? took > 2 * seconds[file] && took > seconds[file] + SLOW : took > SLOW))
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([file, took]) => `::warning file=${file}::${file} took ${took} s, but tools/scripts/test-durations.json ${file in seconds ? `has ${seconds[file]} s for it` : "has no time for it (it counts as a typical file)"}, so the packages shards are uneven: --record this run's packages-test-reports-* artifacts (node tools/scripts/test-shards.mjs --record).`);
 }
 
 const describe = (shards) => shards.map((s, i) => `  ${i + 1}: about ${Math.round(s.load)} s of test time: ${s.units.map((u) => (u.alone ? u.id : `${u.id} (${u.files.length} file${u.files.length === 1 ? "" : "s"})`)).join(", ") || "nothing"}`).join("\n");
@@ -144,16 +179,7 @@ function main(argv) {
   const seconds = () => JSON.parse(readFileSync(durationsFile, "utf8"));
 
   if (first === "--record") {
-    const recorded = {};
-    for (const file of rest) {
-      for (const result of JSON.parse(readFileSync(file, "utf8")).testResults) {
-        if (result.status !== "passed" || !result.endTime) continue;
-        // A report from CI names the runner's checkout: the file is the longest end of its path that is here.
-        const parts = result.name.split("/");
-        const path = parts.map((_, i) => parts.slice(i).join("/")).find((p) => p && existsSync(join(root, p)));
-        if (path) recorded[path] = Math.round((result.endTime - result.startTime) / 100) / 10;
-      }
-    }
+    const recorded = reportTimes(rest);
     // Files recorded now replace their old times; a file no longer there is dropped.
     const merged = { ...seconds(), ...recorded };
     const sorted = Object.fromEntries(Object.entries(merged).filter(([f]) => existsSync(join(root, f))).sort(([a], [b]) => (a < b ? -1 : 1)));
@@ -195,6 +221,7 @@ function main(argv) {
   // One annotation per run, not one per shard.
   if (stale && shard === 1) console.log(stale);
   let failed = 0;
+  const written = [];
   for (const unit of mine.units) {
     // A whole package runs as `npm test` runs it; part of one runs by its files, which Vitest must select exactly.
     const filters = unit.whole ? [] : unit.files.map((f) => join(root, f));
@@ -207,13 +234,17 @@ function main(argv) {
       }
     }
     const tag = unit.alone ? unit.id.split("/").pop().replace(/\.test\.tsx?$/, "") : unit.id.replace(/^@ghostly\//, "");
-    const reports = reportDir ? ["--reporter=default", "--reporter=json", `--outputFile.json=${join(reportDir, `${tag}.json`)}`] : [];
+    const report = reportDir && join(reportDir, `${tag}.json`);
+    const reports = report ? ["--reporter=default", "--reporter=json", `--outputFile.json=${report}`] : [];
     console.log(`\n=== ${unit.id} in ${unit.dir}${unit.whole ? "" : ` (${unit.files.length} files)`}`);
     const started = Date.now();
     const run = vitest(unit.dir, ["run", ...filters, ...reports], { stdio: "inherit" });
     console.log(`=== ${unit.id}: ${run.status === 0 ? "passed" : "FAILED"} in ${Math.round((Date.now() - started) / 1000)} s`);
     if (run.status !== 0) failed++;
+    if (report && existsSync(report)) written.push(report);
   }
+  // Each file runs on one shard, so each slow one is named once.
+  for (const warning of slowWarnings(written, seconds())) console.log(warning);
   return failed ? 1 : 0;
 }
 
