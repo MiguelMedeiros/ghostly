@@ -323,6 +323,14 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     }
   });
 
+  it("a web+ghostly: link with the profile's name, opened while the app is open, names the profile without the scheme", () => {
+    const device = code();
+    // As the router's intake hands it over: the path, escaped (the installed app's `/#%s`) or as written, then the hash.
+    for (const named of [`#${encodeURIComponent(`web+ghostly:Work#${device}`)}`, `#web+ghostly:Work#${device}`, `#web+ghostly://Work#${device}`]) {
+      expect(readDeviceLink(named), named).toEqual({ code: device, profile: "Work" });
+    }
+  });
+
   it("leaves a chat invite and a route alone, for the router", () => {
     window.history.replaceState(null, "", "#/settings");
     takeDeviceLinkFromAddress();
