@@ -586,6 +586,11 @@ const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []
 /** The app's own rows of one scope: its counter row left out. */
 const keysOf = (ref: string, scope: string) => IDBKeyRange.bound([ref, scope, COUNT_KEY], [ref, scope, []], true);
 
+/** U+FFFD, what the broker puts in place of a lone surrogate (`withoutLoneSurrogates`). */
+const REPLACEMENT = String.fromCodePoint(0xfffd);
+/** A key as the broker lists it to an app: each lone surrogate (half an emoji, cut by `slice`) as U+FFFD. */
+const asListed = (key: string) => key.replace(/\p{Cs}/gu, REPLACEMENT);
+
 /** A scope's counter row (`COUNT_KEY`). */
 const counterRow = (ref: string, scope: string, count: AppScopeCount): AppStorageRow => ({ ref, scope, key: COUNT_KEY, value: JSON.stringify(count), size: 0 });
 
@@ -2333,8 +2338,21 @@ export class Apps {
 
   async storageGet({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: JsonValue } | null> {
     const app = await this.runningOrFail(ref, digest);
-    const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, this.scopeOf(scope), this.keyOf(key)]));
+    const row = await this.rowOf(app.ref, this.scopeOf(scope), this.keyOf(key));
     return row ? { value: JSON.parse(row.value) as JsonValue } : null;
+  }
+
+  /**
+   * The row an app's key names: its own, or else one kept under a key with a lone surrogate that the broker lists with
+   * U+FFFD in its place. Such keys were kept before the broker refused them; without this, what `storage.keys` listed
+   * could be neither read nor deleted, and its bytes stayed counted against the scope.
+   */
+  private async rowOf(ref: string, scope: string, key: string): Promise<AppStorageRow | undefined> {
+    const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([ref, scope, key]));
+    if (row || !key.includes(REPLACEMENT)) return row;
+    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(ref, scope))) as [string, string, string][];
+    const kept = keys.find((k) => k[2] !== key && asListed(k[2]) === key);
+    return kept ? wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get(kept)) : undefined;
   }
 
   /**
@@ -2383,7 +2401,7 @@ export class Apps {
     const where = this.scopeOf(scope), name = this.keyOf(key);
     await this.serial(`${app.ref}\0${where}`, async () => {
       const used = await this.usageOf(app.ref, where);
-      const old = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, where, name]));
+      const old = await this.rowOf(app.ref, where, name);
       if (!old) return;
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
@@ -2393,7 +2411,7 @@ export class Apps {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("not-installed", "This app is not installed");
       }
-      writing.delete([app.ref, where, name]);
+      writing.delete([app.ref, where, old.key]);
       await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
     });

@@ -224,6 +224,24 @@ describe("storage", () => {
     expect(await storageRows()).toEqual([]);
   });
 
+  it("a key kept with a lone surrogate (before the broker refused one) is read and deleted by its U+FFFD form, as the broker lists it", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    // Half an emoji, cut by `slice`, and what the broker lists in its place.
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}a`, value: "lost" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${listed}b`, value: "own" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}b`, value: "kept" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` })).toEqual({ value: "lost" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}b` }), "a key kept as asked comes first").toEqual({ value: "own" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}c` })).toBeNull();
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}a` });
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}b` });
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([`${half}b`]);
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}b` });
+    expect(await storageRows(), "the rows and their count are gone").toEqual([]);
+  });
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;
