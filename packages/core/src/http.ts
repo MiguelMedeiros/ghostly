@@ -187,7 +187,8 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
   });
 }
 
-export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget): HeaderList {
+/** `from`: the local URL of the request answered, the one a relative `Location` is read against. */
+export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget, from?: string): HeaderList {
   const out: HeaderList = [];
   for (const [name, value] of headers) {
     const lower = name.toLowerCase();
@@ -195,7 +196,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
     if (HOP_BY_HOP.has(lower) || DROPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" || lower === "content-location") {
       // Off-target locations are dropped, never disclosed.
-      const location = relativizeLocation(value, target);
+      const location = relativizeLocation(value, target, from);
       if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
@@ -314,12 +315,14 @@ export function withViewerPolicy(headers: HeaderList, relayOnly = false): Header
 /**
  * Turns `http://localhost:3400/base/x` into `/x` so the client never learns or
  * follows the local address. Null when the location is not on the target origin
- * and under its base path.
+ * and under its base path. A relative one (`edit`, `?page=2`, `../x`) is read
+ * against `from`, the local URL of the request it answers, as a browser reads it;
+ * without one, against the base path.
  */
-export function relativizeLocation(location: string, target: LocalTarget): string | null {
+export function relativizeLocation(location: string, target: LocalTarget, from?: string): string | null {
   let url: URL;
   try {
-    url = new URL(location, `${target.origin}${target.basePath}/`);
+    url = new URL(location, from ?? `${target.origin}${target.basePath}/`);
   } catch {
     return null;
   }
@@ -334,10 +337,10 @@ export function relativizeLocation(location: string, target: LocalTarget): strin
   return `${path}${url.search}${url.hash}`;
 }
 
-function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolean {
+function isRedirectBlocked(response: LocalResponse, target: LocalTarget, from: string): boolean {
   if (response.status < 300 || response.status > 399) return false;
   const location = response.headers.find(([name]) => name.toLowerCase() === "location");
-  return location !== undefined && relativizeLocation(location[1], target) === null;
+  return location !== undefined && relativizeLocation(location[1], target, from) === null;
 }
 
 // ---------------------------------------------------------------------------
@@ -556,7 +559,7 @@ export class HttpHost {
       // Redirects reach the client as they are, with a relative Location, and
       // only when they stay on the target. Anything else is neither followed
       // nor disclosed.
-      if (isRedirectBlocked(response, service.target)) {
+      if (isRedirectBlocked(response, service.target, stream.url)) {
         this.end(stream);
         return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
       }
@@ -566,7 +569,7 @@ export class HttpHost {
         t: "res",
         id: frame.id,
         st: response.status,
-        h: sanitizeResponseHeaders(response.headers, service.target),
+        h: sanitizeResponseHeaders(response.headers, service.target, stream.url),
         b: hasBody,
       };
       this.channel.send(encodeControl(res));

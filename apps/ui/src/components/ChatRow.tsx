@@ -37,6 +37,7 @@ import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
 import { unreadDot } from "./unreadDot";
 import { REORDER_KEYS } from "../hooks/useRowReorder";
+import { useEngineValue } from "../lib/engineState";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -61,11 +62,14 @@ const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" }
  */
 const USAGE_COLUMN = "flex min-w-[105px] items-center justify-between gap-1.5";
 
-/** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
-export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
+/**
+ * Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. `acked`: a message
+ * without a delivery state (a compatibility chat's text) that the contact's acknowledgement covers, as its bubble says.
+ */
+export function DeliveryMark({ delivery, acked, live }: { delivery?: ChatMessage["delivery"]; acked?: boolean; live?: DhtOnlyBy }) {
   const words = useDeliveryWords();
-  const shape = deliveryShape(delivery);
-  const state = delivery ?? "sent";
+  const shape = deliveryShape(delivery, acked);
+  const state = delivery ?? (acked ? "delivered" : "sent");
   return (
     <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state, live)}
       className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
@@ -310,6 +314,12 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const installed = useInstalledApps(appCards && p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
+  // A text of mine with no delivery state: delivered once the contact's acknowledgement covers it, by the link its
+  // bubble reads (platform/useChat.ts). Only that yes or no draws the row again.
+  const acked = useEngineValue(state => {
+    const m = p.lastMessage;
+    return m?.sender === "me" && !m.delivery && (state?.links.find(l => l.peerPubKeyZ32 === p.peerPubKey)?.peerAck ?? 0) >= m.timestamp;
+  });
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   const meter = p.usage && <UsagePill entry={p.usage} testId="chat-row-usage" />;
@@ -380,7 +390,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} acked={acked} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text

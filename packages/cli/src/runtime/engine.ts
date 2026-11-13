@@ -235,7 +235,8 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
- * the saved chats unstarted until a call names one (a one-shot for one chat, or one that makes or joins one); `offline`
+ * the saved chats and the groups' edges unstarted until a call names one (a one-shot for one chat or one group, or one
+ * that makes or joins a chat); `offline`
  * starts no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join
  * through a group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */

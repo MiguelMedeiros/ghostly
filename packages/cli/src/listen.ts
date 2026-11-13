@@ -70,6 +70,8 @@ export class Allowlist {
     if (typeof chat !== "string") return false;
     if (this.chats.has(chat)) return true;
     if (!this.keys.size) return false;
+    // A removal carries the key: the chat is gone, so its lookup fails, and a replay holds no earlier event of it.
+    if (event.type === "chat.removed" && typeof event.peer === "string") return this.keys.has(event.peer);
     // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
     let key = this.peers.get(chat);
     if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
@@ -99,13 +101,15 @@ export async function allowlist(from: readonly string[], groups: readonly string
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing.
+ * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
+ * or the name its contact chose, which `--group`'s lookup took.
  */
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    const named = other === "chat" ? error.details.chat as string : ref;
+    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }

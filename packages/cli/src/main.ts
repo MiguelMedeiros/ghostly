@@ -210,9 +210,10 @@ const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
- * chats unstarted (`deferChats`); the groups start, and their edges are never deferred. Started, each saved chat put its
- * records and its leave packet on the relays: with 12 invites saved, one `group send` asked the relay 32 times (3 with
- * none), its whole minute, and a text to an away contact, or the next one-shot, waited behind them.
+ * chats and the other groups' edges unstarted (`deferChats`), and starts the group's own (`startNamedChats`). Started,
+ * each saved chat put its records and its leave packet on the relays: with 12 invites saved, one `group send` asked the
+ * relay 32 times (3 with none), its whole minute, and a text to an away contact, or the next one-shot, waited behind
+ * them. Each other group's edges did the same: with six more groups shared with one member, 31 to 47 times.
  */
 export function oneGroupOnly(method: string): boolean {
   return GROUP_EDGES_ONLY.has(method);
@@ -1615,9 +1616,23 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
-  try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }
+  // The connection stays: the call's end comes on it with its reason, so the pipe says why it leaves (the call ended,
+  // or another program took its audio). It left with exit 0 and no word for either.
+  let reason: string | null = null, heard: (() => void) | null = null;
+  try {
+    call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call;
+    if (!call.audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
+    const id = call.call;
+    await client.subscribe(undefined, (event) => {
+      if (event.type !== "call.ended" || event.call !== id) return;
+      reason = String(event.reason);
+      heard?.();
+    }, () => heard?.());
+  } catch (error) {
+    client.close();
+    throw error;
+  }
   const audio = call.audio;
-  if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
@@ -1628,13 +1643,30 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   process.stdin.pipe(socket, { end: false });
   // Nobody reads the contact's audio any more (`call pipe | head -c …`, a player closed): the pipe leaves, exit 0, and
   // the call goes on (another program may take its audio). It died on an EPIPE nobody handled, with a stack trace.
+  let readerGone = false;
   onReaderGone(() => {
+    readerGone = true;
     process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
     socket.destroy();
   });
   socket.pipe(process.stdout);
-  socket.on("close", () => exit(0));
+  socket.on("close", () => void (async () => {
+    if (!readerGone) process.stderr.write(`ghostly: call ${call.call}: ${await whyClosed()}\n`);
+    client.close();
+    exit(0);
+  })());
   socket.on("error", () => exit(1));
+
+  /** Why the daemon closed the call's socket: a call still on gave it to another program; one gone ended. */
+  async function whyClosed(): Promise<string> {
+    if (reason === null) {
+      // The call leaves the daemon's calls before its socket closes, and call.ended comes once the contact is told.
+      const on = await client!.call("call.get", { call: call.call }, { timeoutMs: 5000 }).then(() => true, () => false);
+      if (on && reason === null) return "another program took its audio; the call goes on";
+      if (reason === null) await new Promise<void>((resolve) => { heard = resolve; setTimeout(resolve, 3000).unref(); });
+    }
+    return reason === null ? "the call ended" : `the call ended (${reason})`;
+  }
 }
 
 // ---------- entry ----------

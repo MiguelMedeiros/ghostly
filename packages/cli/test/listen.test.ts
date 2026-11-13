@@ -512,6 +512,14 @@ describe("the allowlist", () => {
     expect(peerOf.mock.calls.filter(([chat]) => chat === "c1")).toHaveLength(1);
   });
 
+  it("a contact key passes its chat's removal by the key it carries: the chat is gone, so its lookup fails", async () => {
+    const list = new Allowlist(new Set(), new Set([KEY]), new Set(), async () => { throw new CliError("not_found", "No chat c1"); });
+    expect(await list.allows(other("chat.removed", { chat: "c1", peer: KEY }))).toBe(true);
+    expect(await list.allows(other("chat.removed", { chat: "c2", peer: OTHER_KEY }))).toBe(false);
+    // Only a removal's: no other event names the chat's contact by it.
+    expect(await list.allows(other("chat.renamed", { chat: "c3", peer: KEY }))).toBe(false);
+  });
+
   it("a group's payment passes its group, whichever link it names; a chat's payment its chat", async () => {
     const payment = (chat: string, group?: string) => other("payment.created", { chat, payment: { id: "p", chat, kind: "request", ...(group ? { group } : {}) } });
     const groups = new Allowlist(new Set(), new Set(), new Set(["g1"]), async () => null);
