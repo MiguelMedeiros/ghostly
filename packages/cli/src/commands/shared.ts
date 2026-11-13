@@ -57,12 +57,13 @@ export function here(path: unknown): string | undefined {
  * A path on this machine a command reads (`file send`, a picture, `profile backup --out`'s folder), looked at before the
  * profile opens: one not there is not_found (`missing`, or "No such file or folder"), one not allowed refused. Before, a
  * one-shot opened the profile and went online first (~1 s on a big profile) to say so. The API keeps its check for
- * socket callers; through a daemon it reads the same path.
+ * socket callers; through a daemon it reads the same path. One stat fails on otherwise (a link that points back to
+ * itself, ELOOP) is not_found too, as the API said it: never Node's raw message as `engine`.
  */
 export function localStat(path: string, missing?: string): Stats {
   try { return statSync(path); } catch (error) {
     const known = localFileError(error, path);
-    throw known?.code === "not_found" && missing ? new CliError("not_found", missing) : known ?? error;
+    throw known && known.code !== "not_found" ? known : new CliError("not_found", missing ?? known?.message ?? `No such file or folder: ${path}`);
   }
 }
 
