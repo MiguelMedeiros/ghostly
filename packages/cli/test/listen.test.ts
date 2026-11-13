@@ -231,7 +231,7 @@ describe("hooks", () => {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
       await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
-      expect(asked).toBeGreaterThan(0);
+      expect(asked).toBe(1);
       expect(elsewhere).toEqual([]);
     } finally {
       stderr.mockRestore();
@@ -408,7 +408,7 @@ describe("hooks", () => {
     expect(asCliError(named).toJSON()).toEqual({ code: "unavailable", message: "No room left for /x/p.backup: free some space, then try again", details: { reason: "no_space", errno: "EDQUOT", path: "/x/p.backup" } });
   });
 
-  it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
+  it("an event the webhook refuses (a 4xx) is posted once and passed: said on stderr, the cursor moves on", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
     let asked = 0;
     const bridge = createServer((request, response) => { asked++; request.resume(); response.writeHead(400).end(); });
@@ -419,7 +419,8 @@ describe("hooks", () => {
       const event = received("c1", "p", "poison");
       handle(event);
       await handle.idle();
-      expect(asked).toBe(3);
+      // Once, as stderr says: before, three times with backoff, three 400s in the bridge's log for "not tried again".
+      expect(asked).toBe(1);
       // The bridge (its origin: a token in the path or query stays off stderr), what it answered, and that the event
       // will not come again: a wrong path or a missing token is seen by its status.
       const said = stderr.mock.calls.map(([text]) => String(text)).join("");
