@@ -31,9 +31,10 @@ export const LIMITS = {
   indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4, totalBytes: 64 * 1024 * 1024,
   /**
    * One `ghostly-revoke.json`, as the app bounds it (appFetch.ts), and every one the listings of one publisher read: a
-   * bound of each, so one publisher's files never leave another's unread (a file not kept revokes nothing).
+   * bound of each, so one publisher's files never leave another's unread (a file not kept revokes nothing). All of them
+   * together stay under `revocationsTotalBytes`, an even share each (the snapshot is one JSON string the build imports).
    */
-  revocationsBytes: 16 * 1024 * 1024, revocationsPublisherBytes: 64 * 1024 * 1024,
+  revocationsBytes: 16 * 1024 * 1024, revocationsPublisherBytes: 64 * 1024 * 1024, revocationsTotalBytes: 64 * 1024 * 1024,
   /** The `sources` one manifest may name (core's appBundle.ts). */
   sources: 8,
 };
@@ -137,18 +138,19 @@ export async function fromStore(fetcher = fetch) {
   const publishers = new Map();
   const kept = new Map();
   const failed = new Set();
+  const keyOf = (listing) => (typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "");
+  for (const listing of listings) publishers.set(keyOf(listing), { urls: new Set(), bytes: 0 });
+  const share = Math.min(LIMITS.revocationsPublisherBytes, Math.floor(LIMITS.revocationsTotalBytes / Math.max(1, publishers.size)));
   for (const listing of listings) {
-    const key = typeof listing.ref === "string" ? listing.ref.slice(0, 52) : "";
-    if (!publishers.has(key)) publishers.set(key, { urls: new Set(), bytes: 0 });
-    const publisher = publishers.get(key);
+    const publisher = publishers.get(keyOf(listing));
     for (const url of revocationUrls(listing, readBundles)) {
       if (publisher.urls.has(url) || failed.has(url)) continue;
       publisher.urls.add(url);
       try {
         const bytes = kept.get(url) ?? await read(url, LIMITS.revocationsBytes, fetcher);
         // Over this publisher's bound, the file is not kept for it; another publisher whose listings read it still may.
-        if (publisher.bytes + bytes.length > LIMITS.revocationsPublisherBytes) {
-          problems.push(`${url}: over the ${LIMITS.revocationsPublisherBytes} bytes one publisher's revocation files may take`);
+        if (publisher.bytes + bytes.length > share) {
+          problems.push(`${url}: over the ${share} bytes one publisher's revocation files may take`);
           continue;
         }
         publisher.bytes += bytes.length;
