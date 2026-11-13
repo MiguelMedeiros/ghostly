@@ -6,7 +6,7 @@ const CREATE = "profile create <name> [--use] [--name <shown name>] [--force]";
 const USE = "profile use <name>";
 const SET = "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]";
 const BACKUP = "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]";
-const RESTORE = "profile restore <file> <new profile> [--passphrase-file f] [--use]";
+const RESTORE = "profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]";
 const ENGINE = "engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]";
 const SETTINGS = "settings set <key> <json-value> [--force]";
 const IDENTITY = "identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]";
