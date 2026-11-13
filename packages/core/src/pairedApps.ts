@@ -177,8 +177,6 @@ class RateWindows {
   private prune(now: number): void {
     for (const [app, window] of this.windows) if (!window.length || now - window[window.length - 1] >= APP_RATE_WINDOW_MS) this.windows.delete(app);
   }
-
-  clear(): void { this.windows.clear(); }
 }
 
 /**
@@ -233,28 +231,26 @@ export class AppSessions {
 
   /**
    * The session ended, or `apps/1` is no longer agreed: what the peer had open is gone, and each such app hears a
-   * `close` with `offline`. This side's open apps stay, and say `open` again on the next session.
+   * `close` with `offline`. This side's open apps stay, and say `open` again on the next session. The rate windows
+   * stay too: they are the contact's per app, or turning `apps/1` off and on would give each app a new 50.
    */
   sessionEnded(): AppFrameEvent[] {
     const closed = [...new Set([...this.held.keys(), ...this.peer.keys()])].map((app): AppFrameEvent => ({ app, o: "close", offline: true }));
     this.peer.clear();
     this.held.clear();
-    this.received.clear();
-    this.sent.clear();
     return closed;
   }
 
   /**
    * The session ended or was replaced, and another may follow at once: what the peer had open is held, not closed (no
    * event now). Nothing is sent to a held app; an `open` on the next session takes it back, a `close` closes it, and
-   * `heldExpired` closes the rest once `graceMs` has passed since the suspension that held each.
+   * `heldExpired` closes the rest once `graceMs` has passed since the suspension that held each. The rate windows stay,
+   * as in `sessionEnded`.
    */
   sessionSuspended(graceMs = APP_RESUME_GRACE_MS): void {
     const until = this.now() + graceMs;
     for (const [app, version] of this.peer) this.held.set(app, { version, until });
     this.peer.clear();
-    this.received.clear();
-    this.sent.clear();
   }
 
   /** Whether any of the peer's apps is held, waiting for its next session. */
