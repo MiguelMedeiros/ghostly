@@ -48,6 +48,19 @@ function canonicalArmor(pasted: string): string {
   return `-----BEGIN SSH SIGNATURE-----\n${body.match(/.{1,70}/g)!.join("\n")}\n-----END SSH SIGNATURE-----\n`;
 }
 
+/** The statement file as Windows tools also save it: after a byte order mark (Notepad's "UTF-8 with BOM", Windows
+ * PowerShell's Out-File -Encoding utf8) or as UTF-16 LE (Windows PowerShell's `>`). Never accepted, as a contact's
+ * app would not accept it either: only recognised, to say what to change. */
+function windowsFiles(text: string): Uint8Array[] {
+  const utf16 = (s: string) => {
+    const bytes = new Uint8Array(2 + 2 * s.length);
+    bytes.set([0xff, 0xfe]);
+    for (let i = 0; i < s.length; i++) bytes.set([s.charCodeAt(i) & 0xff, s.charCodeAt(i) >> 8], 2 + 2 * i);
+    return bytes;
+  };
+  return ["", "\n", "\r\n"].flatMap(end => [new Uint8Array([0xef, 0xbb, 0xbf, ...utf8Encode(`${text}${end}`)]), utf16(`${text}${end}`)]);
+}
+
 /** Exactly the statement; or with one trailing newline ("\r\n" on Windows), which an editor adds when the
  * statement is saved to a file and signed there (the Windows route). Nothing else is accepted. */
 async function verifyStatementSignature(statement: IdentityStatement, evidence: SshEvidence): Promise<SshSignatureCheck> {
@@ -56,6 +69,9 @@ async function verifyStatementSignature(statement: IdentityStatement, evidence: 
     try { return await verifySshSignature(evidence.signature, bytes); }
     catch (e) { if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e; last = e; }
   }
+  for (const bytes of windowsFiles(statement.text))
+    if (await verifySshSignature(evidence.signature, bytes).then(() => true, () => false))
+      throw Object.assign(new Error("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again"), { cause: last });
   throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: last });
 }
 

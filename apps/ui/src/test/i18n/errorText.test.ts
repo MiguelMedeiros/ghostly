@@ -562,6 +562,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
   ["This signature was made by another key (0123ABCD), not the public key given.", `${BROWSER}/proofs/openpgp.ts`, "This signature was made by another key ("],
   ["That signature was made by SHA256:abc, not the key you entered (SHA256:def)", `${BROWSER}/proofs/providers/ssh.ts`, ", not the key you entered ("],
+  ["The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", `${BROWSER}/proofs/providers/ssh.ts`],
   ["No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)", `${BROWSER}/proofs/domain.ts`, "No Ghostly TXT record at ${"],
   ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
   ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],

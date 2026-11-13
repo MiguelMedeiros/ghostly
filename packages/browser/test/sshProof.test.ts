@@ -99,6 +99,17 @@ describe("SSH identity proofs", () => {
       await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, ending), s)), JSON.stringify(ending)).rejects.toThrow(/not over this statement/);
   }, 20_000);
 
+  it("says so when the statement file was saved with a byte order mark or as UTF-16, and still refuses it", async () => {
+    const s = statementFor(ssh, fingerprint);
+    const bom = (text: string) => new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]);
+    const utf16 = (text: string) => new Uint8Array([0xff, 0xfe, ...new Uint8Array(new Uint16Array(Array.from(text, c => c.charCodeAt(0))).buffer)]);
+    // Notepad's "UTF-8 with BOM", Windows PowerShell's Out-File -Encoding utf8, its `>` (UTF-16 LE), Notepad's "UTF-16 LE".
+    for (const file of [bom(s.text), bom(`${s.text}\r\n`), utf16(`${s.text}\r\n`), utf16(s.text)])
+      await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(file), s))).rejects.toThrow("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again");
+    // Another statement saved the same way is still "not over this statement".
+    await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(bom(statementFor(ssh, fingerprint).text)), s))).rejects.toThrow(/not over this statement/);
+  }, 20_000);
+
   it("refuses another namespace, another statement and another key, with a message a person can act on", async () => {
     const s = statementFor(ssh, fingerprint), paste = (text: string) => signer(ssh).parse(text, s);
     await expect(Promise.resolve().then(() => paste(mine.sign(s.text, "git")))).rejects.toThrow(/for "git", not "ghostly"/);

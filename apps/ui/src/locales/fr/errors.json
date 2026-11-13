@@ -551,6 +551,8 @@
     "domainPrivate": "Ce nom ne fonctionne que sur des réseaux privés",
     "domainTooLong": "Ce nom de domaine est trop long",
     "expired": "La preuve a expiré",
+    "fileEncoding": "Le fichier de la déclaration a été enregistré dans un autre encodage",
+    "fileEncodingNext": "Enregistrez-le en UTF-8 sans indicateur d'ordre des octets (BOM), puis signez-le à nouveau.",
     "fileInvalid": "Le fichier de preuve n'est pas un fichier {{kind}} valide",
     "fileInvalidNext": "Il doit être en JSON valide, envoyé sans modification.",
     "fileNoProof": "Le fichier de preuve ne contient aucune preuve Ghostly",

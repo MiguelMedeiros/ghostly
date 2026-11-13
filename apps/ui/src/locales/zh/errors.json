@@ -551,6 +551,8 @@
     "domainPrivate": "这个名称只在私有网络中有效",
     "domainTooLong": "这个域名太长了",
     "expired": "此证明已过期",
+    "fileEncoding": "声明文件以另一种编码保存",
+    "fileEncodingNext": "请另存为不带字节顺序标记（BOM）的 UTF-8，然后重新签名。",
     "fileInvalid": "证明文件不是有效的 {{kind}} 文件",
     "fileInvalidNext": "它必须是有效的 JSON,并原样上传。",
     "fileNoProof": "证明文件中没有 Ghostly 证明",
