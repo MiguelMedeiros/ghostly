@@ -234,6 +234,12 @@ export interface GroupState {
   unsaid?: string[];
   /** Epoch → the admin's mark (`GroupCommitFrame.left`) on the commit of that epoch that took out a member who left. Absent in older states. */
   leftMarks?: Record<string, string>;
+  /**
+   * Epoch → the highest number of mine among the rows the app stored, read from them once (`ownRows`), so a later start
+   * reads none of them for it: since `unsaid`, a row of mine is stored after its counter is saved. Absent: not read yet,
+   * or an app from before wrote the state since (its rows may be above).
+   */
+  rowHigh?: Record<string, number>;
 }
 
 /**
@@ -666,6 +672,7 @@ export class GroupSession {
       // nor the commits of my chain (new frames in each answer, each with a secret sealed again).
       key: frame => frame.t === "group-msg" ? frameKey(frame) : frame.t === "group-commit" ? `commit:${frame.commit.e}` : undefined,
     });
+    for (const [epoch, seq] of Object.entries(state.rowHigh ?? {})) this.rowHigh.set(Number(epoch), seq);
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     for (const [key, record] of Object.entries(state.names ?? {})) this.nickAt.set(key, record.v);
     this.chainMovedAt = this.clock();
@@ -1286,15 +1293,22 @@ export class GroupSession {
 
   /**
    * The highest number of mine, per epoch, among the rows the app stored (`GroupIncomingMessage.seq` of my own): my
-   * counter goes above them, so a row left by an older app killed mid-send never shares its id with a new text.
+   * counter goes above them, so a row left by an older app killed mid-send never shares its id with a new text. Kept
+   * with the state (`GroupState.rowHigh`): a later start need not read them again (`rowsRead`).
    */
   ownRows(rows: Iterable<{ epoch: number; seq: number }>): void {
     for (const { epoch, seq } of rows) {
       if (!Number.isSafeInteger(epoch) || !Number.isSafeInteger(seq) || seq < 0 || seq >= OWN_FRAME_LIMIT) continue;
       if (seq > (this.rowHigh.get(epoch) ?? -1)) this.rowHigh.set(epoch, seq);
     }
+    const high = Object.fromEntries(this.rowHigh);
+    if (JSON.stringify(high) === JSON.stringify(this.state.rowHigh)) return;
+    this.state.rowHigh = high;
+    this.persistSoon();
   }
   private readonly rowHigh = new Map<number, number>();
+  /** Whether my stored rows were read once already (`ownRows`), and what they hold is kept with the state. */
+  get rowsRead(): boolean { return !!this.state.rowHigh; }
 
   /** My next sequence number in `epoch`: the running counter in the current one, past every frame of mine I keep in an older one. */
   private nextSeq(epoch: number): number {
