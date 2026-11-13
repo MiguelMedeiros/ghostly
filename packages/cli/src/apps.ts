@@ -445,7 +445,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
   // The bundle at the folder's default name is this command's own output too: published into another --out, the
   // version an earlier publish left there went into the new bundle as one of its files.
-  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), join(dir, APP_REVOKE_FILE)]));
+  // The folder's revocations and those beside the output (where `app revoke --bundle` writes them), one list when the same.
+  const lists = [...new Set([join(dir, APP_REVOKE_FILE), join(dirname(out), APP_REVOKE_FILE)])];
+  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
   const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
@@ -465,13 +467,17 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   // Read back as a client would (the icon's header, the bundle's size): what is written is never a bundle it refuses.
   const read = readAppBundle(bundle);
   if (!read.ok) throw refused("The bundle made is not valid", read);
-  // Nor one the folder's own revocations already stop: every client that reads them would refuse it, for good.
+  // Nor one those revocations already stop: every client that reads them would refuse it, for good.
   const ref = appRef(key.key, checked.manifest.name);
-  const revocations = existsSync(join(dir, APP_REVOKE_FILE)) ? readAppRevocations(new Uint8Array(readFileSync(join(dir, APP_REVOKE_FILE)))) : null;
-  const held = revocations?.ok ? revocations.revocations : [];
-  if (appRevocationFor({ ref, sequence, digest: read.bundle.digest }, held)) {
-    const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
-    throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
+  const held = lists.flatMap((path) => {
+    if (!existsSync(path)) return [];
+    const revocations = readAppRevocations(new Uint8Array(readFileSync(path)));
+    return revocations.ok ? revocations.revocations.map((r) => ({ path, r })) : [];
+  });
+  const stopping = held.find(({ r }) => appRevocationFor({ ref, sequence, digest: read.bundle.digest }, [r]));
+  if (stopping) {
+    const clear = Math.max(sequence, ...held.map(({ r }) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
+    throw refused(`${stopping.path} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
   }
   saveKeyThen(keyPath, key, () => {
     mkdirSync(dirname(out), { recursive: true });
@@ -494,13 +500,16 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
 /**
  * `app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>]`: a
  * `ghostly-revoke/1` statement (WISP 1200 · Publisher keys, Revocation) for the app whose bundle is `<dir>/app.ghostlyapp`
- * (or `--bundle`), signed by that app's publisher key and added to `<dir>/ghostly-revoke.json`, which stays canonical.
+ * (or `--bundle`), signed by that app's publisher key and added to the `ghostly-revoke.json` beside that bundle, which
+ * stays canonical.
  * The key is never made here: only the key that signed the app may revoke its versions.
  */
 export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string; force?: boolean }): Promise<Record<string, unknown>> {
   const dir = userPath(dirArg);
   const bundlePath = userPath(what.bundle ?? join(dir, APP_BUNDLE_FILE));
-  const listPath = join(dir, APP_REVOKE_FILE);
+  // Beside the bundle, where clients, app verify and app serve read it: a list left in <dir> beside a bundle published
+  // from elsewhere stops nothing.
+  const listPath = join(dirname(bundlePath), APP_REVOKE_FILE);
   const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
   const digests = what.digests ?? [];
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
