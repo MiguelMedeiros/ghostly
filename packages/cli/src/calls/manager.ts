@@ -845,6 +845,11 @@ export class CallManager {
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
+    // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
+    if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
+      throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
+    }
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
     if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
@@ -856,6 +861,8 @@ export class CallManager {
 }
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
+/** The engine's `callsUnavailable` for a chat with no live session (ghostlink's, or node.ts's with no link running). */
+const CALLS_NEED_LIVE = "Calls need a live connection";
 /**
  * Hide my IP from contacts (`relayOnly`, WISP 601 Relay only): libdatachannel's relay policy only keeps the other
  * candidates out of the signal; its ICE still checks from this machine's own sockets, and a call connected on a direct
