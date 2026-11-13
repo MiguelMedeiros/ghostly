@@ -52,7 +52,8 @@ export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProp
           {label}
         </span>
       )}
-      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
+      {/* An image: forced colors keep its white box, the quiet zone a scanner needs around the code's black modules. */}
+      <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full forced-color-adjust-none [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
           value={encoded}
           size={232}
