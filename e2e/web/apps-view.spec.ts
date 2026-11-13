@@ -285,6 +285,37 @@ test("a chat app's Open on the Apps page asks which chat, and opens it there, ne
   await expect(chat(bob).getByTestId("app-card")).toContainText("Ana opened it here");
 });
 
+/*
+ * The Apps dialogs end with their buttons, inside their 20 px padding. Their `pb-safe` (only the phone's safe area)
+ * replaced the bottom one, so Close, Cancel and Install sat on the dialog's bottom edge, on a phone and a computer.
+ */
+test("+ → Apps, the which-chat picker and an app's screen keep their padding under their last buttons", { tag: ["@feature:apps.view", "@feature:apps.page"] }, async ({ peer }) => {
+  const [ana] = await setUp(peer);
+  /** From the last button's bottom to the dialog's: at least the dialog's 20 px padding (2 px before the fix). */
+  const under = async (dialog: string, button: string) => {
+    const box = (await ana.page.getByTestId(dialog).boundingBox())!;
+    const last = (await ana.page.getByTestId(dialog).getByRole("button", { name: button, exact: true }).boundingBox())!;
+    return Math.round(box.y + box.height - (last.y + last.height));
+  };
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 700 }]) {
+    await ana.page.setViewportSize(viewport);
+    await (await composerRow(ana.page, "composer-apps")).click();
+    expect(await under("chat-apps", "Close"), `+ → Apps at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await expect(ana.page.getByTestId("chat-apps")).toHaveCount(0);
+
+    await ana.page.goto("/#/apps");
+    await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+    expect(await under("app-chat-picker", "Cancel"), `the picker at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await ana.page.getByTestId("installed-app").getByRole("button", { name: /^Chess .*: details$/ }).click();
+    expect(await under("app-details", "Open"), `the app's screen at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
+    await ana.page.keyboard.press("Escape");
+    await ana.page.goto("/#/");
+    await ana.page.getByTestId("chat-row").first().click();
+  }
+});
+
 test("a full-screen app opens alone from the Apps page: modal, Close has the focus, Escape closes it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const store = await testStore({ view: "full", title: "Browser", tagline: "Look up Pkarr records" });
   const ana = await peer("ana");
