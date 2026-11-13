@@ -262,7 +262,8 @@ export class GroupEdits {
    * removed member's edits are dropped) and only of the sender's own message; the highest number wins. In a private
    * group a removal stands once its author is out too (`outlives`): the group took it under the epoch rules. One of a message
    * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
-   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
+   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again. One
+   * the row has already (another hub's copy) gives its room back: the window counts the edits that change something.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
@@ -272,7 +273,9 @@ export class GroupEdits {
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
     // Behind those that wait already, so a member's edits are taken in the order they came.
     if (this.held.get(groupId)?.has(key) || !pace.take()) return this.hold(groupId, sender, edit, pace);
-    return this.take(groupId, membership, sender, edit);
+    const result = await this.take(groupId, membership, sender, edit);
+    if (result === "stale") pace.giveBack();
+    return result;
   }
 
   /**
@@ -323,7 +326,7 @@ export class GroupEdits {
       // Unless a higher one took its place while the last was applied.
       if (waiting.get(id) !== edit) continue;
       waiting.delete(id);
-      await this.take(groupId, membership, sender, edit).catch(() => {});
+      if (await this.take(groupId, membership, sender, edit).catch(() => null) === "stale") pace.giveBack();
     }
     if (waiting.size) { if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait()))); return; }
     if (group.get(key) === waiting) group.delete(key);

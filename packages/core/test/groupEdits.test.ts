@@ -114,15 +114,15 @@ describe("group-edit frames (a private group)", () => {
     await bob.sendEdit(id, { v: 1, ts: 1, text: "fixed" });
     await mesh.settle();
     const frame = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME && f.to === carol.myKey)!.frame as GroupEditFrame;
-    // Handed on by Carol, a member: Bob's own edit, taken again (the engine shows it once).
+    // Handed on by Carol, a member: Bob's own edit, taken already (another hub's copy), so not again.
     await alice.handle(carol.myKey, clone(frame));
-    expect(mesh.of(alice).map(e => [e.sender, e.e, e.m])).toEqual([[bob.myKey, 1, "fixed"], [bob.myKey, 1, "fixed"]]);
+    expect(mesh.of(alice).map(e => [e.sender, e.e, e.m])).toEqual([[bob.myKey, 1, "fixed"]]);
     // Altered on the way (a higher number, another text box): the author's signature no longer holds.
     await alice.handle(carol.myKey, { ...clone(frame), v: 2 });
     await alice.handle(carol.myKey, { ...clone(frame), c: clone(frame).c.slice(0, -4) + "AAAA" });
     // From someone not in the group: nothing.
     await alice.handle(createIdentity().pubKeyZ32, clone(frame));
-    expect(mesh.of(alice)).toHaveLength(2);
+    expect(mesh.of(alice)).toHaveLength(1);
   });
 
   it("a member hands an edit on to one whose edge to the author is down, when its sync asks for the author", async () => {
