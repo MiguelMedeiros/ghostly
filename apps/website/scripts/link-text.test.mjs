@@ -19,7 +19,7 @@ test("a link names the host it goes to, not one its text spells", () => {
     const text = linkText(href);
     assert.equal(text.split("/")[0], new URL(href).host);
     assert.ok(text.split("/")[0].endsWith(".attacker.dev"), text);
-    assert.ok(!text.startsWith("github.com"), text);
+    assert.doesNotMatch(text, /^github\.com/);
   }
   const dot = linkText("https://github。com∕x.attacker.dev/");
   assert.ok(dot.startsWith("github.xn--"), dot);

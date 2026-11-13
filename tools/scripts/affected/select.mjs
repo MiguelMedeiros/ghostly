@@ -279,7 +279,8 @@ export function packageImports(text, packages = KNOWN_PACKAGES) {
       const star = key.indexOf("*");
       if (key === sub) { out.push(stripExt(file)); break; }
       if (star < 0 || sub.length < key.length - 1 || !sub.startsWith(key.slice(0, star)) || !sub.endsWith(key.slice(star + 1))) continue;
-      out.push(stripExt(file.replace("*", stripExt(sub.slice(star, sub.length - (key.length - star - 1))))));
+      const part = stripExt(sub.slice(star, sub.length - (key.length - star - 1)));
+      out.push(stripExt(file.replaceAll("*", () => part)));
       break;
     }
   }
