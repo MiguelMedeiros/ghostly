@@ -156,6 +156,7 @@
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
     "bodyCommunity": "The group and its history go from this device. You will not read what is said after, and to come back, open the group's link again.",
+    "bodyLast": "You are the only member: the group and its history end here, and nobody can join it again.",
     "forgetBody": "Deleting the group from this device also leaves it.",
     "forgetTitle": "Delete {{name}}?",
     "forgetTitleUnnamed": "Delete this group?",
