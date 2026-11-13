@@ -463,8 +463,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     const channel = new MessageChannel();
     ports.add(channel.port1);
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal, options.relayOnly === true); };
-    // With Hide my IP on, the bridge runs the WebRTC guard too: the app's frame, on its origin, reaches its window.
-    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true }, origin, [channel.port2]);
+    // With Hide my IP on, the bridge runs the WebRTC guard too: the app's frame, on its origin, reaches its window. Its
+    // frame of the app is named as this one, in the profile's language: a screen reader reaches both.
+    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true, title: options.words.label }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
