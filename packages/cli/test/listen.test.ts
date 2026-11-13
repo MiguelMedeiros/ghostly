@@ -660,8 +660,8 @@ describe("listen with an allowlist and --turns", () => {
     expect(readdirSync(dir)).toEqual(["kept"]);
     const refusal = (path: string) => { try { checkCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
     expect(refusal(join(dir, "nodir", "cursor"))).toEqual({ code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` });
-    // A file where the folder should be.
-    expect(refusal(join(dir, "kept", "cursor"))).toEqual({ code: "not_found", message: `No such file or folder: ${join(dir, "kept")}` });
+    // A file where the folder should be: named as a file, as `file save` names it, not as missing.
+    expect(refusal(join(dir, "kept", "cursor"))).toEqual({ code: "not_found", message: `${join(dir, "kept")} is a file, not a folder` });
     // A folder that takes no file (not as root, which writes anywhere).
     const closed = join(dir, "closed");
     mkdirSync(closed, { mode: 0o500 });
