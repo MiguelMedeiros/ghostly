@@ -81,12 +81,34 @@ export type AppRunCheck =
   | { status: "removed"; by: { store: string; name: string; reason: string; at: number }[] };
 
 export function checkAppBeforeRun(version: AppVersion, stores: readonly AppStoreView[], revocations: readonly SignedAppRevocation[] = []): AppRunCheck {
-  const revocation = appRevocationFor(version, [...revocations, ...stores.flatMap((s) => s.revoked)]);
-  if (revocation) return { status: "revoked", revocation };
-  const by = stores.flatMap((s) => s.removed
-    .filter((r) => r.ref === version.ref && r.digest === version.digest)
+  for (const list of [revocations, ...stores.map((s) => s.revoked)]) {
+    const revocation = appRevocationFor(version, indexed(list, (r) => r.statement.app).get(version.ref) ?? []);
+    if (revocation) return { status: "revoked", revocation };
+  }
+  const by = stores.flatMap((s) => (indexed(s.removed, (r) => `${r.ref} ${r.digest}`).get(`${version.ref} ${version.digest}`) ?? [])
     .map((r) => ({ store: s.key, name: s.name, reason: r.reason, at: r.at })));
   return by.length ? { status: "removed", by } : { status: "ok" };
+}
+
+/*
+ * A list's entries by key, in the list's order, made once per list: a store's `revoked` and `removed` reach 4096 entries
+ * each (`APP_STORE_LIMITS`), and an app's every storage call, frame and read lane answer is checked against them. The
+ * lists are never changed in place (a new index is a new list); one whose length changed is read again all the same.
+ */
+const indexes = new WeakMap<readonly object[], { length: number; byKey: Map<string, unknown[]> }>();
+
+function indexed<T extends object>(list: readonly T[], key: (entry: T) => string): Map<string, T[]> {
+  const held = indexes.get(list);
+  if (held && held.length === list.length) return held.byKey as Map<string, T[]>;
+  const byKey = new Map<string, T[]>();
+  for (const entry of list) {
+    const k = key(entry);
+    const same = byKey.get(k);
+    if (same) same.push(entry);
+    else byKey.set(k, [entry]);
+  }
+  indexes.set(list, { length: list.length, byKey });
+  return byKey;
 }
 
 /** A store index as the client holds it. */
