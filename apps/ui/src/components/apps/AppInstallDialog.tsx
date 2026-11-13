@@ -8,6 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
+import { AppDescription } from "./AppDescription";
 import { NAME, withName } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
@@ -335,10 +336,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {preview && (
         <>
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
-          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
+          {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>
       )}
       {error && <ErrorLine error={error} testId="app-install-error" />}
@@ -461,7 +462,6 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     <Shell titleId={titleId} onClose={close} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
-      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {/* The version's internal `sequence` is never shown: the person knows it by the version in the header. */}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation")}</Line>}
@@ -479,6 +479,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         </div>
       )}
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
+      {app.description && <AppDescription text={app.description} from="publisher" testId="app-description" />}
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
         {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update
