@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent } from "react";
 import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
+import { anyCallOn, subscribeCalls } from "@ghostly/react";
 import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
@@ -115,6 +116,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const [binned, setBinned] = useState(false);
   /** The microphone ended under the recording: it waits, paused for good, to be sent or discarded. */
   const [micEnded, setMicEnded] = useState(false);
+  const callOn = useSyncExternalStore(subscribeCalls, anyCallOn, () => false);
+  /** A call went on under the recording and paused it: Resume waits for the call to end. */
+  const [callPaused, setCallPaused] = useState(false);
+  const callWasOn = useRef(callOn);
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -191,6 +196,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setModeBoth("idle");
     setPhase("starting");
     setMicEnded(false);
+    setCallPaused(false);
     setElapsed(0);
     setLevels([]);
     setDrag({ x: 0, y: 0 });
@@ -373,6 +379,22 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       window.removeEventListener("pagehide", pauseRecording);
     };
   }, [mode, phase, pauseRecording]);
+
+  // A call going on (placed or answered, in any chat) pauses the recording: the microphone would take in the call, and
+  // at the limit the note would send itself to this chat. A held one turns hands-free, since the finger is on the call
+  // now. It waits, paused, to be sent or discarded; one started during a call is recorded as asked.
+  useEffect(() => {
+    const began = callOn && !callWasOn.current;
+    callWasOn.current = callOn;
+    if (!callOn) { setCallPaused(false); return; }
+    if (!began || !recorderRef.current?.recording) return;
+    // The release of that finger, and the click after it, land on Send: they send nothing.
+    if (modeRef.current === "hold") { suppressClickRef.current = true; lock(); }
+    // Resume turns disabled under the focus.
+    focusOutOfBar();
+    pauseRecording();
+    setCallPaused(true);
+  }, [callOn, lock, focusOutOfBar, pauseRecording]);
 
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps. Not the keys of the
   // lock screen, nor of another dialog over the page (the lock screen is one): those keys are theirs. Most of the app's
@@ -590,7 +612,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
               )}
               {locked && (
                 <button type="button" className="voice-icon-button voice-pause-button tap-target" data-testid="voice-pause" data-paused={paused || undefined}
-                  disabled={phase === "starting" || sending || micEnded}
+                  disabled={phase === "starting" || sending || micEnded || callPaused}
                   aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
                 </button>
