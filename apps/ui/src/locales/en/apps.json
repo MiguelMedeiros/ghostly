@@ -134,6 +134,7 @@
     "publisher": "Publisher",
     "removed": "Removed by {{store}}: {{reason}}",
     "revoked": "Its publisher revoked this version.",
+    "revokedReason": "Its publisher revoked this version: {{reason}}",
     "rollback": "You have a newer version.",
     "same": "Already installed.",
     "sentBy": "Sent by {{name}}",

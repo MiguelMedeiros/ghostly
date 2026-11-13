@@ -134,6 +134,7 @@
     "publisher": "الناشر",
     "removed": "أزاله {{store}}: {{reason}}",
     "revoked": "ألغى ناشره هذا الإصدار.",
+    "revokedReason": "ألغى ناشره هذا الإصدار: {{reason}}",
     "rollback": "لديك إصدار أحدث.",
     "same": "مثبّت بالفعل.",
     "sentBy": "أرسله {{name}}",
