@@ -29,6 +29,7 @@ function fake(messages: StoredMessage[] = []) {
   const listeners = new Set<(e: GhostlyEvent) => void>();
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
+    getSettings: (): Settings => node.getState().settings,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),

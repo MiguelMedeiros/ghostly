@@ -9,7 +9,7 @@ import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, settingsOf, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -300,7 +300,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "profile.get"(ctx) {
-    const { settings } = state(ctx);
+    const settings = settingsOf(ctx);
     return { profile: ctx.runtime.paths.name, name: settings.nick || null, shareProfile: settings.shareProfile !== false, picture: !!settings.avatar, online: settings.online };
   },
   async "profile.set"(ctx, params) {
@@ -314,7 +314,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "settings.get"(ctx, params) {
-    return redactSettings(settingsInEffect(state(ctx).settings), bool(params, "showSecret"));
+    return redactSettings(settingsInEffect(settingsOf(ctx)), bool(params, "showSecret"));
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
@@ -351,7 +351,7 @@ const METHODS: Record<string, Method> = {
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
-    return { ...redactSettings(settingsInEffect(state(ctx).settings)), ...(warning ? { warning } : {}) };
+    return { ...redactSettings(settingsInEffect(settingsOf(ctx))), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
