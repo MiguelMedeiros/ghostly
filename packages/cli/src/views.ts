@@ -328,7 +328,10 @@ export function groupJson(group: GroupView, showSecret = false) {
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),
-    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
+    // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
+    // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
+    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
+      ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
     // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
     ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),

@@ -236,6 +236,19 @@ describe("an invitation not yet joined", () => {
   });
 });
 
+describe("an invitation that will not go on by itself", () => {
+  it("says a link join nobody answered and an invitation taken back, which read as a live invitation", () => {
+    const invited = (invitation: Record<string, unknown>) => ({ ...group, status: undefined, isAdmin: false, members: [], canSend: false, entryLink: undefined,
+      invitation: { linkId: "l1", contact: "", admin: "anakey", members: 2, accepted: false, ...invitation } }) as unknown as GroupView;
+    expect(groupJson(invited({ accepted: true, viaLink: true, stage: "knocked", unanswered: true })).invitation)
+      .toEqual({ chat: "l1", accepted: true, viaLink: true, stage: "knocked", unanswered: true });
+    expect(groupJson(invited({ linkId: "chat-ana", takenBack: true })).invitation)
+      .toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null, takenBack: true });
+    // One still going on is as before, with neither.
+    expect(groupJson(invited({ linkId: "chat-ana" })).invitation).toEqual({ chat: "chat-ana", accepted: false, viaLink: false, stage: null });
+  });
+});
+
 describe("other groups under the same id", () => {
   it("are shown beside the group held, a link hidden unless asked for", () => {
     expect(groupJson(group)).not.toHaveProperty("others");
