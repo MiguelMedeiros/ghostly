@@ -278,9 +278,17 @@ export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoD
  */
 const LIVE_ONLY: ReadonlySet<string> = new Set(["chat.typing", "group.typing"]);
 
-/** Whether a one-shot for this call opens the profile offline: a read, a change that stays on this device, or typing. */
+/**
+ * Done only by a daemon (a call placed, a contact's app opened on a port, a served app open in a chat): a one-shot
+ * refuses them whatever the network says. Online, it said "start `ghostly daemon --detach`" only once its leave packet
+ * was taken: 3.4 s with a relay that takes 1.5 s, 10 s with one that does not answer. `call answer` and `call hangup`
+ * stay online: a call may ring while a one-shot runs, and be declined.
+ */
+const DAEMON_ONLY: ReadonlySet<string> = new Set(["call.start", "service.open", "app.open", "app.close", "app.send"]);
+
+/** Whether a one-shot for this call opens the profile offline: a read, a change that stays on this device, typing, or what only a daemon does. */
 export function offlineCall(method: string, params: Record<string, unknown>): boolean {
-  return readOnly(method, params) || LOCAL_WRITES.has(method) || (LIVE_ONLY.has(method) && params.for === undefined);
+  return readOnly(method, params) || LOCAL_WRITES.has(method) || DAEMON_ONLY.has(method) || (LIVE_ONLY.has(method) && params.for === undefined);
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
