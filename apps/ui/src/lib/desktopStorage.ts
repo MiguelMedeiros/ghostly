@@ -74,9 +74,9 @@ export function useDesktopStorage(desktop: boolean, local: number): DesktopStora
   useEffect(() => {
     if (!desktop) return;
     let live = true;
-    const read = () => void readDesktopStorage(local).then((read) => { if (live) setStorage(read); });
+    // Opened once a read went: Settings sets `local` from its first 0 as it opens, before any, and that is no deletion.
+    const read = () => { opened.current = true; void readDesktopStorage(local).then((read) => { if (live) setStorage(read); }); };
     const timers = (opened.current ? RECOUNT_AFTER_MS : [0]).map((ms) => setTimeout(read, ms));
-    opened.current = true;
     return () => { live = false; timers.forEach(clearTimeout); };
   }, [desktop, local]);
   return desktop ? storage : null;
