@@ -358,16 +358,20 @@ export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; 
 
 /** Rows `unmark` reads at a time from the newest back: the marks it moves back are almost always among the last few. */
 export const UNMARK_PAGE = 64;
+/** Pages `unmark` reads before it reads the rest whole: page after page cost 6 times the whole read on the CLI's store. */
+export const UNMARK_PAGES = 3;
 
 /**
  * `newestMarked` of a group's rows without `skip`, for the marks in `want` only: read a page at a time from the newest
  * back until each is found, where the whole history cost ~20 ms per 1,000 rows on each member's daemon for every delete.
- * A store without pages reads it whole.
+ * A mark not found in `UNMARK_PAGES` (the only "@" taken back, a member's line far back) reads the history whole, once:
+ * paging on cost 0.9 s against 0.15 s at 20,000 rows. A store without pages reads it whole.
  */
 export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "getMessagePage">, linkId: string, skip: string, want: { last: boolean; peer: boolean; mention: boolean }): Promise<ReturnType<typeof newestMarked>> {
-  if (!store.getMessagePage) return newestMarked((await store.getMessages(linkId)).filter(m => m.id !== skip));
+  const whole = async () => newestMarked((await store.getMessages(linkId)).filter(m => m.id !== skip));
+  if (!store.getMessagePage) return whole();
   const found: ReturnType<typeof newestMarked> = {};
-  for (let before: { timestamp: number; id: string } | undefined; ;) {
+  for (let pages = 1, before: { timestamp: number; id: string } | undefined; ; pages++) {
     const page = await store.getMessagePage(linkId, { limit: UNMARK_PAGE, before });
     for (const m of [...page.messages].reverse()) {
       if (m.id === skip) continue;
@@ -376,6 +380,7 @@ export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "ge
     }
     const oldest = page.messages[0];
     if (!page.more || !oldest || ((!want.last || found.last) && (!want.peer || found.peer) && (!want.mention || found.mention))) return found;
+    if (pages >= UNMARK_PAGES) return whole();
     before = { timestamp: oldest.timestamp, id: oldest.id };
   }
 }

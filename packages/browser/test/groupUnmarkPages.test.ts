@@ -51,6 +51,28 @@ describe("a group's newest line deleted for everyone", { timeout: 120_000 }, () 
     expect(paged).toBeLessThan(whole);
   });
 
+  it("reads the history whole once when a mark's line is not on the newest pages, not a page at a time", async () => {
+    // A busy group with my lines alone but for a member's first one, and its only mention the newest: deleted, or edited
+    // so the mention goes, its marks go back past every page. Page after page cost 6 times the whole read on the CLI's
+    // store (0.9 s against 0.15 s at 20,000 rows).
+    const rows: StoredMessage[] = Array.from({ length: 1_000 }, (_, i) => ({ linkId: LINK, id: `m${String(i).padStart(5, "0")}`, text: `line ${i}`, sender: i === 3 || i === 999 ? "bob" : "me", timestamp: 1_000 + i, via: "datalink", ...(i === 999 && { mentioned: true }) }));
+    for (const m of rows) await db.putMessage(m);
+    for (const mentionOnly of [false, true]) {
+      const reads = { pages: 0, whole: 0 };
+      const counted = {
+        getMessages: (linkId: string) => { reads.whole++; return db.getMessages(linkId); },
+        getMessagePage: (linkId: string, page: Parameters<typeof db.getMessagePage>[1]) => { reads.pages++; return db.getMessagePage(linkId, page); },
+      };
+      const marks = fresh(), viaWhole = fresh();
+      groups.loadMarks(marks, { id: GROUP }, rows);
+      groups.loadMarks(viaWhole, { id: GROUP }, rows);
+      await groups.unmark(marks, undefined, GROUP, counted, rows[999]!, mentionOnly);
+      await groups.unmark(viaWhole, undefined, GROUP, { getMessages: linkId => db.getMessages(linkId) }, rows[999]!, mentionOnly);
+      expect(marks).toEqual(viaWhole);
+      expect(reads).toEqual({ pages: groups.UNMARK_PAGES, whole: 1 });
+    }
+  });
+
   it("puts back the marks the whole history says, for any line deleted (seeded fuzz)", async () => {
     const next = random(11);
     const rows: StoredMessage[] = [];
