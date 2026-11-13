@@ -551,8 +551,8 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
-  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
+  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -858,7 +858,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
       // The folder it goes in, as the backup checks it (backup.ts): a missing one is named before the profile opens.
       if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${dirname(path)}`);
-      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: await backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
@@ -872,7 +872,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
-      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
+      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : await backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
       if (parsed.options.use) selectProfile(g.home, name);
       // Whether --use made it the current profile, as profile create says it.
       print({ restored: name, folder: paths.dir, protection, current: currentProfile(g.home) === name });
@@ -912,17 +912,20 @@ const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from 
 /**
  * The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). The
  * file is said as every other file the CLI reads: "" names none, a folder is named, and an empty one is called that,
- * not "comes from --passphrase-file" to someone who gave it.
+ * not "comes from --passphrase-file" to someone who gave it. "-" is stdin, as for every other secret the CLI takes (a
+ * pipe from a password manager); a terminal is refused, as it would show the passphrase as it is typed.
  */
-function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
+async function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): Promise<string> {
   if (typeof file !== "string") {
     const value = process.env.GHOSTLY_BACKUP_PASSPHRASE;
     if (!value) throw new CliError("usage", missing);
     return value;
   }
+  if (file === "-" && process.stdin.isTTY) throw new CliError("usage", "--passphrase-file - reads stdin: pipe the passphrase in (… | ghostly profile …), or name a file");
   let value: string;
-  try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
-  if (!value) throw new CliError("bad_request", `${file} is empty: it holds the backup's passphrase`);
+  if (file === "-") value = (await readStdin()).replace(/\r?\n$/, "");
+  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  if (!value) throw new CliError("bad_request", `${file === "-" ? "Stdin" : file} is empty: it holds the backup's passphrase`);
   return value;
 }
 
