@@ -58,6 +58,26 @@ describe("identity signers on Node", () => {
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
 
+  // A link that is not a bunker:// URL is the user's mistake: it ended as `engine`, a Ghostly failure to a script.
+  it("refuses a malformed bunker link as a bad request naming the field, before the signer runs", async () => {
+    const { ctx, node } = fake();
+    const signers = [["nostr", "nip46", {}], ["domain", "nip05-nip46", { domain: "example.com" }]] as const;
+    for (const [provider, id, fields] of signers) {
+      const signer = IDENTITY_PROVIDERS.find((p) => p.id === provider)!.signers.find((s) => s.id === id) as InAppSigner<unknown>;
+      const run = vi.spyOn(signer, "run");
+      try {
+        await expect(callApi(ctx, "identity.add", { provider, signer: id, fields: { ...fields, bunker: "not-a-link" } })).rejects.toMatchObject({
+          code: "bad_request", message: "bunker (Signer connection link): Enter a bunker:// connection URL from your signer",
+        });
+        await expect(callApi(ctx, "identity.add", { provider, signer: id, fields: { ...fields, bunker: "bunker://x?secret=s3cret" } })).rejects.toMatchObject({
+          code: "bad_request", message: "bunker (Signer connection link): Invalid bunker connection URL",
+        });
+        expect(run).not.toHaveBeenCalled();
+      } finally { run.mockRestore(); }
+    }
+    expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
+
   it("a signer named that needs the app's page is refused, naming the one that runs here", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "identity.add", { provider: "nostr", signer: "nip07" })).rejects.toMatchObject({
@@ -108,7 +128,7 @@ describe("identity signers on Node", () => {
       throw new Error("stopped here");
     });
     try {
-      await expect(callApi(ctx, "identity.add", { provider: "nostr", fields: { bunker: "bunker://x" } })).rejects.toThrow("stopped here");
+      await expect(callApi(ctx, "identity.add", { provider: "nostr", fields: { bunker: `bunker://${"a".repeat(64)}?relay=wss://relay.test` } })).rejects.toThrow("stopped here");
     } finally { run.mockRestore(); }
     expect(live.filter((e) => e.type === "identity.approval").map((e) => e.url ?? e.qr)).toEqual(["https://bunker.test/auth?secret=s3cret", "pubkyauth://signin?secret=s3cret"]);
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
