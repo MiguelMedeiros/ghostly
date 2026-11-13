@@ -208,6 +208,24 @@ it("the files profile commands read are named as every other file: a folder, a p
   expect(error(await ghostly(["--home", dir, "identity", "complete", "draft", "--evidence-file", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
 });
 
+// "-" was read as a file of that name ("No such file or folder: <cwd>/-"), where every other secret the CLI takes reads
+// stdin for it: a pipe from a password manager keeps the passphrase off disk and out of the environment.
+it("--passphrase-file - reads the passphrase from stdin, for backup and restore", async () => {
+  const dir = home("backup-stdin");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Piped bot"]));
+  const file = join(dir, "piped.ghostly-backup"), pass = `${PASS.GHOSTLY_BACKUP_PASSPHRASE}\n`;
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", file, "--passphrase-file", "-"], { env: NO_PASS, input: pass }))).toMatchObject({ path: file, protection: "passphrase" });
+  // Sealed with the piped passphrase, its line end dropped: the one in the environment opens it.
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "env-copy"], { env: PASS }))).toMatchObject({ restored: "env-copy" });
+  error(await ghostly(["--home", dir, "profile", "restore", file, "wrong", "--passphrase-file", "-"], { env: NO_PASS, input: "not the passphrase\n" }), "refused", 1);
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "copy", "--passphrase-file", "-"], { env: NO_PASS, input: pass }))).toMatchObject({ restored: "copy", protection: "passphrase" });
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ name: "Piped bot" });
+  // Nothing on stdin: said in stdin's words, not a file's.
+  const empty = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "none.ghostly-backup"), "--passphrase-file", "-"], { env: NO_PASS, input: "" }), "bad_request", 1);
+  expect(empty.message).toBe("Stdin is empty: it holds the backup's passphrase");
+  expect(existsSync(join(dir, "none.ghostly-backup"))).toBe(false);
+});
+
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
 // profile that was listed and opened, with the keys of the original and a file cut short.
 it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {
