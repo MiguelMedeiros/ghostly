@@ -7,6 +7,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { reportAppFrames } from "../src/appEvents";
 import type { ServedApp } from "../src/appServe";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.api
 
 /** A served app in a chat, over a fake engine: what `app open` and `app close` ask of it, and what they refuse first. */
@@ -22,7 +23,7 @@ function fake({ mode = "daemon", apps = true, served = [CHESS] }: { mode?: strin
   dirs.push(dir);
   writeFileSync(join(dir, "apps.json"), JSON.stringify(served));
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [] }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [] }) as unknown as EngineState,
     appId: ({ linkId, ref }: { linkId: string; ref: string }) => ({ app: `id:${linkId}:${ref.split("/")[1]}` }),
     appOpen: vi.fn(async () => ({ app: "id" })),
     appClose: vi.fn(),
