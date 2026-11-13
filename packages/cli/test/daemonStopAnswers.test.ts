@@ -24,6 +24,14 @@ vi.mock("../src/api", async () => {
   };
 });
 
+/** Whether the daemon's socket was still there each time its secret was removed. */
+const removals = vi.hoisted(() => ({ socket: "", listening: [] as boolean[] }));
+vi.mock("../src/daemonProof", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/daemonProof")>();
+  const { existsSync } = await import("node:fs");
+  return { ...real, removeDaemonSecret: (dir: string) => { removals.listening.push(existsSync(removals.socket)); real.removeDaemonSecret(dir); } };
+});
+
 const root = mkdtempSync(join(tmpdir(), "gh-stop-answers-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -50,6 +58,18 @@ describe.skipIf(process.platform === "win32")("a daemon that stops while a call 
     expect(failure.code).toBe("timeout");
     expect(failure.details).toEqual({ messageId: "me_1", delivery: "waiting", reason: "daemon-stopped" });
     expect(failure.message).toBe("The daemon stopped before the wait ended: the message is waiting and goes by itself once this profile is online again");
+  });
+
+  it("takes no connection once its secret is gone: a read that found it gone and asked again is not dropped as it stops", async () => {
+    const address = profileDir("secret-last");
+    const ctx = { runtime: { paths: address }, hub: { onEvent: () => () => {} }, mode: "daemon" };
+    const served = await serve({ ctx } as unknown as Host);
+    removals.socket = address.socket;
+    removals.listening.length = 0;
+    await served.close();
+    // Before: the secret went first. A `chat list` whose hello's answer it read in between found it gone and asked
+    // again on the socket, still listening; the close then ended that connection too: "went away …, twice".
+    expect(removals.listening).toEqual([false]);
   });
 
   /** A daemon that proves itself, then goes away (a crash, SIGKILL) as soon as it reads `method`, never answering it. */
