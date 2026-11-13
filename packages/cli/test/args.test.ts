@@ -323,6 +323,13 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
     // `chat rename <chat> ""` gives the chat back the contact's name, by design.
     expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    expect(positionals(COMMANDS["chat rename"], ["abc"])).toEqual({ chat: "abc", name: undefined });
+    // So the usage line shows a `name...?` that may be left out as optional: `chat rename <chat> <name...>` read as required.
+    const shownRequired = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const last = command.args?.at(-1);
+      return last?.endsWith("...?") && command.usage.split(/\s+/).includes(`<${last.slice(0, -1)}>`) ? [name] : [];
+    });
+    expect(shownRequired).toEqual([]);
     // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
     const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
       // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
