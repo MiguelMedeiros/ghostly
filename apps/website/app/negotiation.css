@@ -68,6 +68,23 @@
   border-color: var(--cyan);
   color: var(--cyan);
 }
+/* Forced colors replace the tint and the cyan that mark the scenario shown: it takes the system's selection colours. */
+@media (forced-colors: active) {
+  .ng-tab[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    outline-color: CanvasText;
+  }
+  .ng-tab[aria-pressed="true"] .ng-tab-n {
+    border-color: HighlightText;
+    color: HighlightText;
+  }
+  .ng-tab[aria-pressed="true"] .ng-tab-bar {
+    background: HighlightText;
+  }
+}
 .ng-tabs-current {
   display: none;
 }
