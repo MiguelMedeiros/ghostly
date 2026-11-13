@@ -531,7 +531,8 @@ describe("a contact's answer on its way to the services worker", () => {
   it("sends the worker no more than a MiB past what the app's frame read: an answer it leaves unread stays on the link, which lets it go", async () => {
     const { link, cancel, done, feed, worker } = await flowing(false);
     feed(16 * 1024 * 1024);
-    await vi.waitFor(() => expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 })));
+    // The opener took the first MiB off the link within the first `unreadStallMs`: the link lets go at the end of the next.
+    await vi.waitFor(() => expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 })), { timeout: 3 * LIMITS.unreadStallMs });
     expect(worker()).toBeGreaterThanOrEqual(ANSWER_AHEAD_BYTES);
     expect(worker()).toBeLessThanOrEqual(ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
     cancel();
@@ -547,6 +548,15 @@ describe("a contact's answer on its way to the services worker", () => {
     }
     await done;
     expect(worker()).toBe(16 * step);
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
+  });
+
+  it("sends the whole answer to a frame that reads it, though the link hands it over faster than the frame reads", async () => {
+    const { link, replies, done, feed, worker } = await flowing(true);
+    feed(16 * 1024 * 1024, true);
+    await done;
+    expect(worker()).toBe(16 * 1024 * 1024);
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
   });
