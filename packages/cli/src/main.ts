@@ -210,9 +210,10 @@ const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
- * chats unstarted (`deferChats`); the groups start, and their edges are never deferred. Started, each saved chat put its
- * records and its leave packet on the relays: with 12 invites saved, one `group send` asked the relay 32 times (3 with
- * none), its whole minute, and a text to an away contact, or the next one-shot, waited behind them.
+ * chats and the other groups' edges unstarted (`deferChats`), and starts the group's own (`startNamedChats`). Started,
+ * each saved chat put its records and its leave packet on the relays: with 12 invites saved, one `group send` asked the
+ * relay 32 times (3 with none), its whole minute, and a text to an away contact, or the next one-shot, waited behind
+ * them. Each other group's edges did the same: with six more groups shared with one member, 31 to 47 times.
  */
 export function oneGroupOnly(method: string): boolean {
   return GROUP_EDGES_ONLY.has(method);
