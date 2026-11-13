@@ -24,13 +24,19 @@ function stateWords(t: Translate, state: BadgeState, named: string): string {
   }
 }
 
-/** How a subject is looked up, said before the tap, and whether it can run on this device alone. */
-function lookupOf(t: Translate, provider: "pubky" | "did", subject: string): { offline: boolean; where: string } {
+/**
+ * How a subject is looked up, said before the tap, and whether it can run on this device alone. `hidden`: none at all,
+ * a did:web someone else chose with Hide my IP on (its server would learn this device's address, as a contact's
+ * picture link's would). The other lookups ask only this device or fixed relays.
+ */
+function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: string } {
   if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: PUBKY_RELAYS.map(host).join(", ") }) };
   const { method, id } = parseDid(subject);
   if (method === "key" || method === "jwk") return { offline: true, where: t("chat.entity.lookupLocal") };
   if (method === "dht") return { offline: false, where: t("chat.entity.lookupDht") };
-  return { offline: false, where: t("chat.entity.lookupWeb", { host: id.split(":")[0].replace(/%3a/i, ":") }) };
+  const server = id.split(":")[0].replace(/%3a/i, ":");
+  if (hideIp) return { offline: false, hidden: true, where: t("chat.entity.lookupWebHiddenIp", { host: server }) };
+  return { offline: false, where: t("chat.entity.lookupWeb", { host: server }) };
 }
 
 type Lookup = { status: "idle" } | { status: "loading" } | { status: "ok"; facts: readonly { label: string; value: string }[] } | { status: "error"; error: string };
@@ -39,13 +45,15 @@ type Lookup = { status: "idle" } | { status: "loading" } | { status: "ok"; facts
  * A Pubky key (`pubky://…`, `pk:…`) or a DID in a message: the provider's mark, the short subject, and a badge from
  * what the chats already know (a contact's verified proof of it, or yours). Resolving it (a DID document, a Pubky
  * key's homeserver) runs on a tap, or by itself as soon as the card is visible when that needs no network
- * (did:key, did:jwk). Resolving shows what the identifier is; only a proof ties it to a person.
+ * (did:key, did:jwk). Resolving shows what the identifier is; only a proof ties it to a person. `othersChoice`: someone
+ * else wrote it (a contact's message, or one I forwarded), so Hide my IP keeps its did:web server uncontacted.
  */
-export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider: "pubky" | "did"; subject: string; peerPubKey?: string }) {
+export function IdentityEntityCard({ provider, subject, peerPubKey, othersChoice }: { provider: "pubky" | "did"; subject: string; peerPubKey?: string; othersChoice: boolean }) {
   // Its badge only: the engine sends its whole state anew on every change.
   const standing = useEngineValue(state => identityStanding(state, provider, subject, peerPubKey));
   const t = useT();
-  const { offline, where } = lookupOf(t, provider, subject);
+  const relayOnly = useEngineValue(state => state?.settings.relayOnly === true);
+  const { offline, hidden, where } = lookupOf(t, provider, subject, relayOnly && othersChoice);
   const [lookup, setLookup] = useState<Lookup>({ status: "idle" });
   const controller = useRef<AbortController | null>(null);
   const card = useRef<HTMLDivElement>(null);
@@ -105,7 +113,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
         <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-identity-where">
           {where} {standing.kind === "none" ? t("chat.entity.resolveNoteNone") : t("chat.entity.resolveNote")}
         </p>
-        {!(offline && lookup.status === "ok") && (
+        {!hidden && !(offline && lookup.status === "ok") && (
           <button type="button" data-testid="entity-identity-resolve" disabled={lookup.status === "loading"} className={cardQuiet} onClick={() => void resolve()}>
             {lookup.status === "loading" ? t("chat.entity.lookingUp") : lookup.status === "idle" ? t("chat.entity.lookUp") : t("chat.entity.lookUpAgain")}
           </button>

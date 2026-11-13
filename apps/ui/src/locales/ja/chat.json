@@ -114,6 +114,7 @@
     "lookupLocal": "この端末で確認: 鍵そのものが識別子です。",
     "lookupPubky": "調べると Pubky の Pkarr リレー（{{relays}}）に問い合わせます。リレーにはあなたの IP アドレスとこの鍵が伝わります。",
     "lookupWeb": "調べると DNS-over-HTTPS リゾルバに {{host}} を問い合わせ、そこから did.json をダウンロードします。そのサーバーにはあなたの IP アドレスが伝わります。",
+    "lookupWebHiddenIp": "IPを隠す設定がオンのため、相手が選んだサーバー {{host}} には接続しません。",
     "muted": "Nostr のミュートリストにより非表示です。",
     "nip05": "（NIP-05、本人の記載どおり、未確認）",
     "noDids": "このアプリは DID を解決できません",
