@@ -1,6 +1,7 @@
 import { createSocket } from "node:dgram";
 import { createServer } from "node:http";
 import { guardViewerAnswer, utf8Encode, viewerServicePolicy, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, type HeaderList } from "@ghostly/core";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 import { expect, test } from "../support/fixtures";
 
 /**
@@ -17,6 +18,18 @@ import { expect, test } from "../support/fixtures";
  */
 const PAGE_PORT = 6322;
 const STUN_PORT = 6323;
+
+test.use({
+  launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
+    args: [
+      "--disable-features=WebRtcHideLocalIpsWithMdns",
+      // Chromium gathers ICE only over this machine's other interfaces, never loopback: with none up at that moment (a
+      // network that drops for a second), a connection made then sends no packet, not even to 127.0.0.1.
+      "--allow-loopback-in-peer-connection",
+    ],
+  },
+});
 
 /** What the contact's pages use (`/try.js`): a connection with the constructor a page found, if it found one. */
 const TRY = `async function attempt(find) {
