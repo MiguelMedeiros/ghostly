@@ -1,8 +1,8 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, GROUP_LEFT_RANGE, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLeftKey, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import { withoutFrame } from "../shared/messageChanges";
-import type { GroupLight, GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import type { GroupLight, GroupLive, MessagePage, Settings, StoredGroup, StoredLeftCommunity, StoredLink, StoredMessage, StoredService } from "../shared/types";
 import { openRow, openRows, RowSeals, sealRow } from "./sealedRows";
 
 /**
@@ -444,6 +444,18 @@ export const db = {
   },
   async putGroupLight(groupId: string, light: GroupLight): Promise<void> {
     await committed((await store(STORES.settings, "readwrite")).put(light, groupLightKey(groupId)));
+  },
+  /** The communities I left whose chain my app still follows, their secrets sealed as a group's record's are. */
+  async getGroupsLeft(): Promise<StoredLeftCommunity[]> {
+    const rows = await wrap((await store(STORES.settings, "readonly")).getAll(GROUP_LEFT_RANGE())) as StoredLeftCommunity[];
+    return Promise.all(rows.map(row => openRow(STORES.groups, row)));
+  },
+  async putGroupLeft(left: StoredLeftCommunity): Promise<void> {
+    const row = await sealRow(STORES.groups, left);
+    await committed((await store(STORES.settings, "readwrite")).put(row, groupLeftKey(left.id)));
+  },
+  async deleteGroupLeft(groupId: string): Promise<void> {
+    await committed((await store(STORES.settings, "readwrite")).delete(groupLeftKey(groupId)));
   },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {

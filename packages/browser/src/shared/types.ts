@@ -19,7 +19,7 @@ import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSoc
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineEntry, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
-import type { CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
+import type { CommunityLeaveFrame, CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A reaction to a message not here yet (WISP 401 § Reactions), from `by`, waiting for it until `until`. */
 export interface WaitingReaction { by: string; reaction: WireReaction; until: number }
@@ -313,6 +313,14 @@ export interface GroupLive {
  * was written by an app from before since, and counts. Absent in rows from before it.
  */
 export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; relayEdits?: GroupEditFrame[]; of?: string }
+
+/**
+ * A community I left whose chain my app still follows (`leftBehind`, WISP 903 § Leaving, "A role that reaches a
+ * leave"), in a row of its own (settings store, `groupLeftKey`): a restart within the follow resumes it, so a role that
+ * crossed my leave still goes on. `community`: its session's state as it follows, `kept` naming the secret of the
+ * epoch I left in among its secrets; `frame`: my leave; `heard`: whose leaves I heard since. Gone once the follow ends.
+ */
+export interface StoredLeftCommunity { id: string; community: CommunityState; frame: CommunityLeaveFrame; since: number; heard: string[]; kept?: string }
 
 export interface GroupMemberView {
   key: string;

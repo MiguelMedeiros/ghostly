@@ -339,6 +339,9 @@ export const GROUP_LIVE_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLiveKe
 /** A private group's pin and deletions for everyone, while its record is behind on them (`GroupLight`): the profile's too. */
 export const groupLightKey = (groupId: string): string => `groupLight:${groupId}`;
 export const GROUP_LIGHT_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLightKey(""), `${groupLightKey("")}￿`);
+/** A community I left whose chain my app still follows (`StoredLeftCommunity`): the profile's too. */
+export const groupLeftKey = (groupId: string): string => `groupLeft:${groupId}`;
+export const GROUP_LEFT_RANGE = (): IDBKeyRange => IDBKeyRange.bound(groupLeftKey(""), `${groupLeftKey("")}￿`);
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -364,6 +367,7 @@ export async function clearProfileStores(): Promise<void> {
     for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
     settings.delete(GROUP_LIVE_RANGE());
     settings.delete(GROUP_LIGHT_RANGE());
+    settings.delete(GROUP_LEFT_RANGE());
     const read = settings.get("settings");
     read.onsuccess = () => {
       const record = read.result as Record<string, unknown> | undefined;
