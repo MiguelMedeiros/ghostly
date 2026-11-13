@@ -30,6 +30,10 @@
 /* A card that cannot be used here still comes up, greyed, to say why. */
 .deck-card[data-blocked=true]{cursor:not-allowed}
 .deck-card[data-blocked=true] [data-deck=face]{filter:grayscale(.75)}
+/* Forced colors (Windows high contrast) drop a face's gradients, all that paints it, and the cards behind showed
+   through the chosen one: their names written over its own. A face of the system's Canvas hides them again (under
+   .deck, so a face's own `background` shorthand, which resets the colour, does not win). */
+@media(forced-colors:active){.deck [data-deck=face]{background-color:Canvas}}
 
 /* A mouse: the stack. Each button is the strip of its card that shows (stack.ts); the face is the whole card,
    placed from its button. Cards keep their places: the chosen one lifts and comes to the top, the others sink and dim

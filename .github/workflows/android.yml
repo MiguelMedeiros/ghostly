@@ -95,8 +95,10 @@ jobs:
           "$SDKMANAGER" --install "ndk;$NDK_VERSION" >/dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
+      # No dependency's install script runs here (better-sqlite3's downloads a native binary nothing here loads); the
+      # root's own postinstall (the dependency patches, the built-in apps) still runs.
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run postinstall
 
       # The version is the Desktop app's (tauri.conf.json, the repository's); Tauri makes the version code
       # major * 1000000 + minor * 1000 + patch, so each release installs over the last.

@@ -2,7 +2,7 @@ import { STATUS_AVAILABILITIES } from "@ghostly/core";
 import { STATUS_CARD_LIMITS } from "@ghostly/core/statusCards";
 import { CliError } from "../errors";
 import { checkOwnStatus } from "../ownStatus";
-import { type Command, CARD_TIME_FORMS, cardTime, force, here, since, translate } from "./shared";
+import { type Command, CARD_TIME_FORMS, cardTime, force, here, picture, since, translate } from "./shared";
 
 /** `--until 30m`, `2h`, `1d`: that long from now. */
 const DURATION = /^(\d+)(m|h|d)$/;
@@ -34,7 +34,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => {
       if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
       if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
-      return { path: here(a.path || undefined), clear: options.clear === true };
+      return { path: picture(here(a.path || undefined)), clear: options.clear === true };
     },
   },
   "status": { method: "status", usage: "status", summary: "The profile, its chats and whether a daemon runs it" },

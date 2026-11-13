@@ -239,6 +239,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) change().reactions = message.reactions;
+    // A reply's quote as the engine holds it now: one whose original was deleted for everyone keeps its id and loses its
+    // words (WISP 400 § Delete for everyone), and the stored copy here must not keep them.
+    if (previous && message.replyTo && JSON.stringify(previous.replyTo ?? null) !== JSON.stringify(message.replyTo)) change().replyTo = message.replyTo;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
     // A received row the engine gave a place to after this chat had it (one stored, before places were kept, under a
     // time that had not come yet: engine/arrival.ts): its place here follows, with the time its sender said.

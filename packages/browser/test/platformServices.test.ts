@@ -542,6 +542,19 @@ describe("wallet and settings", () => {
     expect(services.wallet.answerTo("ask-2")).toBeNull();
   });
 
+  it("finds the contact's payment of a request of ours only while it is on its way", () => {
+    withLinks();
+    (engine.state as EngineState).payments = {
+      req: { id: "req", kind: "request", direction: "out", state: "pending" },
+      sent: { id: "sent", requestId: "req", kind: "payment", direction: "out", state: "pending" },
+      failed: { id: "failed", requestId: "req", kind: "payment", direction: "in", state: "failed" },
+      theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "pending" },
+    } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toMatchObject({ id: "theirs" });
+    (engine.state as EngineState).payments = { theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "settled" } } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toBeNull();
+  });
+
   it("reads nothing before the first state, and the peer's view after", () => {
     expect(services.isOnline()).toBe(false);
     expect(services.getNetwork()).toBeNull();

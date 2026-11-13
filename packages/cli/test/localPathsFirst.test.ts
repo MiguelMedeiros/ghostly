@@ -1,0 +1,37 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { ghostly, home } from "./support/cli";
+// covers: headless.cli
+
+/**
+ * A path on this machine that is not there, or a folder where a file goes: said before the profile opens, in the API's
+ * words. Before, a one-shot opened the profile and went online first (~1 s on a big profile) to refuse it. This home
+ * has no profile: anything past the check fails as no profile.
+ */
+describe("local paths checked before the profile opens", () => {
+  it("file send, profile picture, group picture and profile backup --out refuse a missing path or a folder first", async () => {
+    const dir = home("local-paths-first");
+    const folder = join(dir, "a-folder"), missing = join(dir, "nodir"), file = join(dir, "a-file");
+    mkdirSync(folder);
+    writeFileSync(file, "x");
+    const cases: [string[], string, string][] = [
+      [["file", "send", "bob", join(missing, "f.txt")], "not_found", `No file ${join(missing, "f.txt")}`],
+      [["file", "send", "bob", folder], "bad_request", `${folder} is not a file`],
+      [["profile", "picture", join(missing, "me.jpg")], "not_found", `No such file or folder: ${join(missing, "me.jpg")}`],
+      [["profile", "picture", folder], "bad_request", `${folder} is a folder: name a file`],
+      [["group", "picture", "Crew", join(missing, "crew.jpg")], "not_found", `No such file or folder: ${join(missing, "crew.jpg")}`],
+      [["group", "picture", "Crew", folder], "bad_request", `${folder} is a folder: name a file`],
+      [["profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${missing}`],
+      [["profile", "backup", "--out", join(missing, "deeper", "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${join(missing, "deeper")}`],
+      [["profile", "backup", "--out", join(file, "x.ghostly-backup"), "--no-passphrase"], "not_found", `No such file or folder: ${file}`],
+    ];
+    const seen = [];
+    for (const [args] of cases) {
+      const result = await ghostly(["--home", dir, ...args], { input: "" });
+      seen.push({ args, code: result.code, json: result.json });
+    }
+    expect(seen).toMatchObject(cases.map(([args, code, message]) => ({ args, code: code === "not_found" ? 3 : 1, json: { error: { code, message } } })));
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+});

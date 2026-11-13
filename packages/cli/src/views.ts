@@ -1,4 +1,4 @@
-import { groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import { groupMemberOfLink, groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import type { GroupPayNote, GroupView, LinkView, MessageFile, PaymentView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
 
@@ -297,12 +297,12 @@ export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, 
  * tells them (`groupPayTwin`): the requester's own request, the request as it came over the edge, a payment answering
  * it. Only for a note whose line is in `notes` (the group's, by note id): a twin of nothing is no twin.
  */
-export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId"> | undefined>>,
-  myKey: string | undefined): Map<string, string> {
+export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId" | "linkId"> | undefined>>,
+  group: Pick<GroupView, "members" | "myKey"> | undefined): Map<string, string> {
   const twins = new Map<string, string>();
   for (const m of messages) {
     if (!m.paymentId || m.groupPay) continue;
-    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), myKey);
+    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), group?.myKey, (linkId) => groupMemberOfLink(group, linkId));
     if (note && notes.has(note)) twins.set(m.id, groupPayLineId(note));
   }
   return twins;
@@ -328,7 +328,10 @@ export function groupJson(group: GroupView, showSecret = false) {
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),
-    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
+    // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
+    // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
+    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
+      ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
     // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
     ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),

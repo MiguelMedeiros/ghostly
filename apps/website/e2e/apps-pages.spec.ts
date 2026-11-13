@@ -331,6 +331,26 @@ test.describe("once the released Ghostly has Apps", () => {
     }
   });
 
+  test("at 320 px a description line, a license and release notes of one long word, as long as the store takes, wrap inside the page", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits (lib/store-core/appBundle.ts): a description of 2000 characters, whose one line may be a
+    // payment address or a link; 128 for a license, 500 for release notes. They ran past the screen's edge, where the
+    // page clips them (overflow-x: clip): a person read a cut-off address.
+    const description = "lnurl1".padEnd(2000, "dp68gurn8ghj7"), license = "LicenseRef-".padEnd(128, "Custom"), notes = "Fixed".padEnd(500, "Synchronizer");
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    await page.locator(".ap-description p").first().evaluate((el, text) => { el.textContent = text; }, description);
+    // Every fact as long as release notes; the license as long as a license.
+    await page.locator(".ap-facts dd").evaluateAll((values, [license, notes]) => {
+      values.forEach((value, i) => { value.textContent = i === 0 ? license : notes; });
+    }, [license, notes]);
+    for (const part of [".ap-description p", ".ap-facts dd"]) {
+      for (const value of await page.locator(part).all()) {
+        const box = (await value.boundingBox())!;
+        expect.soft(box.x + box.width, part).toBeLessThanOrEqual(320);
+      }
+    }
+  });
+
   test("axe finds nothing serious on either page", async ({ page }) => {
     for (const path of ["/apps", `/apps/${CHESS}`, `/apps/${NOTES}`]) {
       await page.goto(LIVE + path);

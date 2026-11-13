@@ -15,7 +15,7 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
-import { forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -90,13 +90,12 @@ await becomeThePeer(peerLock, () => {
   const sharing = openedForShare();
   if (sharing) handShareOver(() => isPeer, draw);
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
-  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it.
+  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
+  // on standby opens none: it refuses it, and the link leaves this address all the same, kept for no one.
   const link = sharing ? null : linkInAddress(window.location.hash);
   if (link) {
-    stopLink = forwardLink(peerLock, link, () => {
-      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
-      draw("linkTaken");
-    }, SHARE_FORWARD_AFTER_MS);
+    const leave = () => history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
+    stopLink = forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); });
   }
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
@@ -122,6 +121,9 @@ if (gate.full) {
   askForShare();
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });
+} else {
+  // On standby nothing takes them: a tab waiting with one drops it rather than keep it in its address.
+  dropLinks(peerLock);
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
 // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppsDialog } from "../../components/apps/ChatAppsDialog";
 import { setAppOpener } from "../../lib/apps/open";
-import { forgetInstalledApps } from "../../lib/apps/installed";
+import { forgetInstalledApps, openAppInChat } from "../../lib/apps/installed";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -143,6 +143,26 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(sent).not.toHaveBeenCalled();
   });
 
+  it("Open again on an app whose opened card did not go out sends it then, and once it went, no second one", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    sent.mockImplementationOnce(() => ({ error: "Contact is not reachable" }) as unknown as { error: null });
+    const { user, onClose } = await dialog();
+    await user.click(screen.getByTestId("chat-app-open"));
+    expect(await screen.findByTestId("chat-apps-error")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    // Still running in this chat: the opener shows it again.
+    opener.mockImplementation(async () => "shown" as never);
+    await waitFor(() => expect(screen.getByTestId("chat-app-open")).toBeEnabled());
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(sent).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+    expect(sent).toHaveBeenCalledTimes(2);
+  });
+
   it("an app that may run shows its tagline", async () => {
     run = { status: "ok" };
     await dialog();
@@ -205,6 +225,21 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
     await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     lists.mockImplementation(() => [installed()]);
+  });
+});
+
+describe("the Apps page's chat picker (openAppInChat)", () => {
+  it("opened again after its opened card failed, the app still running there: the card is sent then, once", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => {});
+    setAppOpener(opener);
+    sent.mockImplementationOnce(() => ({ error: "Contact is not reachable" }) as unknown as { error: null });
+    await expect(openAppInChat(installed(), "link-1")).rejects.toThrow("Contact is not reachable");
+    opener.mockImplementation(async () => "shown" as never);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(2);
+    await openAppInChat(installed(), "link-1");
+    expect(sent).toHaveBeenCalledTimes(2);
   });
 });
 

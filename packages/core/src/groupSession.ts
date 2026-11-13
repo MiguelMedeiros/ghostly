@@ -1030,8 +1030,15 @@ export class GroupSession {
     if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => this.handsOn(f.s));
     if (this.onRows?.length) this.onRows = this.onRows.filter(f => this.handsOn(f.s));
     // An author out of the roster edits nothing any more, but its removals stand: a member away when one was said still
-    // takes it from me (WISP 902 § Edits).
-    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.isRemovalEdit(f));
+    // takes it from me (WISP 902 § Edits). One I carry unread (of an epoch before I was let in) may be one: kept, for the
+    // members of that epoch to tell.
+    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.carriedUnread(f) || this.isRemovalEdit(f));
+  }
+
+  /** An edit of an epoch I was not a member of (let in after it): kept and handed on unread (WISP 902 § Edits, "Carried unread"). */
+  private carriedUnread(frame: GroupEditFrame): boolean {
+    const commit = this.state.chain[frame.e];
+    return !!commit && !rosterHas(commit.m, this.myKey);
   }
 
   /** Whether a kept edit is a removal (WISP 400 § Delete for everyone): its box, under its epoch's key, says `rm`. */
@@ -1869,9 +1876,11 @@ export class GroupSession {
     if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
-    // most members of that epoch reach the author only through whoever is a hub now.
+    // most members of that epoch reach the author only through whoever is a hub now. An author out of the roster: kept
+    // all the same, unread, since it may be a removal (a member hands on only those of a leaver), and handed at catch-up
+    // to the members of that epoch, who tell.
     if (!rosterHas(commit.m, this.myKey)) {
-      if (member && this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
+      if (this.keepEdit(raw)) { this.persistSoon(); if (member) this.took(cleanEdit(raw)); }
       return;
     }
     const secret = this.secret(raw.e);
@@ -2239,7 +2248,8 @@ export class GroupSession {
     // once to each member, counted once sent (`answers`), not here: an answer that takes this one's place before it
     // goes still has them.
     const handed = this.leaversHanded.get(from);
-    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && readable(f) && !handed?.has(editKey(f)));
+    // A hub I count on gets them unread too: it carries them to the members of their epoch, whose only edge it may be.
+    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && (readable(f) || (carrier && !!this.state.chain[f.e])) && !handed?.has(editKey(f)));
     answer.push(...gone.slice(-GROUP_LIMITS.handOnEdits));
     // Or last, those after every message.
     answer.push(...metas.map(m => m.frame));

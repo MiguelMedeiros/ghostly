@@ -105,7 +105,8 @@ export const UNIT_PROJECTS = [
       "{docs/README.md,docs/FEATURES.md,docs/WEB.md,docs/APPS.md,docs/ANDROID.md,docs/wisps/ADAPTER-ROADMAP.md,apps/website/content/*.ts}": ["androidReleased"],
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
-      "packages/cli/package.json": ["npmPublish"],
+      "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
       ".github/security-allowlist.json": ["securityScanAllowlist"],
@@ -280,7 +281,8 @@ export function packageImports(text, packages = KNOWN_PACKAGES) {
       const star = key.indexOf("*");
       if (key === sub) { out.push(stripExt(file)); break; }
       if (star < 0 || sub.length < key.length - 1 || !sub.startsWith(key.slice(0, star)) || !sub.endsWith(key.slice(star + 1))) continue;
-      out.push(stripExt(file.replace("*", stripExt(sub.slice(star, sub.length - (key.length - star - 1))))));
+      const part = stripExt(sub.slice(star, sub.length - (key.length - star - 1)));
+      out.push(stripExt(file.replaceAll("*", () => part)));
       break;
     }
   }

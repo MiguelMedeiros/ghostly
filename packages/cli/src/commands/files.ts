@@ -3,7 +3,7 @@ import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
 import { CliError } from "../errors";
-import { type Command, here, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
+import { type Command, here, localStat, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
 
 /**
  * `--voice [ms]` and `--peaks`: a length and a waveform a voice note takes, or a usage error (exit 2) that names the flag
@@ -22,6 +22,12 @@ function voiceOf(options: Parsed["options"]): { voice?: number | true; peaks?: s
     throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${JSON.stringify(peaks)}`);
   }
   return { voice: voice as number | true, peaks: bars };
+}
+
+/** The file `file send` sends, in the API's words (files.ts) when it is not there or not a file. */
+function sendable(path: string): string {
+  if (!localStat(path, `No file ${path}`).isFile()) throw new CliError("bad_request", `${path} is not a file`);
+  return path;
 }
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -64,7 +70,11 @@ export const commands: Record<string, Command> = {
       timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
       force: { type: "boolean", description: "Send even if --name looks like a seed, a key or ecash" },
     },
-    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply, force: options.force === true, wait: options.wait, timeout: timeout(options, LONG_WAIT_SECONDS) }),
+    // The flags first: a usage error (exit 2) is said before the file is looked at.
+    params: ({ options }, a) => {
+      const voice = voiceOf(options), seconds = timeout(options, LONG_WAIT_SECONDS);
+      return { chat: a.chat, path: sendable(here(a.path)!), name: options.name, mime: options.mime, ...voice, reply: options.reply, force: options.force === true, wait: options.wait, timeout: seconds };
+    },
   },
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",

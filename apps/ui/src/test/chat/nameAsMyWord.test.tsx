@@ -44,6 +44,8 @@ describe("a name that is the app's word for me", () => {
       expect(othersName(` ${name.toUpperCase()}  `)).toBe(`“ ${name.toUpperCase()}  ”`);
     }
     for (const name of ["Voce", "VOCÊ", "you", "Y‍ou", "ｙｏｕ", "انت", "Tu"]) expect(othersName(name)).toBe(`“${name}”`);
+    // A letter of another alphabet that looks the same: Cyrillic о, Greek ο and υ, Cyrillic у and Т, Greek Τ.
+    for (const name of ["Yоu", "Yοu", "Yoυ", "уou", "Тu", "Τu", "Vосê"]) expect(othersName(name)).toBe(`“${name}”`);
     for (const name of ["Youssef", "Your mom", "Alice", "Tu Anh", "Me"]) expect(othersName(name)).toBe(name);
   });
 

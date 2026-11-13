@@ -111,6 +111,35 @@ describe("Remove, on the active device", () => {
     await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual([{ key: PHONE }]));
   });
 
+  it("the checklist before a removal has Back to Remove, not a Done that ends with the device still in the set", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-lost"));
+    expect(screen.queryByTestId("device-lost-done")).toBeNull();
+    await user.click(screen.getByTestId("device-lost-back"));
+    expect(screen.getByTestId("device-remove")).toHaveTextContent("Remove Phone?");
+    expect(engine.callsTo("deviceRemove")).toEqual([]);
+  });
+
+  it("while Removing… runs, × and Escape do nothing, and a refusal is said in the dialog", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    let refuse!: () => void;
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = () => reject(new Error("remove-busy: The profile is moving. Try again after it.")); }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    await screen.findByTestId("device-remove-busy");
+    const dialog = screen.getByTestId("device-remove");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    act(() => { dialog.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.getByTestId("device-remove")).toBe(dialog);
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+  });
+
   it("shows who has not taken the new secret yet, and makes a new device secret on request", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet({ waiting: [{ key: PHONE, name: "Phone" }] }));

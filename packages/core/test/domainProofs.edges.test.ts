@@ -103,11 +103,19 @@ describe('DNS answers', () => {
 describe('DNS queries and TXT data', () => {
   it('encodes each type, and refuses empty or over-long labels', () => {
     for (const [type, code] of [['A', 1], ['CNAME', 5], ['TXT', 16], ['AAAA', 28]] as const)
-      expect([...encodeDnsQuery('example.com.', type).slice(-4)]).toEqual([0, code, 0, 1]);
+      expect([...encodeDnsQuery('example.com.', type).subarray(12, 12 + labels('example.com').length + 4).slice(-4)]).toEqual([0, code, 0, 1]);
     expect(encodeDnsQuery(`${'a'.repeat(63)}.com`, 'TXT')[12]).toBe(63);
     expect(() => encodeDnsQuery(`${'a'.repeat(64)}.com`, 'TXT')).toThrow('Invalid DNS name');
     expect(() => encodeDnsQuery('a..com', 'TXT')).toThrow('Invalid DNS name');
     expect(() => encodeDnsQuery('', 'TXT')).toThrow('Invalid DNS name');
+  });
+
+  it("ends with an EDNS0 OPT record whose Client Subnet option of prefix 0 keeps this device's subnet from the name servers", () => {
+    const q = encodeDnsQuery('example.com', 'A'), u16At = (i: number) => (q[i] << 8) | q[i + 1];
+    expect(u16At(10)).toBe(1); // ARCOUNT
+    const question = 12 + labels('example.com').length + 4;
+    // Root owner, type OPT, 1232-byte payload, no extended rcode/flags, then option 8 (ECS): family 1, source 0, scope 0, no address.
+    expect([...q.subarray(question)]).toEqual([0, ...u16(41), ...u16(1232), 0, 0, 0, 0, ...u16(8), ...u16(8), ...u16(4), ...u16(1), 0, 0]);
   });
 
   it('joins character-strings, empty ones included, and refuses one that runs past the data', () => {

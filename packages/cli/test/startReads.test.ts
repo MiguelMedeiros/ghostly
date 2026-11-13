@@ -149,4 +149,36 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
       expect(handed!.events, name).toBe(reread!.events);
     }
   });
+
+  it("a file of a message past its newest: only the history's file rows are read to name it, never the whole history", async () => {
+    const paths = profilePaths(join(root, "files"), "files");
+    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+    const { callApi } = await import("../src/api");
+    const file = (id: string) => ({ id, name: "a.txt", size: 9, mime: "text/plain" });
+    const { chat, group } = await run(paths, async (host, { db }) => {
+      const { chat } = (await callApi(host.ctx, "invite.create", { label: "files" })) as { chat: string };
+      const group = (await callApi(host.ctx, "group.create", { name: "files" })) as { group: string };
+      for (let i = 1; i <= LONG; i++) {
+        await db.putMessage({ ...row(chat, i), ...(i === 1 ? { file: file(`${chat}-in-old`) } : {}) });
+        await db.putMessage({ ...row(`group:${group.group}`, i), id: `member_${i}`, member: "ab".repeat(32), ...(i === 1 ? { file: file(`group-${group.group}-old`) } : {}) });
+      }
+      return { chat, group: group.group };
+    });
+    await run(paths, async () => {});
+
+    // Closed in step: the next start reads the newest 100 of each. A contact's file of the oldest message then ends.
+    await run(paths, async (host, { wholeReads }) => {
+      const { GhostlyNode } = await import("@ghostly/browser/engine/node");
+      const groupWhole = vi.spyOn(GhostlyNode.prototype, "groupMessages");
+      try {
+        const done = { state: "done", transferred: 9, size: 9, direction: "in" };
+        const state = host.ctx.runtime.server.node.getState();
+        host.ctx.hub.sink.post({ kind: "state", state: { ...state, transfers: { [`${chat}-in-old`]: done, [`group-${group}-old`]: done } } as typeof state });
+        const ends = () => host.ctx.hub.replay(0).filter((event) => event.type === "file.done").map((event) => [event.file, event.messageId]);
+        await vi.waitFor(() => expect(ends()).toEqual([[`${chat}-in-old`, "peer_1"], [`group-${group}-old`, "member_1"]]));
+        expect(wholeReads(chat)).toBe(0);
+        expect(groupWhole).not.toHaveBeenCalled();
+      } finally { groupWhole.mockRestore(); }
+    });
+  });
 });

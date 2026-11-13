@@ -29,9 +29,13 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
       setError(key ? said(key, t) : problemText(cause, t));
     } finally { setBusy(false); }
   };
-  if (checklist) return <LostChecklist device={device} onClose={onClose} onRemove={() => { setChecklist(false); void remove(); }} />;
+  // While the removal runs × and Escape do nothing, as Rename's: closed, its refusal would be said nowhere and the
+  // device would stay in the set with nothing said.
+  const close = () => { if (!busy) onClose(); };
+  // Before the removal the checklist goes Back to Remove: a Done there ended the flow with the device still in the set.
+  if (checklist) return <LostChecklist device={device} onClose={onClose} onBack={() => setChecklist(false)} onRemove={() => { setChecklist(false); void remove(); }} />;
   return (
-    <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={onClose} testId="device-remove">
+    <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={close} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
@@ -48,9 +52,10 @@ const holdOf = () => !!engine.state?.settings.holdStorage;
 
 /**
  * "Lost or stolen?": the written checklist of phase 1. First the storage keys, when storage is set up (the copy holds
- * them); then one line per wallet the lost device could spend from; then the chats. "Remove <device>" at the end.
+ * them); then one line per wallet the lost device could spend from; then the chats. "Remove <device>" at the end, and
+ * Back to the Remove dialog when it comes before the removal (onBack), else Done.
  */
-export function LostChecklist({ device, onClose, onRemove }: { device?: string; onClose(): void; onRemove?(): void }) {
+export function LostChecklist({ device, onClose, onRemove, onBack }: { device?: string; onClose(): void; onRemove?(): void; onBack?(): void }) {
   const { t } = useI18n();
   const { settings } = useSettings();
   const wallet = useSyncExternalStore(subscribe, walletOf);
@@ -70,7 +75,9 @@ export function LostChecklist({ device, onClose, onRemove }: { device?: string; 
         ].filter((line): line is { testId: string; title: string; hint?: string } => !!line).map((line, index) => <Line key={`${line.testId}:${line.title}`} n={index + 1} {...line} />)}
       </ol>
       {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}><span>{fillNames(t("devices.lost.remove"), { device })}</span></button>}
-      <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>
+      {onBack
+        ? <button type="button" data-testid="device-lost-back" onClick={onBack} className={quietButton}>{t("common.back")}</button>
+        : <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>}
     </DeviceDialog>
   );
 }

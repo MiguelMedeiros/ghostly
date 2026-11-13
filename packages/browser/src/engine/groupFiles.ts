@@ -157,7 +157,8 @@ export interface GroupFileDeps extends GroupFilesHost {
   out?(groupId: string): string | undefined;
   /** An application frame to everyone in a community. */
   sendApp(groupId: string, frame: Record<string, unknown>): Promise<void>;
-  changed(): void;
+  /** A row changed: the pages get a state. `delayMs`: how long it may wait (the engine's own wait when not given). */
+  changed(delayMs?: number): void;
   now(): number;
 }
 
@@ -1342,7 +1343,9 @@ export class GroupFileDesk {
         this.show(kept, { state: "transferring", stage: "verifying", transferred, size, direction: "in" });
         return;
       default:
-        this.show(kept, { state: "transferring", transferred, size, direction: "in" });
+        // Progress waits 250 ms for its state, as a 1:1 file's does (`FileDesk`): within 50 ms of each part, a 64 MiB
+        // file sent the pages 77 states, where the same file in a 1:1 chat sent 18.
+        this.show(kept, { state: "transferring", transferred, size, direction: "in" }, 250);
     }
   }
 
@@ -1404,10 +1407,10 @@ export class GroupFileDesk {
   }
 
   /** A file's row shows `view`; the engine hears of it only when that is not what the row shows already. */
-  private show(kept: Kept, view: FileTransferView): void {
+  private show(kept: Kept, view: FileTransferView, delayMs?: number): void {
     if (sameView(this.deps.transfers.get(kept.id), view)) return;
     this.deps.transfers.set(kept.id, view);
-    this.deps.changed();
+    this.deps.changed(delayMs);
   }
 }
 

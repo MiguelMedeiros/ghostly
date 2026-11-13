@@ -298,3 +298,75 @@ test("forced colors keep the connection panel's Fallback switch drawn, on and of
   const dot = await drawn(ring.locator("span"));
   expect.soft(dot.bg, "the chosen transport's dot against its ring").not.toBe(dot.around);
 });
+
+/**
+ * A group with something unread has a dot on its row and, with the list folded, on the rail: a background alone, which
+ * forced colors replaced with the page's, so the group looked read. The dot shows in forced colors, dark and light,
+ * muted (grey) or not, and its normal colours are what they were.
+ */
+test("forced colors keep a group's unread dot drawn, in the list and on the rail, muted or not", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:chats.list.rows", "@feature:chats.list.rail", "@feature:chats.mute"] }, async ({ peer, relay }) => {
+  test.setTimeout(6 * 60_000);
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(await relay.listen(), "Dot Bot");
+    const { page } = await peer("group-dot");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const group = (await bot.run("group", "create", "Night shift", "--mesh")).group as string;
+    const { link } = await bot.run("group", "link", group) as { link: string };
+    const code = link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link;
+    await page.goto(`/#/join/${code}`);
+    await expect(page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 150_000 });
+    type Shown = { status?: string; members?: { me: boolean; online: boolean }[] };
+    await expect.poll(async () => {
+      const shown = await bot.run("group", "show", group) as Shown;
+      return shown.status === "active" && shown.members?.length === 2 && shown.members.every((m) => m.me || m.online);
+    }, { timeout: 150_000, intervals: [2_000] }).toBe(true);
+
+    const row = page.getByTestId("sidebar").getByTestId("group-row").filter({ hasText: "Night shift" });
+    const rowDot = row.getByTestId("group-row-unread");
+    const railDot = page.getByTestId("chat-rail").getByTestId("chat-rail-group").getByTestId("chat-rail-unread");
+    /** The dot against what it sits on, in both forced themes; back in normal colours, as it was. */
+    async function shows(name: string, dot: Locator) {
+      await expect(dot, name).toBeVisible({ timeout: 120_000 });
+      await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+      const normal = await look(dot);
+      for (const colorScheme of ["dark", "light"] as const) {
+        await page.emulateMedia({ forcedColors: "active", colorScheme });
+        const forced = await look(dot);
+        expect.soft(forced.bg, `${name}, forced colors ${colorScheme}: the dot against what it sits on`).not.toBe(forced.around);
+      }
+      await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+      expect.soft(await look(dot), `${name}: normal colours as before`).toEqual(normal);
+    }
+
+    // Away from the group, the bot says something: its dot, in the list and on the rail.
+    await page.goto("/#/");
+    await still(page);
+    await bot.run("group", "send", group, "First shift report", "--wait", "sent", "--timeout", "120");
+    await shows("the list's dot", rowDot);
+    await expect(rowDot).not.toHaveAttribute("data-muted");
+    await page.getByTestId("chat-list-toggle").click();
+    await shows("the rail's dot", railDot);
+    await page.getByTestId("chat-list-toggle").click();
+
+    // Muted, read and then unread again: the grey dot.
+    await row.click();
+    await expect(page.getByTestId("group-chat").getByText("First shift report")).toBeVisible();
+    await page.getByTestId("group-options").click();
+    await page.getByTestId("chat-mute-open").click();
+    await page.getByTestId("mute-menu").getByTestId("mute-forever").click();
+    await expect(page.getByTestId("mute-menu")).toHaveCount(0);
+    await page.goto("/#/");
+    await still(page);
+    await expect(row).toHaveAttribute("data-muted", "true");
+    await bot.run("group", "send", group, "Second shift report", "--wait", "sent", "--timeout", "120");
+    await expect(rowDot).toHaveAttribute("data-muted", "true", { timeout: 120_000 });
+    await shows("the list's muted dot", rowDot);
+    await page.getByTestId("chat-list-toggle").click();
+    await expect(railDot).toHaveAttribute("data-muted", "true");
+    await shows("the rail's muted dot", railDot);
+    await page.screenshot({ path: test.info().outputPath("forced-rail-unread.png") });
+  } finally {
+    await bot.stop();
+  }
+});

@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -71,8 +71,9 @@ export const commands: Record<string, Command> = {
   },
   "chat list": { method: "chat.list", usage: "chat list [--show-secret]", summary: "Chats, newest first (a pending invite code only with --show-secret)", options: showInvite, params: ({ options }) => secret(options) },
   "chat remove": {
-    method: "chat.remove", usage: "chat remove <chat> --yes", summary: "Delete a chat, its keys and history on this device", args: ["chat"],
-    options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { chat }) => ({ chat, yes: options.yes === true }),
+    method: "chat.remove", usage: "chat remove <chat> --yes [--force]", summary: "Delete a chat, its keys and history on this device; refused while a message you deleted for everyone has not reached the contact, unless --force", args: ["chat"],
+    options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
+    params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
   "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
@@ -149,7 +150,7 @@ export const commands: Record<string, Command> = {
   "react": {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove] [--wait none|confirmed] [--timeout s]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" }, ...confirmWait },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: reaction(options, a.emoji), remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

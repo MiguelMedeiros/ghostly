@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
+import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
-import { BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
 import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -87,6 +87,37 @@ describe("the cookies one opened app keeps", () => {
     jar.take("a=; Max-Age=60; Max-Age=0");
     expect(jar.header()).toBe("b=3");
   });
+  it("go only to the paths each was set for, the longer path first, as a browser sends them", () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/", "/login");
+    jar.take("sid=admin; Path=/admin", "/admin/login");
+    // No path of its own: the directory of the address that set it.
+    jar.take("step=2", "/wizard/one?x=1");
+    expect(jar.header("/")).toBe("sid=root");
+    expect(jar.header("/admin/users")).toBe("sid=admin; sid=root");
+    expect(jar.header("/administrator")).toBe("sid=root");
+    expect(jar.header("/wizard/two")).toBe("step=2; sid=root");
+    // Gone at its own path only: the one at / stays.
+    jar.take("sid=; Path=/admin; Max-Age=0", "/admin/logout");
+    expect(jar.header("/admin")).toBe("sid=root");
+  });
+  it("stop going once their Max-Age or Expires has passed, while the app stays open", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-12T12:00:00Z"));
+      const jar = new CookieJar();
+      jar.take("flash=saved; Max-Age=5");
+      jar.take("csrf=t1; Expires=Thu, 12 Nov 2026 12:00:10 GMT");
+      jar.take("sid=abc");
+      expect(jar.header()).toBe("flash=saved; csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:06Z"));
+      expect(jar.header()).toBe("csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:11Z"));
+      expect(jar.header()).toBe("sid=abc");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("hold a bounded number of names", () => {
     const jar = new CookieJar();
     for (let i = 0; i < CookieJar.MAX + 10; i++) jar.take(`c${i}=1`);
@@ -128,6 +159,21 @@ describe("one request from the app, over the contact's link", () => {
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
+  });
+
+  it("sends each request the cookies of its own path, and keeps one an answer sets at that answer's path", async () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/");
+    jar.take("sid=admin; Path=/admin");
+    const cookies: (string | undefined)[] = [];
+    const send = async (request: ClientRequest) => {
+      cookies.push(request.headers?.find(([name]) => name === "cookie")?.[1]);
+      return answer(200, request.path.startsWith("/shop/") ? [["set-cookie", "cart=3"]] : [], []);
+    };
+    for (const path of ["/admin/users?page=2", "/shop/item", "/shop/cart", "/"]) {
+      await serve(recorder().port, { type: "request", method: "GET", path, headers: [], body: null }, send, jar, words);
+    }
+    expect(cookies).toEqual(["sid=admin; sid=root", "sid=root", "cart=3; sid=root", "sid=root"]);
   });
 
   it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
@@ -274,6 +320,50 @@ describe("one request from the app, over the contact's link", () => {
     }
   });
 
+  it("takes every file of a page that asks for more at once than the page sends together: the rest wait their turn, none refused", async () => {
+    // A gallery's images and its modules: Chromium hands the services worker 100 at once (60 images and 40 modules
+    // under one page), well past the requests this page has on the link together.
+    const jar = new CookieJar();
+    const waiting: (() => void)[] = [];
+    let live = 0, most = 0, sent = 0;
+    const send = async (request: ClientRequest) => {
+      sent++;
+      most = Math.max(most, ++live);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      live--;
+      return answer(200, [["content-type", "image/png"]], [request.path]);
+    };
+    const requests = Array.from({ length: 100 }, (_, i) => {
+      const r = recorder();
+      const done = serve(r.port, { type: "request", method: "GET", path: `/img/${i}.png`, headers: [], body: null, destination: "image" }, send, jar, words);
+      return { ...r, done };
+    });
+    // One the page let go of while it waited (the image scrolled away) leaves its turn and never reaches the contact.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    requests[99]!.cancel();
+    while (waiting.length) { waiting.shift()!(); await new Promise((resolve) => setTimeout(resolve, 0)); }
+    await Promise.all(requests.map((r) => r.done));
+    expect(most).toBeLessThanOrEqual(MAX_PENDING_REQUESTS);
+    expect(sent).toBe(99);
+    for (const [i, r] of requests.slice(0, 99).entries()) {
+      expect(r.replies[0]?.type, `/img/${i}.png`).toBe("head");
+      expect(r.replies[r.replies.length - 1]).toEqual({ type: "end" });
+    }
+    expect(requests[99]!.replies.every((r) => r.type === "error")).toBe(true);
+    // Past what may wait in this page too, a request is refused at once, as before.
+    const held: (() => void)[] = [];
+    const stuck = async () => { await new Promise<void>((resolve) => held.push(resolve)); return answer(200, [], []); };
+    const more = Array.from({ length: MAX_PENDING_REQUESTS + MAX_WAITING_REQUESTS + 1 }, () => {
+      const r = recorder();
+      void serve(r.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, stuck, jar, words);
+      return r;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(more.filter((r) => r.replies.length).map((r) => r.replies)).toEqual([[{ type: "error", status: 503, text: "Failed" }]]);
+    for (const r of more) r.cancel();
+    for (const go of held) go();
+  });
+
   it("sends nothing on the link for what is not a request, and says it failed at once: the worker would wait for an answer", async () => {
     // A path past what the page takes (a long query), a method it does not read, a full URL: none reaches the contact,
     // and each is answered now, in the profile's words, never left to the worker's English after HEAD_TIMEOUT_MS.
@@ -404,6 +494,61 @@ describe("a contact's answer on its way to the services worker", () => {
     expect(replies.map((r) => r.type)).toEqual(["head", "chunk", "chunk", "chunk", "end"]);
     expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 }));
     expect(closed()).toBe(true);
+  });
+
+  /** A request the worker says what the frame read of (`flow`), its answer fed off the link by `feed`. */
+  async function flowing(reads: boolean) {
+    const link = linkClient();
+    const { port, replies, cancel } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let taken = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      // Its length before it goes: the send moves its buffer.
+      const length = reply.type === "chunk" ? reply.bytes.byteLength : 0;
+      sent(reply, transfer as Transferable[]);
+      if (reads && reply.type === "chunk") {
+        taken += length;
+        const bytes = taken;
+        setTimeout(() => port.onmessage?.({ data: { type: "read", bytes } } as MessageEvent));
+      }
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/video.mp4", headers: [], body: null, flow: true }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    let fed = 0;
+    const feed = (bytes: number, end = false) => {
+      for (let left = bytes; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) {
+        const n = Math.min(MAX_CHUNK_PAYLOAD_BYTES, left);
+        fed += n;
+        link.chunk(1, new Uint8Array(n), end && left <= MAX_CHUNK_PAYLOAD_BYTES);
+      }
+      return fed;
+    };
+    const worker = () => replies.reduce((n, r) => n + (r.type === "chunk" ? r.bytes.byteLength : 0), 0);
+    return { link, replies, cancel, done, feed, worker };
+  }
+
+  it("sends the worker no more than a MiB past what the app's frame read: an answer it leaves unread stays on the link, which lets it go", async () => {
+    const { link, cancel, done, feed, worker } = await flowing(false);
+    feed(16 * 1024 * 1024);
+    await vi.waitFor(() => expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 })));
+    expect(worker()).toBeGreaterThanOrEqual(ANSWER_AHEAD_BYTES);
+    expect(worker()).toBeLessThanOrEqual(ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
+    cancel();
+    await done;
+  });
+
+  it("sends the whole answer to a frame that reads it", async () => {
+    const { link, replies, done, feed, worker } = await flowing(true);
+    const step = 512 * 1024;
+    for (let i = 1; i <= 16; i++) {
+      const fed = feed(step, i === 16);
+      await vi.waitFor(() => expect(worker()).toBe(fed));
+    }
+    await done;
+    expect(worker()).toBe(16 * step);
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
   });
 });
 
