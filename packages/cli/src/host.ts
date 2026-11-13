@@ -125,10 +125,11 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     close: () => (closing ??= (async () => {
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
-      presence?.stop();
       // The engine hands its state over 50 ms after a change: a one-shot's `chat rename` or `chat remove` returned
       // before that, and its event was never said (nor by the next start, which takes the chats as they are).
+      // Before presence stops: it reads every state, and one after its stop said `active` again with a new timer.
       hub.sink.post({ kind: "state", state: runtime.server.node.getState() });
+      presence?.stop();
       runtime.server.detach(hub.sink);
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
       hub.release();
