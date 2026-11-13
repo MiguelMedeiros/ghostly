@@ -56,6 +56,24 @@ describe("reading it", () => {
     }
   });
 
+  it("still counts again when a long chat's files go only seconds later, after its messages", async () => {
+    vi.useFakeTimers();
+    try {
+      // A chat's files are deleted once its messages are: in the Linux WebView, 100,000 messages took 7.3 s.
+      let onDisk = 6_000_000;
+      registerFileBytes("native", async () => ({ kind: "native", usage: async () => ({ files: onDisk, count: onDisk ? 1 : 0, staged: 0 }) }) as unknown as FileBytes, true);
+      const { result, rerender } = renderHook(({ local }) => useDesktopStorage(true, local), { initialProps: { local: 900 } });
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      rerender({ local: 300 });
+      await act(() => vi.advanceTimersByTimeAsync(7_500));
+      onDisk = 0;
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(result.current?.files?.files).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("goes on without a part that fails or does not exist", async () => {
     Object.defineProperty(navigator, "storage", { configurable: true, value: { estimate: vi.fn(async () => { throw new Error("no"); }) } });
     registerFileBytes("native", async () => ({ kind: "native", usage: async () => { throw new Error("No such space"); } }) as unknown as FileBytes, true);
