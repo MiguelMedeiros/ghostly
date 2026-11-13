@@ -152,6 +152,24 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-vb", path: join(folder, name) })).rejects.toMatchObject({ code: "confirm" });
   });
 
+  it("a second file of one name in --dir is a confirm that names both ways out: --force replaces, --path keeps both", async () => {
+    const folder = join(dir, "same-name");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "report.txt"), "first");
+    writeFileSync(join(folder, "report (2).txt"), "second");
+    // Before, it said only "pass --force", and that replaced the other file with this one.
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
+      code: "confirm",
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${join(folder, "report (3).txt")} (path over the socket) to keep both`,
+    });
+    expect(readFileSync(join(folder, "report.txt"), "utf8")).toBe("first");
+    expect(readdirSync(folder).sort()).toEqual(["report (2).txt", "report.txt"]);
+    // A --path the user named is theirs: replacing it is the one way out there.
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: join(folder, "report.txt") })).rejects.toMatchObject({
+      code: "confirm", message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it`,
+    });
+  });
+
   it("a voice message whose sender claims a time no date can hold is named from its row's time, never NaN", async () => {
     const folder = join(dir, "far");
     mkdirSync(folder);
