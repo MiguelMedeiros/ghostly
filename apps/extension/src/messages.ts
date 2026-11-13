@@ -58,6 +58,11 @@ export interface ViewerPage {
   /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
   failed: string;
   /**
+   * A request whose body has a file or a stream, which a viewer tab cannot send (`services.window.upload`): why, and
+   * where it does go. Absent from a page of an older build, which says `failed` instead.
+   */
+  upload?: string;
+  /**
    * The app's name as the chat listed it when the tab opened: the peer's state no longer has it once the contact took
    * the app back, which is when the tab says so by name (`services.window.unshared`).
    */

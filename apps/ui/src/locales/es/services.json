@@ -49,7 +49,8 @@
     "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
     "unguarded": "Esta página de {{app}} no se puede mostrar aquí: impide que las protecciones de Ghostly se ejecuten en ella. Pide a tu contacto que lo revise.",
     "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea.",
-    "unshared": "{{app}} ya no se comparte contigo."
+    "unshared": "{{app}} ya no se comparte contigo.",
+    "upload": "La app de un contacto no puede recibir archivos desde la extensión del navegador. Para enviar este, abre la app en Ghostly en la web o en el escritorio."
   },
   "yourApps": "Tus apps"
 }

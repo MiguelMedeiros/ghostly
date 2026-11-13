@@ -19,7 +19,7 @@ setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "backgro
 export function viewerPage(app?: string): ViewerPage {
   const { language } = loadSettings();
   const t = translatorFor(language);
-  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), ...(app ? { app } : {}) };
+  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), upload: t("services.window.upload"), ...(app ? { app } : {}) };
 }
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
