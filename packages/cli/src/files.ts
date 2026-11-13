@@ -515,7 +515,14 @@ export const FILE_METHODS: Record<string, Method> = {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${target} (dir over the socket)`);
-      if ((there && !force) || code === "EEXIST") return new CliError("confirm", `${target} exists: pass --force (force: true over the socket) to replace it`);
+      if (!((there && !force) || code === "EEXIST")) return;
+      const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
+      if (path) return new CliError("confirm", replace);
+      // In --dir the name is its sender's: two files of one name are two files. Before, --force was the one way out
+      // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
+      let n = 2;
+      while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
+      return new CliError("confirm", `${replace}, or --path ${stem} (${n})${ext} (path over the socket) to keep both`);
     };
     let target = named;
     for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {
