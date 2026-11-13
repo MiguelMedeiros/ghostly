@@ -189,6 +189,27 @@ describe("an opened service's host and link", () => {
     expect(asked).toBe(2);
   });
 
+  it("on port 80 takes the Host a browser sends for its link, which leaves the port out", async () => {
+    // Port 80 needs privileges on Linux: the server listens on a free port and reports 80, as it would on macOS.
+    const listen = NetServer.prototype.listen;
+    vi.spyOn(NetServer.prototype, "listen").mockImplementationOnce(function (this: NetServer, ...args: unknown[]) {
+      return Reflect.apply(listen, this, [0, ...args.slice(1)]) as NetServer;
+    });
+    vi.spyOn(NetServer.prototype, "address").mockImplementationOnce(() => ({ address: "127.0.0.1", family: "IPv4", port: 80 }));
+    const service = await openServiceServer(async () => answer(200, [], ["hi"]));
+    servers.push(service);
+    vi.restoreAllMocks();
+    const on = { host: `x:${(service.server.address() as AddressInfo).port}` } as OpenedService;
+    const url = new URL(service.url);
+    expect(url.host).toBe(url.hostname);
+    const first = await get(on, url.pathname, { host: url.host });
+    expect(first.status).toBe(303);
+    const cookie = String(first.headers["set-cookie"]).split(";")[0];
+    expect((await get(on, "/", { host: url.host, cookie })).body).toBe("hi");
+    expect((await get(on, "/", { host: `${url.hostname}:80`, cookie })).status).toBe(200);
+    for (const host of ["", "localhost", "other.localhost", `${url.hostname}:81`]) expect((await get(on, "/", { host, cookie })).status).toBe(404);
+  });
+
   it("keeps the service's cookies on its own host: Domain is dropped, and this machine's cookie cannot be set", async () => {
     const seen: ClientRequest[] = [];
     const { service, cookie } = await opened(async (request) => {
