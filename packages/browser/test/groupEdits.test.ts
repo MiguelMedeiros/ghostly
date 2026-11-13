@@ -362,6 +362,19 @@ describe("GroupEdits on its own", () => {
     const edited = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ ...mine(n + i), edit: { seq: 1, at: n + i, history: [] } }));
     const ids = (sent: { edit: GroupEdit }[]) => sent.map(s => s.edit.id);
 
+    it("hears no edit of mine under the member key I held before I was removed and invited back, so those since go at once", async () => {
+      vi.useFakeTimers();
+      // Before, my 40 old edits went first, oldest first: the group refused each, but each took its place in the pace,
+      // and the member heard my 3 edits since only two windows (22 s) later.
+      const before = createIdentity().pubKeyZ32;
+      const old = Array.from({ length: 40 }, (_, i): StoredMessage => ({ linkId: chat, id: `${before}:1:${i}`, text: `old ${i}`, sender: "me", member: before, timestamp: i + 1, via: "datalink", edit: { seq: 1, at: i, history: [] } }));
+      const since = edited(1_000, 3);
+      const { edits, sent } = setup([...old, ...since]);
+      await edits.resend("g1", carol);
+      expect(ids(sent)).toEqual(since.map(m => m.id));
+      edits.stop();
+    });
+
     it("hears every edit of mine it has not heard, oldest first, GROUP_EDIT_RESEND a window", async () => {
       vi.useFakeTimers();
       const messages = edited(0, 2 * GROUP_EDIT_RESEND + 8);
