@@ -29,6 +29,7 @@ import { useFittedNameField } from "../hooks/useGroupNameField";
 import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
+import { incomingShare } from "../lib/incomingShare";
 
 /**
  * Another tab's write the page shows: the registry, a profile's settings (its colour in the list), this profile's own
@@ -110,14 +111,23 @@ export function Profile() {
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
   // opens, with what it holds, a backup first and its name to confirm (WISP 05 § Restoring on the same device).
   const replacing = new URLSearchParams(location.search).get("replace");
+  // A share that came along with the copy waits in its Share to… picker (`takeReplaceStep`): offered once this is done.
+  const shareAfter = useRef(false);
   useEffect(() => {
     if (!replacing) return;
     const original = listProfiles().find((entry) => entry.id === replacing);
-    if (original && original.id && original.id !== currentProfile().id) setDeleting(original);
+    const offered = !!original && !!original.id && original.id !== currentProfile().id;
+    if (offered) { setDeleting(original); shareAfter.current = !!incomingShare(); }
     // Once: a reload, or Back, does not open it again.
-    navigate("/profile", { replace: true });
+    navigate(!offered && incomingShare() ? "/shared" : "/profile", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
   }, [replacing]);
+  const closeDeleting = () => {
+    setDeleting(null);
+    if (!shareAfter.current) return;
+    shareAfter.current = false;
+    if (incomingShare()) navigate("/shared");
+  };
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
@@ -218,7 +228,7 @@ export function Profile() {
           <button data-testid="profile-join-another" onClick={() => openJoinAnother()} className="w-full px-4 py-3 min-h-12 text-start text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("devices.join.another")}</button>
         )}
       </Section>
-      {deleting && <DeleteProfileDialog entry={deleting} onClose={() => setDeleting(null)} />}
+      {deleting && <DeleteProfileDialog entry={deleting} onClose={closeDeleting} />}
     </Page>
   );
 }
