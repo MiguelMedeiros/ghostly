@@ -381,6 +381,13 @@ export function Apps() {
     setDetails(null);
     setGone({ app: details });
   }, [details, installed]);
+  // So does its question of which chat: a chat picked would go there to open an app no longer installed. Not on a read
+  // that failed: it keeps the list from before, without the app just installed (a built-in's Allow and open).
+  useEffect(() => {
+    if (!picking || !installed || installedFailure != null || installed.some((a) => a.ref === picking.app.ref)) return;
+    setPicking(null);
+    setGone({ app: picking.app.ref });
+  }, [picking, installed, installedFailure]);
   // Try again worked: its block went with the button that had the focus, so the focus goes to the section's first
   // control (what was read), else to Add. A read that fails again keeps its block, and Try again keeps the focus.
   const [retried, setRetried] = useState<"installed" | "stores" | null>(null);
