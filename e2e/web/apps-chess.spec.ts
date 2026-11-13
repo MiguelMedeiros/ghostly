@@ -405,7 +405,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
 
   await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
-  await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
+  await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by \u2068${STORE_NAME}\u2069: \u2068Sends your moves to a server\u2069`);
   await expect(details.getByTestId("app-open")).toHaveCount(0);
   await details.getByTestId("app-keep-stopped").click();
   await expect(miniApp(ana.page)).toBeHidden();

@@ -9,6 +9,7 @@ import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { NAME, withName } from "./aroundName";
+import { removedLine } from "./removedLine";
 import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
@@ -61,8 +62,8 @@ type BuiltIn = "carried" | "installed";
  */
 function runLine(run: AppRunStatus, t: Translate): ReactNode {
   if (run.status === "revoked") return run.reason ? t("apps.install.revokedReason", { reason: `⁨${run.reason}⁩` }) : t("apps.install.revoked");
-  // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
-  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
+  // A store's own words, one line each, as on the listing.
+  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} className="block">{removedLine(b.name, b.reason, t)}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
