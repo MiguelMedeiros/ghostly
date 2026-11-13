@@ -39,7 +39,7 @@ export function GroupOthers({ group, act, focusAfter }: { group: GroupView; act:
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="min-w-0"><span className="block font-medium text-text-primary">{t("group.others.title")}</span>{t("group.others.body")}</p>
       <button data-testid="group-others-keep" onClick={() => { answered.current = true; void act(() => engine.call("keepGroup", { groupId: group.id })); }}
-        className={`${button} bg-accent font-semibold text-panel-header hover:bg-accent-hover`}>{t("group.others.keep")}</button>
+        className={`${button} bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText]`}>{t("group.others.keep")}</button>
     </div>
     <ul className="mt-2 space-y-1">
       {others.map(other => {
