@@ -254,6 +254,30 @@ describe("a location card", () => {
     } finally { outside.remove(); }
   });
 
+  it("asks again before loading the map of another place a contact's edit names, and forgets a failed one's line", () => {
+    const at = (text: string, seq?: number) => ({ id: "m15", text, sender: "peer" as const, timestamp: 1_700_000_000_000,
+      ...(seq && { edit: { seq, at: 1_700_000_000_000 + seq, history: [] } }) });
+    const { container, rerender } = renderApp(<MessageBubble message={at(torre)} />);
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // Shown for the Torre de Belém: an edit to another place is not what Show map was pressed for.
+    rerender(<MessageBubble message={at("meet me at geo:48.8584,2.2945", 1)} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+    expect(container.querySelector("img[src*='openstreetmap']")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // The same place again (a typo fixed around it): the map stays as it was asked for.
+    rerender(<MessageBubble message={at("meet me there: geo:48.8584,2.2945", 2)} />);
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // A map that failed to load: its line is not said of the next place, which loads once asked.
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    rerender(<MessageBubble message={at(torre, 3)} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+  });
+
   it("names the map link's site cut at its start, as a preview's address", () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
     renderApp(<MessageBubble message={{ id: "m9", text: "https://www.google.com/maps/place/@38.6916,-9.2160,17z", sender: "peer", timestamp: 1_700_000_000_000 }} />);

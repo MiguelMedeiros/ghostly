@@ -90,7 +90,10 @@
     "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede.",
     "storeKey": "Essa loja é assinada por outra chave.",
     "tooLarge": "Grande demais.",
-    "unlistedVersion": "O link tem uma versão que esta loja ainda não lista."
+    "unlistedVersion": "O link tem uma versão que esta loja ainda não lista.",
+    "updateFilesGone": "Os arquivos da atualização sumiram. O Ghostly os busca de novo na próxima verificação.",
+    "updateGone": "Esta atualização não está mais à espera. A versão instalada é a que aparece acima.",
+    "updateUnlisted": "Esta loja não lista mais esta atualização. O Ghostly vê o que ela lista na próxima verificação."
   },
   "files": {
     "allow": "Permitir",

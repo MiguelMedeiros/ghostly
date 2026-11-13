@@ -246,6 +246,18 @@ describe("updates", () => {
     return { store, v1, v2 };
   }
 
+  it("Update pressed again on the screen of the update another tab installed: that version is installed, nothing refused", async () => {
+    const { store, v1, v2 } = await waiting();
+    const update = () => store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["chat"] });
+    expect(await update()).toMatchObject({ sequence: 2, digest: v2.digest });
+    const again = await update();
+    expect(again).toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat"] });
+    expect(again.pending).toBeUndefined();
+    // Without the version its screen listed, or for another one, no update waits.
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^no-update/);
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 3, added: [] })).rejects.toThrow(/^no-update/);
+  });
+
   it.each([false, true])("Update and Uninstall at once, the update's files gone (Uninstall first: %s): the app stays uninstalled", async (first) => {
     const { store, v1, v2 } = await waiting();
     // A restored profile: the waiting update's files are not on this device.
@@ -384,6 +396,25 @@ describe("updates", () => {
     spy.mockRestore();
     expect(await store.list(), "not back on the new version, with its data gone").toEqual([]);
     expect(await bundleIds()).toEqual([]);
+  });
+
+  it("a newer version the check installs while a waiting update's files are read is kept, not the version before it", async () => {
+    const { store, v1 } = await installed({ sources: [BUNDLE_URL] });
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL], permissions: ["chat", "name"] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // The publisher ships 3, which adds nothing; Update pressed on 2, and the check (another tab) installs 3 meanwhile.
+    const v3 = await bundle({ sequence: 3, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v3.bytes);
+    const engine = store as unknown as { readBundleBytes: (...args: unknown[]) => Promise<unknown> };
+    const read = engine.readBundleBytes.bind(store);
+    vi.spyOn(engine, "readBundleBytes").mockImplementationOnce(async (...args: unknown[]) => {
+      expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+      return read(...args);
+    });
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] })).rejects.toThrow(/^no-update/);
+    expect((await store.list())[0], "not back on 1, whose files are gone").toMatchObject({ sequence: 3, digest: v3.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v3.digest}`]);
   });
 
   it("an app uninstalled while Install of another version of it stores the files stays uninstalled", async () => {
@@ -912,6 +943,23 @@ describe("an app installed from a store updates only to the version that store l
     expect(await pinnedTo()).toBeUndefined();
   });
 
+  // A listing URL peeked while the app was pinned held a newer version than the one listed: no miss for a pinned app.
+  // Once the pin goes, that newer version may be taken, as a new engine on the same profile takes it.
+  it("a listing URL skipped while the app was pinned is peeked again once its store is removed and added back", async () => {
+    const { store, v1 } = await fromStore();
+    const MIRROR = "https://raw.githubusercontent.com/mirror/chess/HEAD/app.ghostlyapp";
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    const v3 = await bundle({ sequence: 3, sources: [HEAD] });
+    net.put(MIRROR, v3.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [MIRROR])] }));
+    expect((await store.checkUpdates())[0]!.outcome, "pinned: only the listed 2 is taken").toBe("none");
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    await store.addStore({ url: STORE_URL });
+    expect(await pinnedTo()).toBeUndefined();
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect((await store.list())[0]).toMatchObject({ ref: v1.ref, sequence: 3, digest: v3.digest, from: MIRROR });
+  });
+
   /** `removeStore` waits once it has read the installed apps, until `release` is called; `started` once it is reached. */
   function holdRemoveStore(store: object) {
     const engine = store as unknown as { installed: () => Promise<unknown> };
@@ -1008,6 +1056,9 @@ describe("an app installed from a store updates only to the version that store l
     await store.refreshStores();
     await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^unlisted/);
     expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+    // It no longer waits: an Update offered for it again would fail the same way at every press.
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^no-update/);
 
     // The next check drops 3 and installs 2, which adds no permission.
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");

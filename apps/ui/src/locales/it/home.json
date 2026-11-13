@@ -1,5 +1,4 @@
 {
-  "createChat": "Crea nuova chat",
   "description": "Messaggistica privata, peer-to-peer.",
   "features": {
     "decentralized": "Nessun server centrale",
@@ -7,6 +6,5 @@
     "onDevice": "I tuoi messaggi restano sui tuoi dispositivi"
   },
   "unpublishedVersion": "Versione locale — vedi le versioni pubblicate",
-  "viewRelease": "Visualizza questa versione",
-  "welcome": "Benvenuto su Ghostly"
+  "viewRelease": "Visualizza questa versione"
 }

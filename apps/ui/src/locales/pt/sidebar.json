@@ -53,9 +53,7 @@
     "groupHint": "Um link que qualquer pessoa pode abrir",
     "label": "Criar um grupo ou uma conversa"
   },
-  "noChats": "Nenhuma conversa",
   "noResults": "Nenhum resultado",
-  "pinned": "Fixada",
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",
   "rail": {
@@ -83,6 +81,5 @@
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",
   "skipToContent": "Pular para o conteúdo",
-  "startChat": "Nova conversa",
-  "unread": "Mensagens não lidas"
+  "startChat": "Nova conversa"
 }

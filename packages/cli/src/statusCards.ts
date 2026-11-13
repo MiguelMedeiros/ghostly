@@ -3,6 +3,7 @@ import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, keptForJoin, node, num, oneOf, oneShotWaits, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, asCliError } from "./errors";
+import { checkTextSize } from "./textSize";
 import { reachesNobody, waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -20,7 +21,8 @@ type Kind = StatusCard["kind"];
 type Target = { id: string; linkId: string; group: boolean };
 
 /** Per card (its message): when its last update went, what waits to go next, and how to send it now. */
-interface Pace { last: number; next?: Record<string, unknown>; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void>; flush?: () => void }
+/** `text`: the newest waiting update's `--text`, which goes with `next`. */
+interface Pace { last: number; next?: Record<string, unknown>; text?: string; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void>; flush?: () => void }
 const paces = new WeakMap<ApiContext, Map<string, Pace>>();
 
 function paceOf(ctx: ApiContext, key: string): Pace {
@@ -118,9 +120,11 @@ export function secretIn(value: unknown): ReturnType<typeof findSecret> {
  * The secret guard `send` has (docs/CLI.md § Safety): a card whose text looks like a seed, a private key or a Cashu
  * token goes only with `--force`. `fields` are what this command gives (an update's own, not the card it merges over).
  * A card's text is read as given and as the card carries it (`cardLine`): a line loses its invisible characters on the
- * way, so a key one of them broke in two is whole again on the card. The fallback text goes as it is, as `send`'s.
+ * way, so a key one of them broke in two is whole again on the card. The fallback text goes as it is, as `send`'s, and
+ * one past 16 KiB is refused first, with its size, `--force` or not (`checkTextSize`).
  */
 function guardSecrets(fields: unknown, params: Params, verb: string): void {
+  if (typeof params.text === "string") checkTextSize(params.text);
   if (bool(params, "force")) return;
   const check = (text: string) => {
     const secret = findSecret(text);
@@ -294,13 +298,15 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   if (due > 0 && ctx.mode === "daemon") {
     // Merged into what goes next; the first update in the gap sets the timer, the later ones only change what it sends.
     pace.next = card as unknown as Record<string, unknown>;
+    // Its text too: the first update's went with the merged card, a "done" card under "Working: 10%".
+    pace.text = text;
     queued = true;
     if (!pace.timer) pace.flushed = new Promise<void>((resolve) => {
       const send = () => {
-        const next = pace.next;
+        const next = pace.next, nextText = pace.text ?? "";
         clearTimeout(pace.timer);
-        pace.timer = undefined; pace.next = undefined; pace.flush = undefined; pace.last = Date.now();
-        void (next ? editCard(ctx, target, message.id, next as unknown as StatusCard, text) : Promise.resolve()).catch(() => {}).finally(resolve);
+        pace.timer = undefined; pace.next = undefined; pace.text = undefined; pace.flush = undefined; pace.last = Date.now();
+        void (next ? editCard(ctx, target, message.id, next as unknown as StatusCard, nextText) : Promise.resolve()).catch(() => {}).finally(resolve);
       };
       pace.flush = send;
       pace.timer = setTimeout(send, due);
@@ -370,6 +376,7 @@ async function sendUsage(ctx: ApiContext, params: Params): Promise<Record<string
   if (!bool(params, "all")) return reportUsage(ctx, str(params, "chat", true), fields, params);
   if (str(params, "chat")) throw new CliError("bad_request", "Name a chat or --all, not both");
   checked({ updatedAt: Date.now(), ...fields, kind: "usage", id: typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID });
+  if (typeof params.text === "string") checkTextSize(params.text);
   // The person's mistake, said once: before, each chat refused it on its own and the call still answered.
   oneOf(params, "wait", ["none", "sent"] as const, "none");
   num(params, "timeout", 30, { min: 1, max: 3600 });

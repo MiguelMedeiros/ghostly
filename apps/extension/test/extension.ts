@@ -101,10 +101,11 @@ export async function pauseRequest(
   world: FakeWorld,
   tabId: number,
   request: { url: string; method?: string; headers?: Record<string, string>; postData?: string; postDataEntries?: { bytes?: string }[] },
+  resourceType?: string,
 ): Promise<{ method: string; params: Record<string, unknown> }> {
   const before = world.callsTo("debugger.sendCommand").length;
   const requestId = `r${Math.random()}`;
-  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request } });
+  fire(world.chrome.debugger.onEvent, { tabId }, "Fetch.requestPaused", { requestId, request: { method: "GET", headers: {}, ...request }, ...(resourceType ? { resourceType } : {}) });
   for (let i = 0; i < 50; i++) {
     const answer = world
       .callsTo("debugger.sendCommand")

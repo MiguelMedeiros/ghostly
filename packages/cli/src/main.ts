@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -198,6 +199,31 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
   return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
+/** What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. */
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing"]);
+
+/**
+ * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
+ * chats unstarted (`deferChats`); the groups start, and their edges are never deferred. Started, each saved chat put its
+ * records and its leave packet on the relays: with 12 invites saved, one `group send` asked the relay 32 times (3 with
+ * none), its whole minute, and a text to an away contact, or the next one-shot, waited behind them.
+ */
+export function oneGroupOnly(method: string): boolean {
+  return GROUP_EDGES_ONLY.has(method);
+}
+
+/**
+ * Reads that need nothing of a chat's history: a one-shot for one leaves every saved chat unstarted too (`deferChats`),
+ * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
+ * `profile show` took 0.8 s and 243 MB instead of 0.45 s and 162 MB with 53,800 messages in the profile.
+ */
+const NO_HISTORY_READS: ReadonlySet<string> = new Set(["status", "profile.get", "settings.get", "status.get", "chat.list"]);
+
+/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
+export function readsNoHistory(method: string): boolean {
+  return NO_HISTORY_READS.has(method);
+}
+
 /**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
@@ -252,9 +278,17 @@ export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoD
  */
 const LIVE_ONLY: ReadonlySet<string> = new Set(["chat.typing", "group.typing"]);
 
-/** Whether a one-shot for this call opens the profile offline: a read, a change that stays on this device, or typing. */
+/**
+ * Done only by a daemon (a call placed, a contact's app opened on a port, a served app open in a chat): a one-shot
+ * refuses them whatever the network says. Online, it said "start `ghostly daemon --detach`" only once its leave packet
+ * was taken: 3.4 s with a relay that takes 1.5 s, 10 s with one that does not answer. `call answer` and `call hangup`
+ * stay online: a call may ring while a one-shot runs, and be declined.
+ */
+const DAEMON_ONLY: ReadonlySet<string> = new Set(["call.start", "service.open", "app.open", "app.close", "app.send"]);
+
+/** Whether a one-shot for this call opens the profile offline: a read, a change that stays on this device, typing, or what only a daemon does. */
 export function offlineCall(method: string, params: Record<string, unknown>): boolean {
-  return readOnly(method, params) || LOCAL_WRITES.has(method) || (LIVE_ONLY.has(method) && params.for === undefined);
+  return readOnly(method, params) || LOCAL_WRITES.has(method) || DAEMON_ONLY.has(method) || (LIVE_ONLY.has(method) && params.for === undefined);
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
@@ -279,8 +313,8 @@ async function session(g: Globals, options: RuntimeOptions, again = true): Promi
   const [, { callApi, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
-  const call = (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") startNamedChats(host.ctx, p as Record<string, unknown>);
+  const call = async (m: string, p?: unknown) => {
+    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, p as Record<string, unknown>);
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
@@ -374,13 +408,14 @@ const TURNS_WAIT_MS = 60_000;
  * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
  * STARTING_WAIT_MS, and named as the holder. So is a profile a `daemon restart` or `daemon --detach` keeps for the daemon
  * it starts (`daemonClaim`): the commands that took the profile in turn in the gap kept that daemon from ever starting.
- * A `listen` with no daemon opens it the same way, as the daemon (`mode`).
+ * A `listen` with no daemon opens it the same way, as the daemon (`mode`). A wait that goes on past WAIT_NOTICE_MS says
+ * on a terminal what it waits for, once per kind of holder: it said nothing for up to 30 s (60 s behind commands in turn).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const from = performance.now();
-  // The process that holds the profile, as last seen, and since when.
-  let holder: unknown, since = from;
+  // The process that holds the profile, as last seen, and since when; the kind of holder the terminal was told of.
+  let holder: unknown, since = from, told: string | undefined;
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
@@ -398,6 +433,14 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
         if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: starting });
         const held = now - since >= HOLDER_WAIT_MS ? `was not free after ${HOLDER_WAIT_MS / 1000} s` : `was taken by one process after another for ${TURNS_WAIT_MS / 1000} s`;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and ${held}: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      const kind = claimed !== null ? "claimed" : starting !== null ? "starting" : "command";
+      if (process.stderr.isTTY && now - from >= WAIT_NOTICE_MS && told !== kind) {
+        told = kind;
+        const line = claimed !== null ? `profile ${g.profile} is kept for the daemon that process ${claimed} (ghostly daemon) starts: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : starting !== null ? `profile ${g.profile}'s daemon (process ${starting}) is starting: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : `profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command` : "another ghostly command"}: waiting for it to let go (up to ${HOLDER_WAIT_MS / 1000} s`;
+        process.stderr.write(`ghostly: ${line}; Ctrl-C stops waiting)\n`);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
     }
@@ -521,12 +564,12 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
     from: o("list", "Only this chat's events (id, a label given here or the contact's key; again for more)"),
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
     exec: o("string", "Run this command per event, the event as JSON on stdin"),
-    webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
+    webhook: o("string", "POST each event to this URL (else GHOSTLY_WEBHOOK, which ps does not show)"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
-  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
+  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret, or remove a chat (or clear the profile) while a delete for everyone has not reached the contact") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
@@ -603,14 +646,15 @@ function helpRow(label: string, text: string, at: number, columns: number | unde
 
 /**
  * What `ghostly` says first in a Ghostly folder with no profile yet: where to start, as the README's "Five minutes"
- * does, before the whole list. `$ ` keeps the lines apart from the list's commands.
+ * does, before the whole list. `$ ` keeps the lines apart from the list's commands. The join pipes the invite in, as
+ * docs/CLI.md does: `invite join -` waits for stdin a pipe gives, and a terminal is refused it.
  */
 const FIRST_STEPS = [
   "First steps:",
-  "  $ ghostly invite create --label alice   make an invite for a contact",
-  "  $ ghostly invite join -                 join one (pasted on stdin)",
-  "  $ ghostly daemon --detach               keep the profile online",
-  "  $ ghostly help <command>                one command and its options",
+  "  $ ghostly invite create --label alice             make an invite for a contact",
+  "  $ printf '%s' \"$INVITE\" | ghostly invite join   join one, from stdin",
+  "  $ ghostly daemon --detach                         keep the profile online",
+  "  $ ghostly help <command>                          one command and its options",
 ];
 
 function help(firstSteps = false): string {
@@ -784,7 +828,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "show":
       noMoreThan(0, parsed.positionals, "profile show");
-      print(await withSession(g, (s) => s.call("profile.get"), { offline: true }));
+      print(await withSession(g, (s) => s.call("profile.get"), { offline: true, deferChats: readsNoHistory("profile.get") }));
       return;
     case "set": {
       noMoreThan(0, parsed.positionals, "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]");
@@ -810,7 +854,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
       // The passphrase is read before the profile opens, and the backup only reads the store: offline.
-      const path = here(out) as string;
+      // A separator at its end names a folder: kept for the backup to refuse, as resolving the path drops it. Before,
+      // "--out backups/" with no backups folder wrote the backup as a file named backups.
+      const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
+      // The folder it goes in, as the backup checks it (backup.ts): a missing one is named before the profile opens.
+      if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${dirname(path)}`);
       const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
@@ -1212,13 +1260,23 @@ async function listenCommand(argv: string[]): Promise<void> {
   // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
   const blank = (value: unknown) => typeof value === "string" && value.trim() === "";
   if (blank(parsed.options.webhook)) throw new CliError("usage", "--webhook needs a URL");
+  // GHOSTLY_WEBHOOK: the URL out of `ps`, where a long-running listen's arguments (a bridge's token in the URL) are
+  // every local account's to read. Read once, here; no hook or other child gets it (SECRET_ENV).
+  const envWebhook = process.env.GHOSTLY_WEBHOOK;
+  delete process.env.GHOSTLY_WEBHOOK;
+  if (envWebhook !== undefined && parsed.options.webhook !== undefined) throw new CliError("usage", "A webhook is set in GHOSTLY_WEBHOOK and --webhook was given: choose one");
+  if (blank(envWebhook)) throw new CliError("usage", "GHOSTLY_WEBHOOK is empty: it holds the webhook's URL");
+  const webhook = (parsed.options.webhook as string | undefined) ?? envWebhook;
   if (blank(parsed.options.exec)) throw new CliError("usage", "--exec needs a command");
   if (parsed.options.cursor === "") throw new CliError("usage", "--cursor needs a file");
   if ((parsed.options.from as string[] | undefined)?.some(blank)) throw new CliError("usage", "--from needs a chat or a contact key");
   if ((parsed.options.group as string[] | undefined)?.some(blank)) throw new CliError("usage", "--group needs a group");
   const g = globals(parsed);
   pretty = false; // one event per line
-  if (parsed.options.webhook !== undefined) checkWebhook(String(parsed.options.webhook));
+  if (webhook !== undefined) {
+    const url = checkWebhook(webhook, envWebhook !== undefined ? "GHOSTLY_WEBHOOK" : "--webhook");
+    if (envWebhook === undefined && (url.search || url.pathname !== "/")) process.stderr.write("ghostly: --webhook's URL shows in ps to every account on this machine while listen runs, a token in it too: give it in GHOSTLY_WEBHOOK instead\n");
+  }
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
@@ -1244,11 +1302,11 @@ async function listenCommand(argv: string[]): Promise<void> {
       types, turns,
       translate: translator?.event,
       exec: parsed.options.exec as string | undefined,
-      webhook: parsed.options.webhook as string | undefined,
+      webhook,
       cursor,
       cursorFailed,
       // With a hook, events go to the hook; --print shows them too.
-      print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
+      print: parsed.options.print === true || (!parsed.options.exec && !webhook),
       write: (line) => process.stdout.write(line + "\n"),
       drained: () => new Promise<void>((resolve) => {
         const done = () => { process.stdout.off("drain", done); process.stdout.off("close", done); resolve(); };
@@ -1366,7 +1424,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" }, force: { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
+  if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true, deferChats: readsNoHistory("settings.get") })); return; }
   if (sub === "set") {
     const [key, given] = parsed.positionals;
     if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value> [--force]");
@@ -1419,7 +1477,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
     if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" || oneGroupOnly(spec.method) }));
 }
 
 /**
@@ -1528,7 +1586,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;

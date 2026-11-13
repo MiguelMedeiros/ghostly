@@ -272,6 +272,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
       return engine.call("askToPay", { linkId: link.id, amount, method, memo, timestamp: Date.now(), ...(network?{network}:{}) });
     },
     answerTo: (askId) => Object.values(engine.state?.payments ?? {}).find((p) => p.ask === askId && p.kind === "request" && p.direction === "in") ?? null,
+    paymentOnItsWay: (requestId) => Object.values(engine.state?.payments ?? {}).find((p) => p.requestId === requestId && p.kind === "payment" && p.direction === "in" && p.state === "pending") ?? null,
   };
 }
 

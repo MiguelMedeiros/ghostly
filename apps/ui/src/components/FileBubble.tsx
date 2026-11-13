@@ -236,8 +236,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           <p dir="auto" className="chat-text-media-name leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
-          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
-          <p className={`flex items-center gap-1 chat-text-media-meta m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). At 75 %, as words
+              (4.5:1): at 65 % it read 3.8:1 on a sent bubble in Classic dark. */}
+          <p className={`flex items-center gap-1 chat-text-media-meta m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/75"}`}>
             <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
@@ -274,7 +275,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
           </p>
           {typeof transfer.room === "number" && (
-            <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
+            <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="file-room">
               {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
@@ -296,11 +297,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {moving && transfer.stage !== "asking" && (
         // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
         // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+        <div className="progress-track h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
           role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
           aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size, t) })}>
           <div
-            className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
+            className={`progress-fill h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
             style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}
           />
         </div>

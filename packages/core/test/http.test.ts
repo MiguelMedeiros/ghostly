@@ -23,6 +23,7 @@ import {
   viewerResponseHeaders,
   VIEWER_DROPPED_DIRECTIVES,
   VIEWER_DROPPED_HEADERS,
+  VIEWER_PERMISSIONS_POLICY,
   VIEWER_SERVICE_CSP,
   VIEWER_SERVICE_CSP_RELAY_ONLY,
   viewerServicePolicy,
@@ -223,6 +224,7 @@ describe("header hygiene", () => {
     expect(withViewerPolicy([["Content-Type", "text/html"]])).toEqual([
       ["Content-Type", "text/html"],
       ["content-security-policy", VIEWER_SERVICE_CSP],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
     ]);
     expect(
       withViewerPolicy([
@@ -233,7 +235,26 @@ describe("header hygiene", () => {
     ).toEqual([
       ["X-Kept", "1"],
       ["content-security-policy", `default-src *, img-src *, ${VIEWER_SERVICE_CSP}`],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
     ]);
+  });
+
+  it("lets a contact's app ask for no camera, microphone, location or device, whatever its own headers say", () => {
+    // A grant would be a browser site setting of the app's origin, which no Delete chat, Clear all data or Delete profile clears.
+    const served = withViewerPolicy([
+      ["Permissions-Policy", "camera=*, geolocation=*"],
+      ["Feature-Policy", "camera *; microphone *"],
+      ["permissions-policy", "usb=("],
+    ]);
+    const features = served.filter(([name]) => /^(permissions|feature)-policy$/i.test(name));
+    expect(features).toHaveLength(1);
+    const [[name, value]] = features;
+    expect(name).toBe("permissions-policy");
+    const denied = new Map(value.split(",").map((entry) => entry.trim().split("=") as [string, string]));
+    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "storage-access"]) {
+      expect(denied.get(feature), feature).toBe("()");
+    }
+    expect([...denied.values()].every((allow) => allow === "()")).toBe(true);
   });
 
   it("keeps a viewer's page off plain http and so off this machine's and the local network's services", () => {
@@ -257,8 +278,8 @@ describe("header hygiene", () => {
     // covers: settings.network.relay-only
     expect(viewerServicePolicy(false)).toBe(VIEWER_SERVICE_CSP);
     expect(viewerServicePolicy(true)).toBe(VIEWER_SERVICE_CSP_RELAY_ONLY);
-    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`]]);
-    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
     // No https: (a picture, script, font or frame from a server the contact names would show it this device's address);
     // its own origin, inline, data: and blob: content as before, and requests and forms on its own origin.
     const policy = new Map(VIEWER_SERVICE_CSP_RELAY_ONLY.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));

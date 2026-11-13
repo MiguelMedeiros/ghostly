@@ -201,13 +201,14 @@ function ServiceCard({ service, online, contacts, onRemove }: { service: SharedS
   // the button, the focus goes to its Cancel, and Cancel or Escape gives it back to Remove.
   const [asking, setAsking] = useState(false), [asked, setAsked] = useState(false);
   // An address not yet allowed on this device (one that came with a restored or moved profile): its contacts are
-  // refused until the person allows it here, from this click.
+  // refused until the person allows it here, from this click. Asked again when Share turns on or off: taking back
+  // Chrome's site access turns the app off, and the card mounted before it would say "Shared" once it is on again.
   const [needsAccess, setNeedsAccess] = useState(false), [checked, setChecked] = useState(0);
   useEffect(() => {
     let live = true;
     void platform.localAccessNeeded?.(service.target).then((needed) => { if (live) setNeedsAccess(needed); }, () => {});
     return () => { live = false; };
-  }, [platform, service.target, checked]);
+  }, [platform, service.target, service.enabled, checked]);
   const granted = service.sharedWith ?? [];
   const reached = granted.length;
   const shared = service.enabled && online && reached > 0 && !needsAccess;

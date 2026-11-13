@@ -24,6 +24,11 @@ const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "saved ad
  * the relays all the same). Offline unless `--for` waits for the chat to be live.
  */
 const LIVE_ONLY = ["group typing", "typing"];
+/**
+ * Done only by a daemon: a one-shot refuses them whatever the network says ("start `ghostly daemon --detach`"), so it
+ * opens offline. Online it waited for the relays first: 10 s to say so with a relay that does not answer.
+ */
+const DAEMON_ONLY = ["app close", "app open", "app send", "call start", "service open"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
@@ -35,22 +40,23 @@ const ONLINE = [
   "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
   "identity complete", "identity recheck", "identity remove", "identity share", "identity withdraw",
-  "service close", "service enable", "service open", "service remove", "service share",
-  "call answer", "call flush", "call hangup", "call start",
-  "app close", "app open", "app send", "app serve", "app unserve",
+  "service close", "service enable", "service remove", "service share",
+  // A one-shot online may see a call ring, and decline it.
+  "call answer", "call flush", "call hangup",
+  "app serve", "app unserve",
 ];
 
 describe("which one-shots open the profile offline", () => {
   const table = Object.entries(COMMANDS).filter(([, c]) => !c.run);
 
-  it("names every table command once, as a read, a change of this device, live only or none of them", () => {
-    expect([...READS, ...LOCAL_WRITES, ...LIVE_ONLY, ...ONLINE].sort()).toEqual(table.map(([name]) => name).sort());
+  it("names every table command once, as a read, a change of this device, live only, daemon only or none of them", () => {
+    expect([...READS, ...LOCAL_WRITES, ...LIVE_ONLY, ...DAEMON_ONLY, ...ONLINE].sort()).toEqual(table.map(([name]) => name).sort());
   });
 
-  it("opens the reads and this device's changes offline, and the others online", () => {
+  it("opens the reads, this device's changes and what only a daemon does offline, and the others online", () => {
     for (const [name, c] of table) {
       expect(readOnly(c.method, {}), name).toBe(READS.includes(name));
-      expect(offlineCall(c.method, {}), name).toBe(READS.includes(name) || LOCAL_WRITES.includes(name) || LIVE_ONLY.includes(name));
+      expect(offlineCall(c.method, {}), name).toBe(READS.includes(name) || LOCAL_WRITES.includes(name) || LIVE_ONLY.includes(name) || DAEMON_ONLY.includes(name));
     }
   });
 

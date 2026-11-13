@@ -35,6 +35,7 @@ import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { unreadDot } from "./unreadDot";
 import { REORDER_KEYS } from "../hooks/useRowReorder";
 
 /*
@@ -490,7 +491,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
             {/* Hidden from a screen reader, as the dot: the row's button says both (rowLabel). */}
             {mention && <span aria-hidden="true" data-testid="group-row-mention" data-muted={mentionQuiet || undefined} title={t("mentions.unread")}
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
-            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+            <span aria-hidden="true" data-testid="group-row-unread" data-muted={muted || undefined} className={`w-2.5 h-2.5 ${unreadDot(muted)}`} />
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}

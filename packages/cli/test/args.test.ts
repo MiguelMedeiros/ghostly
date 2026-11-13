@@ -295,7 +295,26 @@ describe("the argument parser", () => {
     expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
     expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
     expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
+    // A word --networks does not take is a usage error before the profile opens. Before, the API answered it after the
+    // one-shot had opened the profile and asked the relays: bad_request (exit 1), "networks must list mainnet and/or testnet".
+    for (const networks of ["foo", "Testnet", "testnet,foo", "testnet;mainnet"]) expect(() => accept("bob", "cashu", "--networks", networks), networks).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet, not ${JSON.stringify(networks)}`));
+    for (const networks of ["", ",", " , "]) expect(() => accept("bob", "cashu", "--networks", networks), JSON.stringify(networks)).toThrow(new CliError("usage", `--networks takes mainnet, testnet or mainnet,testnet (to stop taking it: --off), not ${JSON.stringify(networks)}`));
+    expect(accept("bob", "cashu", "--networks", "mainnet, testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["mainnet", "testnet"] });
+    expect(accept("bob", "cashu", "--networks", "testnet")).toEqual({ chat: "bob", method: "cashu", on: true, networks: ["testnet"] });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
+  });
+
+  it("react and group react refuse an <emoji> that is not one emoji as a usage error, before the profile opens", () => {
+    const params = (name: string, ...argv: string[]) => { const c = COMMANDS[name], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    for (const [name, target] of [["react", "bob"], ["group react", "team"]]) {
+      // Before, a one-shot opened the profile and went online, then the engine answered "A reaction is one emoji" (exit 1).
+      for (const emoji of ["notanemoji", "ab", "1", "👍👍", "👍 👍", ":+1:"]) {
+        expect(() => params(name, target, "m1", ...emoji.split(" ")), `${name} ${emoji}`).toThrow(new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`));
+      }
+      for (const argv of [[target, "m1"], [target, "m1", ""]]) expect(() => params(name, ...argv), `${name} ${JSON.stringify(argv)}`).toThrow(new CliError("usage", "Give one emoji, or --remove to take yours back"));
+      for (const emoji of ["👍", "❤", "👨‍👩‍👧", "🇧🇷"]) expect(params(name, target, "m1", emoji).emoji, `${name} ${emoji}`).toBe(emoji);
+      expect(params(name, target, "m1", "--remove").remove).toBe(true);
+    }
   });
 
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
@@ -471,9 +490,11 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
-    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
-    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
-    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
+    // A file that is there: `file send` looks at it before the profile opens.
+    const sound = import.meta.filename;
+    expect(params("file send", ["alice", sound, "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", sound, "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", sound])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });

@@ -1,6 +1,7 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
-import { readDesktopStorage, storageBreakdown } from "../../lib/desktopStorage";
+import { RECOUNT_AFTER_MS, readDesktopStorage, storageBreakdown, useDesktopStorage } from "../../lib/desktopStorage";
 
 // covers: settings.storage-used
 
@@ -34,6 +35,25 @@ describe("reading it", () => {
     const usage = vi.fn(async () => ({ files: 10, count: 1, staged: 0 }));
     registerFileBytes("native", async () => ({ kind: "native", usage }) as unknown as FileBytes, true);
     expect(await readDesktopStorage(50)).toEqual({ app: 4096, local: 50, files: { files: 10, count: 1, staged: 0 } });
+  });
+
+  it("counts again once the engine has deleted the chats' files, which it does after the page let them go", async () => {
+    vi.useFakeTimers();
+    try {
+      // Rust counts 6 MB of files until the engine deletes them, a moment after Delete all chats changed `local`.
+      let onDisk = 6_000_000;
+      registerFileBytes("native", async () => ({ kind: "native", usage: async () => ({ files: onDisk, count: onDisk ? 1 : 0, staged: 0 }) }) as unknown as FileBytes, true);
+      const { result, rerender } = renderHook(({ local }) => useDesktopStorage(true, local), { initialProps: { local: 900 } });
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      expect(result.current?.files?.files).toBe(6_000_000);
+      rerender({ local: 300 });
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      onDisk = 0;
+      await act(() => vi.advanceTimersByTimeAsync(Math.max(...RECOUNT_AFTER_MS)));
+      expect(result.current).toEqual({ app: null, local: 300, files: { files: 0, count: 0, staged: 0 } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("goes on without a part that fails or does not exist", async () => {

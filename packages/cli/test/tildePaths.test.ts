@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { error, ghostly, home, ok } from "./support/cli";
 
@@ -39,10 +39,13 @@ describe("a path that starts with ~", { timeout: 60_000 }, () => {
     expect(existsSync(join(user, "myapp", "app.ghostlyapp"))).toBe(true);
     ok(await ghostly(["app", "verify", "~/myapp/app.ghostlyapp"], { env, cwd }));
     expect(error(await ghostly(["app", "verify", "~/nope.ghostlyapp"], { env, cwd }), "not_found", 3).message).toContain(join(user, "nope.ghostlyapp"));
-    // store sign's key: made in the home, whatever the index then says.
-    writeFileSync(join(user, "index.json"), "{}");
-    await ghostly(["store", "sign", "~/index.json", "--key=~/store.key"], { env, cwd });
+    // store sign's key: made in the home, with the index it signs (a refused index makes no key).
+    const vectors = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../core/test/vectors/app-store.json"), "utf8")) as { valid: { index: string }[] };
+    const { key: _key, ...index } = JSON.parse(vectors.valid[0].index) as Record<string, unknown>;
+    writeFileSync(join(user, "index.json"), JSON.stringify(index));
+    ok(await ghostly(["store", "sign", "~/index.json", "--key=~/store.key"], { env, cwd }));
     expect(existsSync(join(user, "store.key"))).toBe(true);
+    expect(existsSync(join(user, "ghostly-store.json"))).toBe(true);
     expect(readdirSync(cwd)).toEqual([]);
   });
 
