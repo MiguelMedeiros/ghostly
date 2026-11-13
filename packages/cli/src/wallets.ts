@@ -51,7 +51,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   const source = sources.find((p) => p.id === provider);
   if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
-  if (unknown) throw new CliError("bad_request", `${provider} takes no --value ${unknown}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
+  // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
+  if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
   const missing = source.fields.find((f) => !f.optional && !f.defaults?.[n] && !values[f.name]?.trim());
   if (missing) throw new CliError("bad_request", `${provider} needs --value ${missing.name}=<${missing.options?.map((o) => o.value).join("|") ?? missing.placeholder ?? missing.label.toLowerCase()}>`);
 }
