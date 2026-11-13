@@ -218,7 +218,7 @@ export function readCursor(path: string | undefined): number | undefined {
 export function checkCursor(path: string | undefined): void {
   if (!path) return;
   const folder = dirname(resolve(path));
-  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
   accessSync(folder, constants.W_OK | constants.X_OK);
 }
 
