@@ -134,6 +134,7 @@
     "publisher": "发布者",
     "removed": "已被 {{store}} 移除：{{reason}}",
     "revoked": "发布者已撤销此版本。",
+    "revokedReason": "发布者已撤销此版本：{{reason}}",
     "rollback": "你已有更新的版本。",
     "same": "已安装。",
     "sentBy": "由 {{name}} 发送",
