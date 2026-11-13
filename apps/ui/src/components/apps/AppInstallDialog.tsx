@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -53,16 +53,19 @@ function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: Bu
 type BuiltIn = "carried" | "installed";
 
 /** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
-function runLine(run: AppRunStatus, t: Translate): string | null {
+function runLine(run: AppRunStatus, t: Translate): ReactNode {
   if (run.status === "revoked") return t("apps.install.revoked");
-  if (run.status === "removed") return run.by.map((b) => t("apps.install.removed", { store: b.name, reason: b.reason })).join("\n");
+  // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
+  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
 
+// A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
+// anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
   const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
-  return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
+  return <p data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
 }
 
 /** The publisher and the stores, as a person checks them. */
@@ -87,7 +90,11 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
   );
 }
 
-/** One short line, and the longer story behind an ⓘ beside it. */
+/**
+ * One short line, and the longer story behind an ⓘ beside it. The story may be a refusal as it came, naming a file of the
+ * bundle ("assets/ChessBoard_….html", up to 128 characters with no space or dash): it breaks anywhere rather than push
+ * the screen sideways on a phone.
+ */
 function InfoLine({ children, info, testId, className = "text-xs text-text-secondary" }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -97,7 +104,7 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
         <span className="min-w-0">{children}</span>
         {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId && `${testId}-info`} className="-my-0.5" />}
       </div>
-      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border">{info}</p>}
+      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border [overflow-wrap:anywhere]">{info}</p>}
     </div>
   );
 }
@@ -170,7 +177,7 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testId}
-        className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-safe">
+        className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
     </div>,
@@ -401,10 +408,10 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
   }, [lacks, busy]);
   const focusBack = useFocusBack(busy);
-  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
+  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   // No link it came from answered with its files (offline, the host down, each holding another version): the engine
   // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
@@ -449,7 +456,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update")}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update", appUpdateErrorView)}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}

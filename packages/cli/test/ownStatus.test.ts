@@ -104,6 +104,20 @@ describe("the socket's status.set|clear|get", () => {
     expect(node.setOwnStatus).not.toHaveBeenCalled();
     expect(await callApi(ctx, "status.set", { text: seed, force: true })).toMatchObject({ status: { text: seed } });
   });
+
+  it("holds a secret on the engine's own setOwnStatus too, unless force", async () => {
+    const { ctx, node } = fake();
+    const seed = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
+    const nsec = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+    for (const text of [seed, nsec]) {
+      await expect(callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text } } }))
+        .rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/looks like a secret.*call setOwnStatus with --force/) });
+    }
+    expect(node.setOwnStatus).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text: "At lunch" } } });
+    await callApi(ctx, "engine.call", { method: "setOwnStatus", params: { status: { text: seed } }, force: true });
+    expect(node.setOwnStatus).toHaveBeenLastCalledWith({ status: { text: seed } });
+  });
 });
 
 describe("ghostly status set|clear|show", { timeout: 120_000 }, () => {

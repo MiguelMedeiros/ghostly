@@ -332,12 +332,33 @@ export const SERVICE_METHODS: Record<string, Method> = {
     open.delete(key);
     const entry = await pending?.catch(() => undefined);
     if (!entry) throw new CliError("not_found", "That service is not open here");
-    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
-    // Each connection's end stops the contact's answer too (`proxy`).
-    await new Promise<void>((resolve) => {
-      entry.server.close(() => resolve());
-      entry.server.closeAllConnections();
-    });
+    await closeOpened(entry);
     return { closed: key };
   },
 };
+
+/**
+ * Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+ * Each connection's end stops the contact's answer too (`proxy`).
+ */
+function closeOpened(entry: OpenedService): Promise<void> {
+  return new Promise<void>((resolve) => {
+    entry.server.close(() => resolve());
+    entry.server.closeAllConnections();
+  });
+}
+
+/**
+ * `chat remove`: the services opened from a contact no chat here has any more. Before, they stayed on their ports, each
+ * request a 503, and `service close` answered `No chat` for good.
+ */
+export async function closeServicesOf(ctx: ApiContext, peer: string): Promise<void> {
+  if (state(ctx).links.some((link) => link.peerPubKeyZ32 === peer)) return;
+  const keys = [...open.keys()].filter((key) => key.startsWith(`${peer}/`));
+  await Promise.all(keys.map(async (key) => {
+    const pending = open.get(key);
+    open.delete(key);
+    const entry = await pending?.catch(() => undefined);
+    if (entry) await closeOpened(entry);
+  }));
+}

@@ -117,11 +117,41 @@ describe("group administration", () => {
     expect(node.makeGroupAdmin).not.toHaveBeenCalled();
   });
 
+  // A member chooses its own name: a member of a community calling itself "Bob" while the real Bob is away (or named
+  // otherwise in the roster) took `group admin Crew Bob`, a grant, as `group invite` refuses a contact's own name.
+  it("group admin and hub --pin take a member by key, never by the name it gave itself", async () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+    const crew = { id: "g1", name: "Crew", members: [{ key: "595m389h77", me: true }, { key: KEY, nick: "Bob", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [crew], settings: {}, transport: {} }) as unknown as EngineState, makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const [method, extra] of [["group.admin", {}], ["group.hub", { role: "pin" }]] as const) {
+      await expect(callApi(ctx, method, { group: "Crew", member: "bob", ...extra })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/only by the name it gave itself/), details: { member: KEY, name: "Bob" } });
+    }
+    expect(node.makeGroupAdmin).not.toHaveBeenCalled();
+    expect(node.setGroupHub).not.toHaveBeenCalled();
+    await callApi(ctx, "group.admin", { group: "Crew", member: KEY });
+    expect(node.makeGroupAdmin).toHaveBeenCalledWith({ groupId: "g1", key: KEY });
+    await callApi(ctx, "group.hub", { group: "Crew", member: KEY.slice(0, 8), role: "pin" });
+    expect(node.setGroupHub).toHaveBeenCalledWith({ groupId: "g1", key: KEY, role: "pin" });
+    // Neither grants anything: a name still names the member.
+    await callApi(ctx, "group.hub", { group: "Crew", member: "Bob", role: "exclude" });
+    await callApi(ctx, "group.remove", { group: "Crew", member: "Bob" });
+    expect(node.removeGroupMember).toHaveBeenCalledWith({ groupId: "g1", key: KEY });
+  });
+
   it("a member's whole key is that member, whatever another member calls itself", () => {
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o", OTHER = "o".repeat(52);
     const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
     expect(findMember(named, KEY).key).toBe(KEY);
     expect(findMember(named, OTHER).key).toBe(OTHER);
+    // A key with a line break, a space, an invisible character or capitals left on it is still that key; one no other
+    // member has is no member, never the one calling itself that.
+    const alone = { ...named, members: named.members.filter((m) => m.key !== KEY) } as GroupView;
+    for (const ref of [`${KEY}\n`, ` ${KEY}`, `${KEY}${String.fromCodePoint(0x200b)}`, KEY.toUpperCase()]) {
+      expect(findMember(named, ref).key).toBe(KEY);
+      expect(() => findMember(alone, ref)).toThrow(expect.objectContaining({ code: "not_found" }));
+    }
+    expect(() => findMember(alone, KEY)).toThrow(expect.objectContaining({ code: "not_found" }));
     // A prefix and a name still stand side by side: two members is an error, never a guess.
     const prefixed = { name: "G", members: [{ key: "anaq77", nick: "Bo", me: false }, { key: "zzzz11", nick: "Ana", me: false }] } as unknown as GroupView;
     expect(() => findMember(prefixed, "ana")).toThrow(/more than one/);

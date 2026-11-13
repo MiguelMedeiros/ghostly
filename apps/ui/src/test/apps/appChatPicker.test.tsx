@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -99,6 +100,25 @@ describe("Open an app in a chat: which chat, found by name", () => {
     expect(screen.getAllByTestId("app-chat-picker-chat")[30]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(screen.getAllByTestId("app-chat-picker-chat")[0]).toHaveFocus();
+  });
+});
+
+describe("Open an app in a chat: drawn again only when its chats change", () => {
+  it("draws nothing again for an engine state that changes nothing it lists, and its rows when a chat's does", async () => {
+    const links = Array.from({ length: 30 }, (_, i) => paired(`c${i}`, `Contact ${i}`, 10_000 - i));
+    fakeEngine.update({ links, groups: [] });
+    let commits = 0;
+    renderApp(<Profiler id="picker" onRender={() => { commits++; }}><AppChatPicker app={chess} onClose={() => {}} /></Profiler>, { route: "/apps" });
+    expect(await screen.findAllByTestId("app-chat-picker-chat")).toHaveLength(30);
+    commits = 0;
+    // The engine's state crosses a port: its chats and groups come anew each time, here with only a file moving.
+    for (let i = 0; i < 20; i++) {
+      await act(async () => { fakeEngine.update({ links: fakeEngine.state.links.map((link) => ({ ...link })), groups: [], transfers: { [`t${i}`]: {} } } as never); });
+    }
+    expect(commits).toBe(0);
+    // A chat's link that changes what the list holds (a contact paired again) is drawn.
+    await act(async () => { fakeEngine.update({ links: fakeEngine.state.links.map((link, i) => (i === 0 ? { ...link, id: "link-again" } : { ...link })) }); });
+    expect(commits).toBeGreaterThan(0);
   });
 });
 

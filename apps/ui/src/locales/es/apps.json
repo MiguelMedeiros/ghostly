@@ -90,7 +90,10 @@
     "storageInfo": "Ghostly guarda los archivos de cada app en este dispositivo. Las ventanas privadas, como la Navegación privada de Safari, no lo permiten, y un disco lleno también lo impide.",
     "storeKey": "Esa tienda está firmada con otra clave.",
     "tooLarge": "Demasiado grande.",
-    "unlistedVersion": "El enlace tiene una versión que esta tienda aún no lista."
+    "unlistedVersion": "El enlace tiene una versión que esta tienda aún no lista.",
+    "updateFilesGone": "Los archivos de la actualización ya no están. Ghostly los vuelve a buscar en la próxima comprobación.",
+    "updateGone": "Esta actualización ya no está pendiente. La versión instalada es la que se ve arriba.",
+    "updateUnlisted": "Esta tienda ya no lista esta actualización. Ghostly mira lo que lista en la próxima comprobación."
   },
   "files": {
     "allow": "Permitir",

@@ -233,7 +233,7 @@ function fakeRepo() {
       Object.assign(p, { open: false, merged: true });
       return { ok: true };
     },
-    landPull: async (base: string, _n: number, sha: string) => git.land(base, sha),
+    landPull: async (base: string, p: Pr) => git.land(base, p.sha),
     /** A rebase onto the tip: a new head that sits on it, unless the head already does and nothing forces new commits. */
     rebase: async (base: string, p: Pr, { force = false } = {}) => {
       if (moved.has(p.number)) return { baseSha: tips[base], dropped: "moved" };
@@ -298,6 +298,11 @@ describe("the line", () => {
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
     // queue:priority alone puts a pull request in the line, so the time it was given counts too.
     expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
+    // With queue on it, only queue's times count: queue:priority given (and taken off) since moves it nowhere.
+    const both = [at("queue", "2026-10-08T01:00:00Z"), at("queue:priority", "2026-10-08T03:00:00Z")];
+    expect(queuedAt(both, "x", ["queue"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue", "queue:priority"])).toBe("2026-10-08T01:00:00Z");
+    expect(queuedAt(both, "x", ["queue:priority"])).toBe("2026-10-08T03:00:00Z");
   });
 
   it("takes the head as vouched for when queue was added; queue:priority's time only for one in line by it alone", () => {
@@ -401,6 +406,19 @@ describe("a run of the train", () => {
     expect(lone.landed).toEqual(["#41"]);
   });
 
+  it("keeps the place of a pull request given queue:priority and then not, since it kept queue all along", async () => {
+    const repo = fakeRepo();
+    for (const n of [21, 22, 23]) repo.add(n, { ci: running });
+    repo.events.get(21)!.push(
+      { event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:00:00Z" },
+      { event: "unlabeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:05:00Z" },
+    );
+    await repo.run();
+    expect(repo.comments.get(21)![0].body).toMatch(/1st\*\*\. /);
+    expect(repo.comments.get(22)![0].body).toMatch(/2nd\*\*\. /);
+    expect(repo.comments.get(23)![0].body).toMatch(/3rd\*\*\. /);
+  });
+
   it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
     const repo = fakeRepo();
     const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -463,7 +481,7 @@ describe("a run of the train", () => {
 
   describe("a pull request that merges cleanly onto dev but conflicts with one ahead of it in the batch", () => {
     const waitsFor = (n: number, batch: number | string) =>
-      `Merge train: in line for \`dev\`: **1st**. Waiting for the next batch: it merges cleanly onto \`dev\` by itself, but conflicts with #${n} in batch #${batch}, ahead of it, so it boards once that batch is done (merging \`origin/dev\` into it now changes nothing). It keeps its place.`;
+      `Merge train: in line for \`dev\`: **1st**. Waiting for the next batch: it merges cleanly onto \`dev\` by itself, but conflicts with #${n} in batch #${batch}, ahead of it (merging \`origin/dev\` into it now changes nothing). Once #${n} is on \`dev\`, it conflicts with \`dev\` and leaves the line with \`queue:conflict\`: then merge \`origin/dev\` into it, push, and add \`queue\` again once CI is green. If batch #${batch} ends without it on \`dev\`, it keeps its place and boards the next batch.`;
     const said = (repo: ReturnType<typeof fakeRepo>, n: number) => repo.comments.get(n)!.map((c) => c.body.replace(/^<!--[^\n]*\n/, ""));
 
     it("keeps its queue and its place, names the one it conflicts with, and boards right after it lands", async () => {
@@ -499,9 +517,12 @@ describe("a run of the train", () => {
       const repo = fakeRepo();
       for (const n of [11, 12]) repo.add(n);
       repo.clashes.set(12, [11]);
-      await repo.run();
+      const first = await repo.run();
       expect(repo.members()).toEqual([11]);
       expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+      // Its comment says what comes next, not that it boards once the batch is done (2026-11-13, a real git: with #11
+      // on dev, #12 conflicts with dev by construction, since #11 alone was what it conflicted with).
+      expect(said(repo, 12)).toEqual([waitsFor(11, first.inFlight!)]);
       // #11 on dev now: #12 conflicts with dev itself, which merging origin/dev into it resolves.
       repo.conflicts.add(12);
       repo.settle();
@@ -512,6 +533,12 @@ describe("a run of the train", () => {
       expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([
         "Merge train: this pull request conflicts with `dev`, so it left the line. Rebase it onto `origin/dev` (or merge `origin/dev` into it), push, and add `queue` again once CI is green.",
       ]);
+    });
+
+    it("names all the ones ahead it conflicts with, and what happens once they land", () => {
+      const text = positionText("dev", { number: 12, sha: "a".repeat(40), labels: [LABEL.queue], ci: "success", behind: { batch: 9000, with: [11, 13] } }, 1, null);
+      expect(text).toContain("conflicts with #11 #13 in batch #9000, ahead of it (merging `origin/dev` into it now changes nothing). Once they are on `dev`, it conflicts with `dev`");
+      expect(text).toContain("If batch #9000 ends without them on `dev`, it keeps its place and boards the next batch.");
     });
 
     it("lets the one first in line go: queue:priority ahead, the other waits whichever was queued first", async () => {
@@ -1870,6 +1897,19 @@ describe("a green batch landing on dev", () => {
     expect(pending.repo.merges).toEqual([]);
   });
 
+  it("takes the position comment off a pull request whose `queue` a person took off while it was aboard", async () => {
+    const { repo, b } = await greenBatch([11, 12, 13, 14]);
+    repo.runs.set(repo.pulls.get(b)!.sha, running);
+    const placed = (n: number) => repo.comments.get(n)!.filter((c) => c.body.startsWith("<!-- merge-train:position -->"));
+    expect(placed(12)).toHaveLength(1);
+    repo.pulls.get(12)!.labels = [];
+    expect((await repo.run()).closed).toEqual([b]);
+    expect(last(repo, b)).toMatch(/#12 changed or left the line/);
+    expect(placed(12)).toEqual([]); // no "in batch #N, waiting for its CI" for good
+    expect(repo.members()).toEqual([11, 13, 14]);
+    for (const n of [11, 13, 14]) expect(placed(n)).toHaveLength(1);
+  });
+
   it("falls back to the rebase merge of the batch, with a warning, while the train may not merge past dev's rule", async () => {
     const { repo, b } = await greenBatch([11, 12], { behind: true });
     repo.rules.bypass = false;
@@ -2215,6 +2255,30 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).toBe(head);
     await repo.run({ now: Date.parse("2026-10-08T00:30:00Z"), maxWait: 0 });
     expect(repo.pulls.get(11)!.sha).not.toBe(head);
+  });
+
+  it("pushes a fresh commit at once for one back from a closed batch at the tip, whose own CI the batch cancelled", async () => {
+    const repo = fakeRepo();
+    const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
+    repo.add(31, { ci: running }); // holds dev's tip
+    repo.drafts.set("h31", fastGreen);
+    repo.going.set("h31", [777]);
+    repo.add(32, { behind: true });
+    repo.add(33, { behind: true });
+    await repo.run({ now: at(0), maxWait: 0 });
+    expect(repo.members()).toEqual([31, 32, 33]);
+    expect(repo.cancelled).toEqual([777]);
+    // The batch closes without landing it (the others lost `queue`): #31 is back with its own run cancelled.
+    repo.runs.set("h31", [{ ...running[0], status: "completed", conclusion: "cancelled" }]);
+    for (const n of [32, 33]) repo.pulls.get(n)!.labels = [];
+    const r = await repo.run({ now: at(1), maxWait: 0 });
+    expect(r.inFlight).toBe(31);
+    // No run is going on h31 and none would start there: a new head starts one, without waiting CI_START_TIMEOUT.
+    expect(repo.pulls.get(31)!.sha).not.toBe("h31");
+    expect(repo.pushes).toEqual([`fix-31=${repo.pulls.get(31)!.sha}`]);
+    expect(repo.alone(31)?.sha).toBe(repo.pulls.get(31)!.sha);
+    repo.settle();
+    expect((await repo.run({ now: at(6), maxWait: 0 })).merged).toEqual([31]);
   });
 
   it.each(["sibling", "events"])("takes a lone pull request whose runs never count out of flight (%s), so the line goes on", async (why) => {
@@ -3407,6 +3471,14 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
   });
 
+  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too", async () => {
+    const repo = sharedHead();
+    repo.earlier.delete("h21");
+    repo.drafts.set("h21", fastGreen);
+    expect((await repo.run()).inFlight).toBe(21);
+    expect(repo.pushes).toEqual([]);
+  });
+
   it("does not count a green pull request run from another branch on the same commit", async () => {
     const repo = fakeRepo();
     repo.add(21);
@@ -4212,6 +4284,12 @@ describe("building a batch with git", () => {
       // Alone, the same: #2 from its branch, #3 nowhere.
       expect(await layer.rebase("dev", prs[1])).toMatchObject({ sha: expect.any(String) });
       expect(await layer.rebase("dev", prs[2])).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "missing" });
+      // An epic's lone landing, the same: #2 fast-forwards from its branch; #3 is refused, not thrown, so its batch way
+      // drops it and the line goes on (it threw on every run, and nothing behind it boarded).
+      git(["branch", "-q", "epic/x", "dev"]);
+      expect(await layer.landPull("epic/x", prs[1])).toEqual({ ok: true });
+      expect(git(["rev-parse", "epic/x"])).toBe(prs[1].sha);
+      expect(await layer.landPull("epic/x", prs[2])).toEqual({ ok: false, message: "git could not fetch the head of #3" });
       layer.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

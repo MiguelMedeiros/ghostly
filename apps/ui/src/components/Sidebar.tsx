@@ -140,7 +140,7 @@ export function Sidebar() {
   // The rail has no search: it shows every chat. A phone turned on its side into a folded list keeps what was typed in
   // its search for the way back.
   const search = collapsed ? "" : typed;
-  const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
   // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
   // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.
   const refocus = useRef(false);
@@ -442,9 +442,12 @@ export function Sidebar() {
   useKeptScroll(rowsRef);
   useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
 
+  // The whole list, folded or not, is the landmark "Chats": its New and Join, its search and its rows, which a screen
+  // reader's landmark keys reach as they reach the account bar and the open page.
   return (
-    <div
+    <nav
       ref={sidebarRef}
+      aria-label={t("sidebar.chats")}
       data-testid="sidebar"
       data-collapsed={collapsed || undefined}
       className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : collapsed ? "border-e border-border shrink-0" : "sidebar-desktop border-e border-border shrink-0"}`}
@@ -470,9 +473,9 @@ export function Sidebar() {
           <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
           <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
         </div>
-        <nav ref={rowsRef} aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
+        <div ref={rowsRef} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
           {listReady && railRows.map(railItem)}
-        </nav>
+        </div>
       </> : <>
       {/* Header */}
       <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
@@ -633,6 +636,6 @@ export function Sidebar() {
         onMouseDown={handleResizeStart}
         className="max-md:hidden absolute top-0 end-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
       />}
-    </div>
+    </nav>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "@ghostlytools/cli",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "type": "module",
   "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
   "license": "MIT",
@@ -66,7 +66,8 @@
     "node-datachannel": "^0.33.6",
     "nostr-tools": "2.26.0",
     "opus-decoder": "0.7.12",
-    "opusscript": "0.1.1"
+    "opusscript": "0.1.1",
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@ghostly/browser": "*",

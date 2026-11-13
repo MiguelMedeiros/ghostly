@@ -97,10 +97,15 @@ export function useComputerAwake(): void {
     let timer: ReturnType<typeof setInterval> | undefined;
     // The page read a device set since this started: an answer of `single` asked for before it is out of date.
     let hasSet = false;
+    // The set as last read. With the switch off only a handoff keeps the computer awake, so once the set is known it is
+    // not read again: each read is one of the device state (on Desktop, of its file too), every 5 s.
+    let known: DeviceSetView | null = null;
     const stop = () => { clearInterval(timer); timer = undefined; };
     const check = async () => {
-      const [set, handoff] = await Promise.all([engine.call("deviceSet").catch(() => null), engine.call("deviceHandoffView").catch(() => null)]);
+      const readSet = setting || !known;
+      const [set, handoff] = await Promise.all([readSet ? engine.call("deviceSet").catch(() => null) : known, engine.call("deviceHandoffView").catch(() => null)]);
       if (!live) return;
+      known = set;
       setWanted(keepAwakeWanted(setting, set, handoff));
       // A profile on this device only has no standby and no handoff: nothing is looked at again until it gets a device set.
       if (set?.state === "single" && !hasSet) stop();
