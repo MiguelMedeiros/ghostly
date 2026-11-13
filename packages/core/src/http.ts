@@ -697,6 +697,8 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   private wake: (() => void) | null = null;
   /** Bytes received and not yet read. */
   held = 0;
+  /** Bytes read so far, all told. */
+  taken = 0;
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
@@ -725,6 +727,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
       while (this.chunks.length > 0) {
         const chunk = this.chunks.shift()!;
         this.held -= chunk.length;
+        this.taken += chunk.length;
         yield chunk;
       }
       if (this.error) throw this.error;
@@ -863,18 +866,20 @@ export class HttpClient {
   /**
    * Nothing tells the peer to slow down, and its last chunk frees the slot: a reader that stalls (a contact's page that
    * never reads what it fetched) would have the whole body held here, one per request it leaves unread. Past the bound
-   * the reader gets one turn, as a link that hands over many chunks at once leaves it none; still past it, the response
-   * is reset and what it held let go.
+   * the reader gets `unreadStallMs`, as a link that hands over many chunks at once leaves it no turn: one that took
+   * something in it is looked at again, one that took nothing has the response reset and what it held let go.
    */
   private checkUnread(id: number, stream: ClientStream, queue: BodyQueue): void {
     if (stream.unreadCheck) return;
+    const taken = queue.taken;
     stream.unreadCheck = setTimeout(() => {
       stream.unreadCheck = undefined;
       if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
+      if (queue.taken > taken) return this.checkUnread(id, stream, queue);
       const error = new GhostlyHttpError("unread", "Response body not read in time");
       queue.drop(error);
       this.abort(id, error);
-    }, 0);
+    }, LIMITS.unreadStallMs);
   }
 
   handleReset(frame: ResetFrame): void {
