@@ -1,13 +1,13 @@
-import { LINK_TRAILING, linkStop } from "@ghostly/core";
+import { LINK_TRAILING, linkStop, linkTail } from "@ghostly/core";
 import type { Detector } from "./types";
 
 const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", "見て
- * https://x.example/a。", in any of the app's languages) and a closing bracket or quote the link did not open
- * ("(https://x.example/a)") are left as text, and so is a doubled `~~` or `||` closing the strike or spoiler the link
- * sits in.
+ * https://x.example/a。", in any of the app's languages), an emoji or invisible character ("https://x.example/a🔥",
+ * `linkTail`) and a closing bracket or quote the link did not open ("(https://x.example/a)") are left as text, and so
+ * is a doubled `~~` or `||` closing the strike or spoiler the link sits in.
  */
 export function linkEnd(whole: string): string {
   const url = linkStop(whole);
@@ -17,7 +17,9 @@ export function linkEnd(whole: string): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = CLOSERS[last];
-    if (LINK_TRAILING.test(last) || (opener && count[last] > count[opener])) {
+    const tail = linkTail(url, end);
+    if (tail) end -= tail;
+    else if (LINK_TRAILING.test(last) || (opener && count[last] > count[opener])) {
       if (opener) count[last]--;
       end--;
     } else if ((last === "~" || last === "|") && url[end - 2] === last) end -= 2;

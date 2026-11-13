@@ -34,6 +34,8 @@ describe("linksIn", () => {
   it("finds the links of a text as the bubble ends them", () => {
     expect(linksIn("see (https://a.example/x), and https://b.example/y.")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("no links here")).toEqual([]);
+    // An emoji typed right after a link was previewed as part of it ("…/a%F0%9F%94%A5").
+    expect(linksIn("olha https://a.example/x🔥 e https://b.example/y!👍🏽")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
 
   // The preview was fetched from /a%E3%80%82, a page the person never linked.
