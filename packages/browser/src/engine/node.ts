@@ -6249,10 +6249,19 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A 1:1 chat's pin that came before its message (pinned while I was away: the pin goes as the session opens, ahead of
-   * what waited) names its row once the row is here. Only the rows that changed are read, and only while such a pin stands.
+   * A pin that came before its message (pinned while I was away: a 1:1 chat's goes as the session opens, a group's as an
+   * edge opens, ahead of what waited) names its row once the row is here. Only the rows that changed are read, and only
+   * while such a pin stands.
    */
   private async pinnedRowCame(linkId: string, ids: readonly string[]): Promise<void> {
+    if (linkId.startsWith("group:")) {
+      const groupId = linkId.slice("group:".length), pin = this.groups.pinOf(groupId);
+      // A group's row goes by the pin's own id (`pinnedRow`): only that one is read.
+      if (!pin?.id || pin.messageId || pin.removed || !ids.includes(pin.id)) return;
+      const row = await db.getMessage(linkId, pin.id);
+      if (row && replyRef(row, true) === pin.id) await this.groups.pinRowCame(groupId, pin, row.id);
+      return;
+    }
     const live = this.links.get(linkId), pin = live?.stored.pin;
     if (!live || live.stored.group || !pin?.id || pin.messageId || pin.removed) return;
     for (const id of new Set(ids)) {
