@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { EngineError, RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { EngineError, RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, hasVisible, sparkInvoiceDetails, stripHidden, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -52,6 +52,25 @@ const PAYMENTS_PER_MINUTE = 10;
 const PAYMENTS_BUSY = "Too many payments at once: send it again in a minute";
 /** Refusal lines one chat gets in an hour; past it the contact is still told, and the chat stays as it is. */
 const REFUSAL_LINES_PER_HOUR = 5;
+
+/** The longest reason of a contact's kept: no wallet's reason is longer, and the app reads none past it (errorText `readable`). */
+const CONTACT_REASON_MAX = 120;
+/** An address in a reason: a link or URI ("https://…", "lightning:…"), a "www.", a host ("evil.example/…", any dot). */
+const ADDRESS = /[a-z][a-z0-9+.-]*:(?:\/\/|[a-z0-9])|\bwww[.．。｡]|[\p{L}\p{N}-][.．。｡]\p{L}{2,}/iu;
+/** The one reason of a wallet's that names a host: our own ecash's mint, which the contact does not take (wallet.ts). */
+const MINT_REFUSED = /^Ecash from [a-z0-9-]+(?:\.[a-z0-9-]+)+ is not accepted$/i;
+
+/**
+ * A contact's reason for a payment result (`pay-res` `err`), as this app keeps it; undefined for the app's own words.
+ * It is said after the app's words in the payment's state line and its chat line, so it gets a display text's check:
+ * invisible and direction characters out, and nothing that names an address (but a mint's host in `MINT_REFUSED`) or
+ * is longer than a wallet's reason.
+ */
+export function contactReason(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const reason = stripHidden(error.replace(/\s+/g, " ")).replace(/ {2,}/g, " ").trim();
+  return hasVisible(reason) && reason.length <= CONTACT_REASON_MAX && (MINT_REFUSED.test(reason) || !ADDRESS.test(reason)) ? reason : undefined;
+}
 
 /**
  * "I paid your invoice" (`sayInvoicePaid`) that has not reached the contact's app yet, kept in `STORES.settings` under
@@ -1220,7 +1239,9 @@ export class PaymentDesk {
     await this.refusalLine(record.linkId, `peer_${record.createdAt}_refused`, refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason }), record.createdAt);
   }
 
-  async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
+  async onPaymentResult(linkId: string, said: PaymentResult): Promise<void> {
+    // The contact's reason, kept only as `contactReason` leaves it: without one the app's own words below are said.
+    const result: PaymentResult = { ...said, error: contactReason(said.error) };
     const payment = this.find(linkId, result.id);
     if (payment?.target?.method === "fedimint" && payment.linkId === linkId && payment.direction === "out" && payment.kind === "payment") {
       if (payment.state !== "pending") return;
