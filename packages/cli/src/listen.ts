@@ -62,6 +62,9 @@ export class Allowlist {
 
   async allows(event: GhostlyEvent): Promise<boolean> {
     if ("group" in event) return typeof event.group === "string" && this.groups.has(event.group);
+    // A group's payment names a link (`group:<id>`, a community's `cpay:…`, a member's), never the group: its group says.
+    const group = (event.payment as { group?: unknown } | undefined)?.group;
+    if (group !== undefined) return typeof group === "string" && this.groups.has(group);
     if (!("chat" in event)) return true;
     const chat = event.chat;
     if (typeof chat !== "string") return false;

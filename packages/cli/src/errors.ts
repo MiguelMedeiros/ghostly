@@ -30,7 +30,7 @@ export function asCliError(error: unknown): CliError {
     && Object.hasOwn(EXIT, (error as { code: string }).code)) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
   // A contact the chat's link could not reach (its `GhostlyHttpError` "unreachable"): not there now, not the engine failing.
   if (error instanceof Error && (error as { code?: unknown }).code === "unreachable") return new CliError("unavailable", error.message);
-  const known = engineKnown(error);
+  const known = engineKnown(error) ?? contactNoRail(error);
   if (known) return known;
   const full = noRoomError(error);
   if (full) return full;
@@ -78,6 +78,22 @@ function engineKnown(error: unknown): CliError | undefined {
   // The contact's next step, for a contact that is a bot too.
   if (engineCode === "contactNoWallet") return new CliError("refused", `${error.message} (on a CLI: ghostly wallet create cashu)`, details);
   return new CliError(ENGINE_CODES[engineCode], error.message, details);
+}
+
+/** The engine's names of the ways of paying (payments.ts `METHOD_NAME`), as `wallet create` takes them; Bark is the app's only. */
+const RAILS: Record<string, string | null> = { Cashu: "cashu", Lightning: "lightning", Ark: "arkade", USDT: "usdt", Bark: null, "on-chain Bitcoin": "bitcoin", Fedimint: "fedimint", Spark: "spark" };
+
+/**
+ * A contact with no wallet of the way of paying or the network asked (`chat request --method arkade`, a Mainnet `chat
+ * pay` to a contact with Testnet Cashu only): the engine says it in words alone. `refused` with `contact_no_wallet` and
+ * the contact's next step, as a contact with no wallet at all is said. Before, `engine`, which a bot may retry.
+ */
+function contactNoRail(error: unknown): CliError | undefined {
+  const said = error instanceof Error ? /^Your contact has no (Mainnet|Testnet) (.+) wallet$/.exec(error.message) : null;
+  if (!said || !Object.hasOwn(RAILS, said[2])) return undefined;
+  const type = RAILS[said[2]];
+  const step = type ? ` (on a CLI: ghostly wallet create ${type}${said[1] === "Mainnet" ? " --network mainnet" : ""})` : "";
+  return new CliError("refused", `${said[0]}${step}`, { reason: "contact_no_wallet" });
 }
 
 /**

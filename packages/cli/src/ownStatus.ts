@@ -36,7 +36,8 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
     const length = [...shown].length;
     if (length > STATUS_TEXT_MAX) throw fail("text", `is up to ${STATUS_TEXT_MAX} characters, not ${length} characters`);
     if (!shown) throw fail("text", "needs a character that shows");
-    const text = sanitizeStatusText(oneLine);
+    // The text as counted: the raw one could lose characters that fit to the engine's cut of invisible padding.
+    const text = sanitizeStatusText(shown);
     if (!text) throw fail("text", "is plain text: no link or markup");
     status.text = text;
   }

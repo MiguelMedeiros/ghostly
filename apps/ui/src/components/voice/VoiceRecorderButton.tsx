@@ -638,7 +638,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         onKeyDown={onKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         style={{ touchAction: "none" }}
-        className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
+        className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
       >
         {/* One element either way (so a press's target never leaves the page); the send icon pops in by CSS. */}
         <span className="voice-button-icon">{locked ? <SendIcon /> : <MicIcon />}</span>

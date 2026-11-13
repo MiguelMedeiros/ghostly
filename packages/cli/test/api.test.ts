@@ -636,6 +636,20 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).not.toHaveProperty("note");
   });
 
+  // `--for` with `--stop` is refused, so a stop's note offered advice that could not be followed.
+  it("a one-shot typing stop's note only gives the daemon advice, in a chat and a group", async () => {
+    const { ctx, node } = fake();
+    Object.assign(ctx, { mode: "one-shot" });
+    const state = node.getState();
+    node.getState = () => ({ ...state, groups: [{ ...group, id: "m1", name: "Mesh", profile: "mesh", status: "active" } as unknown as GroupView] });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toMatchObject({ note: expect.stringContaining("--for") });
+    expect(await callApi(ctx, "group.typing", { group: "Mesh" })).toMatchObject({ note: expect.stringContaining("--for") });
+    for (const out of [await callApi(ctx, "chat.typing", { chat: "Alice", stop: true }), await callApi(ctx, "group.typing", { group: "Mesh", stop: true })]) {
+      expect(out).toMatchObject({ note: expect.stringMatching(/reached nobody.*ghostly daemon --detach/) });
+      expect(out).not.toMatchObject({ note: expect.stringContaining("--for") });
+    }
+  });
+
   it("group typing says it in a private group, with the same checks, and refuses a community", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "group.typing", { group: "Crew" })).rejects.toMatchObject({ code: "unavailable" });

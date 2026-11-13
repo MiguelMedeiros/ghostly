@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { VOICE_LIMITS, parseVoiceMeta, voicePeaksOf } from "@ghostly/core";
 import { MAX_OPUS_PACKETS, VoiceMeter, decodeWithFfmpeg, demuxOgg, demuxWebm, measureVoice } from "../src/voicePeaks";
 // covers: headless.files
@@ -173,6 +173,47 @@ describe("a voice note's waveform, measured from its file", () => {
       expect(voice.duration).toBeLessThanOrEqual(VOICE_LIMITS.maxDurationMs + 6_000 + 20_000);
     }
   }, 60_000);
+
+  // The header was trusted before a sample was read: 65,535 channels took a Float32Array of 4,096 frames each (1 GiB)
+  // or, as 64-bit floats, a 2 GiB buffer; a 4 GHz rate a 366 MB meter. A header no sound has is refused.
+  it("refuses a WAV whose header no sound has, before taking memory for it", async () => {
+    const cases = [
+      { name: "channels8.wav", format: 1, bits: 8, channels: 65_535, rate: 8_000, length: 65_535 * 20 },
+      { name: "channels64.wav", format: 3, bits: 64, channels: 65_535, rate: 8_000, length: 65_535 * 8 },
+      { name: "rate.wav", format: 1, bits: 8, channels: 1, rate: 0xffffffff, length: 4_096 },
+      { name: "slow.wav", format: 1, bits: 8, channels: 1, rate: 1, length: 4_096 },
+    ];
+    // Every typed array and buffer taken while it is measured, refused past a few MiB (not taken for real).
+    let taken = 0;
+    const take = (bytes: number) => { taken += bytes; if (taken > 16 * 1024 * 1024) throw new Error(`took ${taken} bytes`); };
+    const RealFloat32Array = Float32Array;
+    vi.stubGlobal("Float32Array", new Proxy(RealFloat32Array, {
+      construct(target, args: unknown[], newTarget) {
+        if (typeof args[0] === "number") take(args[0] * 4);
+        return Reflect.construct(target, args, newTarget);
+      },
+    }));
+    const allocUnsafe = Buffer.allocUnsafe.bind(Buffer);
+    const spy = vi.spyOn(Buffer, "allocUnsafe").mockImplementation((size: number) => { take(size); return allocUnsafe(size); });
+    try {
+      for (const { name, format, bits, channels, rate, length } of cases) {
+        const head = Buffer.alloc(44);
+        head.write("RIFF", 0); head.writeUInt32LE(36 + length, 4); head.write("WAVE", 8);
+        head.write("fmt ", 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(format, 20); head.writeUInt16LE(channels, 22);
+        head.writeUInt32LE(rate, 24); head.writeUInt32LE(0, 28); head.writeUInt16LE(0, 32); head.writeUInt16LE(bits, 34);
+        head.write("data", 36); head.writeUInt32LE(length, 40);
+        const path = join(dir, name);
+        writeFileSync(path, Buffer.concat([head, Buffer.alloc(length, 200)]));
+        taken = 0;
+        const result = await measureVoice(path);
+        expect(result, name).toEqual({ problem: expect.stringMatching(/^a WAV with \d+ channels? at \d+ Hz, which no sound has/), notSound: true });
+        expect(taken, name).toBeLessThan(1024 * 1024);
+      }
+    } finally {
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("holds no more Opus packets than the longest voice note can have, however many empty ones a small file declares", async () => {
     // Every packet of a voice note is at least 2.5 ms long: the cap holds one a little past the limit.

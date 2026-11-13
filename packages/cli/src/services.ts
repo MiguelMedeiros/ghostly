@@ -161,9 +161,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
-  let host = "";
+  let host = "", portless = "";
   const server = createServer((request, response) => {
-    if (request.headers.host?.toLowerCase() !== host) return plain(response, 404, "Not found");
+    const asked = request.headers.host?.toLowerCase();
+    if (!asked || (asked !== host && asked !== portless)) return plain(response, 404, "Not found");
     const path = request.url ?? "/";
     if (path.startsWith(OPEN_PATH)) {
       if (!sameSecret(path.slice(OPEN_PATH.length), token)) return plain(response, 404, "Not found");
@@ -186,7 +187,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
     request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
-  host = `${name}:${(server.address() as AddressInfo).port}`;
+  const on = (server.address() as AddressInfo).port;
+  host = `${name}:${on}`;
+  // On port 80 a browser leaves the port out of Host (`new URL("http://a.localhost:80/").host` is `a.localhost`).
+  if (on === 80) portless = name;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
