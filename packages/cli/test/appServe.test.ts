@@ -81,6 +81,21 @@ describe("app serve", () => {
     expect(servedApps(dir)).toEqual([]);
   });
 
+  it("refuses a card url a contact's app cannot read the bundle from, and never puts one on the card", async () => {
+    const { dir, ctx, file } = profile();
+    const raw = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    for (const bad of ["https://example.org/app.ghostlyapp", "https://raw.githubusercontent.com:8443/ana/chess/HEAD/app.ghostlyapp", "https://raw.githubusercontent.com/ana/chess/HEAD/my app.ghostlyapp"])
+      await expect(callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: bad }), bad).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("raw.githubusercontent.com") });
+    expect(servedApps(dir)).toEqual([]);
+    expect(await callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: raw })).toMatchObject({ served: { url: raw } });
+    // Without --url, the manifest's sources a contact's app cannot read from are not the card's link.
+    const far = vector("every bound at its limit");
+    expect(far.read.manifest.sources!.every((u) => new URL(u).hostname === "example.org")).toBe(true);
+    const other = profile();
+    const { served } = await callApi(other.ctx, "app.serve", { bundle: other.file("far", far.bytes), grant: ["chat"] }) as { served: Record<string, unknown> };
+    expect(served.url).toBeUndefined();
+  });
+
   it("refuses a bundle a client would refuse, with the client's reason", async () => {
     const { dir, ctx, file } = profile();
     for (const bad of vectors.invalid.filter((v) => v.refusal !== "too-large").slice(0, 12))
