@@ -84,7 +84,11 @@ describe("identity signers on Node", () => {
       code: "unavailable", message: "Browser extension (NIP-07) needs a browser window: make this proof in the app (here: --signer nip46)",
     });
     await expect(callApi(ctx, "identity.add", { provider: "atproto", fields: { handle: "alice.test" } })).rejects.toMatchObject({
-      code: "unavailable", message: "Bluesky / AT Protocol proofs need a browser window: make them in the app",
+      code: "unavailable", message: "Bluesky / AT Protocol: this kind of proof needs a browser window, make it in the app",
+    });
+    // It read "Account at a provider proofs need a browser window": the label put before "proofs".
+    await expect(callApi(ctx, "identity.add", { provider: "oidc", subject: "alice@example.com" })).rejects.toMatchObject({
+      code: "unavailable", message: "Account at a provider: this kind of proof needs a browser window, make it in the app",
     });
   });
 
