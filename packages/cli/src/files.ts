@@ -7,7 +7,7 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
@@ -102,22 +102,23 @@ function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferVi
 }
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
-const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
+const chatOrGroupOf = (ctx: ApiContext, params: Params, { links, groups }: EngineState = state(ctx)) => findChatOrGroup(links, groups, str(params, "chat", true));
 
 /**
  * The chat or group a file belongs to: a file id starts with its chat's id (a group's file with `group-<id>-`), so it
  * may be left out; given, it must be the file's own. `where` is what the answer names it by.
  */
 function fileChat(ctx: ApiContext, params: Params, fileId: string): { linkId: string; where: { chat: string } | { group: string } } {
-  const groupId = groupOfFile(fileId, state(ctx).groups.map((g) => g.id));
+  const s = state(ctx);
+  const groupId = groupOfFile(fileId, s.groups.map((g) => g.id));
   if (groupId) {
-    const named = params.chat === undefined ? undefined : chatOrGroupOf(ctx, params);
+    const named = params.chat === undefined ? undefined : chatOrGroupOf(ctx, params, s);
     if (named && !("group" in named && named.group.id === groupId)) throw noFile(fileId, { group: "group" in named, ref: str(params, "chat", true) });
     return { linkId: `group:${groupId}`, where: { group: groupId } };
   }
   const link = params.chat === undefined
-    ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
-    : chatOf(ctx, params);
+    ? s.links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
+    : chatOf(ctx, params, s);
   if (!link) throw noFile(fileId);
   if (!fileId.startsWith(`${link.id}-`)) throw noFile(fileId, { group: false, ref: str(params, "chat", true) });
   return { linkId: link.id, where: { chat: link.id } };
