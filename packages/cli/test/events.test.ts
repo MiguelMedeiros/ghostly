@@ -740,6 +740,48 @@ describe("the event stream", () => {
     }, 60_000);
   });
 
+  /**
+   * Every `listen` connect and reconnect replays from its cursor (`events.subscribe`): each read the journal's whole
+   * window (up to 32 MiB) and parsed every line of it, 49 ms of a blocked daemon to return one event at 19,000 events.
+   */
+  describe("what a replay reads of the journal", () => {
+    function counted(work: () => GhostlyEvent[]): { read: number; parsed: number; events: GhostlyEvent[] } {
+      const alloc = Buffer.alloc, parse = JSON.parse;
+      let read = 0, parsed = 0;
+      const allocs = vi.spyOn(Buffer, "alloc").mockImplementation((size: number, ...rest: unknown[]) => { read += size; return alloc.call(Buffer, size, ...(rest as [])); });
+      const parses = vi.spyOn(JSON, "parse").mockImplementation((...args: Parameters<typeof JSON.parse>) => { parsed++; return parse(...args); });
+      try { const events = work(); return { read, parsed, events }; } finally { allocs.mockRestore(); parses.mockRestore(); }
+    }
+
+    it("a cursor near the end reads and parses the journal's end only, and gives what a whole read gives", async () => {
+      const { h } = await hub("replay-end.jsonl");
+      const text = "x".repeat(300);
+      for (let i = 0; i < 5_000; i++) h.emit("x", `x:${i}`, { text });
+      const path = join(dir, "replay-end.jsonl"), size = statSync(path).size;
+      const near = counted(() => h.replay(h.lastSeq - 1));
+      expect(near.events.map((e) => e.seq)).toEqual([5_000]);
+      expect(near.parsed).toBeLessThan(5);
+      expect(near.read).toBeLessThan(size / 10);
+      // From further back, or from before the journal, every event after the cursor, in order.
+      for (const since of [0, 1, 2_500, 4_998, 4_999, 5_000]) {
+        expect(h.replay(since).map((e) => e.seq)).toEqual(Array.from({ length: 5_000 - since }, (_, i) => since + 1 + i));
+      }
+    }, 60_000);
+
+    it("finds its start past blanked, torn and unended lines, and still says a gap", async () => {
+      const path = join(dir, "replay-odd.jsonl");
+      const line = (seq: number) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 });
+      // 5 and 6: kept; 7 blanked (a message removed); 8 torn; 9 and 10 whole, the last with no newline.
+      writeFileSync(path, [line(5), line(6), " ".repeat(line(7).length), line(8).slice(0, 12), line(9), line(10)].join("\n"));
+      const h = new EventHub(path, () => 1000, "replay-odd");
+      await h.open();
+      expect(h.replay(2).map((e) => e.type === "events.gap" ? `gap ${e.from}-${e.to}` : e.seq)).toEqual(["gap 3-4", 5, 6, 9, 10]);
+      for (const [since, seqs] of [[5, [6, 9, 10]], [6, [9, 10]], [7, [9, 10]], [8, [9, 10]], [9, [10]], [10, []]] as const) {
+        expect(h.replay(since).map((e) => e.seq)).toEqual(seqs);
+      }
+    });
+  });
+
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {
     const first = await hub("e.jsonl");
     first.h.baseline(state([link("c9")]), new Map([["c9", [message("c9", "a"), message("c9", "b")]]]));
