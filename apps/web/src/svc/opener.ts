@@ -474,6 +474,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // The strip and the Services dialog drop the Open button once the contact goes offline or stops sharing the app: the
+  // focus then goes to the dialog it was in, or else to the chat's composer.
+  const holder = before?.parentElement?.closest<HTMLElement>("[role=dialog]") ?? null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   let unwatch = () => {};
   // The person's taps and keys in the app go to its frame, never to this page, whose lock screen would lock them out
@@ -491,7 +494,14 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     view.remove();
     for (const el of shut) el.removeAttribute("inert");
     const active = document.activeElement;
-    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
+    if (!active || active === document.body) {
+      const composer = document.querySelector<HTMLElement>("[data-composer] textarea:not(:disabled)");
+      for (const el of [before, holder, composer]) {
+        if (!el?.isConnected) continue;
+        el.focus({ preventScroll: true });
+        if (document.activeElement === el) break;
+      }
+    }
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
