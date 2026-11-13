@@ -479,7 +479,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
-    removeEventListener("keydown", onKey);
+    removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     bridge.abort();
@@ -490,12 +490,14 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  // Taken before the page's own listeners and spent here: a modal of the app under the view (the chat's Shared services
+  // dialog it was opened from) would close on the same Escape.
+  const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
-  addEventListener("keydown", onKey);
+  addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
