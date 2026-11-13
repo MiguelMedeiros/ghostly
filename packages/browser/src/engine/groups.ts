@@ -369,16 +369,24 @@ export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; 
 
 /** Rows `unmark` reads at a time from the newest back: the marks it moves back are almost always among the last few. */
 export const UNMARK_PAGE = 64;
+/**
+ * Pages `unmark` reads from the newest back before it reads the whole history once: a mark with none older to go back
+ * to (the group's only "@" taken back) read every page, 5 times the whole history at once (the CLI's store walks a
+ * cursor row by row).
+ */
+export const UNMARK_PAGES = 4;
 
 /**
  * `newestMarked` of a group's rows without `skip`, for the marks in `want` only: read a page at a time from the newest
  * back until each is found, where the whole history cost ~20 ms per 1,000 rows on each member's daemon for every delete.
- * A store without pages reads it whole.
+ * Past `UNMARK_PAGES`, or with a store without pages, it reads the whole history.
  */
 export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "getMessagePage">, linkId: string, skip: string, want: { last: boolean; peer: boolean; mention: boolean }): Promise<ReturnType<typeof newestMarked>> {
-  if (!store.getMessagePage) return newestMarked((await store.getMessages(linkId)).filter(m => m.id !== skip));
+  const whole = async () => newestMarked((await store.getMessages(linkId)).filter(m => m.id !== skip));
+  if (!store.getMessagePage) return whole();
   const found: ReturnType<typeof newestMarked> = {};
-  for (let before: { timestamp: number; id: string } | undefined; ;) {
+  for (let before: { timestamp: number; id: string } | undefined, pages = 0; ; pages++) {
+    if (pages === UNMARK_PAGES) return whole();
     const page = await store.getMessagePage(linkId, { limit: UNMARK_PAGE, before });
     for (const m of [...page.messages].reverse()) {
       if (m.id === skip) continue;
