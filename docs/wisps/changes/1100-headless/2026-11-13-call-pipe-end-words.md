@@ -1,0 +1,1 @@
+`call pipe` says on stderr why it leaves when the daemon closes the call's audio: `the call ended (<reason>)`, with the reason of the call's `call.ended`, or `another program took its audio; the call goes on`. It stays subscribed to the daemon's events for this while it runs. The exit status is still 0.
