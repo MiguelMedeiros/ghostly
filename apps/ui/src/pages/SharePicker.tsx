@@ -89,7 +89,8 @@ export function SharePicker() {
 
   return (
     <Page title={t("pwa.shareTitle")} testId="share-picker">
-      <SearchStatus testId="share-next" text={said} />
+      {/* Said too when nothing came: the waiting line changes on its own after a while. */}
+      <SearchStatus testId="share-next" text={share ? said : waited ? t("pwa.shareNone") : ""} />
       {!share ? (
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
