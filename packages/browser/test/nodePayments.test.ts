@@ -26,7 +26,7 @@ function stubLink(overrides: Record<string, unknown> = {}) {
     sendPaymentRequest: vi.fn(async () => {}),
     sendPaymentAsk: vi.fn(async () => {}),
     sendPaymentResult: vi.fn(),
-    stop: vi.fn(async () => {}), depart: vi.fn(),
+    stop: vi.fn(async () => {}), depart: vi.fn(), setTyping: vi.fn(),
     ...overrides,
   };
 }
