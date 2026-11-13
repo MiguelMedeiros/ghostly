@@ -70,11 +70,14 @@ export const DEFAULT_LIMITS = Object.freeze({
 /**
  * The congestion window of the relay's one HyperDHT node: requests it may have out per 750 ms tick before the rest wait
  * in its queue, for every client together. dht-rpc's default (80) is sized for one app, and each listen's announcer pings
- * its 3 nodes every 3 s, about one request a second per listen: measured on loopback, 80 keeps up with about 1,000
- * listens and 320 with 4,096, so a window of listens / 12 sends them all. At the defaults 512 × 16 / 12 = 683. Never
- * below dht-rpc's 80; at most 2048 (24,576 listens), past which a relay is better split in two.
+ * its 3 nodes every 3 s, about one request a second per listen, all at once after a restart. Measured on loopback with
+ * the relay full (its own testnet, 20 s idle): listens / 12 left 400 to 900 pings waiting at 1,024 listens, and at 4,096
+ * and 8,192 a queue of 20,000 to 42,000 that kept growing, its timeouts bringing refreshes that queue more; listens / 2
+ * kept it empty (1,024 listens) or emptied it within seconds (8,192 at 2048). Never below dht-rpc's 80; at most 2048,
+ * which the defaults reach (512 × 16 / 2 is past it) and which keeps their 8,192 listens moving: a relay set for more
+ * is better split in two.
  */
-export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 12)))
+export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80, Math.ceil(clients * listens / 2)))
 
 /**
  * dht-relay 0.4.3 (its latest release) hands a browser the announce record where the browser expects the
