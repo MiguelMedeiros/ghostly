@@ -1143,7 +1143,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (base === "dev") {
       const { title, message } = squashMessage(p, await gh.pullCommits(p.number));
       r = await w.squash(p.number, p.sha, title, message);
-    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p.number, p.sha);
+    } else r = dry ? (say(`(dry run) would fast-forward ${base} to ${p.sha.slice(0, 12)}`), { ok: true }) : await git.landPull(base, p);
     if (r.ok) {
       say(`MERGED #${p.number} alone`);
       done.merged.push(p.number);
@@ -1883,10 +1883,14 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
         return { ok: false, message: (lines.find((l) => /^\s*!|^error:|^fatal:/.test(l)) ?? lines.at(-1)).trim() };
       }
     },
-    /** An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it). */
-    async landPull(base, number, sha) {
-      fetch([`+refs/pull/${number}/head:${ns}/pr-${number}`]);
-      return this.land(base, sha);
+    /**
+     * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
+     * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     */
+    async landPull(base, p) {
+      if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      return this.land(base, p.sha);
     },
   };
 }
