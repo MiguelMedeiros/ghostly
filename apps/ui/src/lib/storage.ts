@@ -129,10 +129,12 @@ function getKey(sessionId: string): string {
 /**
  * The key a chat's id is read from, or null for an id no chat has: a chat's id never has `_` (`isSessionKey`), and one
  * that has it (a chat address's `chat_folders`) names another of the profile's keys or, in the first profile, whose
- * prefix starts every other profile's, another profile's chat.
+ * prefix starts every other profile's, another profile's chat. `profiles` has no `_` but, in the first profile, names the
+ * registry of profiles (`registryKey` in lib/profiles, not imported here: it would load lib/profiles with this module),
+ * and a chat's id is never it (`newSessionId`).
  */
 function readableKey(sessionId: string): string | null {
-  return sessionId && !sessionId.includes("_") ? getKey(sessionId) : null;
+  return sessionId && sessionId !== "profiles" && !sessionId.includes("_") ? getKey(sessionId) : null;
 }
 
 /** Whether a stored key is one of this profile's chats: the prefix and the chat's id; a longer key is another profile's, or not a chat. */
