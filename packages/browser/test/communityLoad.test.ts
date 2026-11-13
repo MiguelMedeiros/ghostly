@@ -46,13 +46,18 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
 
     // Admission through the link, in waves; the admin closes its app after the first wave and opens it again only for
     // a wave the members could not let in on their own (`memberAdmissions` in a row, WISP 903 § Admissions while the
-    // admin is away).
+    // admin is away). Counted on every member's chain, the most: the last of a wave on the list may have been let in
+    // early and not seen the wave's later admissions, and the admin stayed away from a wave the members stopped at their
+    // bound before its end (16 counted where there were 19, and three joiners waited for good).
+    const admissions = () => Math.max(...peers.filter(p => p !== admin && p.online).map(p => memberAdmissionsSinceAdmin(p, id)));
     let t = wall(), simStart = world.now;
     for (let i = 1; i < N; i += WAVE) {
       const wave = Array.from({ length: Math.min(WAVE, N - i) }, (_, j) => add(`p${i + j}`));
-      if (i > 1) admin.online = memberAdmissionsSinceAdmin(peers[peers.length - 1], id) + wave.length > COMMUNITY_LIMITS.memberAdmissions;
+      if (i > 1) admin.online = admissions() + wave.length > COMMUNITY_LIMITS.memberAdmissions;
       for (const p of wave) await p.groups.joinByLink(link);
-      await world.until(() => wave.every(p => world.member(p, id)), 15 * 60_000, 1000, () => `wave ${i}: ${wave.filter(p => !world.member(p, id)).map(p => p.name).join(",")}`);
+      // And if they reach it all the same before the wave is in (the chains read above were a step behind), it opens it.
+      const held = () => { if (!admin.online && admissions() >= COMMUNITY_LIMITS.memberAdmissions) admin.online = true; return false; };
+      await world.until(() => held() || wave.every(p => world.member(p, id)), 15 * 60_000, 1000, () => `wave ${i}: ${wave.filter(p => !world.member(p, id)).map(p => p.name).join(",")}`);
       peers.push(...wave);
     }
     report.joinSimulatedSeconds = (world.now - simStart) / 1000;

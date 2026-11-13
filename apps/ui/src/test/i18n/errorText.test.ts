@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
-import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
+import { ERROR_RULES, errorText, knownErrorParts, knownErrorText, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemLine, problemText, sentences } from "../../lib/problemText";
@@ -333,6 +333,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact does not accept Ark in this chat", `${BROWSER}/engine/payments.ts`, "Your contact does not accept "],
   ["This request cannot be paid from another wallet", `${BROWSER}/engine/payments.ts`],
   ["You are offline", `${BROWSER}/engine/payments.ts`],
+  // What a payee's app sends back for a payment it did not take, shown on the payer's bubble after its state.
+  ["Too many payments at once: send it again in a minute", `${BROWSER}/engine/payments.ts`],
+  ["This ecash does not pay the request: the amount or the mint differs", `${BROWSER}/engine/payments.ts`],
+  ["This transaction already paid another request", `${BROWSER}/engine/payments.ts`],
+  ["Too many open USDT requests of this amount: wait for one to be paid", `${BROWSER}/engine/payments.ts`],
+  ["The mint quoted another amount than this invoice's. Nothing was paid.", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/paymentAdapters/providers/webln.ts`],
+  // A group's pay to one member, refused when the member list was stale.
+  ["Payments are turned off in this group.", `${BROWSER}/engine/communityPay.ts`],
+  ["They are no longer in this group", `${BROWSER}/engine/communityPay.ts`],
+  ["They take no way of paying this device allows.", `${BROWSER}/engine/communityPay.ts`],
   ["This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "payment (${"],
   ["This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "wallet never pays it. Use a "],
   ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
@@ -957,6 +969,28 @@ describe("errors in the app's language", () => {
     // A reason the rules do not know is a translated "could not verify", its English only behind the ⓘ.
     expect(problemText("The Nostr event id does not match its content", t, "proof")).toEqual({ tone: "error", title: t("errors.proof.checkFailed"), detail: "The Nostr event id does not match its content" });
     expect(problemLine("The Nostr event id does not match its content", t, "proof")).toBe(t("errors.proof.checkFailed"));
+  });
+
+  // A refusal written in a chat's or a group's payments reached the bubble and the composer in English in every language.
+  it.each(["pt", "ar"] as const)("every refusal a chat's or a group's payments throw, refuse or store reads in %s, not in English", (language) => {
+    const t = translators[language];
+    // Never shown to a person: a check of the engine's own state, or a line whose bubble is gone with it.
+    const INTERNAL = new Set([
+      "Cashu chat recipient missing", "Cashu outbox does not match the reviewed payment", "Fedimint ecash goes to a contact in a chat",
+      "The Fedimint payment is not in the journal", "Unsupported payment method", "Removed here", "Choose one member to pay",
+    ]);
+    const said = ["payments.ts", "communityPay.ts"].flatMap((file) => [...source(`${BROWSER}/engine/${file}`)
+      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
+    expect(said.length).toBeGreaterThan(40);
+    expect([...new Set(said)].filter((raw) => !INTERNAL.has(raw) && knownErrorText(raw, t) === null)).toEqual([]);
+  });
+
+  it("a payee's refusal on the payer's bubble says what to do next, in the language", () => {
+    const pt = translators.pt;
+    expect(problemLine("Too many payments at once: send it again in a minute", pt)).toBe("Muitos pagamentos ao mesmo tempo. Envie de novo daqui a um minuto.");
+    expect(problemLine("Too many open USDT requests of this amount: wait for one to be paid", pt)).toBe("Muitos pedidos de USDT abertos com este valor. Espere um deles ser pago.");
+    expect(problemLine("The mint quoted another amount than this invoice's. Nothing was paid.", english)).toBe("The mint quoted another amount than the invoice. Nothing was paid.");
+    expect(problemLine("They take no way of paying this device allows.", english)).toBe(english("payments.group.why.noWay"));
   });
 
   it.each(LANGUAGES)("a contact's proof check that could not run never reads as a bad proof in %s, and the host stays a value (agents#3781)", (language) => {

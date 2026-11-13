@@ -146,14 +146,14 @@ describe("GroupMembersDialog", () => {
     await user.click(within(row(BOB)).getByTestId("group-make-admin"));
     act(() => { fakeEngine.update({ groups: [gone] }); });
     await user.click(screen.getByTestId("group-make-admin-confirm"));
-    expect(await screen.findByText("Esta pessoa não está mais no grupo")).toBeInTheDocument();
+    expect(await screen.findByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
     expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
     act(() => { fakeEngine.update({ groups: [group] }); });
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     act(() => { fakeEngine.update({ groups: [gone] }); });
     await user.click(screen.getByTestId("group-remove-confirm"));
     expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
-    expect(screen.getByText("Esta pessoa não está mais no grupo")).toBeInTheDocument();
+    expect(screen.getByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
     expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
   });
 

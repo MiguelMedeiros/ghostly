@@ -1989,6 +1989,8 @@ export class Apps {
       // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
       const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
       if (holds && !twin && judge(holds).status !== "ok") continue;
+      // Nor one under the update still waiting (a mirror behind the publisher's link): it would be refused once read.
+      if (holds && !twin && app.pending && holds.sequence < app.pending.sequence) continue;
       // Unless the app is marked for that very one already (a mark is only taken from a bundle read whole and checked,
       // and the peek's digest is the SHA-256 of the manifest it read): nothing new is learned, and the mark keeps its `at`.
       if (holds && twin && app.equivocation?.sequence === holds.sequence && app.equivocation.digest === holds.digest) { outcome = "equivocation"; continue; }
