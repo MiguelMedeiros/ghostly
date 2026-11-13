@@ -134,6 +134,7 @@
     "publisher": "発行者",
     "removed": "{{store}} が削除：{{reason}}",
     "revoked": "発行者がこのバージョンを取り消しました。",
+    "revokedReason": "発行者がこのバージョンを取り消しました：{{reason}}",
     "rollback": "より新しいバージョンをお持ちです。",
     "same": "インストール済みです。",
     "sentBy": "{{name}} から送信",
