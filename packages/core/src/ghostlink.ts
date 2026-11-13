@@ -4315,8 +4315,10 @@ export class GhostLink {
 
   private attachCandidate(channel: FrameChannel, binding: NativeBinding | undefined, plan: SwitchPlan): Promise<void> {
     // One dialled in first and unproven keeps no place of its own: the contact's, or this side's own dial, authenticates
-    // beside it (`contend`).
-    if ((this.candidate && !this.contendable(plan)) || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
+    // beside it (`contend`). So does the WebRTC session a move to WebRTC opened beside one dialled in as a replacement:
+    // refused, the move off a relay failed and was never planned again.
+    const rtcMove = !binding && plan.choices[0] === "webrtc/1";
+    if ((this.candidate && !this.contendable(rtcMove ? this.candidate.plan : plan)) || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
       channel.close(); return Promise.reject(new Error("Obsolete or duplicate transport candidate"));
     }
     return new Promise<void>((resolve, reject) => this.contend(channel, binding, { plan, resolve, reject }));
