@@ -58,13 +58,18 @@ export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
 
 /**
  * What a chat puts right after a link with no space and no address ends with: an emoji ("https://x.example/a🔥", with
- * its skin tone, presentation selector, joiners and flag tags) and characters that draw as nothing. Read one code point
- * at a time from the end, so an emoji inside an address stays in it.
+ * its skin tone, presentation selector, joiners and flag tags) and characters that draw as nothing (zero-width ones,
+ * the direction marks and isolates right-to-left text puts around a link, the soft hyphen). Read one code point at a
+ * time from the end, so an emoji inside an address stays in it.
  */
-const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|\u200d|\ufe0e|\ufe0f)$/u;
+const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\p{Cf}|\p{Default_Ignorable_Code_Point})$/u;
+
+/** A keycap emoji ("1\ufe0f\u20e3", "#\u20e3"): its digit, `#` or `*` goes with it, and the link is "\u2026/a", not "\u2026/a1". */
+const KEYCAP = /[0-9#*]\ufe0f?\u20e3$/;
 
 /** How many UTF-16 units of `url` before `end` are an emoji's or an invisible character's last code point (0: none). */
 export function linkTail(url: string, end: number): number {
+  if (url[end - 1] === "\u20e3") return KEYCAP.exec(url.slice(Math.max(0, end - 3), end))?.[0].length ?? 1;
   const units = end > 1 && /[\udc00-\udfff]/.test(url[end - 1]) && /[\ud800-\udbff]/.test(url[end - 2]) ? 2 : 1;
   return end > 0 && LINK_TAIL.test(url.slice(end - units, end)) ? units : 0;
 }
