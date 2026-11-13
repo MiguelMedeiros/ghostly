@@ -1,10 +1,19 @@
 import { CliError } from "../errors";
-import { here, readInput, type Command } from "./shared";
+import { here, localStat, readInput, type Command } from "./shared";
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
   if (typeof value !== "string" || !value) throw new CliError("usage", `--key <file> is needed: ghostly ${usage}`);
   return value;
+}
+
+/**
+ * `app serve`'s bundle file, in the API's words (apps.ts) when it is not there or a folder: said before the profile
+ * opens. Before, a one-shot went online first (about 12 s with no daemon) to say the file was not there.
+ */
+function bundleFile(path: string): string {
+  if (localStat(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a .ghostlyapp file`);
+  return path;
 }
 
 /** `app send`'s message: JSON on the command line, or `-` for stdin. */
@@ -88,7 +97,7 @@ export const commands: Record<string, Command> = {
       grant: { type: "list", description: "A permission the app asks and you allow: chat (talk to the contact's app) or name (your name in that chat); again for each" },
       url: { type: "string", description: "Where a contact's app reads the bundle, for the card (default: the URL it was served from, else the manifest's first source)" },
     },
-    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : here(a.bundle), grant: options.grant, url: options.url }),
+    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : bundleFile(here(a.bundle)!), grant: options.grant, url: options.url }),
   },
   "app served": {
     method: "app.served", usage: "app served",
