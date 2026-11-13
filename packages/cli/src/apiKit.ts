@@ -351,8 +351,9 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
 }
 
 /**
- * Starts the chats a call names (its `chat`, a forward's `to`) in a runtime that left the saved chats unstarted
- * (`RuntimeOptions.deferChats`). A ref that names no chat, or names a group, starts nothing: the call says so itself.
+ * Starts the chats and groups a call names (its `chat`, a forward's `to`, its `group`) in a runtime that left the saved
+ * chats and the groups' edges unstarted (`RuntimeOptions.deferChats`). A ref that names nothing starts nothing: the
+ * call says so itself.
  */
 export async function startNamedChats(ctx: ApiContext, params: Params): Promise<void> {
   const { links, groups } = state(ctx);
@@ -361,6 +362,10 @@ export async function startNamedChats(ctx: ApiContext, params: Params): Promise<
     let found: ReturnType<typeof findChatOrGroup>;
     try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
     if ("link" in found) await node(ctx).startDeferredChat(found.link.id);
+    else node(ctx).startDeferredGroup(found.group.id);
+  }
+  if (typeof params.group === "string") {
+    try { node(ctx).startDeferredGroup(findGroup(groups, params.group).id); } catch { /* the call says so itself */ }
   }
 }
 
