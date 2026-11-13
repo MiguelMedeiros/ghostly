@@ -406,6 +406,7 @@ pub fn run() {
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
             files.remove_staged_saves();
+            files.remove_unfinished_saves();
             app.manage(files);
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
@@ -666,8 +667,9 @@ fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
 /// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
-///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, and on Linux
-///   the app's notifications go from the desktop's list (`notifications::exit`).
+///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, on Linux
+///   the app's notifications go from the desktop's list (`notifications::exit`), and a save cut short leaves no
+///   partial copy (`FileStore::remove_unfinished_saves`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -685,6 +687,11 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => app_window::show_main(app),
         tauri::RunEvent::Exit => {
+            // A Save a copy still running ends with the app (its copy runs on a thread exit does not wait for): its
+            // hidden partial copy goes from the folder the person chose.
+            if let Some(files) = app.try_state::<file_store::FileStore>() {
+                files.remove_unfinished_saves();
+            }
             let transports = app
                 .state::<paired_transport::TransportState>()
                 .inner()

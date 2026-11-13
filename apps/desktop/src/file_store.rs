@@ -259,22 +259,55 @@ impl FileStore {
     #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(io_text)?;
-        write_whole(target, |to| std::io::copy(&mut from, to).map(|_| ()))?;
+        write_whole(target, &self.saving(), |to| {
+            std::io::copy(&mut from, to).map(|_| ())
+        })?;
         mark_downloaded(target);
         Ok(())
     }
+
+    /// Where each save a copy notes its partial copy's path while it writes it (`write_whole`): a name no profile
+    /// space takes.
+    fn saving(&self) -> PathBuf {
+        self.base.join(SAVING)
+    }
+
+    /// Partial copies of a save cut short, in the folders the person chose (Downloads, a USB stick), removed: at
+    /// start, after a crash or a power loss, and as the app ends (`RunEvent::Exit`: the window closed on Linux or
+    /// Windows, Quit, a logout), when a copy still running would never come back to remove its own. Only a path whose
+    /// name is a partial copy's (`.<name>.<16 hex>.part`) is removed. Best effort.
+    pub fn remove_unfinished_saves(&self) {
+        let Ok(notes) = fs::read_dir(self.saving()) else {
+            return;
+        };
+        for note in notes.flatten() {
+            if let Ok(partial) = fs::read_to_string(note.path()) {
+                let partial = PathBuf::from(partial);
+                if partial.file_name().is_some_and(is_partial_name) && partial.is_file() {
+                    let _ = fs::remove_file(&partial);
+                }
+            }
+            let _ = fs::remove_file(note.path());
+        }
+    }
 }
+
+/// The folder of the notes of saves being written ([`FileStore::saving`]).
+const SAVING: &str = ".saving";
 
 /// Writes `target` whole or not at all. The bytes go to a hidden name in the same folder (so the
 /// rename stays on one disk) and take the chosen name only once all of them are on the disk. A copy
 /// that fails partway (a full disk, a removed drive) leaves no half file under the name the person
-/// chose, and does not truncate a file that was there before.
+/// chose, and does not truncate a file that was there before. One the app's end cuts short never comes
+/// back here: the partial's path is noted in `notes` first, for [`FileStore::remove_unfinished_saves`].
 #[cfg_attr(target_os = "android", allow(dead_code))]
 fn write_whole(
     target: &Path,
+    notes: &Path,
     write: impl FnOnce(&mut File) -> std::io::Result<()>,
 ) -> Result<(), String> {
     let partial = partial_path(target)?;
+    let note = note_partial(notes, &partial);
     let result = (|| {
         let mut to = OpenOptions::new()
             .write(true)
@@ -288,7 +321,51 @@ fn write_whole(
     if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
+    if let Some(note) = note {
+        let _ = fs::remove_file(note);
+    }
     result.map_err(io_text)
+}
+
+/// Notes `partial`'s path in a file of its own in `notes`, on the disk before the copy starts (a power loss keeps
+/// it). None when it could not be noted (a path that is not UTF-8): the save goes on all the same.
+#[cfg_attr(target_os = "android", allow(dead_code))]
+fn note_partial(notes: &Path, partial: &Path) -> Option<PathBuf> {
+    let text = partial.to_str()?;
+    private_folder(notes).ok()?;
+    let note = notes.join(format!("{:016x}", rand::random::<u64>()));
+    let written = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&note)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()
+    })();
+    match written {
+        Ok(()) => Some(note),
+        Err(_) => {
+            let _ = fs::remove_file(&note);
+            None
+        }
+    }
+}
+
+/// `.<name>.<16 hex>.part`, a name [`partial_path`] makes.
+fn is_partial_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let Some(rest) = name.strip_suffix(".part") else {
+        return false;
+    };
+    let Some((start, random)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    start.len() > 1
+        && start.starts_with('.')
+        && random.len() == 16
+        && random.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// `.<name>.<random>.part` beside `target`, its name cut to fit [`NAME_BYTES`]: a name the disk takes (up to 255
@@ -1024,26 +1101,86 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
+    /// The issue: a save cut short by the app ending (the window closed on Linux or Windows, a logout, a crash) never
+    /// came back to remove its hidden partial copy, and nothing else knew the folder: it stayed in the person's
+    /// Downloads for good, as big as what was copied so far.
+    #[test]
+    fn a_save_cut_short_by_the_app_ending_leaves_nothing_in_the_chosen_folder() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"kept").unwrap();
+        let out = dir.join("Downloads");
+        fs::create_dir_all(&out).unwrap();
+        // A crash (or power loss) mid-copy: write_whole never returns, the partial stays.
+        let crashed = std::panic::catch_unwind(|| {
+            write_whole(&out.join("video.mp4"), &files.saving(), |to| {
+                to.write_all(b"half of it")?;
+                panic!("the app ends");
+            })
+        });
+        assert!(crashed.is_err());
+        assert_eq!(names(&out).len(), 1, "{:?}", names(&out));
+        // The next start removes it.
+        files.remove_unfinished_saves();
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+
+        // The app ending while a copy runs (`RunEvent::Exit`, the copy on another thread): its partial goes with it,
+        // and the copy, should it get that far, does not take the chosen name.
+        let ended = write_whole(&out.join("song.mp3"), &files.saving(), |to| {
+            to.write_all(b"half of it")?;
+            files.remove_unfinished_saves();
+            to.write_all(b" and the rest")
+        });
+        assert!(ended.is_err());
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+
+        // A save that finished leaves no note behind, and a note naming anything but a partial copy removes nothing.
+        files.copy_to("p", "f", &out.join("kept.txt")).unwrap();
+        assert!(names(&files.saving()).is_empty());
+        fs::write(out.join(".kept.txt.zzzzzzzzzzzzzzzz.part"), b"x").unwrap();
+        for (note, named) in [
+            ("1", out.join("kept.txt")),
+            ("2", out.join(".kept.txt.zzzzzzzzzzzzzzzz.part")),
+            ("3", out.clone()),
+        ] {
+            fs::write(
+                files.saving().join(note),
+                named.to_string_lossy().as_bytes(),
+            )
+            .unwrap();
+        }
+        files.remove_unfinished_saves();
+        assert_eq!(
+            names(&out),
+            vec![".kept.txt.zzzzzzzzzzzzzzzz.part", "kept.txt"]
+        );
+        assert!(names(&files.saving()).is_empty());
+        // The notes' folder is no profile's.
+        assert_eq!(files.usage(".saving"), Err("Invalid profile space".into()));
+        fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn a_copy_that_fails_partway_leaves_no_file_and_keeps_the_one_that_was_there() {
-        let (_, dir) = store();
-        fs::create_dir_all(&dir).unwrap();
-        let target = dir.join("report.pdf");
-        let failed = write_whole(&target, |to| {
+        let (files, dir) = store();
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let target = out.join("report.pdf");
+        let failed = write_whole(&target, &files.saving(), |to| {
             to.write_all(b"half of it")?;
             Err(std::io::Error::other("disk full"))
         });
         assert_eq!(failed, Err("disk full".to_string()));
-        assert!(names(&dir).is_empty(), "{:?}", names(&dir));
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+        assert!(names(&files.saving()).is_empty());
         // A file already under that name is not cut short by a failed copy over it.
         fs::write(&target, b"the old report").unwrap();
-        let failed = write_whole(&target, |to| {
+        let failed = write_whole(&target, &files.saving(), |to| {
             to.write_all(b"half")?;
             Err(std::io::Error::other("drive removed"))
         });
         assert!(failed.is_err());
         assert_eq!(fs::read(&target).unwrap(), b"the old report");
-        assert_eq!(names(&dir), vec!["report.pdf"]);
+        assert_eq!(names(&out), vec!["report.pdf"]);
         fs::remove_dir_all(dir).ok();
     }
 
