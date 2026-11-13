@@ -49,19 +49,36 @@ export type RuntimeMessage =
   /** The worker is about to close the peer's document, to start it again as another profile. */
   | { target: "engine"; type: "stop" }
   /** Chrome took back these host patterns (`permissions.onRemoved`): the apps at those hosts stop being shared. */
-  | { target: "engine"; type: "local-access-removed"; origins: string[] }
-  | {
-      target: "engine";
-      type: "http-request";
-      peerPubKeyZ32: string;
-      serviceId: string;
-      method: string;
-      path: string;
-      headers: [string, string][];
-      bodyB64: string | null;
-      /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
-      app?: string;
-    };
+  | { target: "engine"; type: "local-access-removed"; origins: string[] };
+
+/**
+ * The worker's port to the peer, for the requests of a contact's app in its tab (background.ts `askPeer`). A one-shot
+ * message reaches every page of the extension too: each app tab got every request, its body included, only to drop it.
+ */
+export const VIEWER_PORT = "viewer";
+
+/** One request of a contact's app, `id` the worker's, for the reply that names it. */
+export interface ViewerAsk {
+  id: number;
+  request: HttpRequest;
+}
+
+/** `reply` null: no peer runs in this document any more (it stopped for good); the worker starts one and asks again. */
+export interface ViewerReply {
+  id: number;
+  reply: HttpRequestReply | null;
+}
+
+export interface HttpRequest {
+  peerPubKeyZ32: string;
+  serviceId: string;
+  method: string;
+  path: string;
+  headers: [string, string][];
+  bodyB64: string | null;
+  /** The app's name when its tab opened (`ViewerPage.app`), for when the peer's state no longer lists it. */
+  app?: string;
+}
 
 /**
  * What a viewer tab says when its contact's app cannot answer, in the profile's language. The worker has no settings
