@@ -51,6 +51,29 @@ describe("a group's newest line deleted for everyone", { timeout: 120_000 }, () 
     expect(paged).toBeLessThan(whole);
   });
 
+  it("a mark with none older to go back to costs about the whole history, not 5 times it", async () => {
+    // The group's only "@" taken back: no older mention is there, so every row is read. Page after page from the newest
+    // back cost 5 times the whole history at once (326 ms against 62 at 20,000 rows on the CLI's store).
+    const rows: StoredMessage[] = Array.from({ length: 5_000 }, (_, i) => ({ linkId: LINK, id: `m${String(i).padStart(5, "0")}`, text: `line ${i}`, sender: i % 3 ? "bob" : "me", timestamp: 1_000 + i, via: "datalink", ...(i === 4_999 && { mentioned: true }) }));
+    await Promise.all(rows.map(m => db.putMessage(m)));
+    const timed = async (store: Parameters<typeof groups.unmark>[3]) => {
+      const spent: number[] = [];
+      for (let n = 0; n < 5; n++) {
+        const marks = fresh();
+        groups.loadMarks(marks, { id: GROUP }, rows);
+        const started = performance.now();
+        await groups.unmark(marks, undefined, GROUP, store, rows[4_999]!, true);
+        spent.push(performance.now() - started);
+        expect(marks.lastMentionAt.has(GROUP)).toBe(false);
+      }
+      return spent.sort((a, b) => a - b)[2]!;
+    };
+    const whole = await timed({ getMessages: linkId => db.getMessages(linkId) });
+    const paged = await timed(db);
+    console.log(`UNMARK only mention, 5,000 rows: whole history ${whole.toFixed(2)} ms, pages ${paged.toFixed(2)} ms (median of 5)`);
+    expect(paged).toBeLessThan(whole * 2);
+  });
+
   it("puts back the marks the whole history says, for any line deleted (seeded fuzz)", async () => {
     const next = random(11);
     const rows: StoredMessage[] = [];
