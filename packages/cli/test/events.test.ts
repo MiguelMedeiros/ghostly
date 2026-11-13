@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, SEEN_KEEP_MS, type GhostlyEvent } from "../src/events";
-import { toTurn } from "../src/listen";
+import { Allowlist, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events, headless.typing, headless.files
@@ -1000,6 +1000,37 @@ describe("the event stream", () => {
       vi.advanceTimersByTime(2_000);
       expect(events).toMatchObject([{ type: "file.offered", file: "c1-in-z", chat: "c1", messageId: null, room: 100 }]);
     });
+  });
+
+  // Found in a bug hunt: `listen --group` passed a request to the whole group (its record names the group) and dropped
+  // every payment that went over a member's edge or a community member's link: who paid it, a member's request to me.
+  it("a group's payment names its group, whichever link it went over, and so passes listen --group", async () => {
+    const { h, events } = await hub("group-payments.jsonl");
+    const mesh = "g1", community = "Cmty0123456789abcdefgh", bo = "b".repeat(52);
+    const groups = [{ id: mesh, members: [{ key: "mekey", me: true }, { key: "anakey", edge: { linkId: "edge-ana", state: "open" } }] }, { id: community, members: [] }];
+    h.baseline({ ...state([], groups), payments: {} } as unknown as EngineState, new Map());
+    const pay = (id: string, linkId: string, kind: string, direction: string, fields: Record<string, unknown> = {}) =>
+      ({ id, linkId, kind, direction, amount: 21, unit: "sat", state: "pending", createdAt: 5, ...fields });
+    const payments = {
+      // Mine, to the whole group; Ana paying it over her edge; Ana's request to the group as it came to me; Bo paying
+      // in the community; a plain chat's.
+      r1: pay("r1", `group:${mesh}`, "request", "out", { group: mesh }),
+      p1: pay("p1", "edge-ana", "payment", "in", { requestId: "r1", state: "settled" }),
+      r2: pay("r2", "edge-ana", "request", "in"),
+      p2: pay("p2", `cpay:${community}:${bo}`, "payment", "in", { state: "settled" }),
+      p3: pay("p3", "c1", "payment", "in", { state: "settled" }),
+    };
+    h.sink.post({ kind: "state", state: { ...state([], groups), payments } as unknown as EngineState });
+    const created = events.filter((e) => e.type === "payment.created");
+    expect(created.map((e) => [(e.payment as { id: string }).id, (e.payment as { group?: string }).group ?? null, e.chat]))
+      .toEqual([["r1", mesh, `group:${mesh}`], ["p1", mesh, "edge-ana"], ["r2", mesh, "edge-ana"], ["p2", community, `cpay:${community}:${bo}`], ["p3", null, "c1"]]);
+    const passes = async (groupIds: string[]) => {
+      const allow = new Allowlist(new Set(), new Set(), new Set(groupIds), async () => null), ids: string[] = [];
+      for (const e of created) if (await allow.allows(e)) ids.push((e.payment as { id: string }).id);
+      return ids;
+    };
+    expect(await passes([mesh])).toEqual(["r1", "p1", "r2"]);
+    expect(await passes([community])).toEqual(["p2"]);
   });
 });
 

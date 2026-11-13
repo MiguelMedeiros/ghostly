@@ -2,6 +2,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSy
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
+import { parsePayLink } from "@ghostly/browser/shared/payLinks";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
@@ -632,11 +633,17 @@ export class EventHub {
     // A group left or forgotten: the same.
     const groupsGone = new Set(removedGroups);
     this.forget(removedGroups, (event) => groupsGone.has(event.group as string) && event.type !== "group.removed");
+    // A group's payment that went over a member's edge, or a community member's `cpay:` link, has no `group` of its own
+    // (only a request to the whole group does): its event names the group, as `listen --group` reads it.
+    let edgeGroups: Map<string, string> | undefined;
+    const groupOf = (linkId: string) => (edgeGroups ??= new Map(state.groups.flatMap((g) => g.members.flatMap((m) => m.edge ? [[m.edge.linkId, g.id] as const] : [])))).get(linkId)
+      ?? parsePayLink(linkId)?.groupId;
     for (const [id, payment] of Object.entries(state.payments ?? {})) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
       if (quiet || before === shape) continue;
-      const json = paymentJson(payment);
+      const group = payment.group ?? groupOf(payment.linkId);
+      const json = { ...paymentJson(payment), ...(group && { group }) };
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }
