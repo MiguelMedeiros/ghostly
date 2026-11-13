@@ -258,12 +258,14 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
       expect(marks, "a frame mark per frame on the page's main thread").toHaveLength(90);
       const tasks = events.filter((e) => e.ph === "X" && e.cat === "toplevel" && e.name.endsWith("RunTask") && e.pid === marks[0].pid && e.tid === marks[0].tid
         && e.ts >= marks[0].ts && e.ts < marks[89].ts);
-      // Chromium leaves the CPU time off a task of a microsecond or so (1 to 14 in 500 on a runner): its length stands in.
+      // Chromium leaves the CPU time off a task of a microsecond or so: its length stands in, which counts no less than
+      // the CPU time would. How many depends on the runner: 1 to 14 in 500 on most, 68 in 593 twice on one and fine on a
+      // re-run (2026-11-13). The guard only catches a trace that lost its CPU times altogether.
       const untimed = tasks.filter((t) => t.tdur === undefined);
-      expect(untimed.length, `the main thread's tasks with their CPU time: ${tasks.length} tasks, ${untimed.length} without`).toBeLessThan(tasks.length / 10);
+      expect(untimed.length, `the main thread's tasks with their CPU time: ${tasks.length} tasks, ${untimed.length} without`).toBeLessThan(tasks.length / 3);
       const cpu = marks.slice(1).map((mark, i) => tasks.filter((t) => t.ts >= marks[i].ts && t.ts < mark.ts).reduce((sum, t) => sum + (t.tdur ?? t.dur ?? 0), 0) / 1000).sort((a, b) => a - b);
       const ms = (n: number) => Math.round(n * 10) / 10;
-      return { ...frames, cpuMedian: ms(cpu[44]), cpuP95: ms(cpu[84]) };
+      return { ...frames, cpuMedian: ms(cpu[44]), cpuP95: ms(cpu[84]), tasks: tasks.length, untimed: untimed.length };
     };
     // A burst of load on the host (the other worker's bot, another job) can still stretch one pair of measurements: on
     // One with 2 workers the scrolled frames came 50 ms apart against 16.7 standing still in 1 run of 10, with the CPU
