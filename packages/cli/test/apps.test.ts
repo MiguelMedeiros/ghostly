@@ -293,6 +293,12 @@ describe("app publish", () => {
     const long = appFolder({ ...manifest, title: "x".repeat(41) }, files);
     const refusal = error(await ghostly(["app", "publish", long, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
     expect(refusal.details).toEqual({ reason: "bad-field", detail: "title is not valid" });
+    // A key written twice: JSON.parse keeps the last, a person reading the file sees the first.
+    const twice = appFolder(manifest, files);
+    writeFileSync(join(twice, "ghostly-app.json"), `{"title":"Mine",${readFileSync(join(twice, "ghostly-app.json"), "utf8").trimStart().slice(1)}`);
+    const repeated = error(await ghostly(["app", "publish", twice, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
+    expect(repeated.details).toEqual({ reason: "not-json", detail: "\"title\" is written twice" });
+    expect(existsSync(join(twice, "app.ghostlyapp"))).toBe(false);
     // Dot files stay out of the bundle, and say so.
     const dotted = appFolder(manifest, files);
     writeFileSync(join(dotted, ".DS_Store"), "x");
@@ -702,6 +708,23 @@ describe("store sign", () => {
     expect((error(await ghostly(["store", "sign", join(dir, "far.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("expires-too-far");
     writeFileSync(join(dir, "unknown.json"), JSON.stringify({ ...index, extra: 1 }));
     expect((error(await ghostly(["store", "sign", join(dir, "unknown.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("unknown-key");
+  }, 60_000);
+
+  it("refuses an index that writes a key twice, where a reader sees the first and JSON.parse keeps the last", async () => {
+    const dir = tmp();
+    const key = vectorKey(tmp(), "store");
+    const text = JSON.stringify(JSON.parse(vector.index));
+    const other = `"digest":"${"A".repeat(43)}",`;
+    for (const [file, twice, name] of [
+      ["name.json", `{"name":"Mine",${text.slice(1)}`, "name"],
+      ["digest.json", text.replace(`"digest":`, `${other}"digest":`), "digest"],
+    ] as const) {
+      writeFileSync(join(dir, file), twice);
+      const out = tmp();
+      const refusal = error(await ghostly(["store", "sign", join(dir, file), "--key", key, "--out", out]), "refused", 1) as { details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "not-json", detail: `"${name}" is written twice` });
+      expect(existsSync(join(out, "ghostly-store.json"))).toBe(false);
+    }
   }, 60_000);
 
   it("never makes a key or signs over an index there that another store key signed", async () => {
