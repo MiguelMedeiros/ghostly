@@ -118,6 +118,27 @@ it("says why when the relay cannot be reached, and moves chats to a new relay or
   expect(relayed.create).toHaveBeenCalledTimes(calls);
 });
 
+it("lets a chat's relay error go with that relay: emptied or changed, the chat no longer says the old relay is unreachable", async () => {
+  const node = engine();
+  const link = stubLink();
+  const chat = await addChat(node, link);
+  const errorOf = () => node.getState().links.find(l => l.id === chat.id)?.transportErrors?.["hyperdht/1"];
+  relayed.create.mockRejectedValue(new Error("Could not reach the HyperDHT relay"));
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://typo.example" } });
+  await vi.waitFor(() => expect(errorOf()).toMatch(/Could not reach/));
+
+  // Emptied: there is no relay to be unreachable. Before, the chat said so until the app restarted.
+  await node.updateSettings({ settings: { hyperdhtRelay: "" } });
+  expect(errorOf()).toBeUndefined();
+
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://typo.example" } });
+  await vi.waitFor(() => expect(errorOf()).toMatch(/Could not reach/));
+  // Changed to another one still starting: nothing is known of it yet.
+  relayed.create.mockImplementation(() => new Promise(() => {}));
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://fixed.example" } });
+  expect(errorOf()).toBeUndefined();
+});
+
 it("leaves a chat's session on the old relay alone until it can let go", async () => {
   const node = engine();
   const link = stubLink();
