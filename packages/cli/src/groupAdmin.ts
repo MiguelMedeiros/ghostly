@@ -146,11 +146,14 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.link"(ctx, params) {
     const group = joined(ctx, params);
-    if (params.on === false) {
+    // On unless `on` says otherwise; an `on` that is no boolean ("false", 0) is refused, never read as on.
+    const on = params.on === undefined || bool(params, "on"), reset = bool(params, "reset");
+    if (!on && reset) throw new CliError("bad_request", "on: false turns the link off: not with reset");
+    if (!on) {
       await node(ctx).disableGroupLink({ groupId: group.id });
       return { group: group.id, link: null };
     }
-    const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(bool(params, "reset") ? { reset: true } : {}) });
+    const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
     return { group: group.id, link };
   },
   async "group.picture"(ctx, params) {
