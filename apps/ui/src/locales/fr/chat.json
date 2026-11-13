@@ -114,6 +114,7 @@
     "lookupLocal": "Vérifié sur cet appareil : la clé est l'identifiant.",
     "lookupPubky": "La recherche interroge les relais Pkarr de Pubky ({{relays}}), qui apprennent votre adresse IP et cette clé.",
     "lookupWeb": "La recherche interroge votre résolveur DNS-over-HTTPS sur {{host}} et télécharge son did.json depuis ce serveur, qui apprend votre adresse IP.",
+    "lookupWebHiddenIp": "Masquer mon IP est activé : {{host}}, un serveur choisi par votre contact, n'est donc pas contacté.",
     "muted": "Masqué par votre liste de sourdine Nostr.",
     "nip05": "(NIP-05, tel qu'écrit, non vérifié)",
     "noDids": "Cette app ne peut pas résoudre les DID",

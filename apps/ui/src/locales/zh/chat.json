@@ -114,6 +114,7 @@
     "lookupLocal": "在本设备上检查：密钥即标识符。",
     "lookupPubky": "查询会询问 Pubky 的 Pkarr 中继（{{relays}}），它们会得知你的 IP 地址和此密钥。",
     "lookupWeb": "查询会向你的 DNS-over-HTTPS 解析器询问 {{host}}，并从那里下载其 did.json：该服务器会得知你的 IP 地址。",
+    "lookupWebHiddenIp": "隐藏 IP 已开启，因此不会联系 {{host}}，这是对方选择的服务器。",
     "muted": "已被你的 Nostr 屏蔽列表隐藏。",
     "nip05": "（NIP-05，按对方所写，未经核实）",
     "noDids": "此应用无法解析 DID",
