@@ -1,6 +1,8 @@
 import "fake-indexeddb/auto";
 import { fromBase64Url } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FILE_BYTES_STEP, NO_ROOM_TO_PLAY, blobDigest, checkFileId, digestText, dropFileSpace, fileBytes, fileBytesOf, registerFileBytes, removeFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
@@ -270,6 +272,38 @@ describe("stored files, wherever their bytes are", () => {
     await appender.flush();
     expect(appended).toEqual([16 * 16384, 4 * 16384, 300 * 1024]);
     expect(storage.flush).toHaveBeenCalledWith("x-in-1");
+  });
+
+  it("holds no gathering memory before its first small write or once flushed: a contact's paused files hold none", async () => {
+    let file = new Uint8Array(0);
+    const storage = {
+      append: vi.fn(async (_id: string, offset: number, bytes: Uint8Array) => {
+        const grown = new Uint8Array(offset + bytes.length);
+        grown.set(file); grown.set(bytes, offset);
+        file = grown;
+      }),
+      flush: vi.fn(async () => {}), close: vi.fn(async () => {}),
+    } as unknown as FileBytes;
+    // A contact's 256 small files offered and paused, half of them after their first bytes: made, flushed, and kept.
+    // Each held a 256 KiB buffer: 64 MiB until a restart.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const held = () => { gc(); gc(); return process.memoryUsage().arrayBuffers; };
+    const before = held();
+    const paused = Array.from({ length: 256 }, (_, i) => new FileAppender(storage, `x-paused-${i}`));
+    for (const [i, appender] of paused.entries()) {
+      if (i % 2) await appender.append(new Uint8Array(1024));
+      await appender.flush();
+    }
+    expect(held() - before).toBeLessThan(8 * 1024 * 1024);
+    expect(paused).toHaveLength(256);
+    // Paused after its first bytes, then resumed: it gathers again, from where it was.
+    const appender = new FileAppender(storage, "x-in-3");
+    await appender.append(pattern(0, 1024));
+    await appender.flush();
+    for (let i = 0; i < 3; i++) await appender.append(pattern(1024 + i * 16384, 16384));
+    await appender.close();
+    expectBytes(file, pattern(0, 1024 + 3 * 16384));
   });
 
   it("a close while a flush still writes stores the gathered part once, so a resumed file goes on from its true size", async () => {
