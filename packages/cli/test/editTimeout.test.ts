@@ -136,4 +136,19 @@ describe("a group frame's wait", () => {
     const groups = [{ id: "g1", profile: "community", status: "lost", statusReason: "Asking to be let in again…", members: [me, ana] }];
     expect(await timedOut(waitForGroupFrame(fake("daemon", [], groups), "g1", "mine:0:2", undefined, 30_000))).toMatchObject({ code: "timeout" });
   });
+
+  // The engine's whole state (every chat, group, payment) is built to find one group: each 250 ms poll built it twice.
+  it("builds the engine's state at most once per poll", async () => {
+    vi.useFakeTimers();
+    const ctx = fake("daemon", [], crew("mesh", [me, ana]));
+    const node = (ctx as unknown as { runtime: { server: { node: { getState: () => unknown } } } }).runtime.server.node;
+    const getState = vi.spyOn(node, "getState");
+    let error: unknown;
+    void waitForGroupFrame(ctx, "g1", "mine:0:2", undefined, 10_000).catch((caught: unknown) => { error = caught; });
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(error).toMatchObject({ code: "timeout" });
+    const polls = (node as unknown as { groupTaken: { mock: { calls: unknown[] } } }).groupTaken.mock.calls.length;
+    expect(polls).toBeGreaterThan(30);
+    expect(getState.mock.calls.length).toBeLessThanOrEqual(polls);
+  });
 });
