@@ -395,6 +395,7 @@
     "hiddenChars": "这段代码包含隐藏字符或改变文字方向的字符，显示为 {{marker}}。复制代码时也会一并复制它们。",
     "localTime": "你的时间 {{time}}",
     "notCopied": "未复制",
+    "notCopiedHint": "未复制。请选中文字后复制。",
     "showAll": "显示全部",
     "showLess": "收起",
     "spoiler": "隐藏的文字。点按显示",

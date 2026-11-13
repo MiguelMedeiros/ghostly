@@ -396,6 +396,7 @@
     "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come {{marker}}. Copia codice copia anche quelli.",
     "localTime": "{{time}} nel tuo fuso orario",
     "notCopied": "Non copiato",
+    "notCopiedHint": "Non copiato. Seleziona il testo e copialo.",
     "showAll": "Mostra tutto",
     "showLess": "Mostra meno",
     "spoiler": "Testo nascosto. Tocca per mostrarlo",
