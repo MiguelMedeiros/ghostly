@@ -290,8 +290,20 @@ function ownerOnlyUmask(): (() => void) | null {
 /** A client's nonce: 16 to 64 bytes as lowercase hex, so the proof is over nothing but a nonce. */
 const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
 
+/**
+ * The most calls one connection has open at once; the next is refused `busy` until one answers. Each open wait holds a
+ * listener or a poll (`chat wait` up to a day): 100,000 written at once on one connection held 204 MB.
+ */
+export const MAX_OPEN_CALLS = 1_024;
+
 /** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
-function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
+function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
+  // The calls of this connection see it close (`ApiContext.closed`), and their waits end with it. Made from the
+  // daemon's context, not copied: what the daemon sets on it after `serve` (`stop`, `listen`) is read through.
+  const closed = new AbortController();
+  const ctx: ApiContext = Object.create(daemon) as ApiContext;
+  ctx.closed = closed.signal;
+  let open = 0;
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
@@ -303,7 +315,7 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     socket.write(JSON.stringify(value) + "\n");
   };
   socket.on("drain", () => { limit = MAX_UNREAD; });
-  socket.on("close", unsubscribe);
+  socket.on("close", () => { unsubscribe(); closed.abort(); });
   socket.on("error", () => {});
   // Before anything is read: a client writes nothing until this proves the daemon (`provesGreeting`).
   write(greeting(secret));
@@ -350,10 +362,12 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
+    if (open >= MAX_OPEN_CALLS) { write({ id, error: new CliError("busy", `This connection has ${MAX_OPEN_CALLS} calls open: wait for one to answer, or open another connection`, { open }).toJSON() }); return; }
+    open++;
     const answered = callApi(ctx, request.method, request.params ?? {}).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
-    );
+    ).finally(() => { open--; });
     answering.add(answered);
     void answered.then(() => answering.delete(answered));
   });
