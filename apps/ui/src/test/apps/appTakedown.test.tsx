@@ -225,7 +225,7 @@ describe("an app the watchdog stopped", () => {
     expect(within(app).getByRole("status")).toHaveTextContent(UNRESPONSIVE);
     await user.click(within(app).getByRole("button", { name: "Open again" }));
     await waitFor(() => expect(started).toHaveLength(2));
-    expect(within(app).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(app).getByRole("status")).toBeEmptyDOMElement();
     expect(within(app).queryByRole("button", { name: "Open again" })).not.toBeInTheDocument();
     expect(app).toContainElement(started[1]!.frame);
     expect(chatApp("link-1")?.stopped).toBeUndefined();
@@ -421,6 +421,24 @@ describe("an app in a chat that stops while the focus is in it", () => {
     expect(screen.getByTestId("mini-app-stopped")).toBeVisible();
     expect(document.activeElement).toBe(field);
   });
+
+  // The focus stays where the person is (the message field beside it), or goes to a bare "Open again": only a live
+  // region that was there, empty, before the app stopped tells a screen reader that it did, and why.
+  for (const reason of ["unresponsive", "revoked"]) {
+    it(`${reason}: why is said in a status line that was there, empty, before it stopped`, async () => {
+      chatPanel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      const said = within(app).getByRole("status");
+      expect(said).toBeEmptyDOMElement();
+      act(() => screen.getByRole("textbox", { name: "Message" }).focus());
+      if (reason === "revoked") await checked({ status: "revoked" });
+      else act(() => started[0]!.stop(reason));
+      expect(within(app).getByRole("status")).toBe(said);
+      expect(said).toHaveTextContent(reason === "revoked" ? "Chess was stopped: its publisher revoked this version" : /^Chess stopped responding/);
+      expect(said).toHaveTextContent(within(app).getByTestId("mini-app-stopped").textContent!);
+    });
+  }
 });
 
 // On a phone the person went Back to the chat and types there: an app that stops meanwhile stays behind Back. Its way
