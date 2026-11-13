@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { ClientMessage, PostedEvent } from "./shared/rpc";
+import type { AttachMark, ClientMessage, PostedEvent } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -67,8 +67,11 @@ export interface BrowserHost {
    * page: reloading the page starts it again. The extension's peer outlives its pages, so it is restarted on purpose.
    */
   restartEngine?(): Promise<void>;
-  /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
-  connect(onMessage: (message: PostedEvent) => void, onDisconnect: () => void): Promise<EngineConnection>;
+  /**
+   * Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. `since`: the mark this
+   * app's pages last mirrored (`AttachMark`), for a host whose peer sends each page what changed since (the extension).
+   */
+  connect(onMessage: (message: PostedEvent) => void, onDisconnect: () => void, since?: AttachMark): Promise<EngineConnection>;
   /**
    * Asks the user for access to a local origin, where the platform has such a thing: `originPattern` is the
    * extension's host pattern (`http://localhost/*`), `origin` the exact address with its port (`http://localhost:3400`),

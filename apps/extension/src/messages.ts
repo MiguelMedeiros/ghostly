@@ -1,5 +1,23 @@
+import type { AttachMark } from "@ghostly/browser/shared/rpc";
+
 /** Messages between the extension's own contexts: pages, service worker and the offscreen peer. */
 export const UI_PORT = "ui";
+
+/**
+ * A page's port, named with the mark the extension's pages last mirrored (`AttachMark`): the peer attaches the page as its
+ * port opens, and sends no chat unchanged since.
+ */
+export function uiPortName(since?: AttachMark): string {
+  return since ? `${UI_PORT} ${since.epoch} ${since.mark}` : UI_PORT;
+}
+
+/** A page's port by its name (`uiPortName`): with the mark it carries, if any. Null for any other port. */
+export function uiPortMark(name: string): { since?: AttachMark } | null {
+  if (name === UI_PORT) return {};
+  const [port, epoch, mark, ...rest] = name.split(" ");
+  if (port !== UI_PORT || !epoch || rest.length || !/^\d+$/.test(mark ?? "")) return null;
+  return { since: { epoch, mark: Number(mark) } };
+}
 /** One-shot messages, addressed by `target` because every context hears them. */
 export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
