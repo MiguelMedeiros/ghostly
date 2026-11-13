@@ -339,7 +339,9 @@ export const FILE_METHODS: Record<string, Method> = {
     // A one-shot leaves once its command is done, and the transfer with it: in a chat it stays until the contact has the
     // whole file, as `send` stays until its message went out. Before, it left in under a second with nothing sent, and
     // the contact saw the file only with a later command that stayed online long enough. A group's file, or one to a chat
-    // nobody joined yet: none.
+    // nobody joined yet: none. To a group `sent` is a usage error that says why, as the parser's own refusal of a value
+    // is (not `oneOf`'s "one of none").
+    if ("group" in target && params.wait === "sent") throw new CliError("usage", "--wait sent is for a 1:1 chat: in a group each member's app fetches the file itself, so there is nothing to wait for (leave out --wait)");
     const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size);

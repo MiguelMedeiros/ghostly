@@ -62,3 +62,20 @@ describe("file send to a group that would refuse it", () => {
     stage.mockRestore();
   });
 });
+
+describe("file send --wait sent to a group", () => {
+  // It was `bad_request` "wait must be one of none" (exit 1), where `--wait delivered` is a usage error (exit 2).
+  it("is a usage error that says why and what to do", async () => {
+    const stage = vi.spyOn(NodeFileBytes.prototype, "stage");
+    const { node, ctx } = ctxWith({ error: null });
+    const file = join(dir, "mid.bin");
+    writeFileSync(file, new Uint8Array(1024));
+    await expect(callApi(ctx, "file.send", { chat: "Team", path: file, wait: "sent" })).rejects.toMatchObject({
+      code: "usage",
+      message: "--wait sent is for a 1:1 chat: in a group each member's app fetches the file itself, so there is nothing to wait for (leave out --wait)",
+    });
+    expect(node.groupFileCheck).not.toHaveBeenCalled();
+    expect(stage).not.toHaveBeenCalled();
+    stage.mockRestore();
+  });
+});
