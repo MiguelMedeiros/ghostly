@@ -84,4 +84,19 @@ describe("the waiting screen", () => {
     rerender(<OtherTab state="linkTaken" t={t} />);
     expect(screen.getByTestId("other-tab").textContent).toContain("Your link opened in Ghostly in your other tab.");
   });
+
+  it("is said to a screen reader as it changes: the same polite status stays mounted while the share or link goes over", () => {
+    const t = translatorFor("en");
+    const { rerender } = render(<OtherTab state="sharing" t={t} />);
+    const said = screen.getByRole("status");
+    expect(said).toHaveAttribute("aria-live", "polite");
+    expect(said).toHaveTextContent("Sending to Ghostly in your other tab…");
+    rerender(<OtherTab state="shareNone" t={t} />);
+    expect(screen.getByRole("status")).toBe(said);
+    expect(said).toHaveTextContent("Nothing was shared, or it was already picked up.");
+    rerender(<OtherTab state="link" t={t} />);
+    rerender(<OtherTab state="linkTaken" t={t} />);
+    expect(screen.getByRole("status")).toBe(said);
+    expect(said).toHaveTextContent("Your link opened in Ghostly in your other tab.");
+  });
 });
