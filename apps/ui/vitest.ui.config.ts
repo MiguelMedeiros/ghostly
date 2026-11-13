@@ -5,7 +5,7 @@ import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { ghostlyPlatformModules, tauriAliases } from "../../packages/browser/vite-plugin.ts";
-import { maxWorkers } from "../../tools/vitest.shared.ts";
+import { maxWorkers, reporters } from "../../tools/vitest.shared.ts";
 
 /**
  * Component and hook tests for the shared UI (`apps/ui/src/`) and `@ghostly/react`. They render the UI as the web app
@@ -50,5 +50,6 @@ export default defineConfig({
     css: false,
     restoreMocks: true,
     maxWorkers,
+    reporters,
   },
 });
