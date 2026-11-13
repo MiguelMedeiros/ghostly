@@ -703,9 +703,13 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   /** Bytes read so far, all told. */
   taken = 0;
 
+  /** `all`: what every queue of the same client holds, kept with this one's. */
+  constructor(private readonly all: { held: number }) {}
+
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
     this.held += chunk.length;
+    this.all.held += chunk.length;
     this.wake?.();
   }
 
@@ -719,6 +723,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   /** Lets go of what was not read yet, ended or not: the reader gets `error` in its place. */
   drop(error: Error): void {
     this.chunks = [];
+    this.all.held -= this.held;
     this.held = 0;
     this.done = true;
     this.error = error;
@@ -730,6 +735,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
       while (this.chunks.length > 0) {
         const chunk = this.chunks.shift()!;
         this.held -= chunk.length;
+        this.all.held -= chunk.length;
         this.taken += chunk.length;
         yield chunk;
       }
@@ -748,6 +754,8 @@ export class HttpClient {
   private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
+  /** Response-body bytes all this client's responses hold before their readers took them. */
+  private readonly unread = { held: 0 };
 
   constructor(private readonly channel: FrameChannel) {}
 
@@ -835,7 +843,7 @@ export class HttpClient {
     if (!stream || stream.queue) return;
     clearTimeout(stream.headersTimer);
 
-    const queue = new BodyQueue();
+    const queue = new BodyQueue(this.unread);
     stream.queue = queue;
     if (frame.b) this.armIdleTimer(frame.id, stream);
     else this.finish(frame.id);
@@ -861,7 +869,11 @@ export class HttpClient {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
-    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) this.checkUnread(chunk.id, stream, stream.queue);
+    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) {
+      // Many responses read slowly add up: past the client's bound, one over its own is let go without a turn.
+      if (this.unread.held > LIMITS.maxClientUnreadResponseBytes) return this.dropUnread(chunk.id, stream.queue);
+      this.checkUnread(chunk.id, stream, stream.queue);
+    }
     if (chunk.end) this.finish(chunk.id);
     else this.armIdleTimer(chunk.id, stream);
   }
@@ -879,10 +891,14 @@ export class HttpClient {
       stream.unreadCheck = undefined;
       if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
       if (queue.taken > taken) return this.checkUnread(id, stream, queue);
-      const error = new GhostlyHttpError("unread", "Response body not read in time");
-      queue.drop(error);
-      this.abort(id, error);
+      this.dropUnread(id, queue);
     }, LIMITS.unreadStallMs);
+  }
+
+  private dropUnread(id: number, queue: BodyQueue): void {
+    const error = new GhostlyHttpError("unread", "Response body not read in time");
+    queue.drop(error);
+    this.abort(id, error);
   }
 
   handleReset(frame: ResetFrame): void {
