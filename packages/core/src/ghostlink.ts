@@ -1368,7 +1368,7 @@ export class GhostLink {
           if (isDiscoveryBudgetError(error)) return;
           if (!signal || !options.params.profile) return;
           this.signalPublishFailed = true;
-          events.onPairingState?.({ status: "error",
+          this.sayPairingState({ status: "error",
             error: publishFailure(error) });
         };
         try {
@@ -1633,7 +1633,7 @@ export class GhostLink {
     } else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
       this.securityRejected = true;
       this.tracker?.failed("rejected", false);
-      options.events?.onPairingState?.({ status: "error", keyMismatch: false,
+      this.sayPairingState({ status: "error", keyMismatch: false,
         error: "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced." });
     }
   }
@@ -1718,7 +1718,7 @@ export class GhostLink {
     if (this.stopped || this.keyStopped || this.securityRejected) return;
     if (this.streamBlocked) this.emitDeliveryState();
     else if (this.paired?.state) this.emitPairingState();
-    else this.options.events?.onPairingState?.({ status: "connecting" });
+    else this.sayPairingState({ status: "connecting" });
   }
 
   private emitPairingState(): void {
@@ -1734,7 +1734,7 @@ export class GhostLink {
       if (!open) this.pairedFiles?.closeAll();
       this.options.events?.onDataLinkState?.(open ? "open" : "idle");
     }
-    this.options.events?.onPairingState?.({ ...state,
+    this.sayPairingState({ ...state,
       ...(blocked ? { status: this.transitionError ? "error" as const : "negotiating" as const, error: this.transitionError } : {}),
       transitionTarget: this.transitionTarget, transitionError: this.transitionError,
     });
@@ -1807,12 +1807,25 @@ export class GhostLink {
     this.session.setActive(active);
     this.dht?.setActive(active);
   }
+  /**
+   * What `emitDeliveryState` said last, cleared by any other pairing state: every mailbox read and publication of a
+   * DHT-only chat asks for it again, and one that changed nothing builds no engine state (bug hunt 1109-chat-perf).
+   */
+  private saidDeliveryState: string | undefined;
+  private sayPairingState(state: PairingState): void {
+    this.saidDeliveryState = undefined;
+    this.options.events?.onPairingState?.(state);
+  }
   private emitDeliveryState(): void {
     if (!this.streamBlocked) return;
     const credentials = this.options.pairing?.credentials;
     const error = this.dht?.view.error;
-    this.options.events?.onPairingState?.({ status: error ? "error" : credentials?.peerKey ? "ready" : "connecting",
-      peerKey: credentials?.peerKey, code: this.dht?.comparisonCode, verified: !!credentials?.peerKey && credentials.verifiedPeerKey === credentials.peerKey, error });
+    const state: PairingState = { status: error ? "error" : credentials?.peerKey ? "ready" : "connecting",
+      peerKey: credentials?.peerKey, code: this.dht?.comparisonCode, verified: !!credentials?.peerKey && credentials.verifiedPeerKey === credentials.peerKey, error };
+    const said = JSON.stringify([state.status, state.peerKey, state.code, state.verified, state.error]);
+    if (said === this.saidDeliveryState) return;
+    this.saidDeliveryState = said;
+    this.options.events?.onPairingState?.(state);
   }
   async setDeliveryMode(mode: DeliveryMode): Promise<void> {
     if (!this.dht) throw new Error("DHT delivery is unavailable for this conversation.");
@@ -1919,7 +1932,7 @@ export class GhostLink {
         const message = error instanceof Error ? error.message : String(error);
         this.tracker?.failed("transport", true, message);
         // Waiting for a chosen transport is not a connection error (WISP 100): the wait says why.
-        if (!this.dialFailed(message)) this.options.events?.onPairingState?.({ status: "error", error: message });
+        if (!this.dialFailed(message)) this.sayPairingState({ status: "error", error: message });
         this.rejectWaiters(error instanceof Error ? error : new Error(message));
       });
     });
@@ -2604,7 +2617,7 @@ export class GhostLink {
     this.resumeKnockMissed = false;
     const epoch = this.connectionEpoch;
     this.attempt = { side: "dialled", failed: [] };
-    this.options.events?.onPairingState?.({ status: "connecting" });
+    this.sayPairingState({ status: "connecting" });
     try {
       const local = this.transportOffer();
       const relayed = relayedTransports(this.localDescriptors(), this.peerDescriptors);
