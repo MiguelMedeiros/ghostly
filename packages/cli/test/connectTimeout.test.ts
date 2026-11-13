@@ -49,6 +49,31 @@ describe("chat connect", () => {
     });
   });
 
+  it("a contact whose app is not there is unavailable, with HyperDHT's words in details", async () => {
+    const notFound = new Error("PEER_NOT_FOUND: Peer not found");
+    expect(await callApi(fake("daemon", async () => { throw notFound; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { chat: "chat-one", reason: "PEER_NOT_FOUND: Peer not found" },
+      message: "Your contact's app isn't reachable on HyperDHT: it may be closed. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+    const frozen = new Error("PEER_CONNECTION_FAILED: Could not connect to peer");
+    expect(await callApi(fake("one-shot", async () => { throw frozen; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { reason: "PEER_CONNECTION_FAILED: Could not connect to peer" },
+      message: "Your contact's app isn't answering on HyperDHT: it may be asleep or frozen. Try again later, or keep this profile online with `ghostly daemon --detach`: it reconnects by itself",
+    });
+  });
+
+  it("the link giving up on the contact says what happens next too", async () => {
+    const gaveUp = Object.assign(new Error("Could not connect to the peer"), { code: "unreachable" });
+    expect(await callApi(fake("daemon", async () => { throw gaveUp; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", details: { chat: "chat-one", reason: "Could not connect to the peer" },
+      message: "The contact did not answer. It reconnects by itself while this profile is online; ghostly chat wait bia --until live waits for it",
+    });
+    const notFound = Object.assign(new Error("Could not connect to the peer: PEER_NOT_FOUND: Peer not found"), { code: "unreachable" });
+    expect(await callApi(fake("daemon", async () => { throw notFound; }).ctx, "chat.connect", { chat: "bia" }).catch((error: unknown) => error)).toMatchObject({
+      code: "unavailable", message: expect.stringMatching(/^Your contact's app isn't reachable on HyperDHT: it may be closed\. It reconnects by itself/),
+    });
+  });
+
   it("answers as soon as the link is up, and keeps any other error", async () => {
     const { ctx } = fake("daemon", async () => {});
     expect(await callApi(ctx, "chat.connect", { chat: "bia", timeout: 5 })).toMatchObject({ id: "chat-one" });

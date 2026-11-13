@@ -1271,6 +1271,28 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblemOf).toBe("camera");
   });
 
+  it("the note that the camera is off goes once the camera comes on in the call", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+    devices.userMedia[1].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    expect(call.result.current.mediaProblem).toBe("unavailable");
+
+    // The camera plugged in (or the app holding it closed), well within the note's time: Camera turns it on.
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[2].grant();
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
   it.each([
     ["NotAllowedError", "denied"],
     ["SecurityError", "denied"],
@@ -1325,8 +1347,34 @@ describe("when the prompt is refused or there is no device", () => {
     expect(FakePeerConnection.instances[0].getTransceivers().map((t) => t.receiver.track.kind)).toEqual(["audio", "video"]);
     expect(call.result.current.mediaProblem).toBe("denied");
     expect(call.result.current.mediaProblemOf).toBe("camera");
-    expect(lines(call)).toEqual(["call_started"]);
+    // Its "Video call started" line, written as the camera was asked for, is a voice one now.
+    expect(call.addCallEventMessage.mock.calls).toEqual([["call_started", true], ["call_started", false]]);
     expect(call.onError).not.toHaveBeenCalled();
+  });
+
+  it("a video call that went on as a voice call has voice call lines, as the contact's chat does", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(denied());
+    await settle();
+    devices.userMedia[1].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(3000); });
+    act(() => call.result.current.hangUp());
+
+    // The "Video call started" written as the camera was asked for is taken back for a voice one.
+    const started = call.addCallEventMessage.mock.results[0].value;
+    expect(call.removeCallEventMessage).toHaveBeenCalledExactlyOnceWith(started);
+    expect(call.addCallEventMessage.mock.calls).toEqual([
+      ["call_started", true],
+      ["call_started", false],
+      ["call_connected", false],
+      ["call_ended", false, 3000],
+    ]);
   });
 
   it("a video call whose microphone is refused too fails as before, and names the microphone", async () => {

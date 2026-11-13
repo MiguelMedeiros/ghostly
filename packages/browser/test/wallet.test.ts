@@ -324,7 +324,7 @@ describe("Lightning out: melts", () => {
 
   it("a refusal with nothing lost says no sats left the wallet, in the app's words, the mint's reason kept (agents#2253)", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
-    mint.completeMelt.mockRejectedValue(new MintOperationError(20000, "Lightning payment failed:\n no route"));
+    mint.completeMelt.mockRejectedValue(new MintOperationError(20000, "Lightning payment\u200b failed:\n no\u202e route\u2066"));
     mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
     const { wallet } = setup();
 

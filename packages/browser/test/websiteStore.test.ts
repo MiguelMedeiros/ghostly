@@ -394,4 +394,43 @@ describe("the site leaves out a version its publisher revoked, as the app does b
     expect(snap.revocations).toEqual({});
     expect(snap.problems.some((p) => p.startsWith(`${revokeAt("kept")}: larger than`))).toBe(true);
   });
+
+  it("the build bounds each publisher's files apart: one listed ahead that fills its bound leaves another's revocation read", async () => {
+    // `mal`, of another publisher, names three sources: four files of 16 MiB beside its URLs, any bytes. `vic` comes after.
+    const m = signerOf("publisher m");
+    const mal = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2, 3].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
+    const vic = await buildAppBundle(base("vic", "vic"), [page("vic")], a);
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: STORE, name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: [
+        { ref: appRef(keyOf("publisher m"), "mal"), sequence: 1, digest: mal.digest, urls: [at("mal")], title: "mal", tagline: "mal" },
+        { ref: ref("vic"), sequence: 1, digest: vic.digest, urls: [at("vic")], title: "vic", tagline: "vic" },
+      ],
+      removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const filler = new Uint8Array(APP_FETCH_LIMITS.revocationsBytes);
+    const served: Record<string, Uint8Array> = {
+      [sync.STORE_URL]: indexBytes, [sync.STORE_URL.replace(/\.json$/, ".sig")]: sigBytes, [at("mal")]: mal.bytes, [at("vic")]: vic.bytes,
+      ...Object.fromEntries(["mal", "mal-1", "mal-2", "mal-3"].map((name) => [revokeAt(name), filler])),
+      [revokeAt("vic")]: fileOf([await signAppRevocation({ ghostlyRevoke: 1, app: ref("vic"), upTo: 1 }, a)]),
+    };
+    const fetcher = async (url: string) => (served[url] ? new Response(served[url]) : new Response("Not Found", { status: 404 }));
+    const snap = await sync.fromStore(fetcher) as { bundles: Record<string, string>; revocations: Record<string, string>; problems: string[] };
+    expect(snap.problems).toEqual([]);
+    expect(Object.keys(snap.revocations)).toContain(revokeAt("vic"));
+    const decode = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).map(([u, b]) => [u, new Uint8Array(Buffer.from(b, "base64"))]));
+    const view = readStore({ index: indexBytes, sig: sigBytes, bundles: decode(snap.bundles), revocations: decode(snap.revocations) }, NOW, STORE);
+    if (!view.ok) throw new Error(view.reason);
+    expect(view.apps.map((x) => x.name)).toEqual(["mal"]);
+    expect(view.skipped.map((x) => [x.ref.slice(53), x.reason])).toEqual([["vic", "revoked"]]);
+
+    // Past its own bound, a publisher's next file is left out, and only its own.
+    served[revokeAt("mal-4")] = filler;
+    const more = await buildAppBundle({ ...base("mal", "mal"), sources: [1, 2, 3, 4].map((n) => at(`mal-${n}`)) }, [page("mal")], m);
+    served[at("mal")] = more.bytes;
+    const again = await sync.fromStore(fetcher) as { revocations: Record<string, string>; problems: string[] };
+    expect(again.problems).toEqual([`${revokeAt("mal-4")}: over the ${sync.LIMITS.revocationsPublisherBytes} bytes one publisher's revocation files may take`]);
+    expect(Object.keys(again.revocations)).toContain(revokeAt("vic"));
+  });
 });

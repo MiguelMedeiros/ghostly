@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
+import { ANSWER_AHEAD_BYTES, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 
@@ -68,13 +68,16 @@ export async function serviceLabel(tag: string, peerPubKeyZ32: string, serviceId
 /**
  * The cookies one opened app set, kept in this page for as long as it is open. A service worker neither sees a
  * request's cookies nor may set one, so the app's `Set-Cookie`s are taken here and sent back with its requests, as a
- * browser would for that origin (by name; never another app's). The app's own script cannot read them.
+ * browser would for that origin (by name and path, while they last; never another app's). The app's own script cannot
+ * read them.
  */
 export class CookieJar {
-  private readonly cookies = new Map<string, string>();
+  /** By name and path, as a browser keeps them: `sid` at `/` and `sid` at `/admin` are two cookies. */
+  private readonly cookies = new Map<string, { name: string; value: string; path: string; until: number }>();
   static readonly MAX = 64;
 
-  take(setCookie: string): void {
+  /** `requestPath`: the path the answer that set it is for, whose directory is the cookie's path when it names none. */
+  take(setCookie: string, requestPath = "/"): void {
     const [pair, ...attributes] = setCookie.split(";");
     const at = pair?.indexOf("=") ?? -1;
     const name = at > 0 ? pair!.slice(0, at).trim() : "";
@@ -83,20 +86,51 @@ export class CookieJar {
     // As RFC 6265 §5.3 reads them: the last of each that parses counts, and a Max-Age wins over an Expires.
     let maxAge: number | undefined;
     let expires: number | undefined;
+    let path = defaultCookiePath(requestPath);
     for (const a of attributes) {
-      const [key, v = ""] = a.split("=").map((s) => s.trim());
-      if (/^max-age$/i.test(key ?? "") && /^-?\d+$/.test(v)) maxAge = Number(v);
-      if (/^expires$/i.test(key ?? "")) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+      const eq = a.indexOf("=");
+      const key = (eq < 0 ? a : a.slice(0, eq)).trim();
+      const v = eq < 0 ? "" : a.slice(eq + 1).trim();
+      if (/^max-age$/i.test(key) && /^-?\d+$/.test(v)) maxAge = Number(v);
+      if (/^expires$/i.test(key)) { const when = Date.parse(v); if (Number.isFinite(when)) expires = when; }
+      if (/^path$/i.test(key)) path = v.startsWith("/") ? v : defaultCookiePath(requestPath);
     }
-    const gone = maxAge !== undefined ? maxAge <= 0 : expires !== undefined && expires <= Date.now();
-    if (gone) { this.cookies.delete(name); return; }
-    if (!this.cookies.has(name) && this.cookies.size >= CookieJar.MAX) return;
-    this.cookies.set(name, value);
+    const now = Date.now();
+    const until = maxAge !== undefined ? now + maxAge * 1000 : expires ?? Infinity;
+    const key = `${path}\n${name}`;
+    if (until <= now) { this.cookies.delete(key); return; }
+    if (!this.cookies.has(key) && this.cookies.size >= CookieJar.MAX) return;
+    this.cookies.set(key, { name, value, path, until });
   }
 
-  header(): string | null {
-    return this.cookies.size ? [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ") : null;
+  /**
+   * The `Cookie` header for a request to `path`: the cookies whose path it is under and that have not run out, the
+   * longer paths first (RFC 6265 §5.4).
+   */
+  header(path = "/"): string | null {
+    const now = Date.now();
+    const sent: { name: string; value: string; path: string }[] = [];
+    for (const [key, cookie] of this.cookies) {
+      if (cookie.until <= now) this.cookies.delete(key);
+      else if (pathMatches(path, cookie.path)) sent.push(cookie);
+    }
+    // A stable sort: cookies of one path length go in the order they were first set.
+    sent.sort((a, b) => b.path.length - a.path.length);
+    return sent.length ? sent.map(({ name, value }) => `${name}=${value}`).join("; ") : null;
   }
+}
+
+/** A cookie's path when its `Set-Cookie` names none: the request path's directory (RFC 6265 §5.1.4). */
+function defaultCookiePath(requestPath: string): string {
+  const path = requestPath.split("?")[0]!;
+  const last = path.lastIndexOf("/");
+  return path.startsWith("/") && last > 0 ? path.slice(0, last) : "/";
+}
+
+/** Whether a request to `path` carries a cookie of `cookiePath`: that path, or one under it (RFC 6265 §5.1.4). */
+function pathMatches(path: string, cookiePath: string): boolean {
+  if (path === cookiePath) return true;
+  return path.startsWith(cookiePath) && (cookiePath.endsWith("/") || path[cookiePath.length] === "/");
 }
 
 /**
@@ -181,7 +215,16 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     return;
   }
   const stop = new AbortController();
-  port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  // What the app's frame read of the answer, as the worker says (`flow`), and the wait for it to read on.
+  let read = 0;
+  let readOn: (() => void) | null = null;
+  const wake = () => { readOn?.(); readOn = null; };
+  stop.signal.addEventListener("abort", wake);
+  port.onmessage = (event) => {
+    const said = event.data as { type?: unknown; bytes?: unknown } | null;
+    if (said?.type === "cancel") stop.abort();
+    else if (said?.type === "read" && typeof said.bytes === "number" && said.bytes > read) { read = said.bytes; wake(); }
+  };
   const pageGone = () => stop.abort();
   if (view?.aborted) stop.abort();
   else view?.addEventListener("abort", pageGone);
@@ -199,7 +242,8 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       post({ type: "error", status: 503, text: words.failed });
       return;
     }
-    const cookie = jar.header();
+    const path = request.path.split("?")[0]!;
+    const cookie = jar.header(path);
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
     const answer = await send({ method: request.method, path: request.path, headers, body: request.body ? new Uint8Array(request.body) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
@@ -211,7 +255,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     }
     let out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
-      if (name.toLowerCase() === "set-cookie") jar.take(value);
+      if (name.toLowerCase() === "set-cookie") jar.take(value, path);
       else out.push([name, value]);
     }
     // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
@@ -226,10 +270,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
       const bytes = ownsBuffer(chunk) ? chunk : chunk.slice();
+      sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
+      // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
     }
     post({ type: "end" });
   } catch (error) {
@@ -431,7 +479,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     clearInterval(using);
     unwatch();
     removeEventListener("message", onMessage);
-    removeEventListener("keydown", onKey);
+    removeEventListener("keydown", onKey, true);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     bridge.abort();
@@ -442,12 +490,14 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  // Taken before the page's own listeners and spent here: a modal of the app under the view (the chat's Shared services
+  // dialog it was opened from) would close on the same Escape.
+  const onKey = (event: KeyboardEvent) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
   watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
-  addEventListener("keydown", onKey);
+  addEventListener("keydown", onKey, true);
   addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);

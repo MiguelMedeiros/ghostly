@@ -1,3 +1,4 @@
+import { dropLoneJoiners, hasVisible, stripHidden } from "@ghostly/core";
 import { STORES, transact } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE } from "./cashuMint";
@@ -94,9 +95,21 @@ const ALIAS_IN_NAME = 20;
  * ends, with "…", never in the middle of a word.
  */
 export function defaultCardName(providerId: string, alias: string | undefined, short: string): string {
-  const own = (alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "").replace(/\s+/g, " ").trim();
+  const own = cleanName(alias && providerId === nwc.id ? nwcWalletName(alias) : alias ?? "");
   return own ? `${cutAtWord(own, ALIAS_IN_NAME)} (${short})` : short;
 }
+
+/**
+ * A card's name as shown: no invisible or direction-changing character (one from the wallet's service could make a
+ * name read like another card's, or reorder the source's name after it), white space collapsed; "" with nothing visible.
+ */
+function cleanName(name: string): string {
+  const clean = dropLoneJoiners(stripHidden(name.replace(/\s+/g, " "))).replace(/\s+/g, " ").trim();
+  return hasVisible(clean) ? clean : "";
+}
+
+/** What two names that read alike share: a name stored before `cleanName` may still hold what it drops. */
+const nameKey = (name: string) => cleanName(name).toLowerCase();
 
 /** `text` in at most `max` UTF-16 units (the unit `rename` counts), cut after a whole word with "…" when longer. */
 function cutAtWord(text: string, max: number): string {
@@ -259,9 +272,9 @@ export class LightningCards {
 
   /** A name no other card of the network has: "LND", then "LND 2". */
   private freeName(name: string): string {
-    const taken = new Set(this.stored.cards.map((c) => c.name.toLowerCase()));
-    if (!taken.has(name.toLowerCase())) return name;
-    for (let n = 2; ; n++) if (!taken.has(`${name} ${n}`.toLowerCase())) return `${name} ${n}`;
+    const taken = new Set(this.stored.cards.map((c) => nameKey(c.name)));
+    if (!taken.has(nameKey(name))) return name;
+    for (let n = 2; ; n++) if (!taken.has(nameKey(`${name} ${n}`))) return `${name} ${n}`;
   }
 
   /**
@@ -303,11 +316,11 @@ export class LightningCards {
   /** Renames a card: 1 to 32 characters, unique on its network. */
   rename(id: string, name: string): Promise<void> {
     return this.serial(async () => {
-      const clean = name.replace(/\s+/g, " ").trim();
+      const clean = cleanName(name);
       if (!clean) throw new Error("Enter a name");
       if (clean.length > NAME_MAX) throw new Error(`At most ${NAME_MAX} characters`);
       if (!this.services.has(id)) throw new Error("That Lightning card is gone");
-      if (this.stored.cards.some((c) => c.id !== id && c.name.toLowerCase() === clean.toLowerCase())) throw new Error("Another card has that name");
+      if (this.stored.cards.some((c) => c.id !== id && nameKey(c.name) === nameKey(clean))) throw new Error("Another card has that name");
       await this.save({ ...this.stored, cards: this.stored.cards.map((c) => (c.id === id ? { ...c, name: clean } : c)) });
     });
   }

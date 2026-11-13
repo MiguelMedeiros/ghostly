@@ -511,6 +511,19 @@ describe("online notices: a contact whose app is closed hears that this one came
     expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
   });
 
+  it("none while the host says this run is not online to its contacts (a headless profile with no presence)", async () => {
+    const pushSend = vi.fn(async () => 201);
+    let says = false;
+    const node = engine({ pushSend, onlineNotices: () => says });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    says = true;
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+  });
+
   it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
     const pushSend = vi.fn(async () => 201);
     const node = engine({ pushSend });

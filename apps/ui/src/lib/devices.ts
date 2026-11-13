@@ -399,7 +399,8 @@ export function takeDeviceLink(): DeviceLink | null {
  * on a device on standby too, where no router runs. Anything else is left for the router.
  */
 export function takeDeviceLinkFromAddress(): void {
-  const rest = window.location.hash.replace(/^#/, "");
+  // A `/` the link ends with (typed, or added by a linkifier) is not the code's.
+  const rest = window.location.hash.replace(/^#/, "").replace(/\/+$/, "");
   if (!rest) return;
   // As a link reads after its origin: `#ghostly1z…`, or `#<profile>#ghostly1z…`.
   const value = `#${protocolLinkCode(rest) ?? rest.replace(/^\//, "")}`;

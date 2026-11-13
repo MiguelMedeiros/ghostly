@@ -10,7 +10,7 @@ import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
 import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
-import { ghostly } from "./support/cli";
+import { ghostly, Running } from "./support/cli";
 // covers: headless.hooks, headless.events
 
 /**
@@ -73,7 +73,12 @@ describe("--type", () => {
   it("a first word that is no family is a usage error naming them; a type no event has is said on stderr", () => {
     const warned: string[] = [];
     const check = (...types: string[]) => checkTypes(types, (line) => warned.push(line));
-    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received", "agent.turn")).not.toThrow();
+    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received")).not.toThrow();
+    expect(warned).toEqual([]);
+    // agent.turn comes only from --turns, which takes the place of --type: one kept alone was a listener silent for good.
+    for (const type of ["agent.turn", "agent", "agent.", "agent.*", "agent*"]) {
+      expect(() => check(type), type).toThrow(`No event is of type ${type} without --turns: ghostly listen --turns gives agent.turn events, in the place of --type`);
+    }
     expect(warned).toEqual([]);
     for (const type of ["bogus", "messages.received", "bogus.", "bogus*", ".message"]) {
       const error = (() => { try { check(type); } catch (e) { return e; } })();
@@ -209,8 +214,8 @@ describe("hooks", () => {
     expect((JSON.parse(lines[1]) as { untrusted: { text: string } }).untrusted.text).toBe(text);
   });
 
-  it("run without the backup passphrase in their environment", () => {
-    const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
+  it("run without the backup passphrase or the webhook's URL in their environment", () => {
+    const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_WEBHOOK: "http://127.0.0.1:1/hook?token=s3cret", GHOSTLY_PROFILE: "bot" });
     expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
   });
 
@@ -618,6 +623,11 @@ describe("listen with an allowlist and --turns", () => {
     expect(node.pressButton).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs, buttonId: "yes" });
     await callApi(ctx, "chat.delete", { chat: "c1", message: ref });
     expect(node.deleteMessage).toHaveBeenLastCalledWith({ linkId: "c1", messageId: theirs });
+    // History's cursors: the context before or after a turn; a timestamp stays a timestamp.
+    await callApi(ctx, "chat.history", { chat: "c1", before: ref, after: 1 });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "c1", limit: 50, before: theirs, after: 1 });
+    await callApi(ctx, "group.history", { group: "g1", after: groupRef });
+    expect(node.messagePage).toHaveBeenLastCalledWith({ linkId: "group:g1", limit: 50, before: undefined, after: inGroup });
 
     // A stored id still names its message; a turn's id of another chat, or of no message, names none here.
     await callApi(ctx, "chat.react", { chat: "c1", message: theirs, emoji: "👍" });
@@ -780,4 +790,53 @@ describe("listen with an allowlist and --turns", () => {
     }
     expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 2, json: { error: { code: "usage", message } } })));
   });
+
+  // A long-running listen's arguments are every local account's to read (`ps`, /proc/<pid>/cmdline): the bridge's
+  // token comes in GHOSTLY_WEBHOOK, out of them, and an argv URL that carries one is warned of.
+  it("GHOSTLY_WEBHOOK gives the webhook's URL out of the arguments, and nothing repeats the URL it is given", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const runs: [string[], NodeJS.ProcessEnv, string][] = [
+      [["--webhook", "http://127.0.0.1:1/hook"], { GHOSTLY_WEBHOOK: "http://127.0.0.1:1/hook?token=s3cret" }, "A webhook is set in GHOSTLY_WEBHOOK and --webhook was given: choose one"],
+      [[], { GHOSTLY_WEBHOOK: " " }, "GHOSTLY_WEBHOOK is empty: it holds the webhook's URL"],
+      [[], { GHOSTLY_WEBHOOK: "127.0.0.1:1/hook?token=s3cret%" }, "GHOSTLY_WEBHOOK is not a URL"],
+      [["--webhook", "127.0.0.1:1/hook?token=s3cret%"], {}, "--webhook is not a URL"],
+    ];
+    for (const [args, env, message] of runs) {
+      const result = await ghostly(["--home", dir, "listen", ...args], { env });
+      expect(result.code, message).toBe(2);
+      expect(result.json).toEqual({ error: { code: "usage", message } });
+      expect(result.stdout + result.stderr).not.toMatch("s3cret");
+    }
+    // Said once on stderr, the token not in it.
+    const onLine = new Running(["--home", dir, "listen", "--webhook", "http://127.0.0.1:1/hook?token=s3cret"]);
+    try {
+      await vi.waitFor(() => expect(onLine.stderr).toMatch("--webhook's URL shows in ps to every account on this machine while listen runs, a token in it too: give it in GHOSTLY_WEBHOOK instead"), { timeout: 10_000, interval: 100 });
+      expect(onLine.stderr).not.toMatch("s3cret");
+    } finally {
+      await onLine.stop();
+    }
+
+    const posted: string[] = [];
+    const bridge = createServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => { if (request.url === "/hook/s3cret?token=s3cret") posted.push(body); response.writeHead(204).end(); });
+    });
+    await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+    expect((await ghostly(["--home", dir, "profile", "create", "bot", "--use"])).code).toBe(0);
+    const url = `http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook/s3cret?token=s3cret`;
+    const listen = new Running(["--home", dir, "listen", "--since", "0", "--exec", `env > ${JSON.stringify(join(dir, "hook.env"))}`], { GHOSTLY_WEBHOOK: url });
+    try {
+      // --exec and the webhook both take the event: the hook's environment has no GHOSTLY_WEBHOOK.
+      await vi.waitFor(() => expect(posted.map((body) => (JSON.parse(body) as { type: string }).type)).toContain("daemon.started"), { timeout: 30_000, interval: 100 });
+      await vi.waitFor(() => expect(existsSync(join(dir, "hook.env"))).toBe(true), { timeout: 10_000, interval: 100 });
+      expect(readFileSync(join(dir, "hook.env"), "utf8")).not.toMatch("s3cret");
+      if (process.platform === "linux") expect(readFileSync(`/proc/${listen.child.pid}/cmdline`, "utf8")).not.toMatch("s3cret");
+      expect(listen.lines).toEqual([]);
+      expect(listen.stderr).not.toMatch("s3cret");
+    } finally {
+      await listen.stop();
+      bridge.close();
+    }
+  }, 60_000);
 });

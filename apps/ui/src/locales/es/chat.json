@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
     "notSent": "Tu mensaje «{{text}}» no se envió",
     "notSentCount": "{{count}} mensajes no enviados",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
     "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
     "waiting": "Tu mensaje «{{text}}» está esperando a que tu contacto esté en línea",
@@ -241,7 +242,6 @@
     "newOne": "1 mensaje nuevo, desplazar al final"
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
-  "lastSeen": "Última vez {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -394,6 +394,7 @@
     "copyCode": "Copiar código",
     "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
+    "notCopied": "No copiado",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toca para mostrarlo",
@@ -483,7 +484,6 @@
     "showTranslation": "Ver traducción",
     "translate": "Traducir"
   },
-  "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",
