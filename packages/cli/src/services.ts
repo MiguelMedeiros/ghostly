@@ -276,17 +276,21 @@ export const SERVICE_METHODS: Record<string, Method> = {
   async "service.add"(ctx, params) {
     const name = serviceNameOf(params);
     const target = str(params, "target", true);
-    let url: URL;
-    try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
-    const here = LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
-    if (!here) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), first: a query, a fragment, a user and
-    // password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the engine,
-    // they were plain errors, `engine` (exit 1): "the engine failed" (agents#894).
+    // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+    // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+    // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+    // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+    // for the engine to refuse in other words.
     try { parseLocalTarget(target); } catch (error) {
       const said = error instanceof Error ? error.message : String(error);
-      // Named without its user, password, query and fragment: the parts refused here can hold a secret (a token).
-      const shown = `${url.protocol}//${url.host}${url.pathname}`;
+      // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+      // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
+      const text = target.trim();
+      let shown = text;
+      try {
+        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+        shown = `${url.protocol}//${url.host}${url.pathname}`;
+      } catch { /* Not a URL: named as given. */ }
       throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
     }
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
