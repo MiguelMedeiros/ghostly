@@ -5384,9 +5384,13 @@ export class GhostLink {
         if (!this.takeMessage()) break;
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
-      case "call":
-        this.options.events?.onCallSignal?.(heardCallSignal(frame.s, Date.now()));
+      case "call": {
+        // Counted before it is read and none handed on twice, as on a paired session (`paired-call`).
+        if (!this.callsReceived.take()) break;
+        const signal = heardCallSignal(frame.s, Date.now());
+        if (this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
         break;
+      }
       case "req":
         this.httpHost?.handleRequest(frame);
         break;
