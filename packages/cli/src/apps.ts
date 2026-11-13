@@ -358,9 +358,10 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
  * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
  * v2.4.5" headers included), or a Ghostly key file's first line. A library that only names the block's header in its
- * code does not match.
+ * code does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per
+ * header to the end of the file.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n[A-Za-z0-9+/=\r\n :,.-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
