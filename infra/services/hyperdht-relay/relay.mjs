@@ -9,6 +9,11 @@ import { WebSocketServer } from 'ws'
 
 const require = createRequire(import.meta.url)
 
+// Every span of time the relay measures reads a monotonic clock, as the push relay's counts do: a host clock set back
+// (an NTP step, an operator fixing a clock that ran ahead) read as a refill an hour negative stopped reading each client
+// for that hour, so its pongs went unread and it was dropped, and kept the listens before the step in their minute.
+const monotonicNow = () => performance.now()
+
 /**
  * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
  * eight native listeners per app, and one per linked device) and dials a contact now and then; everything above that
@@ -224,7 +229,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
-        const now = Date.now()
+        const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
@@ -251,7 +256,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
-        const now = Date.now()
+        const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
@@ -603,7 +608,7 @@ export async function startRelay(options = {}) {
   // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
   let answeredAt = null
   const onresponse = dht.io.onresponse
-  dht.io.onresponse = (...args) => { answeredAt = Date.now(); return onresponse(...args) }
+  dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
   if (dht.toArray().length === 0) log('bootstrap reached no node')
 
@@ -664,16 +669,16 @@ export async function startRelay(options = {}) {
    */
   const madeRoom = new Map()
   const makeRoom = address => {
-    if (Date.now() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
+    if (monotonicNow() - (madeRoom.get(address) ?? -Infinity) < ROOM_MS) return null
     const own = perAddress.get(address)?.size ?? 0
     let most = null
     for (const held of perAddress.values()) if (!most || held.size > most.size) most = held
     if (!most || most.size <= own + 1) return null
     const [[, evict]] = most
-    return () => { madeRoom.set(address, Date.now()); evict() }
+    return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
   const forgetRoom = setInterval(() => {
-    for (const [address, at] of madeRoom) if (Date.now() - at >= ROOM_MS) madeRoom.delete(address)
+    for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -785,10 +790,10 @@ export async function startRelay(options = {}) {
     }
     // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
-    let last = Date.now()
+    let last = monotonicNow()
     let paused = false
     const spend = bytes => {
-      const now = Date.now()
+      const now = monotonicNow()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
       last = now
       tokens -= bytes
@@ -886,7 +891,7 @@ export async function startRelay(options = {}) {
     stats: () => ({
       clients: clients.size,
       ...stats,
-      sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt,
+      sinceAnswerMs: answeredAt === null ? null : monotonicNow() - answeredAt,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
     // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
@@ -933,7 +938,7 @@ export function originOf (entry) {
  * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
  * sending a new value each time cannot flood it.
  */
-export function originRefusals (log, { most = 16, now = Date.now } = {}) {
+export function originRefusals (log, { most = 16, now = monotonicNow } = {}) {
   let seen = new Set()
   let since = now()
   let full = false
