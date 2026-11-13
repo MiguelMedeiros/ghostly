@@ -118,6 +118,7 @@
   "noticesMisplaced": "将 Ghostly 移到“应用程序”以允许通知",
   "noticesOpenSettings": "打开设置",
   "noticesRunning": "Ghostly 打开时",
+  "noticesRunningExtension": "浏览器打开时，即使没有 Ghostly 标签页",
   "noticesUnavailable": "此处不可用",
   "notificationSounds": "声音",
   "notificationSoundsDescription": "消息、通话和已确认的付款",
