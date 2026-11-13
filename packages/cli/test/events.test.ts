@@ -460,6 +460,46 @@ describe("the event stream", () => {
     expect(moved.events.map((e) => [e.type, e.file, e.stage, e.messageId])).toEqual([["file.stage", "c1-in-v", "downloading", "peer_v"]]);
   });
 
+  it("an online one-shot reads the notes of a chat only when its history's first event comes, and catches it up then", async () => {
+    const one = [message("c1", "m1"), message("c1", "m2")], two = [message("c2", "n1")];
+    const first = await hub("perchat.jsonl");
+    first.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", one], ["c2", two]]));
+    first.h.release();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const proto = Object.getPrototypeOf(first.h["db"].transaction("seen").objectStore("seen")) as IDBObjectStore;
+    const reads = vi.spyOn(proto, "getAll");
+    // The chats whose notes were read: none for the whole set.
+    const read = () => reads.mock.calls.map(([range]) => (range ? String((range as IDBKeyRange).lower[0]) : "all"));
+    const h = new EventHub(join(dir, "perchat.jsonl"), () => 1000, "perchat.jsonl");
+    await h.open({ seen: false });
+    expect(await h.loadOwnNotes()).toBe(true);
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    const newest = vi.fn(async (chat: string) => (chat === "c1" ? { messages: one, more: true } : null));
+    const whole = vi.fn(async () => [...two, message("c2", "n2")]);
+    h.perChat(state([link("c1"), link("c2")]), { newest, whole, files: async () => [] });
+    expect(read()).toEqual(["format:", "files:", "said:"]);
+
+    // c1's page is in step: only what changes is told. c2 has no page (its history changed before): read whole, and what
+    // came while nothing ran is told before what comes now.
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m3")], deleted: ["m1"] });
+    h.sink.post({ kind: "message-changes", linkId: "c2", messages: [message("c2", "n3")], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m4")], deleted: [] });
+    expect(events).toEqual([]);
+    await h.caughtUp();
+    expect(events.map((e) => e.id)).toEqual(["message.received:c1:m3", "message.deleted:c1:m1", "message.received:c1:m4", "message.received:c2:n2", "message.received:c2:n3"]);
+    expect(read().slice(3).sort()).toEqual(["c1", "c2", "reactions:c1", "reactions:c2"]);
+    expect([newest.mock.calls.length, whole.mock.calls.length]).toEqual([2, 1]);
+    vi.restoreAllMocks();
+    h.release();
+
+    // What it noted is the next start's: nothing again.
+    const next = await hub("perchat.jsonl");
+    next.h.baseline(state([link("c1"), link("c2")]), new Map([["c1", [message("c1", "m2"), message("c1", "m3"), message("c1", "m4")]], ["c2", [...two, message("c2", "n2"), message("c2", "n3")]]]));
+    expect(next.events).toEqual([]);
+  });
+
   it("says when the journal no longer holds what a listener asks for", async () => {
     const { h } = await hub("d.jsonl");
     const lines = [5, 6].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n";
