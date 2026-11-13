@@ -628,6 +628,7 @@ const RULES: readonly Rule[] = [
   // the ⓘ. "Made by another key" stays in the line: it is why the proof is refused.
   { match: /^This signature was made by another key(?: \([0-9A-F]+\))?, not the public key given\.$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeyPgpNext", detail: true },
   { match: /^That signature was made by \S+, not the key you entered \([^)]*\)$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeySshNext", detail: true },
+  exact("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", "errors.proof.fileEncoding", "errors.proof.fileEncodingNext"),
   { match: /^No Ghostly TXT record at \S+(?: \(DNS changes can take a few minutes\))?$/, key: "errors.proof.noDnsRecord", next: "errors.proof.noDnsRecordNext", detail: true },
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },

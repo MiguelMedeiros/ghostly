@@ -551,6 +551,8 @@
     "domainPrivate": "That name only works on private networks",
     "domainTooLong": "That domain name is too long",
     "expired": "The proof has expired",
+    "fileEncoding": "The statement file was saved in another encoding",
+    "fileEncodingNext": "Save it as UTF-8 without a byte order mark (BOM), then sign it again.",
     "fileInvalid": "The proof file is not a valid {{kind}} file",
     "fileInvalidNext": "It must be valid JSON, uploaded unchanged.",
     "fileNoProof": "The proof file names no Ghostly proof",

@@ -551,6 +551,8 @@
     "domainPrivate": "この名前はプライベートネットワークでしか使えません",
     "domainTooLong": "このドメイン名は長すぎます",
     "expired": "証明の期限が切れました",
+    "fileEncoding": "声明のファイルが別の文字コードで保存されています",
+    "fileEncodingNext": "BOM（バイトオーダーマーク）なしの UTF-8 で保存し、もう一度署名してください。",
     "fileInvalid": "証明ファイルは有効な {{kind}} ファイルではありません",
     "fileInvalidNext": "有効な JSON を、変更せずにアップロードする必要があります。",
     "fileNoProof": "証明ファイルに Ghostly の証明がありません",

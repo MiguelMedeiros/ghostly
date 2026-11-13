@@ -551,6 +551,8 @@
     "domainPrivate": "Esse nome só funciona em redes privadas",
     "domainTooLong": "Esse nome de domínio é longo demais",
     "expired": "A prova expirou",
+    "fileEncoding": "O arquivo da declaração foi salvo em outra codificação",
+    "fileEncodingNext": "Salve-o como UTF-8 sem marca de ordem de bytes (BOM) e assine de novo.",
     "fileInvalid": "O arquivo de prova não é um arquivo {{kind}} válido",
     "fileInvalidNext": "Ele precisa ser um JSON válido, enviado sem alterações.",
     "fileNoProof": "O arquivo de prova não traz nenhuma prova do Ghostly",
