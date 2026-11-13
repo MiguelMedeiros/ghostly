@@ -744,6 +744,26 @@ describe("HttpClient", () => {
     expect(read).toBe(3 * LIMITS.maxUnreadResponseBytes);
     expect(c.controls().some((f) => f.t === "rst")).toBe(false);
   });
+
+  it("resets an answer past the unread bound at once while the client's answers hold more than their bound together", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    // Each answer one slow reader could keep alone: two fit what the client holds for all, three are past it.
+    const each = Math.floor(LIMITS.maxClientUnreadResponseBytes / 3 / chunk.length) + 1;
+    const responses = [];
+    for (let id = 1; id <= 3; id++) {
+      const pending = c.client.request("atlas", { method: "GET", path: `/${id}` });
+      c.client.handleResponse({ t: "res", id, st: 200, h: [], b: true });
+      responses.push(await pending);
+      for (let i = 0; i < each; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id, end: i === each - 1, payload: chunk });
+    }
+    // No time passed, so no reader stalled: the third is let go for what the client held, the first two are whole.
+    expect(c.controls().filter((f) => f.t === "rst")).toEqual([{ t: "rst", id: 3, d: "q", e: "Response body not read in time" }]);
+    await expect(responses[2]!.bytes()).rejects.toMatchObject({ code: "unread" });
+    expect((await responses[0]!.bytes()).length).toBe(each * chunk.length);
+    expect((await responses[1]!.bytes()).length).toBe(each * chunk.length);
+  });
 });
 
 describe("webLocalFetch", () => {
