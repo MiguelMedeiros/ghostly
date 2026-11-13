@@ -32,6 +32,7 @@ const message = (id: string, fields: Partial<StoredMessage> = {}): StoredMessage
 function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    getSettings: () => ({}),
     groupMessages: vi.fn(async () => messages),
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:7" })),

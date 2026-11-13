@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, ownChatOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -325,7 +325,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
     // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
     // (a STUN server the contact names would see this machine's address), so none opens while it is on.
-    if (state(ctx).settings?.relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
+    if (settingsOf(ctx).relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
