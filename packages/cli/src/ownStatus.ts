@@ -29,6 +29,9 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
     if (!emoji) throw fail("emoji", `takes one emoji, not ${JSON.stringify(input.emoji)}`);
     status.emoji = emoji;
   }
+  // Far past its bound as given (64 UTF-16 units a character, as a name: apiKit's `RAW_PER_CHARACTER`), refused before
+  // it is read whole: a 10 MiB text was cleaned first, a second the daemon answered no one else.
+  if (input.text !== undefined && input.text.length > STATUS_TEXT_MAX * 64) throw fail("text", `is up to ${STATUS_TEXT_MAX} characters, not ${input.text.length} characters as given`);
   // One line, as contacts see it: a line break or a run of spaces is one space; invisible characters are not counted.
   const oneLine = input.text?.replace(/\s+/g, " ").trim();
   if (oneLine) {

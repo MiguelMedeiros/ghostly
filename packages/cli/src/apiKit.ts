@@ -153,13 +153,24 @@ export function cleanName(name: string, max: number): string | undefined {
 }
 
 /**
+ * UTF-16 units of a name as given, per character of its bound, past which nothing of it is read: what cleaning drops
+ * (spaces, invisible characters) never takes that many, so a 64-character name is refused past 4096 units.
+ */
+export const RAW_PER_CHARACTER = 64;
+
+/**
  * `name` as `cleanName` stores it, or the one refusal every name kind gives (`bad_request`), so a chat's, the profile's
  * and a group's name read alike. `subject` starts the sentence ("A chat's name", "nick"); `empty` follows "needs a
  * character that shows" (what an empty name does instead, when it does something). Too long says the count as stored,
  * in code points as the engine counts, and the largest character of several code points in it (a joined emoji or a
- * flag counts as several): the person sees what to cut, and a bot reads `details.length` and `details.max`.
+ * flag counts as several): the person sees what to cut, and a bot reads `details.length` and `details.max`. A name
+ * far past `max` as given (`RAW_PER_CHARACTER` UTF-16 units a character) is refused before it is cleaned, counted as
+ * given: a 10 MiB name was cleaned whole first, seconds the daemon answered no one else.
  */
 export function shownName(name: string, max: number, subject: string, empty = ""): string {
+  if (name.length > max * RAW_PER_CHARACTER) {
+    throw new CliError("bad_request", `${subject} is up to ${max} characters as stored (this one is ${name.length} as given)`, { given: name.length, max });
+  }
   const clean = cleanName(name, Infinity) ?? "";
   const length = [...clean].length;
   if (length > max) {
