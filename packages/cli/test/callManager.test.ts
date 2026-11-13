@@ -143,6 +143,32 @@ function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean
   return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
+/**
+ * The real media stack, but its connection fails where it would have connected (a path that never comes up: ICE that
+ * finds no pair, a DTLS handshake that does not finish): "failed" in place of the first "connected", and nothing after.
+ */
+function failingStack(): () => Promise<CallStack | string> {
+  return async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const listen = pc.onStateChange.bind(pc);
+      let failed = false;
+      Object.defineProperty(pc, "onStateChange", {
+        value: (cb: Parameters<typeof listen>[0]) => listen((state) => {
+          if (failed) return;
+          if (state === "connected") { failed = true; cb("failed"); return; }
+          cb(state);
+        }),
+      });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+}
+
 /** The real media stack, counting the connections it made and the ones still open (not closed), and the most open at once. */
 function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number; peak: () => number } {
   let made = 0, peak = 0;
@@ -591,6 +617,20 @@ describe("two call managers", { timeout: 60_000 }, () => {
     a.calls.onSignal("chat-ab", JSON.stringify({ t: "h", ts: Date.now() + 1, r: "u" }));
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(a.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  // It ended on its own with nothing said: the contact's app went on "Connecting..." (up to 45 s) or "Reconnecting...",
+  // where an app whose connection fails hangs up (WISP 601 "Couldn't connect").
+  it("a call whose connection fails ends as failed, and the contact is told", async () => {
+    const { a, b } = pairOfManagers({ b: failingStack() });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await b.calls.answer(undefined, {});
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(signalsOf(b, "h")).toHaveLength(1);
+    await until(() => a.events.find((e) => e.type === "call.ended"));
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
