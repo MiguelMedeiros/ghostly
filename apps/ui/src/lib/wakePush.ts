@@ -68,6 +68,8 @@ export interface PushPlatform {
    * message and online notices (never a call's).
    */
   closeNotices?(profile: string, path?: string): Promise<void>;
+  /** Closes every online notice of this profile: each names a contact, which a profile with a lock screen never shows. */
+  closeOnlineNotices?(profile: string): Promise<void>;
 }
 
 /** The device words of the push worker, with `{device}` left in for the worker to fill (`t` interpolates `{{device}}`). */
@@ -357,6 +359,11 @@ export function useWakeTableSync(text: WakeWords): void {
       window.removeEventListener("session-updated", write);
     };
   }, [on, held, words, locked]);
+  // The online notices already up name a contact too: they go when the lock is turned on (or the app starts locked).
+  useEffect(() => {
+    const push = pushPlatform();
+    if (locked && push?.closeOnlineNotices) void push.closeOnlineNotices(activeProfileId()).catch(() => {});
+  }, [locked]);
 
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for
