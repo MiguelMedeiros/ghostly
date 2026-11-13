@@ -13,6 +13,7 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
 import { AppIcon, Fingerprint } from "../components/apps/AppIcon";
 import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInstallDialog";
+import { removedLine } from "../components/apps/removedLine";
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
@@ -299,9 +300,10 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
                   <span className="min-w-0 flex-1">
                     <span dir="auto" className="text-match-parent block text-sm text-text-primary truncate">{listing.title}</span>
                     {/* Why the store took it down is read whole: cut to one line, a phone showed only "Removed by <store>: It
-                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. */}
+                        sent the b…", with nothing to open for the rest, and in Arabic the store's name was the part cut. The
+                        store's name and reason are isolated, each in its own direction, in a line in the page's (`removedLine`). */}
                     {removed
-                      ? <span dir="auto" data-testid="app-listing-removed" className="text-match-parent block text-xs text-text-muted [overflow-wrap:anywhere]">{t("apps.install.removed", { store: store.name ?? "", reason: removed.reason })}</span>
+                      ? <span data-testid="app-listing-removed" className="block text-xs text-text-muted [overflow-wrap:anywhere]">{removedLine(store.name ?? "", removed.reason, t)}</span>
                       : <span dir="auto" className="text-match-parent block text-xs text-text-muted truncate">{listing.tagline}</span>}
                   </span>
                 </span>
