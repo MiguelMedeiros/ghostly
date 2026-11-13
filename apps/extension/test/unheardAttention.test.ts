@@ -121,6 +121,22 @@ describe("a message with no Ghostly tab open", () => {
     expect(asked()).toHaveLength(1);
   });
 
+  it("builds the engine's whole state only for a 1:1 chat's event that may be shown", async () => {
+    // `getState` builds every chat's and group's view: it was built for each event the peer heard with no tab open.
+    const built = vi.spyOn(engine().node, "getState");
+    notificationsOn(false);
+    await hear();
+    notificationsOn();
+    await hear({ type: "coin", linkId: undefined });
+    await hear({ type: "sent" });
+    await hear({ at: Date.now() - 60_000 });
+    await hear({ linkId: "group:g1" }, true);
+    expect(built).not.toHaveBeenCalled();
+    await hear({}, true);
+    expect(built).toHaveBeenCalledTimes(1);
+    expect(world.session.get(`notice:${created().at(-1)![0]}`)).toBe(CHAT);
+  });
+
   it("nothing without the notifications permission", async () => {
     resetEngine();
     world = await bootExtension();
