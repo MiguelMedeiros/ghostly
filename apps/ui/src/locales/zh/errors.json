@@ -293,6 +293,7 @@
     "legacyAppNext": "它最多只支持 {{max}} 人的群组。",
     "lost": "两位成员同时让人加入了",
     "lostNext": "正在重新请求加入…",
+    "memberGone": "此人已不在群组中",
     "name": "请输入包含文字或表情的名称",
     "nameNext": "最多 {{max}} 个字符，单行。",
     "needsGroupsNext": "对方的应用需要支持群组（更新版 Ghostly）。",

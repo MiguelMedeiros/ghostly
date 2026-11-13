@@ -293,6 +293,7 @@
     "legacyAppNext": "Admite grupos de {{max}} como máximo.",
     "lost": "Dos miembros dejaron entrar a gente a la vez",
     "lostNext": "Pidiendo entrar de nuevo…",
+    "memberGone": "Esta persona ya no está en el grupo",
     "name": "Escribe un nombre con letras o emoji",
     "nameNext": "Hasta {{max}} caracteres, en una línea.",
     "needsGroupsNext": "Su app necesita grupos (un Ghostly actualizado).",

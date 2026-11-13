@@ -293,6 +293,7 @@
     "legacyAppNext": "It takes groups of {{max}} at most.",
     "lost": "Two members let people in at once",
     "lostNext": "Asking to be let in again…",
+    "memberGone": "This person is no longer in the group",
     "name": "Type a name with letters or emoji",
     "nameNext": "Up to {{max}} characters, on one line.",
     "needsGroupsNext": "Their app needs groups (an updated Ghostly).",
