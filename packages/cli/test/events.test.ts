@@ -62,12 +62,33 @@ describe("the event stream", () => {
       [4, "message.deleted:c1:old"],
       [5, "chat.pairing:c1:live:1000"],
       [6, "chat.connection:c1:hyperdht/1:1000"],
-      [7, "chat.created:c2"],
+      [7, "chat.created:c2:1000"],
       [8, "chat.renamed:c2:1000"],
-      [9, "chat.removed:c1"],
+      [9, "chat.removed:c1:1000"],
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+  });
+
+  // The same invite joined again gives the same chat id, a group joined again keeps its id: the second creation and
+  // removal had the first one's id, and a listener that dedupes on it dropped them.
+  it("gives a chat or a group that comes back, and its removal again, ids of their own", async () => {
+    let now = 1000;
+    const h = new EventHub(join(dir, "again.jsonl"), () => now, "again.jsonl");
+    await h.open();
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    h.baseline(state([]), new Map());
+    const g = { id: "g1", status: "active", members: [{ key: "ana" }] };
+    for (let round = 0; round < 2; round++) {
+      h.sink.post({ kind: "state", state: state([link("c1")], [g]) });
+      now += 1000;
+      h.sink.post({ kind: "state", state: state([]) });
+      now += 1000;
+    }
+    const ids = events.filter((e) => /^(chat|group)\.(created|removed)$/.test(e.type)).map((e) => e.id);
+    expect(ids).toHaveLength(8);
+    expect(new Set(ids).size).toBe(8);
   });
 
   it("gives a delivery a message comes back to an id of its own, also after a restart (a listener dedupes on it)", async () => {
@@ -530,10 +551,10 @@ describe("the event stream", () => {
     expect(journal()).toContain("kept");
     h.sink.post({ kind: "state", state: state([link("c1")], [group]) });
     expect(journal()).not.toContain("SECRET-TWO");
-    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2");
+    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2:1000");
     h.sink.post({ kind: "state", state: state([link("c1")]) });
     expect(journal()).not.toContain("SECRET-THREE");
-    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1");
+    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1:1000");
     expect(journal()).toContain("kept");
     expect(statSync(path).mode & 0o777).toBe(0o600);
     // The seq goes on from where it was.
