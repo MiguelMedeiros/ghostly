@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useI18n } from "../contexts/I18nContext";
+import { useEngineReconnecting } from "../lib/engineState";
 import { presenceLabel, presenceTone, shownAvailability, statusText, usePeerPresence, type PeerPresence, type PresenceTone } from "../lib/presence";
 
 /*
@@ -38,9 +39,13 @@ export function PresenceDot({ entry, testId, size = 12 }: { entry: PeerPresence 
   );
 }
 
-/** The same, read from the engine for a contact's key: drawn again only when theirs changes (lib/presence.ts). */
+/**
+ * The same, read from the engine for a contact's key: drawn again only when theirs changes (lib/presence.ts). None
+ * while the tab lost its peer (the Reconnecting notice): whether they are online is not known then.
+ */
 export function PeerPresenceDot({ peerKey, testId, size }: { peerKey?: string; testId: string; size?: number }) {
-  return <PresenceDot entry={usePeerPresence(peerKey)} testId={testId} size={size} />;
+  const entry = usePeerPresence(peerKey);
+  return <PresenceDot entry={useEngineReconnecting() ? undefined : entry} testId={testId} size={size} />;
 }
 
 /**
@@ -80,7 +85,8 @@ const GIVES_WAY = "max-md:h-4 max-md:flex-wrap max-md:gap-0 max-md:overflow-hidd
 export function PeerPresenceLine({ peerKey, testId, className = "", emojiOnPhone = false }: { peerKey?: string; testId: string; className?: string; emojiOnPhone?: boolean }) {
   const { t } = useI18n();
   const entry = usePeerPresence(peerKey);
-  const tone = presenceTone(entry);
+  // The dot's words go with it while the tab lost its peer; the status they set is the last one known, and stays.
+  const tone = useEngineReconnecting() ? undefined : presenceTone(entry);
   const shown = statusText(t, entry);
   if (!tone && !shown) return null;
   // Each class whole in the source, for Tailwind to find it.

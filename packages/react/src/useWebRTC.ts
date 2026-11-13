@@ -57,6 +57,13 @@ interface UseWebRTCParams {
    */
   relayOnly?: boolean;
   /**
+   * Each request for the microphone or camera shows the system's own dialog for each device in it, whatever was
+   * answered before, and a request for both is refused whole when either is (the Android app's WebView). A video call
+   * then asks the microphone alone and the camera alone: one dialog each, and a refused microphone is never asked twice
+   * for one tap (Android's second "Don't allow" blocks it for good).
+   */
+  asksEachAlone?: boolean;
+  /**
    * How many candidates a signal carries: `PAIRED_CALL_CANDIDATES` on a chat session, whose frames have room for
    * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
    */
@@ -295,6 +302,7 @@ export function useWebRTC({
   media,
   iceServers,
   relayOnly,
+  asksEachAlone,
   maxCandidates,
   devices,
   chatId,
@@ -303,6 +311,8 @@ export function useWebRTC({
   iceServersRef.current = iceServers;
   const relayOnlyRef = useRef(relayOnly === true);
   relayOnlyRef.current = relayOnly === true;
+  const asksEachAloneRef = useRef(asksEachAlone === true);
+  asksEachAloneRef.current = asksEachAlone === true;
   const maxCandidatesRef = useRef(maxCandidates);
   maxCandidatesRef.current = maxCandidates;
   const onErrorRef = useRef(onError);
@@ -390,11 +400,32 @@ export function useWebRTC({
    * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
    * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
    * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
-   * the call, as before, and the note names it.
+   * the call, as before, and the note names it. Where each device is asked alone (`asksEachAlone`), the microphone is
+   * asked first and the camera after it, each once.
    */
   const captureForCall = useCallback(
     async (withVideo: boolean, cancelled: () => boolean): Promise<{ stream: MediaStream; cameraError?: unknown }> => {
       const audio = captureFrom("audio");
+      if (withVideo && asksEachAloneRef.current) {
+        let stream: MediaStream;
+        try {
+          stream = await mediaRef.current.getUserMedia({ audio, video: false });
+        } catch (error) {
+          setMediaProblemOf("mic");
+          throw error;
+        }
+        if (cancelled()) return { stream };
+        try {
+          const camera = await mediaRef.current.getUserMedia({ audio: false, video: captureFrom("video") });
+          camera.getVideoTracks().forEach((track) => stream.addTrack(track));
+          return { stream };
+        } catch (error) {
+          if (!cancelled() && mediaProblem(error)) return { stream, cameraError: error };
+          stream.getTracks().forEach((track) => track.stop());
+          setMediaProblemOf("both");
+          throw error;
+        }
+      }
       try {
         return { stream: await mediaRef.current.getUserMedia({ audio, video: withVideo && captureFrom("video") }) };
       } catch (error) {
@@ -414,10 +445,14 @@ export function useWebRTC({
     [captureFrom],
   );
 
+  /** The id of the note shown last that the camera is off (`showCameraOff`): the camera coming on takes it away. */
+  const cameraOffShownRef = useRef(0);
   /** A video call went on without the camera (`captureForCall`): the person is told why it is off. */
   const showCameraOff = useCallback((error: unknown) => {
     setMediaProblemOf("camera");
+    if (!mediaProblem(error)) return;
     showMediaProblem(error);
+    cameraOffShownRef.current = mediaProblemIdRef.current;
   }, [showMediaProblem]);
 
   /**
@@ -963,6 +998,8 @@ export function useWebRTC({
       setLocalStream(stream);
       setPicture(next);
       if (next) callHadVideoRef.current = true;
+      // The camera is on now: a note still up that it is off would say the opposite.
+      if (next === "camera") setMediaProblemShownState((shown) => (shown?.id === cameraOffShownRef.current ? null : shown));
       publishPicture(next);
     },
     [setPicture, publishPicture, captureFrom],
@@ -1039,7 +1076,13 @@ export function useWebRTC({
         const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         const video = withVideo && !cameraError;
-        if (cameraError) showCameraOff(cameraError);
+        if (cameraError) {
+          showCameraOff(cameraError);
+          // Gone on as a voice call: its lines say so from the start, as the contact's chat does (the offer says voice).
+          callHadVideoRef.current = false;
+          if (startedLineRef.current) removeCallEventMessage?.(startedLineRef.current);
+          startedLineRef.current = addCallEventMessage?.("call_started", false) || null;
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(video ? "camera" : null);
@@ -1087,7 +1130,7 @@ export function useWebRTC({
         showNoPath(error);
         // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
         // after its "call started" line. No offer went out, so the contact has nothing to hear.
-        addCallEventMessage?.("call_failed", withVideo);
+        addCallEventMessage?.("call_failed", callHadVideoRef.current);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -1208,7 +1251,10 @@ export function useWebRTC({
         const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         const video = withVideo && !cameraError;
-        if (cameraError) showCameraOff(cameraError);
+        if (cameraError) {
+          showCameraOff(cameraError);
+          callHadVideoRef.current = signalHasVideo(offer);
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(video ? "camera" : null);

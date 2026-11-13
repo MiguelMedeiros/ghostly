@@ -8,7 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../../contexts/I18
 import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { appErrorCode, appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { appErrorCode, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -53,16 +53,19 @@ function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: Bu
 type BuiltIn = "carried" | "installed";
 
 /** Why it cannot run, if it cannot: revoked by its publisher, removed by a store, its files gone. */
-function runLine(run: AppRunStatus, t: Translate): string | null {
+function runLine(run: AppRunStatus, t: Translate): ReactNode {
   if (run.status === "revoked") return t("apps.install.revoked");
-  if (run.status === "removed") return run.by.map((b) => t("apps.install.removed", { store: b.name, reason: b.reason })).join("\n");
+  // A store's own words, one line each, in their own direction (an Arabic reason in an English app), as on the listing.
+  if (run.status === "removed") return run.by.length > 0 && run.by.map((b) => <span key={b.store} dir="auto" className="text-match-parent block">{t("apps.install.removed", { store: b.name, reason: b.reason })}</span>);
   if (run.status === "needs-files") return t("apps.app.needsFiles");
   return null;
 }
 
+// A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
+// anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
   const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
-  return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
+  return <p data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
 }
 
 /** The publisher and the stores, as a person checks them. */
@@ -87,7 +90,11 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
   );
 }
 
-/** One short line, and the longer story behind an ⓘ beside it. */
+/**
+ * One short line, and the longer story behind an ⓘ beside it. The story may be a refusal as it came, naming a file of the
+ * bundle ("assets/ChessBoard_….html", up to 128 characters with no space or dash): it breaks anywhere rather than push
+ * the screen sideways on a phone.
+ */
 function InfoLine({ children, info, testId, className = "text-xs text-text-secondary" }: { children: ReactNode; info?: ReactNode; testId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -97,7 +104,7 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
         <span className="min-w-0">{children}</span>
         {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId={testId && `${testId}-info`} className="-my-0.5" />}
       </div>
-      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border">{info}</p>}
+      {info && open && <p id={id} data-testid={testId && `${testId}-text`} className="text-xs text-text-secondary leading-relaxed mt-1.5 ps-3 border-s-2 border-border [overflow-wrap:anywhere]">{info}</p>}
     </div>
   );
 }
@@ -170,7 +177,7 @@ function Shell({ titleId, onClose, children, testId, box }: { titleId: string; o
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testId}
-        className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-safe">
+        className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
     </div>,
@@ -197,6 +204,14 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
       </div>
     </div>
   );
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
+
+/** An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same. */
+function sameScreen(a: AppPreview, b: AppPreview): boolean {
+  return a.digest === b.digest && a.install === b.install && a.run.status === b.run.status && a.unknownPublisher === b.unknownPublisher
+    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions);
 }
 
 /**
@@ -240,29 +255,48 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   const [stale, setStale] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
-  const recheck = async () => {
+  // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
+  const rereadFor = useRef<"asks" | "expired">("asks");
+  const recheck = async (): Promise<AppPreview | null> => {
     try {
       const again = await engine.call("appPreview", source);
+      const was = preview;
       setPreview(again); setStale(false);
-      setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      if (rereadFor.current === "asks") setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      // Read again as it was: nothing new to look at, Install takes it. Another version, or other words: look at it first.
+      else if (was && sameScreen(was, again)) { setError(null); return again; }
+      else setError({ text: t("apps.errors.expired") });
+      return null;
     } catch (read) {
       // The read's own failure, said as it is: "look at them again" over the old list had nothing new to look at.
       setStale(true); setError(appErrorView(read, t));
+      return null;
     }
   };
+  const grant = (shown: AppPreview) =>
+    engine.call("appInstall", { stage: shown.stage, digest: shown.digest, grant: [...shown.manifest.permissions], asks: [...shown.asks] });
   const install = async () => {
     if (!preview || stale) return;
     focusBack();
     setBusy(true); setError(null);
     try {
-      const app = await engine.call("appInstall", { stage: preview.stage, digest: preview.digest, grant: [...preview.manifest.permissions], asks: [...preview.asks] });
+      let app: InstalledAppView;
+      try { app = await grant(preview); } catch (e) {
+        // What this screen fetched is held 10 minutes, and 4 screens' worth (a phone left here, other screens since): read
+        // again, the same version asking the same installs as pressed. Else it showed "check it again" with no way to.
+        if (appErrorCode(e) !== "expired") throw e;
+        rereadFor.current = "expired";
+        const again = await recheck();
+        if (!again) return;
+        app = await grant(again);
+      }
       await refreshInstalledApps();
       onInstalled?.(app);
       onClose();
     } catch (e) {
       // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
       // installed by the check): the screen shows what it asks now, and Install grants only that.
-      if (appErrorCode(e) === "permissions-changed") await recheck();
+      if (appErrorCode(e) === "permissions-changed") { rereadFor.current = "asks"; await recheck(); }
       else setError(appErrorView(e, t));
     } finally { setBusy(false); }
   };
@@ -374,10 +408,16 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     if (!active || active === document.body) (open.current ?? box.current)?.focus({ preventScroll: true });
   }, [lacks, busy]);
   const focusBack = useFocusBack(busy);
-  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
+  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+  };
+  // No link it came from answered with its files (offline, the host down, each holding another version): the engine
+  // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
+  const fetchFiles = async () => {
+    const run = await engine.call("appFetchFiles", { ref: app.ref });
+    if (run.status === "needs-files") throw new Error(navigator.onLine === false ? "offline: You are offline" : "files-not-found: No link holds this version's files");
   };
   // While Uninstall (or an Update) runs, the screen stays, as the install screen's: a Cancel then showed the app as
   // still here, and it was deleted a moment later. Escape on the question is its Cancel, as on the other Remove questions.
@@ -416,7 +456,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update")}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref, sequence: app.pending!.sequence, added: [...app.pending!.added] }), false, "update", appUpdateErrorView)}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}
@@ -426,7 +466,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {/* While an Update (or Fetch files) runs, nothing here leaves the screen, as Escape doesn't: opening the app mid-update
             ran it while its files were replaced, and the update's error then had no screen to show on. */}
         <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" disabled={busy} onClick={() => setRemoving(true)}>{t("apps.app.uninstall")}</Button>
-        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
+        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(fetchFiles, false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" disabled={busy} onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" disabled={busy} onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
         {canRun && <Button ref={open} variant="primary" data-testid="app-open" disabled={busy} onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}

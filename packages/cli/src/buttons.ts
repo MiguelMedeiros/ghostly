@@ -4,6 +4,7 @@ import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits, str, type Method, type Params, type RefPlace } from "./apiKit";
 import { CliError } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
+import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -100,7 +101,10 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const close = bool(params, "close");
   const newText = str(params, "text");
   if (chosen === undefined && !close && newText === undefined) throw new CliError("bad_request", "Nothing to update: give chosen, close or text");
-  // A new text is a message like any other: the same guard as `send` and `edit`.
+  // The engine fills a card's blank text with its fallback line ("Reply: Yes / No"): the question's words were lost.
+  if (newText !== undefined && !newText.trim()) throw new CliError("bad_request", "The new text is blank: give the question's new words, or leave text out to keep them");
+  // A new text is a message like any other: the same size check and guard as `send` and `edit`.
+  if (newText !== undefined) checkTextSize(newText);
   if (newText !== undefined && !bool(params, "force")) {
     const secret = findSecret(newText);
     if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; update with --force if you mean to`, { kind: secret.kind });

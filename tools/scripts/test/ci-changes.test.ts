@@ -266,7 +266,7 @@ describe("a push to dev whose tree a pull request already tested", () => {
     expect(job("changes")).toContain("lint: ${{ steps.plan.outputs.lint }}");
     expect(job("frontend-checks")).toMatch(/^ {4}needs: changes\n {4}if: needs\.changes\.outputs\.lint == 'true'$/m);
     expect(job("ci-success")).toContain("LINT: ${{ needs.changes.outputs.lint }}");
-    expect(job("ci-success")).toContain('! ok "$FRONTEND_CHECKS" "$LINT"');
+    expect(job("ci-success")).toContain('check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"');
 
     const steps = job("tauri").split(/^(?= {6}- name: )/m).slice(1);
     const named = (name: string) => steps.findIndex((s) => s.startsWith(`      - name: ${name}\n`));
@@ -637,5 +637,34 @@ describe("the notice of a green fast tier", () => {
       "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts.",
     ]);
     expect(notices.join()).not.toContain("gh pr ready");
+  });
+});
+
+// The run page shows the gate's ::error:: lines and "exit code 1": a plain echo of every job's result was not among them.
+describe("the errors of a red CI Success", () => {
+  const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+  const body = job("ci-success").split("      - name: Check all jobs passed\n")[1]?.split(/^ {8}run: \|\n/m)[1] ?? "";
+  const script = body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
+  /** The full tier on a ready pull request with app changes: every job ran and passed, but for `results`. */
+  const gate = (results: Record<string, string>) => {
+    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
+    const plan = { CHANGES: "success", DRAFT: "false", TESTED: "false", FULL: "true", AFFECTED_GATE: "false", AFFECTED: "skipped", LINT: "true", PACKAGES: "true", RUST: "true", WEBSITE_GATE: "true", WEBSITE_E2E_GATE: "true", APP: "true" };
+    const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...plan, ...Object.fromEntries(jobs.map((j) => [j, "success"])), ...results } });
+    return { status: run.status, errors: run.stdout.split("\n").filter((l) => l.startsWith("::error::")) };
+  };
+
+  it("names each job that failed, or was skipped while the change needs it", () => {
+    expect(gate({})).toEqual({ status: 0, errors: [] });
+    expect(gate({ TAURI: "failure", WEBSITE_E2E: "skipped" })).toEqual({
+      status: 1,
+      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
+    });
+  });
+
+  it("blames Changed paths, not the plan, when that job did not pass", () => {
+    // Every output of `changes` is empty then.
+    const empty = { DRAFT: "", FULL: "", AFFECTED_GATE: "", LINT: "", PACKAGES: "", RUST: "", WEBSITE_GATE: "", WEBSITE_E2E_GATE: "", APP: "", TESTED: "" };
+    expect(gate({ ...empty, CHANGES: "failure" })).toEqual({ status: 1, errors: ["::error::Changed paths ended failure, so this run has no plan: see that job"] });
   });
 });

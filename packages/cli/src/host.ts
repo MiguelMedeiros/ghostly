@@ -59,15 +59,17 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   // names finds room when 32 others wait (`GroupAutoJoin.autoJoins`).
   let groupAuto: GroupAutoJoin | undefined;
   const autoJoins = (chat: string): boolean => !!groupAuto?.autoJoins(chat);
+  // Online notices only from a daemon that says presence (`DaemonPresence.saysOnline`); a one-shot never says it.
+  let presence: DaemonPresence | undefined;
+  const onlineNotices = (): boolean => !!presence?.saysOnline();
   try {
-    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, keepNewest: BASELINE_NEWEST });
+    runtime = await startRuntime(paths, { ...options, ...(mode === "daemon" ? { logJoins: true } : {}), autoJoins, onlineNotices, keepNewest: BASELINE_NEWEST });
   } catch (error) {
     release();
     throw error;
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
-  let presence: DaemonPresence | undefined;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -87,7 +89,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
       else histories.set(id, await whole(id));
     }
-    hub.baseline(now, histories, { newest, whole });
+    hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
     // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
     await hub.ended((id) => fileStore.get(id));
     announceJoins(hub, node);
@@ -123,6 +125,10 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     close: () => (closing ??= (async () => {
       // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
       await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
+      // The engine hands its state over 50 ms after a change: a one-shot's `chat rename` or `chat remove` returned
+      // before that, and its event was never said (nor by the next start, which takes the chats as they are).
+      // Before presence stops: it reads every state, and one after its stop said `active` again with a new timer.
+      hub.sink.post({ kind: "state", state: runtime.server.node.getState() });
       presence?.stop();
       runtime.server.detach(hub.sink);
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).
@@ -279,6 +285,9 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     if (!line.trim()) return;
     let request: Request;
     try { request = JSON.parse(line) as Request; } catch { write({ id: null, error: new CliError("bad_request", "Not JSON").toJSON() }); return; }
+    // `null` threw below (an uncaught exception), and the lines that came with it in one chunk went unanswered; a list
+    // or a number was told "method is required".
+    if (typeof request !== "object" || request === null || Array.isArray(request)) { write({ id: null, error: new CliError("bad_request", 'A request is a JSON object: {"id", "method", "params"}').toJSON() }); return; }
     const id = typeof request.id === "number" || typeof request.id === "string" ? request.id : null;
     if (typeof request.method !== "string") { write({ id, error: new CliError("bad_request", "method is required").toJSON() }); return; }
     if (request.method === HELLO) {

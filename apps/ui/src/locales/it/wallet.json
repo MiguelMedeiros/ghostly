@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Aggiungi",
     "addMintPlaceholder": "Aggiungi un mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Richiesta al mint…",
     "backupCopied": "Backup copiato. Chi ha questi token ha i sats.",
     "contactHint": "Paghi un contatto? Usa ⚡ nella chat.",
@@ -192,7 +191,7 @@
       "perProofTest": "{{fee}} sat di prova per prova (circa 1 sat di prova a pagamento)"
     },
     "history": {
-      "fee": "commissione {{amount}}",
+      "fee": "commissione {{amount}} {{unit}}",
       "feesPaid": "Commissioni pagate: {{amount}} {{unit}}",
       "movements": "{{count}} movimenti",
       "movementsOne": "1 movimento",

@@ -1,4 +1,5 @@
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
+import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
@@ -50,6 +51,28 @@ export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm 
 export function here(path: unknown): string | undefined {
   if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? userPath(path) : undefined;
+}
+
+/**
+ * A path on this machine a command reads (`file send`, a picture, `profile backup --out`'s folder), looked at before the
+ * profile opens: one not there is not_found (`missing`, or "No such file or folder"), one not allowed refused. Before, a
+ * one-shot opened the profile and went online first (~1 s on a big profile) to say so. The API keeps its check for
+ * socket callers; through a daemon it reads the same path.
+ */
+export function localStat(path: string, missing?: string): Stats {
+  try { return statSync(path); } catch (error) {
+    const known = localFileError(error, path);
+    throw known?.code === "not_found" && missing ? new CliError("not_found", missing) : known ?? error;
+  }
+}
+
+/**
+ * A picture's file (`profile picture`, `group picture`), in the API's words (groupAdmin.ts) when it is not there or a
+ * folder. Only a folder is refused here: a pipe (`<(…)`) is read as a file.
+ */
+export function picture(path: string | undefined): string | undefined {
+  if (path !== undefined && localStat(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a file`);
+  return path;
 }
 
 /** The most a command reads of stdin or of a file it sends: the longest request line a daemon reads (client.ts `MAX_LINE`). */
@@ -107,7 +130,8 @@ export function pairs(values: unknown): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const item of values as string[]) {
     const eq = item.indexOf("=");
-    if (eq < 1) throw new CliError("usage", `--value takes name=value, not ${JSON.stringify(item)}`);
+    // Never the item itself: a --value is a wallet's seed phrase or macaroon as often as not (as `--field`'s, secretInput).
+    if (eq < 1) throw new CliError("usage", "--value takes name=value, and one has no name or no =");
     out[item.slice(0, eq)] = item.slice(eq + 1);
   }
   return out;
@@ -145,6 +169,19 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * The `<emoji>` of `react` and `group react`: one emoji (core's `reactionEmoji`), or none with `--remove`. Anything else
+ * is a usage error (exit 2) before the profile opens, as `status set --emoji` is. Before, a one-shot opened the profile
+ * and went online first, then the engine answered "A reaction is one emoji" (`bad_request`, exit 1), and a missing one
+ * "Give one emoji" (exit 2) only from there. The API keeps its checks for socket callers.
+ */
+export function reaction(options: Parsed["options"], emoji: string | undefined): string | undefined {
+  if (options.remove === true) return emoji;
+  if (!emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
+  if (!reactionEmoji(emoji)) throw new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`);
+  return emoji;
 }
 
 /**
