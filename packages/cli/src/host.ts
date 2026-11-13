@@ -70,29 +70,47 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
+  // The seen set read and the baseline taken after the start (`EventHub.know`), when they are.
+  let baselining: Promise<void> | undefined;
   try {
-    await hub.open();
-    const node = runtime.server.node;
-    const now = node.getState();
-    // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
-    const mark = runtime.server.historyMark;
-    const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
-    const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
-    // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
-    // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
-    // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
-    const closed = !runtime.store.recovered;
-    const kept = runtime.server.takeStartNewest();
-    for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
-      const page = closed && !runtime.server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
-      if (page && !page.more) histories.set(id, page.messages);
-      else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
-      else histories.set(id, await whole(id));
-    }
-    hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
-    // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
-    await hub.ended((id) => fileStore.get(id));
-    announceJoins(hub, node);
+    // An offline one-shot: nothing reaches it while it runs, so the seen set is read only if a history or a transfer
+    // changes here (`EventHub.know`).
+    const later = mode === "one-shot" && !!options.offline;
+    await hub.open({ seen: !later });
+    const { server, store } = runtime, node = server.node;
+    const kept = server.takeStartNewest();
+    const baseline = async () => {
+      const now = node.getState();
+      // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
+      const mark = server.historyMark;
+      const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
+      const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
+      // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
+      // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+      // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
+      const closed = !store.recovered;
+      for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
+        const page = closed && !server.historyChanged(id) ? kept.get(id) ?? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+        if (page && !page.more) histories.set(id, page.messages);
+        else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
+        else histories.set(id, await whole(id));
+      }
+      hub.baseline(now, histories, { newest, files: (id) => node.fileMessages(id) });
+      // A transfer that ended while the last run stopped has no transfer in the engine any more: its record tells its end.
+      await hub.ended((id) => fileStore.get(id));
+      announceJoins(hub, node);
+      return { mark, ids: [...histories.keys(), ...newest.keys()] };
+    };
+    let read: { mark: number; ids: string[] };
+    if (later) {
+      const now = node.getState();
+      read = { mark: server.historyMark, ids: [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)] };
+      // Attached again once taken: what changed while it was taken comes then.
+      hub.know(now, () => {
+        baselining = hub.loadSeen().then(baseline).then((read) => server.attach(hub.sink, read))
+          .catch((error: unknown) => { process.stderr.write(`ghostly: event error: ${error instanceof Error ? error.stack : String(error)}\n`); });
+      });
+    } else read = await baseline();
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
     const manager = calls;
@@ -102,7 +120,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const joiner = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
     groupAuto = joiner;
     hub.onState((s) => joiner.check(s));
-    runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
+    server.attach(hub.sink, read);
     joiner.check(node.getState());
     // Presence (`settings set daemonPresence true`): only a daemon says it, while it runs.
     if (mode === "daemon") {
@@ -129,6 +147,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       // before that, and its event was never said (nor by the next start, which takes the chats as they are).
       // Before presence stops: it reads every state, and one after its stop said `active` again with a new timer.
       hub.sink.post({ kind: "state", state: runtime.server.node.getState() });
+      // A baseline taken after the start (`EventHub.know`) reads the histories: before the engine closes.
+      await baselining;
       presence?.stop();
       runtime.server.detach(hub.sink);
       // The seqs reserved past the last event go back, so the next start numbers on from it (`EventHub.release`).

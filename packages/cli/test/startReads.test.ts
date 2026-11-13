@@ -33,28 +33,32 @@ interface Tools {
   /** The newest pages the host read itself (`messagePage`). */
   pageReads: (chat: string) => number;
   reported: () => string[];
+  /** How many times the hub read its seen set (`EventHub.loadSeen`). */
+  seenReads: () => number;
 }
 
 /**
  * A process's life with the profile: the engine and the store are new each time, as after a restart. `reread`: the
  * host reads each newest page itself, as it did before the engine handed it the rows its start read.
  */
-async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: Tools) => Promise<T>, reread = false): Promise<T> {
+async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: Tools) => Promise<T>, reread = false, options: import("../src/runtime/engine").RuntimeOptions = {}): Promise<T> {
   vi.resetModules();
   const { GhostlyNode } = await import("@ghostly/browser/engine/node");
   const whole = vi.spyOn(GhostlyNode.prototype, "getMessages");
   const page = vi.spyOn(GhostlyNode.prototype, "messagePage");
   const { EngineServer } = await import("@ghostly/browser/engine/server");
   const handed = reread ? vi.spyOn(EngineServer.prototype, "takeStartNewest").mockReturnValue(new Map()) : null;
+  const { EventHub } = await import("../src/events");
+  const seen = vi.spyOn(EventHub.prototype, "loadSeen");
   const { openHost } = await import("../src/host");
   const { db } = await import("@ghostly/browser/engine/db");
-  const host = await openHost(paths, "one-shot", "test");
+  const host = await openHost(paths, "one-shot", "test", options);
   // Every message event the profile ever reported, this start's included.
   const reported = () => host.ctx.hub.replay(0).filter((event) => event.type.startsWith("message.")).map((event) => event.id);
   const calls = (spy: typeof whole | typeof page, chat: string) => spy.mock.calls.filter(([id]) => (typeof id === "string" ? id : id.linkId) === chat).length;
   try {
-    return await work(host, { db, wholeReads: (chat) => calls(whole, chat), pageReads: (chat) => calls(page, chat), reported });
-  } finally { await host.close(); whole.mockRestore(); page.mockRestore(); handed?.mockRestore(); }
+    return await work(host, { db, wholeReads: (chat) => calls(whole, chat), pageReads: (chat) => calls(page, chat), reported, seenReads: () => seen.mock.calls.length });
+  } finally { await host.close(); whole.mockRestore(); page.mockRestore(); handed?.mockRestore(); seen.mockRestore(); }
 }
 
 describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
@@ -148,6 +152,36 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
       expect([handed!.wholes, reread!.wholes], name).toEqual([whole, whole]);
       expect(handed!.events, name).toBe(reread!.events);
     }
+  });
+
+  it("an offline one-shot reads neither the seen set nor a history while nothing changes there; a change reads them then", async () => {
+    const paths = profilePaths(join(root, "offline"), "offline");
+    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+    const { callApi } = await import("../src/api");
+    const chat = await run(paths, async (host, { db }) => {
+      const { chat } = (await callApi(host.ctx, "invite.create", { label: "long" })) as { chat: string };
+      for (let i = 1; i <= LONG; i++) await db.putMessage(row(chat, i));
+      return chat;
+    });
+    await run(paths, async (_host, { reported }) => { expect(reported()).toHaveLength(LONG); });
+
+    // A read (`status`, `chat list`): the seen set, a note per message of the last 30 days, took 0.16 s and 56 MB at 50,000.
+    await run(paths, async (host, { seenReads, wholeReads, pageReads }) => {
+      await callApi(host.ctx, "chat.list", {});
+      expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
+    }, false, { offline: true });
+
+    // A row no start reported, past the newest 100, then a message deleted here: its history changed while the one-shot
+    // ran, so the seen set is read then and the history whole, and both are told.
+    await run(paths, async (host, { db, seenReads, wholeReads, reported }) => {
+      await db.putMessage(row(chat, 0));
+      host.ctx.runtime.server.node.deleteMessage({ linkId: chat, messageId: `peer_${LONG}` });
+      // The row goes a turn later.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await host.close();
+      expect([seenReads(), wholeReads(chat)]).toEqual([1, 1]);
+      expect(reported().slice(-2).sort()).toEqual([`message.deleted:${chat}:peer_${LONG}`, `message.received:${chat}:peer_0`]);
+    }, false, { offline: true });
   });
 
   it("a file of a message past its newest: only the history's file rows are read to name it, never the whole history", async () => {
