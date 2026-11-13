@@ -309,6 +309,8 @@ interface Edge {
   busy: Map<string, number>;
   /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge's session closes or opens. */
   gone: Set<string>;
+  /** The wants waiting for a holder were asked again for this edge since its session opened (`edgeUp`). */
+  swept?: boolean;
 }
 
 /**
@@ -629,7 +631,8 @@ export class GroupFileDesk {
     if (open) edge.files.attach(); else edge.files.detach();
     // Another session, or none: its member may have fetched since what it did not hold, and is asked again.
     edge.gone.clear();
-    if (open) this.retry(groupId);
+    edge.swept = false;
+    if (open) this.edgeUp(edge);
   }
 
   /** An edge came up and both sides said where they are: what this device holds goes to it, and wants waiting for a holder go. */
@@ -640,7 +643,17 @@ export class GroupFileDesk {
       const held = [...this.kept.values()].filter(k => k.groupId === groupId && k.held).map(k => k.message).slice(-GROUP_FILE_LIMITS.haveIds);
       if (held.length) this.sendHave(edge, held);
     }
-    this.retry(groupId);
+    this.edgeUp(edge);
+  }
+
+  /**
+   * The edge is up with its files/3 session open: wants waiting for a holder are asked again, once for the two (the
+   * session opening and the edge coming up), and only those its member could serve (`retry`'s `up`).
+   */
+  private edgeUp(edge: Edge): void {
+    if (edge.swept || !this.deps.ready(edge.linkId) || !edge.files.live) return;
+    edge.swept = true;
+    this.retry(edge.groupId, undefined, edge);
   }
 
   /** A `group-want`, `group-want-no` or `group-have` on an edge, from the member it is pinned to. */
@@ -747,15 +760,20 @@ export class GroupFileDesk {
    * its author's edge, whose turn it may wait for (`waitForKnown`). A free edge does nothing else for it: one up and
    * live to a member it could ask would have queued it, not left it waiting. What may (an edge up, a session open, a
    * member saying it holds the file, a new round) asks it then.
+   * `up`, the edge that came up: a want waiting with nobody to ask is asked again only when its member could serve it
+   * (`couldServe`). The others it cannot help: a member back in a busy group, with hundreds of files waiting for authors
+   * away, asked each of them again at every edge that came up, to members that joined after them.
    */
-  private retry(groupId: string, freed?: string): void {
+  private retry(groupId: string, freed?: string, up?: Edge): void {
     let free: [string, string][] | undefined;
     const peer = freed === undefined ? undefined : this.edgesById.get(freed)?.peer;
+    const membership = up && this.deps.membership(groupId);
     for (const [id, want] of this.wants) {
       const kept = this.kept.get(id);
       if (kept?.groupId !== groupId || want.holder) continue;
       const stage = this.deps.transfers.get(id)?.stage;
       if (freed !== undefined && stage === "waiting" && kept.author !== peer) continue;
+      if (up && stage === "waiting" && !this.couldServe(kept, want, up, membership)) continue;
       if (stage === "queued" && !this.freeFor(kept, want, free ??= this.freeEdges(groupId))) continue;
       this.ask(kept);
       // That ask may have taken a free edge.
@@ -783,6 +801,17 @@ export class GroupFileDesk {
     const others = !this.waitForKnown(kept, want, known, this.deps.edges(kept.groupId));
     return free.some(([key, linkId]) => this.mayAsk(kept, want, key, linkId)
       && (known.includes(key) || (others && key !== membership.me && membership.couldRead(key, kept.message, kept.arrived))));
+  }
+
+  /**
+   * The member at the other end of this edge is one `ask` could ask this want of: a known holder, or one that could read
+   * its message, not asked yet this round and that did not say it is gone. With no membership, `ask` decides.
+   */
+  private couldServe(kept: Kept, want: Want, edge: Edge, membership: GroupFileMembership | undefined): boolean {
+    if (!membership) return true;
+    const key = edge.peer;
+    return this.mayAsk(kept, want, key, edge.linkId)
+      && (this.knownHolders(kept, membership).includes(key) || (key !== membership.me && membership.couldRead(key, kept.message, kept.arrived)));
   }
 
   /** The members known to hold the file (its author first), in the group's roster, but this device. */
