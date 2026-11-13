@@ -247,6 +247,26 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     expect(existsSync(daemonSecretPath(dir))).toBe(false);
   });
 
+  it("answers a request line that is JSON but no object, and the lines written with it", async () => {
+    // Before: `null` threw in the line handler (an uncaught exception in the log) and the requests written in the same
+    // chunk were never answered, so a client waited on them for good.
+    const { dir, socket } = profileAt("not-object");
+    const served = await serve({ ctx: { runtime: { paths: { dir, socket } }, hub: quietHub } } as unknown as Host);
+    cleanups.push(() => served.close());
+    const raw = connect(socket);
+    cleanups.push(() => { raw.destroy(); });
+    const answers: { id?: unknown; result?: unknown; error?: { code: string; message: string } }[] = [];
+    const got = new Promise<void>((resolve) => createInterface({ input: raw }).on("line", (line) => {
+      answers.push(JSON.parse(line) as (typeof answers)[number]);
+      if (answers.length === 6) resolve();
+    }));
+    raw.write(`null\n[]\n5\n"x"\n${JSON.stringify({ id: 1, method: "daemon.hello", params: { nonce: "ab".repeat(16) } })}\n`);
+    await got;
+    const refused = { id: null, error: { code: "bad_request", message: "A request is a JSON object: {\"id\", \"method\", \"params\"}" } };
+    expect(answers.slice(1, 5)).toEqual([refused, refused, refused, refused]);
+    expect(answers[5]).toMatchObject({ id: 1, result: { proof: expect.any(String) } });
+  });
+
   it("daemon stop still ends an older release's daemon, which does not greet, through the process that holds the profile", async () => {
     const dir = join(root, "old-daemon");
     createProfile(dir, "default");
