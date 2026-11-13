@@ -169,6 +169,29 @@ describe("group rename", () => {
   });
 });
 
+describe("group link", () => {
+  it("turns the link on only for a real true (or on left out), and refuses an on that is no boolean", async () => {
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    // A word or a number read as "not false" turned the link on and answered it: whoever holds it joins.
+    for (const on of ["false", "off", 0, 1, "true", {}]) {
+      await expect(callApi(ctx, "group.link", { group: "Crew", on }), JSON.stringify(on)).rejects.toMatchObject({ code: "bad_request", message: "on must be true or false" });
+    }
+    // Off with a new link is no request at all, as `group link --off --reset` is refused.
+    await expect(callApi(ctx, "group.link", { group: "Crew", on: false, reset: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // null reads as false, as every other boolean parameter reads it.
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: false })).toEqual({ group: "g1", link: null });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: null })).toEqual({ group: "g1", link: null });
+    expect(disableGroupLink).toHaveBeenCalledTimes(2);
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK });
+    expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
+  });
+});
+
 describe("group remove", () => {
   it("says on stderr, as the app's Remove dialog does, that the link still lets the member back while it is on", async () => {
     const { ctx, node } = fake();
