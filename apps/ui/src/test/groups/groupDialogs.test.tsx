@@ -135,6 +135,28 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
+  // The ask stays open while the member's leave arrives: the engine then refuses with core's "Not a member", which read
+  // in English in every language.
+  it.each(["mesh", "community"] as const)("a Hand over admin or Remove confirmed after the member left says so in the language (%s)", async profile => {
+    const group = groupView({ status: "active", isAdmin: true, profile, members });
+    fakeEngine.update({ groups: [group], links: [] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={group} onClose={vi.fn()} />, { language: "pt" });
+    engine.on("makeGroupAdmin", () => Promise.reject(new Error("Not a member"))).on("removeGroupMember", () => Promise.reject(new Error("Not a member")));
+    const gone = { ...group, members: members.filter(m => m.key !== BOB) };
+    await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-make-admin-confirm"));
+    expect(await screen.findByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
+    act(() => { fakeEngine.update({ groups: [group] }); });
+    await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    act(() => { fakeEngine.update({ groups: [gone] }); });
+    await user.click(screen.getByTestId("group-remove-confirm"));
+    expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
+    expect(screen.getByText("Essa pessoa não está mais neste grupo")).toBeInTheDocument();
+    expect(screen.queryByText("Not a member")).not.toBeInTheDocument();
+  });
+
   it("gives the focus back to the Remove or Hand over admin that asked, and to the list once a removed row is gone", async () => {
     const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
     let removed!: () => void;
