@@ -188,6 +188,17 @@ describe("button update", () => {
     expect(params("button update", ["Alice", "me_1", "--text", "x", "--force"])).toMatchObject({ text: "x", force: true });
   });
 
+  it("refuses a blank new text before the engine is asked: the question keeps its words", async () => {
+    // The engine fills a card's blank text with its fallback line, so `--chosen yes --text "  "` (an empty variable
+    // with a space) turned the question into "Reply: Yes / No" on both sides, answered with exit 0.
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Ship it?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", chosen: "yes", text: "  " })).rejects.toMatchObject({ code: "bad_request", message: /blank/ });
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: "\n\t" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    expect(rows("chat-one")[0]).toMatchObject({ text: "Ship it?" });
+  });
+
   it("refuses a new text past 16 KiB as edit does, with its size, before the secret guard reads it", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
