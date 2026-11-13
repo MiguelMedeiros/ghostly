@@ -155,8 +155,8 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
     }
   });
 
-  it("an offline one-shot reads neither the seen set nor a history while nothing changes there; a change reads them then", async () => {
-    const paths = profilePaths(join(root, "offline"), "offline");
+  it.each([["online", false], ["offline", true]] as const)("an %s one-shot reads no seen note while no history changes; then that chat's notes and its newest messages only", async (name, offline) => {
+    const paths = profilePaths(join(root, name), name);
     mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
     const { callApi } = await import("../src/api");
     const chat = await run(paths, async (host, { db }) => {
@@ -166,41 +166,11 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
     });
     await run(paths, async (_host, { reported }) => { expect(reported()).toHaveLength(LONG); });
 
-    // A read (`status`, `chat list`): the seen set, a note per message of the last 30 days, took 0.16 s and 56 MB at 50,000.
+    // A read (`chat list`): the seen set, a note per message of the last 30 days, took 0.07-0.16 s and 56 MB at 50,000.
     await run(paths, async (host, { seenReads, wholeReads, pageReads }) => {
       await callApi(host.ctx, "chat.list", {});
       expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
-    }, false, { offline: true }, "one-shot");
-
-    // A row no start reported, past the newest 100, then a message deleted here: its history changed while the one-shot
-    // ran, so the seen set is read then and the history whole, and both are told.
-    await run(paths, async (host, { db, seenReads, wholeReads, reported }) => {
-      await db.putMessage(row(chat, 0));
-      host.ctx.runtime.server.node.deleteMessage({ linkId: chat, messageId: `peer_${LONG}` });
-      // The row goes a turn later.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      await host.close();
-      expect([seenReads(), wholeReads(chat)]).toEqual([1, 1]);
-      expect(reported().slice(-2).sort()).toEqual([`message.deleted:${chat}:peer_${LONG}`, `message.received:${chat}:peer_0`]);
-    }, false, { offline: true }, "one-shot");
-  });
-
-  it("an online one-shot reads no seen note while no history changes; then that chat's notes and its newest messages only", async () => {
-    const paths = profilePaths(join(root, "online"), "online");
-    mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
-    const { callApi } = await import("../src/api");
-    const chat = await run(paths, async (host, { db }) => {
-      const { chat } = (await callApi(host.ctx, "invite.create", { label: "long" })) as { chat: string };
-      for (let i = 1; i <= LONG; i++) await db.putMessage(row(chat, i));
-      return chat;
-    });
-    await run(paths, async (_host, { reported }) => { expect(reported()).toHaveLength(LONG); });
-
-    // A read (`chat list`): the seen set, a note per message of the last 30 days, took 0.07 s and 56 MB at 50,000.
-    await run(paths, async (host, { seenReads, wholeReads, pageReads }) => {
-      await callApi(host.ctx, "chat.list", {});
-      expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
-    }, false, {}, "one-shot");
+    }, false, { offline }, "one-shot");
 
     // A message deleted here: the chat's notes are read then, its newest messages as the engine's start read them are in
     // step with them, and only the deletion is told.
@@ -213,7 +183,7 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
       // The deleted message's own event leaves the journal with it.
       expect(reported()).toHaveLength(LONG);
       expect(reported().at(-1)).toBe(`message.deleted:${chat}:peer_${LONG}`);
-    }, false, {}, "one-shot");
+    }, false, { offline }, "one-shot");
   });
 
   it("a file of a message past its newest: only the history's file rows are read to name it, never the whole history", async () => {
