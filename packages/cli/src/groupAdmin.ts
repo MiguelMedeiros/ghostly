@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, NO_PICTURE_METADATA, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupNameOf, groupOf, node, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupNameOf, groupOf, node, ownChatOf, settingsOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -97,7 +97,7 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
 }
 
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
-const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), state(ctx).settings.nick, grant);
+const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant);
 
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
