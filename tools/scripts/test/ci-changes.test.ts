@@ -213,6 +213,17 @@ describe("plan", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
   });
 
+  it("a draft's notice names the jobs its fast tier runs: Website and Tauri Backend when their gates are on", () => {
+    const notice = (files: string[] | null) => plan(files, draft).why.find((w) => w.startsWith("Draft:"));
+    expect(notice(["apps/ui/src/App.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
+    expect(notice(["apps/desktop/src/lib.rs"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Tauri Backend). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx", "apps/desktop/src/lib.rs"])).toBe(
+      "Draft: the fast tier only (lint and types, the affected unit tests, Website, Tauri Backend). Leaving draft runs everything",
+    );
+    expect(notice(null)).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
+  });
+
   it("draft or ready, the Rust jobs run only when Rust changed", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
     expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(false);
