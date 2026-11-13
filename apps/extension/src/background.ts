@@ -631,6 +631,13 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     return;
   }
 
+  // DevTools leaves `bytes` out of a piece it holds as a file or a stream (a FormData with a picked file, an XHR sending
+  // one; an empty piece is `bytes: ""`), and has no command that reads it: sent without it, the app would get the form
+  // with an empty file, or no body at all, as if it were the upload. The request fails instead.
+  if (paused.request.postDataEntries?.some((e) => typeof e.bytes !== "string")) {
+    await answerFailed(tabId, paused.requestId, binding.page, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
+    return;
+  }
   let bodyB64: string | null = null;
   const entries = paused.request.postDataEntries?.filter((e) => e.bytes);
   if (entries?.length === 1) bodyB64 = entries[0].bytes!;
@@ -673,15 +680,18 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     });
     return;
   }
+  await answerFailed(tabId, paused.requestId, binding.page, reply);
+}
 
+/** A request that got no answer from the app: its error page, in the words of the page that opened the tab. */
+async function answerFailed(tabId: number, requestId: string, page: ViewerPage, reply: Extract<HttpRequestReply, { ok: false }>): Promise<void> {
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
   if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
-  const { page } = binding;
   // The contact's machine answered in place of their app: the peer said why, from this side (viewerWords.ts).
   const html = reply.shown ? errorPage(reply.shown, reply.shown.text) : errorPage(page, gone ? page.unreachable : page.failed);
   await devtools(tabId, "Fetch.fulfillRequest", {
-    requestId: paused.requestId,
+    requestId,
     responseCode: reply.status ?? (gone ? 503 : 502),
     responseHeaders: [
       { name: "content-type", value: "text/html; charset=utf-8" },
