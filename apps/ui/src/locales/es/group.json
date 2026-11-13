@@ -156,6 +156,7 @@
     "blockedNext": "Nombra a alguien admin o espera a un miembro.",
     "body": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver alguien tendrá que dejarte entrar de nuevo.",
     "bodyCommunity": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver, abre de nuevo el enlace del grupo.",
+    "bodyLast": "Eres el único miembro: el grupo y su historial terminan aquí, y nadie podrá volver a unirse.",
     "forgetBody": "Eliminar el grupo de este dispositivo también te hace salir de él.",
     "forgetTitle": "¿Eliminar {{name}}?",
     "forgetTitleUnnamed": "¿Eliminar este grupo?",
