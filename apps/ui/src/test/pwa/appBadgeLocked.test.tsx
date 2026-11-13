@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LockScreen } from "../../components/LockScreen";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
@@ -59,6 +59,8 @@ describe("the number on the app's icon while the app is locked", () => {
     fireEvent.change(lockField(), { target: { value: "pw" } });
     await act(async () => { fireEvent.submit(lockField().closest("form")!); });
     await screen.findByText("false");
-    expect(icon).toEqual([2, 0, 7]);
+    // The number comes from useAppBadge's effect, which React may run a task after the page shows the unlock: findBy
+    // resolves on the page, outside act, so it is waited for.
+    await waitFor(() => expect(icon).toEqual([2, 0, 7]));
   });
 });
