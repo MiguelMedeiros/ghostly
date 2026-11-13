@@ -765,6 +765,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     await w.closePull(batch.number);
     if (batch.branch.startsWith("batch/")) await w.deleteBranch(batch.branch);
     done.closed.push(batch.number);
+    // Its pull requests no longer in line (`queue` taken off by a person, closed) are not read again: the place it gave
+    // them ("in batch #N, waiting for its CI") would stay for good. The ones in line get a new place in this run.
+    for (const s of readState(batch.body).prs) {
+      if (byNumber.has(s.number)) continue;
+      const sticky = (await gh.comments(s.number)).find((c) => isPosition(c, login));
+      if (sticky) await w.deleteComment(sticky.id);
+    }
   };
 
   /** Logs whether GitHub shows a commit it just made as verified, with a warning when it does not: a regression shows in the log. */
