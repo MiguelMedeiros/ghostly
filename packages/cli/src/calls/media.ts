@@ -5,6 +5,7 @@ import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CA
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
 import { envSwitch } from "../envSwitch";
+import { rtcThreads } from "../runtime/rtcThreads";
 
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
@@ -199,6 +200,8 @@ interface Connection {
   failed: boolean;
   /** Who hears its states once it has its audio: none are told before. */
   onState: ((state: MediaState) => void) | null;
+  /** Said once it is closed: libdatachannel's threads go with the process's last connection (`rtcThreads`). */
+  released: () => void;
 }
 
 /**
@@ -211,6 +214,7 @@ async function openConnection(stack: CallStack, options: ConnectionOptions, offe
   const bind = process.env.GHOSTLY_CALL_BIND;
   const iceServers = callIceServers(options.iceServers);
   const pc = new ndc.PeerConnection("ghostly-call", { iceServers, ...(bind ? { bindAddress: bind } : {}) });
+  const released = rtcThreads.opened();
   // Each line says how long after this connection was made it happened: the order of the connection's states and
   // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
   const born = Date.now();
@@ -270,13 +274,13 @@ async function openConnection(stack: CallStack, options: ConnectionOptions, offe
     if (offer?.m) local.m = [...offer.m];
     // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
     if (videoTrack) local.vr = 0;
-    conn = { pc, track, videoTrack, local, payloadType, ssrc, log, ice: { state: "new", pair: null }, closed: false, failed: false, onState: null };
+    conn = { pc, track, videoTrack, local, payloadType, ssrc, log, ice: { state: "new", pair: null }, closed: false, failed: false, onState: null, released };
     // What each side offered to meet on: when a call does not connect, the log says between which addresses.
     log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
     try { conn.ice.state = pc.iceState(); } catch { /* keeps "new" */ }
     return conn;
   } catch (error) {
-    pc.close();
+    try { pc.close(); } finally { released(); }
     throw error;
   }
 }
@@ -286,6 +290,7 @@ function closeConnection(conn: Connection): void {
   try { conn.track.close(); } catch { /* closed with the connection */ }
   try { conn.videoTrack?.close(); } catch { /* same */ }
   try { conn.pc.close(); } catch { /* already */ }
+  conn.released();
 }
 
 /**
