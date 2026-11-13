@@ -1,8 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_PROJECTS, unitGroupOf, workspaceExports } from "../affected/select.mjs";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -723,6 +724,46 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     expect(checkPaths(inventory)).toEqual([]);
     expect(checkPaths({ features: inventory.features, paths: { "src/x.ts": ["payment.*", "groups.create"] } })).toEqual(['paths["src/x.ts"]: "payment.*" matches no feature']);
   });
+});
+
+describe("--unit-group: the draft tier's unit projects over a few runners", () => {
+  const names = UNIT_PROJECTS.map((u) => u.name);
+  const groups = (count: number) => Array.from({ length: count }, (_, i) => names.filter((n) => unitGroupOf(n, count) === i + 1));
+
+  it("puts ui, browser and cli on runners of their own and everything else on the last", () => {
+    expect(UNIT_ALONE.filter((n) => !names.includes(n))).toEqual([]);
+    expect(groups(4)).toEqual([["ui"], ["browser"], ["cli"], names.filter((n) => !UNIT_ALONE.includes(n))]);
+  });
+
+  it("runs every project in exactly one group, whatever the count", () => {
+    for (const count of [1, 2, 3, 4, 5, 8]) expect(groups(count).flat().sort()).toEqual([...names].sort());
+    expect(groups(1)).toEqual([names]);
+    expect(groups(2)).toEqual([["ui"], names.filter((n) => n !== "ui")]);
+  });
+
+  it("reads <i>/<n> with 1 ≤ i ≤ n", () => {
+    expect(parseUnitGroup("2/4")).toEqual({ index: 2, count: 4 });
+    expect(parseUnitGroup("1/1")).toEqual({ index: 1, count: 1 });
+    for (const bad of ["0/4", "5/4", "2", "2/", "/4", "a/b", "2/4/1", " 2/4", "", undefined]) expect(parseUnitGroup(bad)).toBeNull();
+  });
+
+  const script = join(import.meta.dirname, "..", "test-affected.mjs");
+  const affected = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 60_000 });
+
+  it("refuses a group it cannot read before it plans anything", () => {
+    const r = affected("--unit-group", "5/4", "--list");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("--unit-group 5/4: give <i>/<n>");
+  });
+
+  it("plans only its group's projects: a core change in group 1 of 4 runs ui, the others say whose they are", () => {
+    const r = affected("--list", "--no-e2e", "--unit-group", "1/4", "--files", "packages/core/src/http.ts");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("unit (vitest): group 1 of 4 (--unit-group)");
+    expect(r.stdout).toMatch(/\n {2}related ui {8}/);
+    expect(r.stdout).toMatch(/\n {2}other {3}browser {3}group 2 runs it \(related: /);
+    expect(r.stdout).toMatch(/\n {2}other {3}core {6}group 4 runs it \(related: /);
+  }, 60_000);
 });
 
 describe("the real inventory", () => {
