@@ -299,10 +299,9 @@ export class EventHub {
       if (next > before + 1 && before < this.dropped)
         out.push({ seq: before, id: `events.gap:${before}:${next}`, type: "events.gap", at: this.now(), from: before + 1, to: Math.min(this.dropped, next - 1) });
     };
-    const { bytes, start } = existsSync(this.journalPath) ? journalAfter(this.journalPath, since) : { bytes: Buffer.alloc(0), start: 0 };
-    for (const [from, to] of linesOf(bytes, start)) {
+    if (existsSync(this.journalPath)) for (const line of journalAfter(this.journalPath, since)) {
       let event: GhostlyEvent;
-      try { event = JSON.parse(bytes.toString("utf8", from, to)) as GhostlyEvent; } catch { continue; /* torn, or blanked */ }
+      try { event = JSON.parse(line) as GhostlyEvent; } catch { continue; /* torn */ }
       if (event.seq <= before) continue;
       gapTo(event.seq);
       out.push(event);
@@ -1078,58 +1077,63 @@ function journalTail(path: string): { lines: string[]; size: number } {
   return { lines: bytes.toString("utf8", start).split("\n").filter((line) => line.trimStart()), size };
 }
 
-/** Where `journalAfter` reads from first, from the journal's end; each read further back is twice the last. */
+/** What `journalAfter` reads first from the journal's end; each read further back is twice the last. */
 const REPLAY_CHUNK = 64 * 1024;
+/** The bytes of a line's start that hold its seq (`seqAt`), and how they begin. */
+const SEQ_PREFIX = 32;
+const SEQ_START = Buffer.from('{"seq":');
 
 /**
- * The journal's bytes within its last `JOURNAL_MAX_BYTES`, and `start` where its first line after `since` begins in
- * them: read from its end back, a line's seq taken from its `{"seq":N` start (as each event is written), until a line at
- * or before `since`. A cursor near the end reads and parses the end only; a line with no seq there (blanked by `forget`,
- * torn) is passed over.
+ * The journal's lines after `since`, within its last `JOURNAL_MAX_BYTES`, as `journalTail` gives them: its end is read
+ * back in growing chunks, each line's seq taken from its `{"seq":N` start (as each event is written), until a line at or
+ * before `since`; then only what follows it is read and made into text. A line with no seq there (blanked by `forget`,
+ * torn) is passed over and given, as `journalTail` gives it.
  */
-function journalAfter(path: string, since: number): { bytes: Buffer; start: number } {
+function journalAfter(path: string, since: number): string[] {
   const fd = openSync(path, "r");
+  const read = (from: number, to: number) => {
+    const bytes = Buffer.alloc(to - from);
+    let done = 0;
+    while (done < bytes.length) {
+      const n = readSync(fd, bytes, done, bytes.length - done, from + done);
+      if (!n) break;
+      done += n;
+    }
+    return bytes.subarray(0, done);
+  };
   try {
     const size = fstatSync(fd).size;
     // From one byte before the cut, as `journalWindow` reads: a line that begins exactly at it is kept whole.
     const cut = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
-    let bytes = Buffer.alloc(0), from = size, chunk = REPLAY_CHUNK;
-    // In `bytes`: where the earliest line checked begins (it and every line after it are past `since`, or have no seq),
-    // and below where newlines are not checked yet.
-    let after = 0, unchecked = 0;
-    while (from > cut) {
-      const next = Math.max(cut, from - chunk), read = Buffer.alloc(from - next);
-      for (let done = 0; done < read.length;) {
-        const n = readSync(fd, read, done, read.length - done, next + done);
-        if (!n) break;
-        done += n;
+    // Where the earliest line checked begins in the file: it and every line after it are past `since`, or have no seq.
+    let after = size, found = false, from = size, chunk = REPLAY_CHUNK, bytes = Buffer.alloc(0);
+    while (from > cut && !found) {
+      const next = Math.max(cut, from - chunk);
+      // With the start of what follows: a line that begins near the chunk's end has its seq there.
+      bytes = read(next, Math.min(size, from + SEQ_PREFIX));
+      for (let newline = bytes.lastIndexOf(0x0a, from - next - 1); newline !== -1; newline = newline > 0 ? bytes.lastIndexOf(0x0a, newline - 1) : -1) {
+        const seq = seqAt(bytes, newline + 1);
+        if (seq !== undefined && seq <= since) { found = true; break; }
+        after = next + newline + 1;
       }
-      bytes = bytes.length ? Buffer.concat([read, bytes]) : read;
-      after += read.length;
-      unchecked += read.length;
       from = next;
       chunk *= 2;
-      // Each line that begins after a newline in what was just read, from its end back.
-      for (let newline = unchecked > 0 ? bytes.lastIndexOf(0x0a, unchecked - 1) : -1; newline !== -1; newline = newline > 0 ? bytes.lastIndexOf(0x0a, newline - 1) : -1) {
-        const seq = seqAt(bytes, newline + 1);
-        if (seq !== undefined && seq <= since) return { bytes, start: after };
-        after = newline + 1;
-        unchecked = newline;
-      }
     }
     // The file's first line, which no newline comes before. Past the window, the line it cut is not whole: left out.
-    if (from > 0) return { bytes, start: after };
-    const seq = seqAt(bytes, 0);
-    return { bytes, start: seq !== undefined && seq <= since ? after : 0 };
+    if (!found && from === 0 && (seqAt(bytes, 0) ?? Infinity) > since) after = 0;
+    return read(after, size).toString("utf8").split("\n").filter((line) => line.trimStart());
   } finally {
     closeSync(fd);
   }
 }
 
-/** The seq a journal line begins with, read from its first bytes only. */
+/** The seq a journal line begins with (`{"seq":N,` or `{"seq":N}`), read from its first bytes, never made into text. */
 function seqAt(bytes: Buffer, at: number): number | undefined {
-  const named = /^\{"seq":(\d+)[,}]/.exec(bytes.toString("latin1", at, Math.min(bytes.length, at + 32)))?.[1];
-  return named === undefined ? undefined : Number(named);
+  if (bytes.length < at + SEQ_START.length + 2 || bytes.compare(SEQ_START, 0, SEQ_START.length, at, at + SEQ_START.length) !== 0) return undefined;
+  let seq = 0, i = at + SEQ_START.length;
+  const end = Math.min(bytes.length, at + SEQ_PREFIX);
+  for (; i < end && bytes[i] >= 0x30 && bytes[i] <= 0x39; i++) seq = seq * 10 + bytes[i] - 0x30;
+  return i > at + SEQ_START.length && (bytes[i] === 0x2c || bytes[i] === 0x7d) ? seq : undefined;
 }
 
 /**
