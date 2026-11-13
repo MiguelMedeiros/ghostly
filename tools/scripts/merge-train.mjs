@@ -455,7 +455,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
  * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with `pr.behind` ({ batch,
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so (its `held` is the base's CI that
+ * holds that one, not a hold of its own). One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
 export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null) {
@@ -470,9 +471,10 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
   const cancelled = " Cancelled checks here are not failures; a push would take it out of the line.";
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
-    const where = held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
-    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is red (\`${LABEL.priority}\`).` : "";
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
+    // One going ahead of a hold (`past`) is not held itself: `held` there is what holds the one it goes past.
+    const where = held && !alone.past ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is ${held ?? "red"} (\`${LABEL.priority}\`).` : "";
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${alone.past ? "" : hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -1396,7 +1398,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
     const text =
       past?.number === p.number
-        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone)
+        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held)
         : inFlight?.alone && inFlight.number === p.number
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)

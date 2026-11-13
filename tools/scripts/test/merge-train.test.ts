@@ -2637,6 +2637,22 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     expect(readState(repo.batch()!.body)).toMatchObject({ baseSha: "s13" });
   });
 
+  it("says the base's CI is still running in the flying one's comment too, once dev's failed jobs are re-run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is red/);
+    repo.runs.set("dev0", running); // someone re-ran dev's failed jobs, as the hold's help asks
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(repo.alone(13)).toMatchObject({ past: 9000 });
+    expect(said(repo, 11)).toMatch(/CI Success on `dev` itself is still running/);
+    const flying = repo.comments.get(13)!.at(-1)!.body;
+    expect(flying).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is still running/);
+    // It is not held itself: still waiting for its own CI, with no hold of its own.
+    expect(flying).toMatch(/waiting for CI Success on /);
+    expect(flying).not.toMatch(/The train is on hold/);
+  });
+
   it("lands ahead of a held red lone pull request, which keeps its flight and is rebased onto the new tip", async () => {
     const repo = await heldLone();
     const held = repo.pulls.get(11)!.sha;
