@@ -59,6 +59,15 @@ const BROWSER_PACKAGES = new Map([
   ["noise-curve-ed", platform("noiseCurveEd.ts")],
 ]);
 
+/**
+ * nostr-tools pins exact, older versions of the noble and scure libraries; the app and its other libraries share
+ * newer ones of the same major. nostr-tools gets those, or every browser build carries a second secp256k1, SHA-2 and
+ * base encoders in its first load. Only nostr-tools: other libraries' copies are of an older major (ethers' noble 1.x).
+ */
+const PINNED_CRYPTO = /^@(noble\/(ciphers|curves|hashes)|scure\/(base|bip32|bip39))(\/|$)/;
+const NOSTR_TOOLS = "/node_modules/nostr-tools/";
+const FROM_ROOT = viteId(resolve(repositoryRoot, "package.json"));
+
 export function ghostlyPlatformModules(): Plugin {
   return {
     name: "ghostly-platform-modules",
@@ -67,6 +76,7 @@ export function ghostlyPlatformModules(): Plugin {
       const sdkModule = SDK_MODULES.get(source) ?? BROWSER_PACKAGES.get(source);
       if (sdkModule) return sdkModule;
       if (!importer || viteId(importer).startsWith(platform(""))) return null;
+      if (PINNED_CRYPTO.test(source) && viteId(importer).includes(NOSTR_TOOLS)) return this.resolve(source, FROM_ROOT, { ...options, skipSelf: true });
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
       const id = viteId(resolved.id);
