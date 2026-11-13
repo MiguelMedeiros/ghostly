@@ -247,9 +247,16 @@
     "theGroup": "グループ",
     "title": {
       "asked": "{{to}} が {{from}} に請求",
+      "askedByMe": "あなたが {{from}} に請求",
       "askedGroup": "{{to}} がグループに請求",
+      "askedGroupByMe": "あなたがグループに請求",
+      "askedMe": "{{to}} があなたに請求",
       "paying": "{{from}} が {{to}} に支払い中",
-      "sent": "{{from}} が {{to}} に送金"
+      "payingByMe": "あなたが {{to}} に支払い中",
+      "payingMe": "{{from}} があなたに支払い中",
+      "sent": "{{from}} が {{to}} に送金",
+      "sentByMe": "あなたが {{to}} に送金",
+      "sentToMe": "{{from}} があなたに送金"
     },
     "why": {
       "noPayments": "相手のアプリはグループでの支払いに対応していないか（更新が必要）、すべての方法をオフにしています",
