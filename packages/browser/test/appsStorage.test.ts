@@ -242,6 +242,19 @@ describe("storage", () => {
     expect(await storageRows(), "the rows and their count are gone").toEqual([]);
   });
 
+  it("a key kept with a lone surrogate, written by its U+FFFD form, takes the new value: its old one is not read back after a delete", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    const half = "\u{1F600}".slice(0, 1), listed = String.fromCodePoint(0xfffd);
+    await store.storageSet({ ref, scope: "chat-1", key: `${half}a`, value: "lost" });
+    await store.storageSet({ ref, scope: "chat-1", key: `${listed}a`, value: "new" });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` })).toEqual({ value: "new" });
+    expect(await store.storageKeys({ ref, scope: "chat-1" }), "one key, not the same key listed twice").toHaveLength(1);
+    await store.storageDelete({ ref, scope: "chat-1", key: `${listed}a` });
+    expect(await store.storageGet({ ref, scope: "chat-1", key: `${listed}a` }), "a deleted key reads nothing").toBeNull();
+    expect(await storageRows(), "the rows and their count are gone").toEqual([]);
+  });
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;

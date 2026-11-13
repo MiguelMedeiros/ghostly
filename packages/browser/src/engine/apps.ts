@@ -2372,8 +2372,9 @@ export class Apps {
     const size = byteLength(name) + valueBytes;
     await this.serial(`${app.ref}\0${where}`, async () => {
       const used = await this.usageOf(app.ref, where);
-      const rows = await store(STORES.appStorage, "readonly");
-      const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
+      // A key kept with a lone surrogate that the app writes by its listed form is the same key: its row is replaced, not
+      // kept beside the new one, listed twice and read back once the new one is deleted.
+      const old = await this.rowOf(app.ref, where, name);
       const next = plus(old ? plus(used, countOf(old, -1)) : used, countOf({ key: name, size }));
       if (costOf(next) > APP_STORAGE_LIMITS.scopeBytes && costOf(next) > costOf(used)) fail("full", "This app's storage in this chat is full (5 MiB)");
       const writing = await store(STORES.appStorage, "readwrite");
@@ -2389,6 +2390,7 @@ export class Apps {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("not-installed", "This app is not installed");
       }
+      if (old && old.key !== name) writing.delete([app.ref, where, old.key]);
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
       await committed(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
