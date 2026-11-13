@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Page } from "../components/layout";
 import { ChatTargetRow, ChatTargetSearch } from "../components/chat/ChatTargets";
 import { useChatTargets } from "../hooks/useChatTargets";
@@ -7,6 +8,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { chatTargetKeys, findChatTargets } from "../lib/chatTargets";
 import { Notice } from "../components/ui/Notice";
 import { SEARCH_STATUS_SETTLE_MS, SearchStatus } from "../components/ui/SearchStatus";
+import { takeReplaceStep } from "../lib/profiles";
 import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare, type IncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
@@ -29,6 +31,14 @@ export function SharePicker() {
     const timer = setTimeout(() => setWaited(true), WAIT_MS);
     return () => clearTimeout(timer);
   }, []);
+  // A backup's Replace opened this copy here, as a share went along: once the share is in (a share arriving takes the
+  // page back here), the profile page offers the original's removal, and the share is offered after.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!share && !waited) return;
+    const replace = takeReplaceStep();
+    if (replace) navigate(replace, { replace: true });
+  }, [share, waited, navigate]);
 
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
