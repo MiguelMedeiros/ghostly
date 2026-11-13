@@ -23,6 +23,7 @@ import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate, useLimited } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
+import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
@@ -366,6 +367,15 @@ function LockGate({ children }: { children: ReactNode }) {
 }
 
 /**
+ * The visible height and whether a keyboard is up (`useViewportHeight`) on the standby screen, which is drawn in place
+ * of the app that keeps them otherwise: on a phone, Use here, Take over and Remove from this device stayed under the keyboard.
+ */
+function StandbyViewport() {
+  useViewportHeight();
+  return null;
+}
+
+/**
  * The app's router. A move to another page is drawn at once, not as a transition: the engine's state comes several
  * times a second, each time a sync render, and each one started a transition's render over. Leaving a long chat still
  * drawing its older rows (transitions too, before the row window) waited behind them: seconds on a slow machine.
@@ -398,7 +408,7 @@ export function Root() {
           <LockScreenProvider>
             <LockScreen />
             <ProfileSwitchSplash />
-            {standby ? <LockGate><DeviceStandby gate={standby} /></LockGate> : (
+            {standby ? <LockGate><StandbyViewport /><DeviceStandby gate={standby} /></LockGate> : (
             <AppRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
