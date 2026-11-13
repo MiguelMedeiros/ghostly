@@ -1,4 +1,5 @@
 import { expect, test, LATEST_URL } from "../support/extension";
+import { keepsAnEdge } from "../support/forcedColors";
 
 /**
  * Chrome never updates an unpacked extension, and no API can. All Ghostly can
@@ -24,4 +25,6 @@ test("says when a new version is out, and points at the download", { tag: ["@fea
   // No button: replacing the folder is the user's to do.
   const download = banner.getByRole("link", { name: "Download" });
   await expect(download).toHaveAttribute("href", "https://github.com/MiguelMedeiros/ghostly/releases/latest");
+  // Drawn by its fill alone, it read as bare text in forced colors (Windows Contrast themes).
+  await keepsAnEdge(page, download, "the update banner's Download");
 });

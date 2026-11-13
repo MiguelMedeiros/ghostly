@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
     "notSent": "Votre message « {{text}} » n’a pas été envoyé",
     "notSentCount": "{{count}} messages non envoyés",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
     "rowMoved": "Maintenant à la place {{place}} sur {{count}}",
     "waiting": "Votre message « {{text}} » attend que votre contact soit en ligne",
@@ -242,7 +243,6 @@
     "newOne": "1 nouveau message, aller en bas"
   },
   "keyChanged": "Cette discussion s'est arrêtée : la clé de votre contact a changé.",
-  "lastSeen": "Vu {{time}}",
   "listTime": {
     "days": "{{count}} j",
     "hours": "{{count}} h",
@@ -395,6 +395,7 @@
     "copyCode": "Copier le code",
     "hiddenChars": "Ce code contient des caractères cachés ou qui changent le sens du texte, affichés comme {{marker}}. Copier le code les copie aussi.",
     "localTime": "{{time}} chez vous",
+    "notCopied": "Non copié",
     "showAll": "Tout afficher",
     "showLess": "Afficher moins",
     "spoiler": "Texte masqué. Touchez pour l’afficher",
@@ -484,7 +485,6 @@
     "showTranslation": "Afficher la traduction",
     "translate": "Traduire"
   },
-  "typeMessage": "Tapez un message...",
   "typing": "écrit…",
   "typingRecording": "enregistre un audio…",
   "typingThinking": "réfléchit…",

@@ -89,7 +89,8 @@ export function SharePicker() {
 
   return (
     <Page title={t("pwa.shareTitle")} testId="share-picker">
-      <SearchStatus testId="share-next" text={said} />
+      {/* Said too when nothing came: the waiting line changes on its own after a while. */}
+      <SearchStatus testId="share-next" text={share ? said : waited ? t("pwa.shareNone") : ""} />
       {!share ? (
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
@@ -159,7 +160,7 @@ export function SharePicker() {
           )}
 
           <button type="button" onClick={cancel} data-testid="share-cancel"
-            className="px-4 py-2 min-h-10 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
+            className="px-4 py-2 min-h-10 max-md:min-h-11 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
             {t("common.cancel")}
           </button>
         </>

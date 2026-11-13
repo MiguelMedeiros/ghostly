@@ -5,6 +5,9 @@ import { tabbables } from "../hooks/useDismiss";
 import { externalLinkProps } from "../lib/externalLink";
 import { updateFailure } from "../lib/updateFailure";
 
+/** Download, Reload or Restart. Drawn by its fill alone, it read as bare text in forced colors (Windows Contrast themes), where every fill is the page's. */
+const action = "shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors forced-colors:border forced-colors:border-[color:ButtonText]";
+
 /**
  * A new version exists. Nothing happens until the user says so: applying one
  * ends every call and every connection this client holds, and on the web it
@@ -71,7 +74,7 @@ export function UpdateBanner() {
           {update.apply === "manual" ? (
             <a
               {...externalLinkProps(downloadUrl)}
-              className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors"
+              className={action}
             >
               {t("updates.download")}
             </a>
@@ -80,7 +83,7 @@ export function UpdateBanner() {
               onClick={() => { if (!busy) void install(); }}
               aria-disabled={busy}
               aria-busy={busy}
-              className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors aria-disabled:opacity-60 aria-disabled:cursor-progress cursor-pointer"
+              className={`${action} aria-disabled:opacity-60 aria-disabled:cursor-progress cursor-pointer`}
             >
               {t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
             </button>

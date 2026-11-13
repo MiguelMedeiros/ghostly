@@ -258,6 +258,19 @@ describe("Back with a layer open", () => {
     await waitFor(() => expect(where()).toBe("/"));
   });
 
+  it("Back over a call shown full screen is for that call only: the next call opens full screen again", async () => {
+    onTestFinished(() => localStorage.removeItem("ghostly_call_mini"));
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await back();
+    await waitFor(() => expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true"));
+    await user.click(screen.getByTitle("End call"));
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+  });
+
   it("Back from the entry a menu closed by Escape left, over a layer still open, goes to that layer, not out of the chat", async () => {
     const user = await inChat();
     await user.click(screen.getByRole("button", { name: "Panel" }));

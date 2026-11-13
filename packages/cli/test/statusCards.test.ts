@@ -332,6 +332,30 @@ describe("the secret guard on cards", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: broken("​") }, force: true })).resolves.toMatchObject({ task: "t1", card: { step: nsec } });
   });
 
+  it("refuses a --text past 16 KiB as send does, with its size, before the guard reads it: every card command, chat and group", async () => {
+    vi.useFakeTimers();
+    const { ctx, node } = fake("one-shot");
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy" }, wait: "none" });
+    await callApi(ctx, "routine.send", { chat: "Sala de Máquinas", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    node.sendMessage.mockClear(); node.sendGroupMessage.mockClear();
+    // A seed past the limit: the size is said, not "looks like a secret" (a --force would not send it either).
+    const text = `${seed} ${"é".repeat(8193)}`;
+    const bytes = new TextEncoder().encode(text).length;
+    const tooLong = { code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/), details: { bytes, max: 16384 } };
+    for (const chat of ["Coordinator", "Sala de Máquinas"]) {
+      await expect(callApi(ctx, "task.send", { chat, card: { title: "Deploy" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "routine.send", { chat, card: { name: "Nightly", schedule: "every day 01:00" }, text })).rejects.toMatchObject(tooLong);
+      await expect(callApi(ctx, "usage.send", { chat, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    }
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" }, text })).rejects.toMatchObject(tooLong);
+    await expect(callApi(ctx, "routine.update", { chat: "Sala de Máquinas", routine: "r1", card: {}, text })).rejects.toMatchObject(tooLong);
+    // `--all` says it once, with its size, not once per chat.
+    await expect(callApi(ctx, "usage.send", { all: true, card: { left: 40 }, text })).rejects.toMatchObject(tooLong);
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    expect(node.editMessage).not.toHaveBeenCalled();
+  });
+
   it("takes --force on every card command", () => {
     for (const [name, argv] of [["task send", ["c", "--title", "t"]], ["task update", ["c", "t1"]], ["routine send", ["c", "--name", "n", "--schedule", "daily"]], ["routine update", ["c", "r1"]], ["usage send", ["c", "--left", "50"]]] as const)
       expect(params(name, [...argv, "--force"])).toMatchObject({ force: true });

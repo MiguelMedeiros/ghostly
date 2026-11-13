@@ -21,7 +21,7 @@ export function providerSay(provider: IdentityProofProvider, t: Translate): Prov
 
 /**
  * A proof's source in `t`'s language where the provider's words are fixed (`displaySourceOf`): who wrote a name (a
- * key's user ID is its holder's own, a sign-in provider may not have checked the email), or how a Nostr proof was
+ * key's user ID is its holder's own, a sign-in provider may not have checked the email or the name), or how a Nostr proof was
  * checked. Any other source is shown as written.
  */
 export function sourceWords(provider: string, source: string, t: Translate): string {
@@ -31,6 +31,11 @@ export function sourceWords(provider: string, source: string, t: Translate): str
   if (known.kind === "openpgp-user-id") return t("identities.contact.sourceUserId");
   if (known.kind === "openpgp-keyserver") return t("identities.contact.sourceKeyserver");
   const signer = { provider: known.provider };
+  if (known.nameUnchecked) {
+    return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerifiedNameUnchecked", signer)
+      : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverifiedNameUnchecked", signer)
+      : t("identities.contact.sourceSignedNameUnchecked", signer);
+  }
   return known.email === "verified" ? t("identities.contact.sourceSignedEmailVerified", signer)
     : known.email === "unverified" ? t("identities.contact.sourceSignedEmailUnverified", signer)
     : t("identities.contact.sourceSigned", signer);

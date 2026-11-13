@@ -177,8 +177,8 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       {/* Progress along the card's foot: a still bar, never a spinner (an app nobody touches draws nothing). */}
       {progress !== undefined && (
         <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} data-testid="board-card-progress"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
-          <div className={`h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
+          className="progress-track pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
+          <div className={`progress-fill h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
         </div>
       )}
     </article>

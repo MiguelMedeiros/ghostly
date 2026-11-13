@@ -50,7 +50,8 @@ const KEY_HEADER: Record<KeyKind, string> = {
 };
 const PEM = /-----BEGIN PRIVATE KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)-----END PRIVATE KEY-----/;
 
-export interface LoadedKey { signer: Signer; key: string; created: boolean }
+/** `pem`: a key made by this run, written to its file by `saveKey` only once every check passed. */
+export interface LoadedKey { signer: Signer; key: string; created: boolean; pem?: string }
 
 /** Refuses a key file that is not a plain file of this user's, or that anyone else may read or write. */
 function checkKeyFile(path: string): void {
@@ -85,14 +86,35 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   return { signer, key: toZ32(signer.publicKey), created: false };
 }
 
-/** Makes a key file: owner-only from the start, never over a file that is there. */
-function makeKey(path: string, kind: KeyKind): LoadedKey {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+/**
+ * Makes a key in memory: its file is written by `saveKey`, right before the bundle or index it signs. A run refused
+ * after this step leaves no key file, which the next run would read as an existing key and never say to back up.
+ */
+function makeKey(kind: KeyKind): LoadedKey {
   const { privateKey } = generateKeyPairSync("ed25519");
-  const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+  const signer = seedSigner(fromBase64Url(privateKey.export({ format: "jwk" }).d!));
+  return { signer, key: toZ32(signer.publicKey), created: true, pem: `${KEY_HEADER[kind]}\n${privateKey.export({ type: "pkcs8", format: "pem" }) as string}` };
+}
+
+/** Writes a key this run made: owner-only from the start, never over a file that is there. */
+function saveKey(path: string, key: LoadedKey): void {
+  if (!key.pem) return;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = openSync(path, "wx", 0o600);
-  try { writeSync(fd, `${KEY_HEADER[kind]}\n${pem}`); } finally { closeSync(fd); }
-  return { ...readKey(path, kind), created: true };
+  try { writeSync(fd, key.pem); } finally { closeSync(fd); }
+}
+
+/**
+ * Saves the key, then writes what it signs: the key first, so nothing it signed is ever on disk without it. A write
+ * that fails (a folder it may not write) takes back the key this run made, which nothing signed by it needs: kept,
+ * the next run read it as an existing key and never said to back it up.
+ */
+function saveKeyThen(path: string, key: LoadedKey, write: () => void): void {
+  saveKey(path, key);
+  try { write(); } catch (error) {
+    if (key.pem) rmSync(path, { force: true });
+    throw error;
+  }
 }
 
 /** What the person is told on stderr when a key was made: where, which, and to back it up. Never the key. */
@@ -229,8 +251,10 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const files = isUrl
     ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
     : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
-  for (const file of files) {
-    const revocation = appRevocationFor(version, await revocationsIn(file, isUrl));
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  for (const [i, file] of [...files].entries()) {
+    const revocation = appRevocationFor(version, lists[i]!);
     if (revocation) {
       throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
     }
@@ -334,9 +358,10 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
  * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
  * v2.4.5" headers included), or a Ghostly key file's first line. A library that only names the block's header in its
- * code does not match.
+ * code does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per
+ * header to the end of the file.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n[A-Za-z0-9+/=\r\n :,.-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -402,7 +427,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   if (existsSync(keyPath)) key = readKey(keyPath, "publisher");
   else if (previous) {
     throw new CliError("not_found", `No key file ${keyPath}: ${out} is signed by ${appFingerprint(previous.publisher)}, and only that key publishes its next version`);
-  } else key = makeKey(keyPath, "publisher");
+  } else key = makeKey("publisher");
 
   if (previous && previous.publisher !== key.key) {
     throw refused(`${out} is ${appRef(previous.publisher, previous.name)}, signed by another key (${appFingerprint(previous.publisher)}): a version of an app is signed by its own key`, { reason: "other-app" }, { publisher: previous.publisher });
@@ -445,8 +470,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
     throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
   }
-  mkdirSync(dirname(out), { recursive: true });
-  writeWhole(out, bundle);
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(dirname(out), { recursive: true });
+    writeWhole(out, bundle);
+  });
 
   return {
     ...described(read.bundle, bundle),
@@ -581,7 +608,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
   else if (unread) throw unread;
   else if (held) throw new CliError("not_found", `No key file ${keyPath}: ${indexOut} is signed by ${appFingerprint(held.index.key)}, and only that key signs its next index`);
-  else key = makeKey(keyPath, "store");
+  else key = makeKey("store");
   if (index.key !== undefined && index.key !== key.key) {
     throw refused(`${indexPath} names another store key than ${keyPath}'s (${appFingerprint(key.key)})`, { reason: "store-key" });
   }
@@ -611,8 +638,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  mkdirSync(outDir, { recursive: true });
-  writeWhole(indexOut, indexBytes);
+  // The signature after the index is written keeps the key: the index names it, and a run again signs it with it.
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(outDir, { recursive: true });
+    writeWhole(indexOut, indexBytes);
+  });
   writeWhole(sigOut, sigBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),

@@ -161,9 +161,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
-  let host = "";
+  let host = "", portless = "";
   const server = createServer((request, response) => {
-    if (request.headers.host?.toLowerCase() !== host) return plain(response, 404, "Not found");
+    const asked = request.headers.host?.toLowerCase();
+    if (!asked || (asked !== host && asked !== portless)) return plain(response, 404, "Not found");
     const path = request.url ?? "/";
     if (path.startsWith(OPEN_PATH)) {
       if (!sameSecret(path.slice(OPEN_PATH.length), token)) return plain(response, 404, "Not found");
@@ -186,7 +187,10 @@ export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly
     request.on("end", () => { if (!refused) void proxy(request, response, chunks, send, cookies, policy); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
-  host = `${name}:${(server.address() as AddressInfo).port}`;
+  const on = (server.address() as AddressInfo).port;
+  host = `${name}:${on}`;
+  // On port 80 a browser leaves the port out of Host (`new URL("http://a.localhost:80/").host` is `a.localhost`).
+  if (on === 80) portless = name;
   return { server, host, url: `http://${host}${OPEN_PATH}${token}` };
 }
 
@@ -332,12 +336,33 @@ export const SERVICE_METHODS: Record<string, Method> = {
     open.delete(key);
     const entry = await pending?.catch(() => undefined);
     if (!entry) throw new CliError("not_found", "That service is not open here");
-    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
-    // Each connection's end stops the contact's answer too (`proxy`).
-    await new Promise<void>((resolve) => {
-      entry.server.close(() => resolve());
-      entry.server.closeAllConnections();
-    });
+    await closeOpened(entry);
     return { closed: key };
   },
 };
+
+/**
+ * Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+ * Each connection's end stops the contact's answer too (`proxy`).
+ */
+function closeOpened(entry: OpenedService): Promise<void> {
+  return new Promise<void>((resolve) => {
+    entry.server.close(() => resolve());
+    entry.server.closeAllConnections();
+  });
+}
+
+/**
+ * `chat remove`: the services opened from a contact no chat here has any more. Before, they stayed on their ports, each
+ * request a 503, and `service close` answered `No chat` for good.
+ */
+export async function closeServicesOf(ctx: ApiContext, peer: string): Promise<void> {
+  if (state(ctx).links.some((link) => link.peerPubKeyZ32 === peer)) return;
+  const keys = [...open.keys()].filter((key) => key.startsWith(`${peer}/`));
+  await Promise.all(keys.map(async (key) => {
+    const pending = open.get(key);
+    open.delete(key);
+    const entry = await pending?.catch(() => undefined);
+    if (entry) await closeOpened(entry);
+  }));
+}

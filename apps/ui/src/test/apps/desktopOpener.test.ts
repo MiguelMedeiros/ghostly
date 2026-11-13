@@ -3,7 +3,7 @@ import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
 import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 import { nameToldIn } from "../../lib/apps/nameInChat";
-import { stopAppsIn, stopTakenDown } from "../../lib/apps/open";
+import { CHAT_CLOSED, stopAppsIn, stopTakenDown } from "../../lib/apps/open";
 import type { AppEntry } from "../../lib/platform";
 import { engineState, linkView } from "../fakeEngine";
 
@@ -86,6 +86,26 @@ describe("opening an app on Desktop", () => {
     // Opened again in that chat: a new window, not the closed one brought to the front.
     await open(REF, LINK);
     expect(calls.filter((c) => c.command === "app_open")).toHaveLength(4);
+  });
+
+  it("does not start an app whose chat is deleted while it opens, and closes the window it made for it", async () => {
+    const { calls, hooks, host, open, stops } = setup();
+    // Deleted while its window is being made: the window comes, and closes before the app starts in it.
+    hooks.opened = () => stopAppsIn(LINK);
+    await expect(open(REF, LINK)).rejects.toThrow(CHAT_CLOSED);
+    expect(calls.filter((c) => c.command === "app_close").map((c) => c.args.label)).toEqual(["app-1"]);
+    // Deleted while its entry is read: no window at all.
+    hooks.opened = undefined;
+    const read = host.entry;
+    host.entry = async (ref, runAnyway) => { stopAppsIn(LINK); return read(ref, runAnyway); };
+    await expect(open(REF, LINK)).rejects.toThrow(CHAT_CLOSED);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(1);
+    // Another chat's deletion stops nothing of it.
+    host.entry = async (ref, runAnyway) => { stopAppsIn("link-2"); return read(ref, runAnyway); };
+    await open(REF, LINK);
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(2);
+    expect(calls.filter((c) => c.command === "app_close")).toHaveLength(1);
+    expect(stops).toEqual([]);
   });
 
   it("names its window after the app and the contact in a chat, and the app alone outside one", async () => {

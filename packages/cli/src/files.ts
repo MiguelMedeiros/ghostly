@@ -44,17 +44,22 @@ export function mimeOf(path: string, given?: string): string {
  * a date can hold it; else when it was stored here.
  */
 async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
-  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+  // Past the newest, among the history's file rows only (the messages store's file index): the whole history, read for
+  // each old voice message saved, held the daemon 0.8 s at 100,000 messages.
+  const older = (linkId: string) => node(ctx).fileMessages(linkId);
+  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id, older))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
 }
 
 /**
  * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
- * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row.
+ * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row;
+ * `older` reads fewer, where the message is known to be among them.
  */
-async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean): Promise<StoredMessage | undefined> {
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean, older?: (linkId: string) => Promise<StoredMessage[]>): Promise<StoredMessage | undefined> {
   const page = await node(ctx).messagePage({ linkId, limit: 200 });
   const newest = page.messages.find(test);
   if (newest || !page.more) return newest;
+  if (older) return (await older(linkId)).find(test);
   const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
   return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
 }
@@ -335,7 +340,9 @@ export const FILE_METHODS: Record<string, Method> = {
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
-    if (!link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
+    // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
+    // as files/3 on the next one (the engine's `sendWaitingFile`), as the app's composer sends it.
+    if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"));
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
@@ -441,6 +448,11 @@ export const FILE_METHODS: Record<string, Method> = {
         || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
       if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
       if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
+    }
+    // Paused by the contact: only their resume moves it. The engine takes these and does nothing, and it stays paused.
+    const view = state(ctx).transfers[fileId];
+    if ((action === "resume" || action === "request" || action === "resend") && view?.stage === "paused" && view.pausedBy === "peer") {
+      throw new CliError("refused", "Paused by the contact: it goes on when they resume it");
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
