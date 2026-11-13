@@ -62,8 +62,9 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
 ```
 
 The cursor file keeps the last event handled, so a restarted bot goes on where it stopped; it sits in the Ghostly
-folder in use. With another folder or profile, set `GHOSTLY_HOME` or `GHOSTLY_PROFILE` rather than `--home` or
-`--profile`: the environment reaches the hook's own `ghostly send`, a flag does not. The example script takes
+folder in use. With another folder, set `GHOSTLY_HOME` rather than `--home`: the cursor's path above reads it. The
+hook's own `ghostly send` runs on the folder and profile `listen` runs on, given as a flag or in the environment
+(`listen` sets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` for it). The example script takes
 `ECHO_CURSOR` for the cursor's path (default `echo.cursor` in `GHOSTLY_HOME`, else `~/.ghostly`); give each bot and
 profile its own.
 
@@ -400,7 +401,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
-  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment. A non-zero exit, or a death by a
+  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment, and `GHOSTLY_HOME` and
+  `GHOSTLY_PROFILE` of the listen (`--home`, `--profile` too), so its own `ghostly send` answers from the same profile. A non-zero exit, or a death by a
   signal (`--exec was killed by SIGKILL on event N`), is said on stderr and the cursor moves past the event. With
   `--print`, the command's stdout goes to listen's stderr: stdout is the JSON events only.
 - `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A URL with
