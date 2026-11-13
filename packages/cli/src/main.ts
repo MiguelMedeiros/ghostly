@@ -21,7 +21,7 @@ import { format } from "node:util";
 import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
-  checkProfileName, checkShownNameOption, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownNameOption, createProfile, currentProfile, currentProfileOrNone, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, noProfile, profileExists, profilePaths, selectProfile,
   claimForDaemon, daemonClaim, startingDaemon,
   type ProfilePaths,
 } from "./profiles";
@@ -63,9 +63,11 @@ function printAnswer(result: Record<string, unknown>): void {
   print(result);
 }
 
-function globals(parsed: Parsed): Globals {
+/** `ownProfile`: the command names its profile, or none (`profile create`, `use`): a bad `<home>/current` is not read. */
+function globals(parsed: Parsed, { ownProfile = false } = {}): Globals {
   const home = ghostlyHome(parsed.options.home as string | undefined);
-  const profile = currentProfile(home, parsed.options.profile as string | undefined);
+  const option = parsed.options.profile as string | undefined;
+  const profile = ownProfile ? currentProfileOrNone(home, option) ?? DEFAULT_PROFILE : currentProfile(home, option);
   return { home, profile, paths: profilePaths(home, profile), pretty: parsed.options.pretty === true };
 }
 
@@ -785,7 +787,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
   const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
-  const g = globals(parsed);
+  // These replace or list `<home>/current`: a name there that is no profile's does not stop them, they are the way out.
+  const g = globals(parsed, { ownProfile: ["create", "list", "use", "restore"].includes(sub ?? "") });
   pretty = g.pretty;
   switch (sub) {
     case "create": {
@@ -808,12 +811,12 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
         }
       }
       if (parsed.options.use) selectProfile(g.home, name);
-      print({ created: name, folder: paths.dir, current: currentProfile(g.home) === name, ...(shown ? { profile: shown } : {}) });
+      print({ created: name, folder: paths.dir, current: currentProfileOrNone(g.home) === name, ...(shown ? { profile: shown } : {}) });
       return;
     }
     case "list": {
       noMoreThan(0, parsed.positionals, "profile list");
-      const current = currentProfile(g.home);
+      const current = currentProfileOrNone(g.home);
       print({ profiles: listProfiles(g.home).map((name) => ({ name, current: name === current, running: lockOwner(profilePaths(g.home, name)) !== null })), home: g.home });
       return;
     }
@@ -875,7 +878,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
       if (parsed.options.use) selectProfile(g.home, name);
       // Whether --use made it the current profile, as profile create says it.
-      print({ restored: name, folder: paths.dir, protection, current: currentProfile(g.home) === name });
+      print({ restored: name, folder: paths.dir, protection, current: currentProfileOrNone(g.home) === name });
       return;
     }
     default:
