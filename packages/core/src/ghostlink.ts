@@ -144,6 +144,12 @@ export const BLOCKED_DIAL_WAIT_MS = 10_000;
  */
 export const UNPROVEN_AUTH_MS = 15_000;
 /**
+ * Connections dialled in that authenticate at once beside the one waiting to take over (`contend`). Whoever read the
+ * endpoint and dials it over and over pushes out only the oldest of them: the contact's, a few round trips long, is
+ * pushed out only by this many dials within those round trips.
+ */
+export const DIALED_IN_CONTENDERS = 8;
+/**
  * A native connection this side dialled that has not authenticated this long after it opened, while the contact's
  * record names a newer way to dial it: the dial went to an old address (the web app's Iroh homed on another relay after
  * a restart), and the chat dials the new one at once. Sooner, it is a handshake still under way.
@@ -861,6 +867,9 @@ export function publishFailure(error: unknown): string {
   return `Could not publish connection details: ${text}. ${waits.length ? `Retrying in ${Math.min(...waits)} s.` : "Retrying."}`;
 }
 
+/** A connection that takes over from the session open now once it authenticated (`GhostLink.attach`'s `migration`). */
+interface LinkCandidate { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void }
+
 export class GhostLink {
   readonly session: LinkSession;
   private readonly dht: DhtDelivery | null;
@@ -884,7 +893,12 @@ export class GhostLink {
   private switchAck: (() => void) | null = null;
   private readonly switcher: TransportSwitch;
   /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
-  private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void } | null = null;
+  private candidate: LinkCandidate | null = null;
+  /**
+   * Connections that authenticate beside a `candidate` dialled in and unproven (`contend`), oldest first: whichever
+   * authenticates first takes over, so one that never does neither holds the place nor takes it from the contact's.
+   */
+  private contenders: LinkCandidate[] = [];
   private candidateEpoch = 0;
   /** The native dial a transport change has in flight, per transport (`prepareSwitch`). */
   private readonly switchDials = new Map<PairedTransport, Promise<void>>();
@@ -4226,6 +4240,7 @@ export class GhostLink {
     candidate?.session.stop();
     candidate?.reject(new Error("Transport change cancelled"));
     candidate?.channel.close();
+    this.dropContenders("Transport change cancelled");
     this.rtcCandidateWaiter?.reject(new Error("Transport change cancelled"));
     this.rtcCandidateWaiter = null;
     if (this.activeBinding && closeRtc) this.dataLink.close();
@@ -4289,6 +4304,7 @@ export class GhostLink {
         if (epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
         const candidate = this.candidate; this.candidate = null;
         candidate?.session.stop(); candidate?.reject(new Error("Candidate failed")); candidate?.channel.close();
+        this.dropContenders("Candidate failed");
         this.rtcCandidateWaiter = null;
         if (transport === "webrtc/1") this.dataLink.close();
       }
@@ -4298,10 +4314,44 @@ export class GhostLink {
   }
 
   private attachCandidate(channel: FrameChannel, binding: NativeBinding | undefined, plan: SwitchPlan): Promise<void> {
-    if (this.candidate || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
+    // One dialled in first and unproven keeps no place of its own: the contact's, or this side's own dial, authenticates
+    // beside it (`contend`).
+    if ((this.candidate && !this.contendable(plan)) || this.switcher.pending !== plan || !plan.choices.includes(binding?.transport ?? "webrtc/1")) {
       channel.close(); return Promise.reject(new Error("Obsolete or duplicate transport candidate"));
     }
-    return new Promise<void>((resolve, reject) => this.attach(channel, binding, { plan, resolve, reject }));
+    return new Promise<void>((resolve, reject) => this.contend(channel, binding, { plan, resolve, reject }));
+  }
+
+  /** The candidate waiting for `plan` (none: a replacement) was dialled in and has not authenticated yet. */
+  private contendable(plan?: SwitchPlan): boolean {
+    const held = this.candidate;
+    return !!held && held.plan === plan && this.unproven(held.channel) && held.session.state.status !== "ready";
+  }
+  /**
+   * A connection that authenticates beside the candidate held (`contenders`), or takes the place if none is. With
+   * `DIALED_IN_CONTENDERS` waiting already, the oldest dialled in and unproven of them gives its place up.
+   */
+  private contend(channel: FrameChannel, binding: NativeBinding | undefined, migration: { plan?: SwitchPlan; resolve(): void; reject(error: Error): void }): void {
+    if (this.candidate && this.contenders.length >= DIALED_IN_CONTENDERS) {
+      const at = this.contenders.findIndex(c => this.unproven(c.channel));
+      if (at < 0) { channel.close(); migration.reject(new Error("Obsolete or duplicate transport candidate")); return; }
+      const [oldest] = this.contenders.splice(at, 1);
+      traceLink(this.myPubKeyZ32, "dialed-in-dropped", { transport: oldest.binding?.transport });
+      oldest.session.stop(); oldest.reject(new Error("A newer connection took its place")); oldest.channel.close();
+    }
+    this.attach(channel, binding, migration);
+  }
+  /** One of the `contenders` authenticated first: it takes the candidate's place, and the candidate held closes. */
+  private promoteContender(channel: FrameChannel): boolean {
+    const at = this.contenders.findIndex(c => c.channel === channel);
+    if (at < 0) return false;
+    const [won] = this.contenders.splice(at, 1), held = this.candidate;
+    this.candidate = won;
+    if (held) { held.session.stop(); held.reject(new Error("Another connection authenticated first")); held.channel.close(); }
+    return true;
+  }
+  private dropContenders(reason: string): void {
+    for (const c of this.contenders.splice(0)) { c.session.stop(); c.reject(new Error(reason)); c.channel.close(); }
   }
 
   /**
@@ -4349,13 +4399,10 @@ export class GhostLink {
    */
   private attachReplacement(channel: FrameChannel, binding: NativeBinding): void {
     if (!this.options.pairing?.credentials.peerKey || !this.options.params.profile) { channel.close(); return; }
-    // A replacement dialled in that has not authenticated yet keeps no place against a newer one: whoever read the
-    // endpoint could otherwise hold it while the contact, back after a restart, is turned away.
-    const waiting = this.candidate;
-    if (waiting && !waiting.plan && this.unproven(waiting.channel) && waiting.session.state.status !== "ready") {
-      traceLink(this.myPubKeyZ32, "dialed-in-dropped", { transport: waiting.binding?.transport });
-      this.candidate = null; waiting.session.stop(); waiting.channel.close(); waiting.reject(new Error("A newer connection took its place"));
-    }
+    // A replacement dialled in that has not authenticated yet keeps no place of its own: a newer one authenticates beside
+    // it, and whichever does first takes over (`contend`). Whoever read the endpoint could otherwise hold the place, or
+    // take it from the contact's over and over, while the contact, back after a restart, is turned away.
+    if (this.contendable()) { this.contend(channel, binding, { resolve: () => {}, reject: () => {} }); return; }
     if (this.candidate) { channel.close(); return; }
     // Two dials crossed and both connected: the lower key's carries the chat. Here, the lower key's side, holding the
     // one it just dialled, refuses the contact's; the contact takes this one over as a replacement.
@@ -4450,6 +4497,8 @@ export class GhostLink {
       if ((!binding && !fingerprints) || !this.options.pairing) { channel.close(); migration?.reject(new Error("Connection binding unavailable")); return; }
       channel.onClose = () => {
         if (this.candidate?.channel === channel) { this.candidate.session.stop(); this.candidate = null; migration?.reject(new Error("Candidate connection closed")); }
+        const contender = this.contenders.findIndex(c => c.channel === channel);
+        if (contender >= 0) { this.contenders.splice(contender, 1)[0].session.stop(); migration?.reject(new Error("Candidate connection closed")); }
         if (this.channel === channel) {
           const wasLive = this.paired?.state.status === "ready";
           this.rejectWaiters(new Error("The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect."));
@@ -4519,10 +4568,11 @@ export class GhostLink {
           let carried: PairedFiles | null = null;
           let switched: { from?: PairedTransport; to: PairedTransport } | null = null, replaced = false;
           if (migration) {
-            if (this.candidate?.channel !== channel) { paired.stop(); channel.close(); return; }
+            if (this.candidate?.channel !== channel && !this.promoteContender(channel)) { paired.stop(); channel.close(); return; }
             const oldChannel = this.channel, oldPaired = this.paired, oldBinding = this.activeBinding;
             const from = oldPaired?.state.transport;
             this.candidate = null;
+            this.dropContenders("Another connection authenticated first");
             // Transfers in flight carry on over the new channel; they end only if it cannot take files. A replacement is a
             // new session on the contact's side: nothing of the old one carries over.
             const files = this.pairedFiles; this.pairedFiles = null;
@@ -4883,7 +4933,10 @@ export class GhostLink {
           }
         },
       });
-      if (migration) this.candidate = { channel, session: paired, binding, ...(migration.plan && { plan: migration.plan }), reject: migration.reject };
+      if (migration) {
+        const entry: LinkCandidate = { channel, session: paired, binding, ...(migration.plan && { plan: migration.plan }), reject: migration.reject };
+        if (this.candidate) this.contenders.push(entry); else this.candidate = entry;
+      }
       else this.paired = paired;
       paired.start();
       return;
