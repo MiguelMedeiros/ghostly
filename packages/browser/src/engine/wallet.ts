@@ -974,7 +974,8 @@ export class CashuWallet {
         // says it instead, with how much fits. Its coins are not split's, so `roomAt` would claim more than fits here.
         if(!/^Not enough funds available/.test(error instanceof Error?error.message:""))throw error;
         const fits=(sats:number)=>prepare(sats).then(()=>true,()=>false);
-        let low=0,high=Math.min(amount,total(proofs)-wallet.getFeesForProofs(asProofLike(proofs)).toNumber())-1;
+        // Below the amount asked, and at most what every coin brings in past its fee (all of it, at a mint that charges none).
+        let low=0,high=Math.min(amount-1,total(proofs)-wallet.getFeesForProofs(asProofLike(proofs)).toNumber());
         while(low<high){
           const middle=Math.ceil((low+high)/2);
           if(await fits(middle))low=middle;
