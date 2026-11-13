@@ -247,9 +247,16 @@
     "theGroup": "le groupe",
     "title": {
       "asked": "{{to}} a demandé à {{from}}",
+      "askedByMe": "Vous avez demandé à {{from}}",
       "askedGroup": "{{to}} a demandé au groupe",
+      "askedGroupByMe": "Vous avez demandé au groupe",
+      "askedMe": "{{to}} vous a demandé",
       "paying": "{{from}} paie {{to}}",
-      "sent": "{{from}} a envoyé à {{to}}"
+      "payingByMe": "Vous payez {{to}}",
+      "payingMe": "{{from}} vous paie",
+      "sent": "{{from}} a envoyé à {{to}}",
+      "sentByMe": "Vous avez envoyé à {{to}}",
+      "sentToMe": "{{from}} vous a envoyé"
     },
     "why": {
       "noPayments": "Son app n’accepte pas les paiements en groupe (mise à jour nécessaire), ou tous les moyens sont désactivés",
