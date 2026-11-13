@@ -198,6 +198,11 @@
   list-style: decimal;
   color: var(--muted);
 }
+/* Step 3 names the app by its title (40 characters): one word that long grew the list to it and took every step off a
+   phone's screen. */
+.ap-steps li {
+  overflow-wrap: anywhere;
+}
 .ap-steps li::marker {
   color: var(--cyan);
   font-family: var(--font-jetbrains), ui-monospace, monospace;
