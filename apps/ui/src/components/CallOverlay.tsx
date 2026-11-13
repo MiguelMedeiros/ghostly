@@ -489,7 +489,8 @@ export function CallOverlay({
             aria-label={isScreenSharing ? t("calls.stopSharing") : t("calls.shareScreen")}
             aria-pressed={isScreenSharing}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
+              // Its icon is the same on and off: in forced colors, where the accent goes, Highlight tells you are sharing.
+              isScreenSharing ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
             title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ? errorText(screenShareUnavailable, t) : t("calls.shareScreen")}
           >
