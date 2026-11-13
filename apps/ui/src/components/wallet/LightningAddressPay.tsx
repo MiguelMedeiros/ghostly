@@ -111,7 +111,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         {/* The server's own words, in any script: laid out by their own direction. */}
         {info.description && <p className={muted} dir="auto">{info.description}</p>}
         {over !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} data-testid="lnurl-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
-        {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
+        {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), unit, fee: formatAmount(quote.feeReserve, t.language), feeUnit: satsIn(t, real ? "mainnet" : "testnet", quote.feeReserve) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primary} disabled={over !== undefined} {...working} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
             <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
