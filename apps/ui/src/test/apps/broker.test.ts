@@ -356,7 +356,7 @@ describe("requests", () => {
     const { broker, host, run, posted, stops, clock } = setup();
     run();
     clock.t += 1_001;
-    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     expect(stops).toEqual([]);
     expect(broker.phase).toBe("running");
     // The one over: read by nothing (a getter on it would throw), the app stopped, its chat closed.
@@ -365,11 +365,11 @@ describe("requests", () => {
     expect(stops).toEqual(["protocol"]);
     expect(broker.phase).toBe("stopped");
     const before = posted.length;
-    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     await new Promise((done) => setTimeout(done, 0));
     expect(posted.length).toBe(before);
     expect(posted.filter((p) => p.message.error === "too-fast").length).toBe(STOP_REQUESTS_PER_SECOND - MINI_APP_LIMITS.requestsPerSecond);
-    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "storage.get").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
     expect(host.calls.filter((c) => c.op === "chat.close").length).toBe(1);
     expect(stops).toEqual(["protocol"]);
   });
@@ -479,6 +479,32 @@ describe("requests", () => {
     // A second later the budget is whole again.
     clock.t += 1_001;
     broker.message({ id: 100, type: "file", args: ["small.txt"] });
+    await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
+  });
+
+  it("storage.keys answers count in the same budget, by their JSON with its escapes", async () => {
+    // A full scope of 256-byte keys of control characters: one byte each kept, six each as JSON, ~3.7 MB a list.
+    // Uncounted, 50 lists a second made the page (and on Desktop the main thread) write ~185 MB of JSON a second.
+    const { host, broker, run, posted, clock } = setup();
+    run();
+    const keys = Array.from({ length: 2_400 }, (_, i) => String(i).padStart(4, "0") + "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes - 4));
+    for (const key of keys) await host.storage.set(REF, LINK, key, 1);
+    const listJson = JSON.stringify(keys).length;
+    expect(listJson).toBeGreaterThan(3_600_000);
+    clock.t += 1_001;
+    for (let id = 1; id <= 50; id++) broker.message({ id, type: "storage.keys", args: [] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 1).length).toBe(50));
+    const answers = posted.filter((p) => (p.message.id as number) >= 1).map((p) => p.message);
+    // Each list that starts under 16 MiB is answered whole: five, the rest refused unread.
+    const lists = Math.ceil(MINI_APP_LIMITS.fileBytesPerSecond / listJson);
+    expect(answers.filter((a) => a.ok === true).length).toBe(lists);
+    expect(answers.filter((a) => a.error === "too-fast").length).toBe(50 - lists);
+    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(lists);
+    const written = answers.reduce((sum, a) => sum + JSON.stringify(a).length, 0);
+    expect(written).toBeLessThan(MINI_APP_LIMITS.fileBytesPerSecond + listJson + 50 * 100);
+    // A second later the budget is whole again.
+    clock.t += 1_001;
+    broker.message({ id: 100, type: "storage.keys", args: [] });
     await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
   });
 

@@ -138,6 +138,19 @@ export async function signInForProof(options: {
     const request = await authorizationRequest({ ...options, redirectUri: w.redirectUri, statePrefix: w.statePrefix });
     const redirected = await w.authorize(request.url, options.signal);
     options.signal.throwIfAborted();
-    return await completeSignIn(options.provider, request, redirected, options);
+    const idToken = await completeSignIn(options.provider, request, redirected, options);
+    refuseUnchosenClaims(options.provider, idToken, options.reveal);
+    return idToken;
   } finally { w.close(); }
+}
+
+/** A token the provider filled with more than the person chose to share never becomes evidence: it would go to every contact. */
+export function refuseUnchosenClaims(provider: OidcProvider, idToken: string, reveal: OidcReveal[]): void {
+  const { claims } = decodeIdToken(idToken);
+  for (const [claim, coveredBy] of Object.entries(provider.disclosing ?? {})) {
+    if (claims[claim] === undefined || reveal.includes(coveredBy)) continue;
+    throw new Error(claim === 'hd'
+      ? `This is a work or school ${provider.name} account: ${provider.name} adds its organisation’s domain to the sign-in, and your contacts would see it. Choose to share your email too, or sign in with a personal account.`
+      : `${provider.name} added more to the sign-in than you chose to share. Choose to share your ${coveredBy} too, or sign in with another account.`);
+  }
 }

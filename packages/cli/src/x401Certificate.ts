@@ -100,7 +100,7 @@ function pathProblem(certs: X509Certificate[], anchor: X509Certificate | undefin
     if (usages && !usages.includes(OID.serverAuth) && !usages.includes(OID.anyExtendedKeyUsage)) return "a certificate's extended key usage is not for servers";
   }
   if (read[0].keyUsage && !read[0].keyUsage(DIGITAL_SIGNATURE)) return "the leaf certificate's key usage does not allow signing";
-  const names = [...read[0].dns, host].map((name) => name.toLowerCase());
+  const names = [...read[0].dns, host].map(dnsForm);
   for (let i = 1; i < all.length; i++) {
     const { pathLen, permitted, excluded } = read[i];
     // The CAs between this one and the leaf; a self-issued one does not count (RFC 5280 §4.2.1.9).
@@ -114,10 +114,13 @@ function pathProblem(certs: X509Certificate[], anchor: X509Certificate | undefin
 
 /** A DNS name within a constraint's base: the base itself or a name below it; below it only, when the base starts with `.`. */
 function within(name: string, base: string): boolean {
-  const b = base.toLowerCase();
+  const b = dnsForm(base);
   if (!b) return true;
   return b.startsWith(".") ? name.endsWith(b) : name === b || name.endsWith(`.${b}`);
 }
+
+/** A DNS name as the constraints compare it: lower case, without the root's trailing dots (`a.example.` is `a.example`). */
+const dnsForm = (name: string) => name.toLowerCase().replace(/\.+$/, "");
 
 const commonName = (cert: X509Certificate) => cert.subject.split("\n").find((part) => part.startsWith("CN="))?.slice(3) ?? cert.subject;
 

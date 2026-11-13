@@ -198,7 +198,7 @@ async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, picked: number) {
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number) {
   if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"));
@@ -215,7 +215,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const size = source.size;
   const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
   const fileId = groupFileId(group.id, "out");
-  const file: MessageFile = { id: fileId, name: sanitizeFileName(str(params, "name") ?? basename(path)), size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+  const file: MessageFile = { id: fileId, name, size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
   const timestamp = Date.now();
   const bytes = await fileBytes();
   const digest = await whileUnchanged(path, () => bytes.stage(fileId, source));
@@ -325,10 +325,12 @@ function waitsForYou(name: string | undefined, fileId: string, where: { chat: st
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
-    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety).
-    guardText(str(params, "name"), bool(params, "force"), "file's name", "send it");
-    const target = chatOrGroupOf(ctx, params);
     const path = resolve(str(params, "path", true));
+    // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety): the name that goes out,
+    // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
+    const name = sanitizeFileName(str(params, "name") ?? basename(path));
+    guardText(name, bool(params, "force"), "file's name", "send it");
+    const target = chatOrGroupOf(ctx, params);
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
@@ -340,7 +342,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // nobody joined yet: none.
     const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
-    if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
+    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
     // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
@@ -358,7 +360,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await whileUnchanged(path, () => readImageMeta(source, mime));
     const wireId = toBase64Url(randomBytes(12));
-    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name, size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await whileUnchanged(path, () => bytes.stage(file.id, source));

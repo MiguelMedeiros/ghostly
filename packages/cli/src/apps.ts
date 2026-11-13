@@ -1,13 +1,13 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
-  readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
-import { isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
+import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
 import { jsonOut } from "./jsonOut";
@@ -129,6 +129,15 @@ function madeKeyNote(path: string, kind: KeyKind, key: string): string {
 const refused = (what: string, reading: { reason: string; detail?: string }, extra: Record<string, unknown> = {}) =>
   new CliError("refused", `${what} (${reading.reason}${reading.detail ? `: ${reading.detail}` : ""})`, { reason: reading.reason, ...(reading.detail ? { detail: reading.detail } : {}), ...extra });
 
+/**
+ * Refuses JSON that writes a key twice in one object, as `readAppListing` does: JSON.parse keeps the last value, where a
+ * person reading the file sees the first, so what is signed is not what was read. `text` is JSON that JSON.parse took.
+ */
+function refuseRepeatedKey(path: string, text: string): void {
+  const twice = repeatedJsonKey(text);
+  if (twice !== null) throw refused(`${path} writes a key twice`, { reason: "not-json", detail: `${JSON.stringify(twice)} is written twice` });
+}
+
 /** A bundle file's bytes: its size is checked before it is read, so a huge file is refused unread. */
 function readBundleFile(path: string): Uint8Array {
   const info = statSync(path);
@@ -140,7 +149,8 @@ function readBundleFile(path: string): Uint8Array {
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
- * 16 MiB.
+ * 16 MiB. A redirect stays on the URL's own host and port or goes to a host a client reads from (isAppFetchUrl): never
+ * a host or port of the server's choosing on this machine's network.
  */
 async function fetchBundle(url: string): Promise<Uint8Array> {
   // One wait for the URL, its redirects and its body together: a host that redirects just before a wait runs out
@@ -152,6 +162,9 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
       throw new CliError(hop ? "refused" : "usage", hop
         ? `${url} redirects to ${at}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
         : `Not a URL a client reads: https only, at most ${APP_BUNDLE_LIMITS.url} characters, no user or password, and jsDelivr only as https://cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/<path>`);
+    }
+    if (hop && new URL(at).host !== new URL(url).host && !isAppFetchUrl(at)) {
+      throw new CliError("refused", `${url} redirects to ${at}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
     }
     let response: Response;
     try {
@@ -367,15 +380,25 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
-const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+/** `path` with its symlinks followed, as far as it exists (the rest, not made yet, kept as written). */
+function realPath(path: string): string {
+  try { return realpathSync(path); } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realPath(parent), basename(path));
+  }
+}
+/** {@link isUnder} as written or through a symlink: another name for the folder (or for the file) is the same place. */
+const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(realPath(dir), realPath(path));
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
 
 function readSource(path: string): Record<string, unknown> {
   if (!existsSync(path)) throw new CliError("not_found", `No ${APP_SOURCE} in ${dirname(path)}: it holds the manifest's fields (name, version, title, tagline, entry, permissions, runtime, license, ...) but publisher, sequence and files, which publish writes`);
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(path, "utf8")); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  let text: string, value: unknown;
+  try { text = readFileSync(path, "utf8"); value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  refuseRepeatedKey(path, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${path} is not a JSON object`);
   const draft = value as Record<string, unknown>;
   const written = WRITTEN.filter((k) => k in draft);
@@ -575,19 +598,24 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
  * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
  * store is another `--out`), or when a `ghostly-store.json` or `.sig` there does not read as a signed index. The key is
- * made only when neither is there.
+ * made only when neither is there, and never read or made inside the output folder, which is published.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = userPath(indexArg);
   const keyPath = userPath(keyArg);
   const outDir = userPath(outArg ?? dirname(indexPath));
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(indexPath, "utf8")); } catch (error) {
+  let text: string, value: unknown;
+  try { text = readFileSync(indexPath, "utf8"); value = JSON.parse(text); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
     throw localFileError(error, indexPath) ?? error;
   }
+  refuseRepeatedKey(indexPath, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
+  // The folder is published (a repository served raw): a store key there signs any index for every client of the store.
+  if (isInside(outDir, keyPath)) {
+    throw refused(`${keyPath} is inside ${outDir}, which is published: keep the store key outside the store's folder (and its repository)`, { reason: "private-key" });
+  }
 
   // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
   const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);

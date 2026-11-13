@@ -158,6 +158,37 @@ describe("the CLI's Mainline DHT node, asked by a stranger", { timeout: 30_000 }
     expect(got?.r?.values).toBeUndefined();
   });
 
+  it("refuses a signed put whose value is no string of at most 1000 bytes, or whose seq is no integer, and serves none of them", async () => {
+    const { stranger } = await nodeAndStranger();
+    const putSigned = async (v: Value, seq: Value) => {
+      const secret = ed25519.utils.randomSecretKey();
+      const k = Buffer.from(ed25519.getPublicKey(secret));
+      const sig = Buffer.from(ed25519.sign(encode({ seq, v }).subarray(1, -1), secret));
+      const target = sha1(k);
+      const token = (await stranger.ask("get", { target }))?.r?.token as Buffer;
+      const put = await stranger.ask("put", { token, k, v, seq, sig });
+      const got = await stranger.ask("get", { target });
+      return { put, got };
+    };
+    // A dictionary or a list has no length bittorrent-dht reads: a 60 KB one was stored and served to any get.
+    for (const [v, seq, code] of [
+      [{ a: randomBytes(4_000) }, 1, 205],
+      [[randomBytes(600), randomBytes(600)], 1, 205],
+      [randomBytes(1_001), 1, 205],
+      [Buffer.from("a packet"), Buffer.from("1"), 203],
+      [Buffer.from("a packet"), -1, 203],
+    ] as Array<[Value, Value, number]>) {
+      const { put, got } = await putSigned(v, seq);
+      expect(put?.y).toBe("e");
+      expect(put?.e?.[0]).toBe(code);
+      expect(got?.y).toBe("r");
+      expect(got?.r?.v).toBeUndefined();
+    }
+    const { put, got } = await putSigned(randomBytes(1_000), 1_700_000_000_000_000);
+    expect(put?.y).toBe("r");
+    expect((got?.r?.v as Buffer).length).toBe(1_000);
+  });
+
   it("keeps a signed mutable item (what Pkarr is made of) and serves it, for two hours", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { stranger } = await nodeAndStranger();

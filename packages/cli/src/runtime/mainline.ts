@@ -27,6 +27,14 @@ export interface MainlineOptions {
 
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
+/**
+ * What a `get` takes from the nodes that answer: a record signed without salt (Pkarr has none). bittorrent-dht reads a
+ * reply's `salt` (`Buffer.concat` with the key) only once it is verified, and a number there threw in its socket handler:
+ * any node a lookup asked, signing with its own key, raised an error nobody caught. Signed data is `4:salt…` with a salt.
+ */
+const SALTED = Buffer.from("4:salt");
+const verifyUnsalted = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) =>
+  !Buffer.from(message.buffer, message.byteOffset, Math.min(message.length, SALTED.length)).equals(SALTED) && verify(sig, message, key);
 
 /** Queries the node answers, a second: from each address (as libtorrent's default), and from all of them together. */
 const QUERY_LIMITS = { perAddress: 5, perAddressBurst: 20, total: 50, totalBurst: 200 };
@@ -72,7 +80,7 @@ export class DhtQueryLimit {
   }
 }
 
-type Query = { q?: Buffer | string; a?: { k?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
+type Query = { q?: Buffer | string; a?: { k?: unknown; v?: unknown; seq?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
 type QueryPeer = { address: string; port: number };
 /** The parts of bittorrent-dht's node (no API for them) through which it answers queries. */
 interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { error(peer: QueryPeer, query: Query, error: [number, string]): void } }
@@ -84,14 +92,18 @@ interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { 
  */
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
 const bytes = (value: unknown, length: number): boolean => Buffer.isBuffer(value) && value.length === length;
+/** BEP44's bound on an item's value, which bittorrent-dht checks only on what has a `length` (not a dictionary). */
+const VALUE_MAX = 1_000;
 
 /**
  * What the node answers strangers: queries at `DhtQueryLimit`'s rate, ping, find_node and get/get_peers as BEP5/BEP44
  * say, and puts of signed mutable items only, which is what Pkarr packets are (the testnet's nodes and the public DHT
  * keep each other's that way). It refuses what the app has no use for and bittorrent-dht kept for anyone and served to
- * anyone: immutable items and peers announced for torrents. A query whose hash, key, signature or salt is not the
- * string BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error
- * nobody caught, one per datagram. It is refused before bittorrent-dht reads it.
+ * anyone: immutable items and peers announced for torrents. A put's value is a string of at most 1000 bytes and its seq
+ * a non-negative integer, as every Pkarr packet's: bittorrent-dht bounds only a value with a `length`, so a dictionary
+ * of 60 KB was kept and served whole to every get. A query whose hash, key, signature or salt is not the string
+ * BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error nobody
+ * caught, one per datagram. It is refused before bittorrent-dht reads it.
  */
 function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
   const node = dht as unknown as DhtInternals;
@@ -101,7 +113,9 @@ function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
     const q = query.q?.toString(), a = query.a ?? {};
     if (q === "announce_peer") return node._rpc.error(peer, query, [204, "announce_peer is not served here"]);
     if (q === "put" && (!bytes(a.k, 32) || !bytes(a.sig, SIGNATURE))) return node._rpc.error(peer, query, [203, "only signed mutable items are stored here"]);
+    if (q === "put" && !(Buffer.isBuffer(a.v) && a.v.length <= VALUE_MAX)) return node._rpc.error(peer, query, [205, "only values of at most 1000 bytes are stored here"]);
     const malformed = ((q === "get" || q === "find_node") && !bytes(a.target, 20)) || (q === "get_peers" && !bytes(a.info_hash, 20))
+      || (q === "put" && !(Number.isSafeInteger(a.seq) && (a.seq as number) >= 0))
       || (q === "put" && a.salt !== undefined && !(Buffer.isBuffer(a.salt) && a.salt.length <= 64));
     if (malformed) return node._rpc.error(peer, query, [203, "malformed query"]);
     try { answer(query, peer); } catch { /* a query bittorrent-dht could not read goes unanswered */ }
@@ -178,14 +192,18 @@ export class Mainline {
     // A mutable item without salt is found under the SHA-1 of its public key (BEP44).
     const target = createHash("sha1").update(k).digest();
     return this.bounded(new Promise((resolve, reject) => {
-      this.dht.get(target, { cache: false }, (error, found) => {
+      this.dht.get(target, { cache: false, verify: verifyUnsalted }, (error, found) => {
         if (error) return reject(error);
-        if (!found?.v || !found.sig) return resolve(null);
-        const timestamp = new Uint8Array(TIMESTAMP);
-        new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
-        const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
-        payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
-        try { resolve(parseRelayPayload(pubKeyZ32, payload)); } catch { resolve(null); }
+        // A record is what its node sent, checked only by its signature: one signed with no `seq` (bittorrent-dht signs
+        // `seq || 0`) or with a dictionary for `v` threw here, out of the socket's handler.
+        if (!found || !Buffer.isBuffer(found.v) || !Buffer.isBuffer(found.sig) || !Number.isSafeInteger(found.seq) || found.seq < 0) return resolve(null);
+        try {
+          const timestamp = new Uint8Array(TIMESTAMP);
+          new DataView(timestamp.buffer).setBigUint64(0, BigInt(found.seq));
+          const payload = new Uint8Array(SIGNATURE + TIMESTAMP + found.v.length);
+          payload.set(found.sig, 0); payload.set(timestamp, SIGNATURE); payload.set(found.v, SIGNATURE + TIMESTAMP);
+          resolve(parseRelayPayload(pubKeyZ32, payload));
+        } catch { resolve(null); }
       });
     }));
   }

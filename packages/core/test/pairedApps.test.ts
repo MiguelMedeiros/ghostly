@@ -7,7 +7,7 @@ import { LIMITS, type FrameChannel } from "../src/frames";
 import { GhostLink, type GhostLinkOptions } from "../src/ghostlink";
 import { createIdentity, identityFromSeed } from "../src/identity";
 import { createLink } from "../src/invite";
-import { APPS_CAPABILITY, KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
+import { APPS_CAPABILITY, KNOWN_SESSION_CAPABILITIES, sessionCapabilitiesFrame } from "../src/pairedCapabilities";
 import { isAppRef } from "../src/appStatements";
 import {
   APP_DATA_MAX_BYTES, APP_FRAME, APP_PEER_OPEN_MAX, APP_RATE_LIMIT, APP_RESUME_GRACE_MS, APP_RATE_WINDOW_MS, APP_SEND_LIMIT, AppSessions, appCloseFrame, appDataBytes,
@@ -206,6 +206,27 @@ describe("the receiver's limits", () => {
     expect(apps.receive(wire(appDataFrame(id, "late")))).toBeNull();
     clock.now += 1;
     expect(taken()).toBe(APP_RATE_LIMIT);
+  });
+
+  it("keeps each app's 50 a second, both ways, across sessions that end or are replaced", () => {
+    const { apps, clock } = sessions();
+    apps.open.set(id, "1.0.0");
+    let taken = 0, sent = 0;
+    // Before, each end or suspension gave the app a new window: 100 rounds took 4,900 frames in one second.
+    for (let round = 0; round < 100; round++) {
+      apps.receive(wire(appOpenFrame(id, "1.0.0")));
+      for (let n = 0; n < 2 * APP_RATE_LIMIT; n++) {
+        if (apps.receive(wire(appDataFrame(id, n)))) taken++;
+        if (apps.canSend(id, n) === null) sent++;
+      }
+      if (round % 2) apps.sessionEnded(); else apps.sessionSuspended();
+    }
+    expect(taken).toBeLessThan(APP_RATE_LIMIT);
+    expect(sent).toBe(APP_SEND_LIMIT);
+    clock.now += APP_RATE_WINDOW_MS;
+    apps.receive(wire(appOpenFrame(id, "1.0.0")));
+    expect(apps.receive(wire(appDataFrame(id, "next")))).toEqual({ app: id, d: "next" });
+    expect(apps.canSend(id, "next")).toBeNull();
   });
 
   it("keeps at most 16 apps the peer has open", () => {
@@ -510,6 +531,28 @@ describe("apps on a paired session (apps/1)", () => {
     const data = b.events.slice(before);
     // Counted before they are read: the open and the oversized frame took two of B's 50.
     expect(data).toEqual(Array.from({ length: APP_RATE_LIMIT - 2 }, (_, n) => ({ app, d: n })));
+    expect(b.link.isDataLinkOpen).toBe(true);
+  });
+
+  it("keeps an app's 50 a second while the peer turns apps/1 off and on", async () => {
+    const { a, b, app } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
+    a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+    await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+    const channel = (a.link as unknown as { channel: FrameChannel }).channel;
+    const before = b.events.length;
+    // Sent straight on the channel: each round, apps/1 off and on again, the app open again, then 40 frames.
+    for (let round = 0; round < 3; round++) {
+      channel.send(JSON.stringify(sessionCapabilitiesFrame([])));
+      channel.send(JSON.stringify(sessionCapabilitiesFrame([APPS_CAPABILITY])));
+      channel.send(JSON.stringify(appOpenFrame(app, "1.0.0")));
+      for (let n = 0; n < 40; n++) channel.send(JSON.stringify(appDataFrame(app, `${round}.${n}`)));
+      await vi.waitFor(() => expect(b.link.peerApps.has(app)).toBe(true));
+      await pause();
+    }
+    // Before, each turn gave the app a new window: all 120 were taken.
+    expect(b.events.slice(before).filter(event => "d" in event).length).toBeLessThan(APP_RATE_LIMIT);
     expect(b.link.isDataLinkOpen).toBe(true);
   });
 
