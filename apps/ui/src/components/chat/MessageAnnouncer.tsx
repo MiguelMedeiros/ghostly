@@ -120,7 +120,7 @@ const noteOpen = (note: GroupPayNote) => note.state !== "paid" && note.state !==
  * Failed, Taken back), once; a group's payment note too (`noteLine`). Never their first draw: what the chat had as it
  * opened, a payment just in the chat (its arrival is said), one the wallet comes to know.
  */
-export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, active = true }: {
+export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, active = true, ready = true }: {
   chat: string;
   /**
    * The chat as its bubbles are given it (`MessageBubble`'s `linkId`): an app card is read as its card where they draw
@@ -133,6 +133,11 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
   noteLine?(note: GroupPayNote): string;
   /** The chat is on screen. A chat kept open behind another one reads nothing out. */
   active?: boolean;
+  /**
+   * The chat's history is in. Until it is, what the chat has is not what it had as it opened (a group's history comes
+   * a moment after its first draw): what it has once its history is in is history, not news.
+   */
+  ready?: boolean;
 }) {
   const { t } = useI18n();
   const online = useOnline();
@@ -287,9 +292,10 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
 
   useEffect(() => {
     const known = seen.current;
-    // A chat just opened (or another one): what it already has is history, not news.
-    if (!known || known.chat !== chat) {
-      seen.current = { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id, at: messages.length - 1 };
+    // A chat just opened (or another one): what it already has is history, not news. One whose history is not in yet
+    // takes it once it is.
+    if (!ready || !known || known.chat !== chat) {
+      seen.current = ready ? { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id, at: messages.length - 1 } : null;
       files.current = new Map(messages.filter(followed).map(m => [m.file.id, heardNow(m, -Infinity)]));
       watched.current = new Map();
       payments.current = new Map();
@@ -357,7 +363,7 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
         : t("chat.announce.messages", { count: batch.length }));
       sayRef.current(line);
     }, ANNOUNCE_WINDOW_MS);
-  }, [chat, messages, active]);
+  }, [chat, messages, active, ready]);
 
   useEffect(() => () => { clearTimeout(timers.current.flush); clearTimeout(timers.current.clear); clearTimeout(timers.current.turns); }, []);
   // Another chat: nothing of the last one is read out in this one.
