@@ -17,8 +17,12 @@ const READS = [
 /**
  * Changes that stay on this device: no contact and no relay hears of them. This profile's status too: no relay carries
  * it, and only a live session says it (a one-shot waits for none; the daemon, or the profile's next run online, does).
+ * An app served or unserved too: served.json, read when the profile next starts.
  */
-const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set", "x401 credential add", "x401 credential remove", "x401 key new"];
+const LOCAL_WRITES = [
+  "app serve", "app unserve", "chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set",
+  "x401 credential add", "x401 credential remove", "x401 key new",
+];
 /**
  * Said on a live session only: a one-shot starts the chat or group as it says it, so it reaches nobody (it waited for
  * the relays all the same). Offline unless `--for` waits for the chat to be live.
@@ -43,7 +47,6 @@ const ONLINE = [
   "service close", "service enable", "service remove", "service share",
   // A one-shot online may see a call ring, and decline it.
   "call answer", "call flush", "call hangup",
-  "app serve", "app unserve",
 ];
 
 describe("which one-shots open the profile offline", () => {
