@@ -6,6 +6,7 @@ import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shar
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto, sameNamed } from "../lib/groups";
+import { reachDot } from "../lib/connection";
 import { useComposition } from "../hooks/useComposition";
 import { useGroupNameField } from "../hooks/useGroupNameField";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -277,8 +278,8 @@ const MemberRow = memo(function MemberRow({ member: m, focused, out, viaHub, pho
   return <li data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={focused || undefined}
     className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${focused ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
     {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
-    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
-      : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
+    {out ? null : viaHub ? <span role="img" aria-label={t("group.member.viaHub")} className={`h-2 w-2 shrink-0 rounded-full ${reachDot("bg-text-muted/50")}`} />
+      : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${reachDot(m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted")}`} />}
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">
