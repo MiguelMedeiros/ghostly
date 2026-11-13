@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
-import { verifyApp, writeWhole } from "../src/apps";
+import { publishApp, verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: apps.bundle, apps.store
@@ -256,6 +256,20 @@ describe("app publish", () => {
     // Code that only names the block (a PEM parser) is not a key.
     const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode('const head = "-----BEGIN PRIVATE KEY-----";\n')]]));
     expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
+  }, 60_000);
+
+  it("reads a file of key headers with no end once: 1 MiB of them publishes in moments, a key after them is still found", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // Cut keys (a test fixture, a log): each header and a body line, never an END. Each header was read to the end of
+    // the file again, about 30 s for this 1 MiB.
+    const cut = `-----BEGIN PRIVATE KEY-----\n${"MC4CAQAwBQYDK2VwBCIEI".repeat(3)}\n`.repeat(1024 * 1024 / 92);
+    const dir = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut)]]));
+    const started = performance.now();
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["fixtures/cut.pem", "index.html"] });
+    expect(performance.now() - started).toBeLessThan(3_000);
+    const leaky = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut + readFileSync(key, "utf8"))]]));
+    await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
   }, 60_000);
 
   it("lists a folder's files in the manifest's order when a file and a folder share a prefix", async () => {
