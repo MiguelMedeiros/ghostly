@@ -188,7 +188,6 @@
   "sharePresenceHint": "Tus contactos ven un punto mientras usas Ghostly. Un estado que pongas se ve igualmente.",
   "shareProfile": "Compartir mi nombre y foto con los contactos",
   "shareProfileHint": "Tus contactos ven el nombre y la foto de este perfil. Desactivado, ven “Contacto” y un patrón en su lugar.",
-  "sourceCode": "Código fuente",
   "stayConnected": "Mantener la conexión en segundo plano",
   "stayConnectedHint": "Los chats y grupos siguen conectados mientras Ghostly no está a la vista, con una notificación discreta. Usa más batería.",
   "stayConnectedStopped": "Android detuvo Ghostly en segundo plano",
@@ -231,12 +230,6 @@
     "large": "Grande",
     "larger": "Más grande",
     "small": "Pequeño"
-  },
-  "theme": "Tema",
-  "themes": {
-    "dark": "Oscuro",
-    "light": "Claro",
-    "system": "Sistema"
   },
   "timeout": "Bloquear después de",
   "timeoutOptions": {

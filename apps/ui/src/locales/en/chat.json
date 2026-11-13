@@ -241,7 +241,6 @@
     "newOne": "1 new message, scroll to bottom"
   },
   "keyChanged": "This chat stopped: your contact's key changed.",
-  "lastSeen": "Last seen {{time}}",
   "listTime": {
     "days": "{{count}}d",
     "hours": "{{count}}h",
@@ -484,7 +483,6 @@
     "showTranslation": "Show translation",
     "translate": "Translate"
   },
-  "typeMessage": "Type a message...",
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",

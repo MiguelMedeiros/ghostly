@@ -61,7 +61,6 @@
     "tooLong": "Message too long",
     "tooLongNext": "Shorten it or send it as a file."
   },
-  "connectionFailed": "Connection failed",
   "devices": {
     "digitsEnded": "Adding this device has ended",
     "digitsEndedNext": "Start again from Add a device.",
@@ -406,7 +405,6 @@
     "refused": "{{host}} refused the request",
     "tooSlow": "The server took too long to answer"
   },
-  "messageFailed": "Failed to send message",
   "pay": {
     "alreadyPaid": "You already paid this request",
     "bothNeed": "You and your contact both need {{rail}}, with the chat live",
