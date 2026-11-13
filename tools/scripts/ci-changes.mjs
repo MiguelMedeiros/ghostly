@@ -318,8 +318,11 @@ export function plan(files, { draft, tested = false, superseded = false }) {
   // No file list runs Tauri Backend unless it is a draft.
   const rust = all ? !draft : files.some((f) => covers(RUST_INPUTS, f) || (!draft && covers(RUST_JOB, f)));
   if (!all && !rust) why.push("Nothing the Rust job reads changed: Tauri Backend skipped");
-  // Then the tier: a draft keeps only the fast jobs.
-  if (draft) why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+  // Then the tier: a draft keeps only the fast jobs, and the site's checks and the Rust job when their gates are on.
+  if (draft) {
+    const fast = ["lint and types", "the affected unit tests", ...(site ? ["Website"] : []), ...(rust ? ["Tauri Backend"] : [])];
+    why.push(`Draft: the fast tier only (${fast.join(", ")}). Leaving draft runs everything`);
+  }
   return {
     lint: true,
     rust,
