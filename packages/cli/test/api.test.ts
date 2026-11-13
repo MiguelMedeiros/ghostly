@@ -867,6 +867,18 @@ describe("chats", () => {
     expect(removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
   });
 
+  // `engine clearProfileData` took every chat's row with the removals still on their way, as `chat remove` no longer does.
+  it("engine clearProfileData is refused while a delete for everyone is on its way in any chat, until --force", async () => {
+    const { ctx, node } = fake();
+    const clearProfileData = vi.fn(async () => undefined);
+    Object.assign(node, { clearProfileData, removalsPending: ({ linkId }: { linkId: string }) => (linkId === "chat-two" ? ["m2"] : []) });
+    Object.assign(ctx, { mode: "one-shot" });
+    await expect(callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("clearing the profile now"), details: { messages: ["m2"] } });
+    expect(clearProfileData).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true, force: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+    expect(clearProfileData).toHaveBeenCalledOnce();
+  });
+
   // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
   it("each confirm refusal names the flag first, the socket's name after it", async () => {
     const { ctx } = fake();
@@ -1223,7 +1235,7 @@ describe("the engine passthrough", () => {
   it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
     const { ctx, node } = fake();
     const stop = vi.fn();
-    Object.assign(node, { clearProfileData: vi.fn(async () => undefined) });
+    Object.assign(node, { clearProfileData: vi.fn(async () => undefined), removalsPending: () => [] });
     Object.assign(ctx, { stop });
     vi.useFakeTimers();
     try {
