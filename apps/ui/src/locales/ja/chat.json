@@ -14,6 +14,7 @@
     "messagesFrom": "{{name}} から新着メッセージ {{count}} 件",
     "notSent": "あなたのメッセージ「{{text}}」は送信されませんでした",
     "notSentCount": "未送信のメッセージ {{count}} 件",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "ピン留めしたチャット {{count}} 件中 {{place}} 番目に移動しました",
     "rowMoved": "{{count}} 件中 {{place}} 番目に移動しました",
     "waiting": "あなたのメッセージ「{{text}}」は相手がオンラインになるのを待っています",
