@@ -280,11 +280,13 @@ export function identityKeys(db: string): Set<string> {
  * The backup whose store is in `db` is of the same person as profiles of this home (WISP 05 § Restoring on the same
  * device): a copy beside them would answer their contacts as them, and with both running messages land in either one
  * and wallets race on the same funds. Refused, naming them, unless `copy` says to make it anyway. Each profile's store
- * is read from its files, a running one's too; one that cannot be read is no match.
+ * is read from its files, a running one's too; one that cannot be read is no match, and a backup whose store this
+ * cannot read has nothing to compare.
  */
 export function refuseSameProfile(home: string, db: string, copy: boolean): void {
   if (copy) return;
-  const theirs = identityKeys(db);
+  let theirs: Set<string>;
+  try { theirs = identityKeys(db); } catch { return; }
   if (!theirs.size) return;
   const same = listProfiles(home).filter((name) => {
     try { return [...identityKeys(profilePaths(home, name).db)].some((key) => theirs.has(key)); } catch { return false; }

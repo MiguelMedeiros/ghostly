@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -60,4 +60,7 @@ it("a backup that shares only a chat's key with a profile here is the same perso
   expect(await shares([{ id: "chat-1", seedB64: createIdentity().seedB64, participationSeed: createIdentity().seedB64 }]), "another participation key").toBeNull();
   expect(await shares([{ id: "chat-3", seedB64: "not a seed" }]), "a key that is no seed matches nothing").toBeNull();
   expect(await shares([]), "nothing to compare").toBeNull();
+  const unread = mkdtempSync(join(tmpdir(), "ghostly-bundle-"));
+  writeFileSync(join(unread, "snapshot.bin"), "not a snapshot");
+  expect(refusal(home, unread), "a backup's store this cannot read has nothing to compare").toBeNull();
 });
