@@ -1,9 +1,9 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { oneChatOnly, readsNoHistory } from "../src/main";
+import { oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
 import { ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
-// covers: headless.one-shot
+// covers: headless.one-shot, headless.groups
 
 /** Pkarr relays on loopback that keep one store between them: each counts the requests that came to it. */
 async function relays(count: number) {
@@ -110,5 +110,72 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list"]) expect(readsNoHistory(method), method).toBe(true);
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
     for (const method of ["chat.history", "file.list", "payment.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+  });
+});
+
+/**
+ * A one-shot about one group that goes over its edges only (`group send`, `group edit`, `group react`, `group typing`)
+ * leaves the saved 1:1 chats unstarted. It started them all: with 12 invites saved their publishes took the relay's
+ * whole minute, the group's edge never came up behind them, and `group send --wait sent` and `group react` each timed
+ * out after 60 s, exit 4, with nothing said. Dave's requests come to a relay of his own, as Bob's above.
+ */
+describe("a one-shot about one group", { timeout: 300_000 }, () => {
+  let daveRelay: Awaited<ReturnType<typeof relays>>[number], erinRelay: typeof daveRelay;
+  let dht: Awaited<ReturnType<typeof hyperdhtTestnet>>;
+  const dave = home("one-shot-one-group-dave"), erin = home("one-shot-one-group-erin");
+  const running: Running[] = [];
+  let daveEnv: NodeJS.ProcessEnv, erinEnv: NodeJS.ProcessEnv;
+  let group = "";
+
+  beforeAll(async () => {
+    [daveRelay, erinRelay] = await relays(2);
+    dht = await hyperdhtTestnet();
+    daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+    const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
+    const daveDaemon = new Running(["--home", dave, "daemon"], daveEnv);
+    running.push(erinDaemon, daveDaemon);
+    await Promise.all([erinDaemon, daveDaemon].map((d) => d.waitFor((l) => l.daemon === "ready")));
+    // Dave joins Erin's private group through its link, then makes twelve invites nobody takes, and stops.
+    group = ok(await ghostly(["--home", erin, "group", "create", "Crew", "--mesh"], { env: erinEnv })).group as string;
+    const link = ok(await ghostly(["--home", erin, "group", "link", group], { env: erinEnv })).link as string;
+    ok(await ghostly(["--home", dave, "group", "join", link], { env: daveEnv }));
+    for (let i = 0; ; i++) {
+      const shown = ok(await ghostly(["--home", dave, "group", "show", group], { env: daveEnv }));
+      const members = shown.members as { online: boolean }[];
+      if (shown.status === "active" && members.length === 2 && members.every((m) => m.online)) break;
+      if (i > 90) throw new Error(`Dave not in the group: ${JSON.stringify(shown)}`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    for (let i = 0; i < 12; i++) ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }));
+    ok(await ghostly(["--home", dave, "daemon", "stop"], { env: daveEnv }));
+    await daveDaemon.exited(20_000);
+  }, 180_000);
+  afterAll(async () => {
+    await Promise.all(running.map((r) => r.stop()));
+    await dht?.destroy();
+    daveRelay?.close(); erinRelay?.close();
+  }, 30_000);
+
+  const counted = async (args: string[]) => {
+    daveRelay.requests.length = 0;
+    const result = await ghostly(["--home", dave, ...args], { env: daveEnv });
+    return { result, requests: daveRelay.requests.length };
+  };
+
+  it("group send and group react start the groups only, and an edge takes each", async () => {
+    const send = await counted(["group", "send", group, "hello from a one-shot", "--wait", "sent", "--timeout", "60"]);
+    const sent = ok(send.result);
+    expect(sent).toMatchObject({ group, sent: true });
+    const react = await counted(["group", "react", group, sent.messageId as string, "👍", "--timeout", "60"]);
+    expect(ok(react.result)).toMatchObject({ group, sent: true });
+    // 13 chats started asked the relay its whole 30 a minute and more; the group alone asks it 3 to 16 times.
+    for (const [name, requests] of [["group send", send.requests], ["group react", react.requests]] as const) expect(requests, name).toBeLessThan(24);
+  });
+
+  it("leaves the 1:1 chats unstarted only for what goes over the group's edges", () => {
+    for (const method of ["group.send", "group.edit", "group.react", "group.typing"]) expect(oneGroupOnly(method), method).toBe(true);
+    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by.
+    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
   });
 });
