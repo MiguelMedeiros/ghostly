@@ -1072,8 +1072,14 @@ export class Apps {
     return stores.filter((s) => s.index).map((s) => ({ key: s.key, name: s.index!.name, kind: s.index!.kind, removed: s.index!.removed, revoked: s.index!.revoked }));
   }
 
-  private listedBy(ref: string, stores: AddedAppStore[]): AppListedBy[] {
-    return stores.filter((s) => s.index?.apps.some((a) => a.ref === ref)).map((s) => ({ key: s.key, name: s.index!.name, kind: s.index!.kind }));
+  /**
+   * The stores that list this version of an app: a store vouches for what it lists (WISP 1200 § Publisher identity), the
+   * digest of its listing, not every version of the app. `pin`: the store an installed app's updates come from, whose
+   * listing may have moved on to a newer version the app has not taken yet; it took that store's listed digest.
+   */
+  private listedBy(version: { ref: string; digest: string }, stores: AddedAppStore[], pin?: string): AppListedBy[] {
+    return stores.filter((s) => s.index?.apps.some((a) => a.ref === version.ref && (a.digest === version.digest || s.key === pin)))
+      .map((s) => ({ key: s.key, name: s.index!.name, kind: s.index!.kind }));
   }
 
   private runStatus(version: AppVersion, views: AppStoreView[], revocations: readonly SignedAppRevocation[] = []): AppRunStatus {
@@ -1766,7 +1772,7 @@ export class Apps {
     this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now() });
     if (!this.sweep) this.sweepStaged();
 
-    const listedBy = this.listedBy(version.ref, stores);
+    const listedBy = this.listedBy(version, stores);
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
@@ -2313,7 +2319,7 @@ export class Apps {
 
   private async view(app: InstalledApp, stores: AddedAppStore[]): Promise<InstalledAppView> {
     const { manifest } = app;
-    const listedBy = this.listedBy(app.ref, stores);
+    const listedBy = this.listedBy(app, stores, app.store);
     const stopped = this.startedBefore(app).map((v) => ({ digest: v.digest, run: this.runStatus(v, this.storeViews(stores), app.revocations) })).filter((v) => v.run.status !== "ok");
     return {
       ref: app.ref, name: app.name, publisher: app.publisher, fingerprint: appFingerprint(app.publisher),
