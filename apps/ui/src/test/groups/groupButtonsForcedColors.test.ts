@@ -30,11 +30,30 @@ describe("a group's main buttons in forced colors", () => {
   it.each(FILES)("%s: every accent-filled button has a ButtonText border in forced colors only", (file) => {
     const buttons = accentButtons(file);
     expect(buttons.length, file).toBeGreaterThan(0);
-    for (const classes of buttons) {
-      const names = classes.split(/\s+/);
-      for (const name of EDGE) expect(names, `${file}: ${classes}`).toContain(name);
-      // Normal colours keep no border: only the forced-colors variant draws one.
-      expect(names.filter((n) => /^border(-|$)/.test(n)), `${file}: ${classes}`).toEqual([]);
-    }
+    for (const classes of buttons) keepsAnEdge(file, classes);
+  });
+
+  // A question's answer that ends something (Leave group, Remove, Turn off the link) is drawn by its red tint alone:
+  // forced colors drop the tint and its red, so it read as Cancel beside it.
+  it.each(DANGER_FILES)("%s: the danger-tinted answer has a ButtonText border in forced colors only", (file) => {
+    const buttons = dangerButtons(file);
+    expect(buttons.length, file).toBeGreaterThan(0);
+    for (const classes of buttons) keepsAnEdge(file, classes);
   });
 });
+
+const DANGER_FILES = ["components/LeaveGroupDialog.tsx", "components/RemoveMemberDialog.tsx", "components/GroupLinkAskDialog.tsx"];
+
+/** Each class string that tints a button with the danger colour behind danger ink: a question's answer that ends something. */
+function dangerButtons(file: string): string[] {
+  const source = readFileSync(join(SRC, file), "utf8");
+  return [...source.matchAll(/["`]([^"`]*\bbg-danger\/15\b[^"`]*)["`]/g)].map(([, classes]) => classes)
+    .filter((classes) => /\btext-danger-ink\b/.test(classes));
+}
+
+function keepsAnEdge(file: string, classes: string): void {
+  const names = classes.split(/\s+/);
+  for (const name of EDGE) expect(names, `${file}: ${classes}`).toContain(name);
+  // Normal colours keep no border: only the forced-colors variant draws one.
+  expect(names.filter((n) => /^border(-|$)/.test(n)), `${file}: ${classes}`).toEqual([]);
+}

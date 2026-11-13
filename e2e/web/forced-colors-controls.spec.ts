@@ -118,10 +118,10 @@ test("forced colors keep Settings' switches, the chosen Mode and Chat list optio
 
 /**
  * A group's main buttons, filled with the accent alone: forced colors fill them with the page's colour, so New group's
- * Create and an invitation's Accept (on the chat list's row and on the invitation's page) read as bare bold text. Each
- * keeps an edge there, and shows none in normal colours.
+ * Create and an invitation's Accept (on the chat list's row and on the invitation's page) read as bare bold text; Leave
+ * group's answer, tinted red alone, as Cancel. Each keeps an edge there, and shows none in normal colours.
  */
-test("forced colors keep an edge on New group's Create and an invitation's Accept", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.create", "@feature:groups.invite"] }, async ({ peer }) => {
+test("forced colors keep an edge on New group's Create, an invitation's Accept and Leave group's answer", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.create", "@feature:groups.invite"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await pair(alice, bob);
@@ -162,6 +162,13 @@ test("forced colors keep an edge on New group's Create and an invitation's Accep
   await keepsAnEdge(bob.page, invitation.getByTestId("group-accept"), "the invitation page's Accept");
   await bob.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
   await bob.page.screenshot({ path: test.info().outputPath("forced-group-invitation.png") });
+
+  // The answer that ends something, drawn by its red tint alone: it read as Cancel beside it.
+  await alice.page.getByTestId("group-options").click();
+  await alice.page.getByTestId("group-leave").click();
+  await keepsAnEdge(alice.page, alice.page.getByTestId("group-leave-confirm"), "Leave group's answer");
+  await alice.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  await alice.page.screenshot({ path: test.info().outputPath("forced-group-leave.png") });
 });
 
 /**
