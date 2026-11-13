@@ -150,7 +150,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       const touch = touchOnly();
       // A device code is not an invite: the words say which one to paste.
       if (value === null) { setError(said(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() }))); setManual(true); return; }
-      if (!value.trim()) { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); return; }
+      if (!value.trim()) {
+        const empty = () => { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); };
+        // No text, but the app may hold a picture there (a screenshot of the QR): read as Ctrl+V on the dialog reads one.
+        const picture = platformPastedImage(IMAGE_MAX);
+        if (picture) readHeld(picture, false, empty); else empty();
+        return;
+      }
       setInput(value.trim()); setPastes(count => count + 1);
       accept(value.trim());
     } finally {
@@ -207,8 +213,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     readHeld(reading, picture || pasteNamesFiles(event.clipboardData));
   };
   // A picture the app holds (pasted, or dropped from another app), weighed as it was read. `named`: files or a picture
-  // were offered, so finding none is said.
-  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean) => {
+  // were offered, so finding none is said; otherwise `none` says it, if anything.
+  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean, none?: () => void) => {
     stop(); setError(null); busyRef.current = true; setBusy(true);
     const current = generation.current;
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
@@ -219,6 +225,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       else if (found) void readImage(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(said(t("join.imageFailed")));
+      else none?.();
     }, (cause: unknown) => {
       // In the dialog's own words: the composer's point at its +, which Join has none of.
       if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
