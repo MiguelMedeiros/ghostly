@@ -273,8 +273,9 @@ const waitable = (options: PkarrRequestOptions): boolean =>
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
  * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
- * request budget held it back (the DHT has no budget). A background read the budget holds waits for it. Background reads
- * the DHT answers in the relays' place keep to the relays' background share (`DhtBackgroundBudget`).
+ * request budget held it back (the DHT has no budget), or every relay rate limits this address (429). A background read
+ * this app's budget holds waits for it. Background reads the DHT answers in the relays' place keep to the relays'
+ * background share (`DhtBackgroundBudget`).
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -382,14 +383,19 @@ export class RelaysAndDht implements PkarrTransport {
         return found;
       }
       ({ packet: fromRelays, failed } = answered);
+      // No relay is asked now: each one rate limits this address (429) for as long as it said, or fails. Their answer is
+      // what they last saw, or a wait, and the DHT is asked in their place, as when they all fail (a background read
+      // at their share). Taken as their answer, a daemon whose relays answered 429 for 10 minutes read none of its 50
+      // contacts in that time, and looked none up on the DHT (bug hunt, 2026-11-11).
+      const refusing = this.relays.discovery().relays.every((relay) => relay.state !== "ok");
       // The relays' budget held the read back: the DHT, which has no budget and already has a contact's first
       // envelope, is asked instead. Waiting for the relays' minute made each pairing past ~10 chats on working relays
       // take 3-18 s (13-37 s on one relay), where DHT-only pairings take 0.1-2.8 s (agents#1715). Found nowhere there,
       // or a background read, it is still a wait.
-      if (isDiscoveryBudgetError(failed)) return this.heldBack(pubKeyZ32, failed, options);
+      if (isDiscoveryBudgetError(failed) && !(refusing && options.background)) return this.heldBack(pubKeyZ32, failed, options);
       if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
-      if (!failed && !down()) return fromRelays;
+      if (!failed && !down() && !refusing) return fromRelays;
     }
     try {
       // A background read the DHT answers instead of the relays waits its turn there (`DhtBackgroundBudget`), as it did

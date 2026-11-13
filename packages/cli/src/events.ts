@@ -563,12 +563,14 @@ export class EventHub {
 
   private stateChanged(state: EngineState): void {
     const quiet = !this.baselined;
+    // A chat's id comes back when its invite is joined again, and a group's when it is joined again: each creation and
+    // removal carries its time in its id, or a listener that dedupes on it dropped the second.
     const links = new Map(state.links.map((link) => [link.id, link]));
     for (const [id, link] of links) {
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("chat.created", `chat.created:${id}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
+      if (!before) { this.emit("chat.created", `chat.created:${id}:${this.now()}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
       if (shape.stage && shape.stage !== before.stage) {
         const progress = link.pairingProgress;
         this.emit("chat.pairing", `chat.pairing:${id}:${shape.stage}:${progress?.since ?? this.now()}`, {
@@ -595,7 +597,7 @@ export class EventHub {
     const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
     for (const id of removedChats) {
       this.chats.delete(id);
-      if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
+      if (!quiet) this.emit("chat.removed", `chat.removed:${id}:${this.now()}`, { chat: id });
     }
     // A chat removed deletes its history here: its events go too, but for its removal.
     const chatsGone = new Set(removedChats);
@@ -605,7 +607,7 @@ export class EventHub {
       const shape = groupShape(group), before = this.groups.get(id);
       this.groups.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("group.created", `group.created:${id}`, { group: id, summary: groupJson(group) }); continue; }
+      if (!before) { this.emit("group.created", `group.created:${id}:${this.now()}`, { group: id, summary: groupJson(group) }); continue; }
       if (shape.status !== before.status) this.emit("group.status", `group.status:${id}:${shape.status}:${this.now()}`, { group: id, status: shape.status });
       const joined = shape.members.filter((key) => !before.members.includes(key));
       const left = before.members.filter((key) => !shape.members.includes(key));
@@ -625,7 +627,7 @@ export class EventHub {
     const removedGroups = [...this.groups.keys()].filter((id) => !groups.has(id));
     for (const id of removedGroups) {
       this.groups.delete(id);
-      if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
+      if (!quiet) this.emit("group.removed", `group.removed:${id}:${this.now()}`, { group: id });
     }
     // A group left or forgotten: the same.
     const groupsGone = new Set(removedGroups);

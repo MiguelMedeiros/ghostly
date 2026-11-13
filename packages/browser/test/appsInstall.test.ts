@@ -398,6 +398,25 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([]);
   });
 
+  it("a newer version the check installs while a waiting update's files are read is kept, not the version before it", async () => {
+    const { store, v1 } = await installed({ sources: [BUNDLE_URL] });
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL], permissions: ["chat", "name"] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // The publisher ships 3, which adds nothing; Update pressed on 2, and the check (another tab) installs 3 meanwhile.
+    const v3 = await bundle({ sequence: 3, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v3.bytes);
+    const engine = store as unknown as { readBundleBytes: (...args: unknown[]) => Promise<unknown> };
+    const read = engine.readBundleBytes.bind(store);
+    vi.spyOn(engine, "readBundleBytes").mockImplementationOnce(async (...args: unknown[]) => {
+      expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+      return read(...args);
+    });
+    await expect(store.acceptUpdate({ ref: v1.ref, sequence: 2, added: ["name"] })).rejects.toThrow(/^no-update/);
+    expect((await store.list())[0], "not back on 1, whose files are gone").toMatchObject({ sequence: 3, digest: v3.digest, run: { status: "ok" } });
+    expect(await bundleIds()).toEqual([`app-${v3.digest}`]);
+  });
+
   it("an app uninstalled while Install of another version of it stores the files stays uninstalled", async () => {
     const { store, v1 } = await installed();
     const v2 = await bundle({ sequence: 2 });

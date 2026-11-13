@@ -87,9 +87,13 @@ export const relayWindow = ({ clients, listens }) => Math.min(2048, Math.max(80,
  * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all. `onLeave(fail)` calls `fail`
  * when the browser leaves (at once if it has) and returns what forgets it: a wait on the client's `gone` itself stayed
  * there for every signature after it came, until the browser left.
+ * hyperdht's announcer also asks for one for a node whose answer had no token (seen with a few thousand listens through
+ * one relay): dht-relay cannot encode that request, and a client whose message cannot be sent is dropped (guardProtocol),
+ * every listen and dial with it. It is refused here, which fails that node's announcement only, as on a native node.
  */
 const SIGN_MS = 10_000
 const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) => {
+  if (token?.byteLength !== 32 || id?.byteLength !== 32) return Promise.reject(new Error('No token'))
   let timer
   let forget = () => {}
   return Promise.race([

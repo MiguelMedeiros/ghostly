@@ -181,6 +181,35 @@ describe("app publish", () => {
     expect(readFileSync(store, "utf8")).toMatch(/^Ghostly store key/);
   }, 60_000);
 
+  // The key was saved before the bundle or index it signs: an --out it could not write left the new key behind, and
+  // the run that passed read it as an existing key and never said to back it up.
+  it("writes no key file when the bundle or index cannot be written, so the run that passes says to back it up", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const keys = tmp(), locked = tmp();
+    chmodSync(locked, 0o555);
+    try {
+      const key = join(keys, "publisher.key");
+      expect((await ghostly(["app", "publish", dir, "--key", key, "--out", join(locked, "sub", "x.ghostlyapp")])).code).not.toBe(0);
+      expect(existsSync(key)).toBe(false);
+      const published = await ghostly(["app", "publish", dir, "--key", key, "--out", join(tmp(), "x.ghostlyapp")]);
+      expect(ok(published).keyCreated).toBe(true);
+      expect(published.stderr).toContain(`new publisher key written to ${key}; back it up`);
+
+      const { key: _key, ...index } = JSON.parse(storeVectors.valid[0].index) as Record<string, unknown>;
+      const store = join(keys, "store.key");
+      const indexPath = join(tmp(), "index.json");
+      writeFileSync(indexPath, JSON.stringify(index));
+      expect((await ghostly(["store", "sign", indexPath, "--key", store, "--out", join(locked, "sub")])).code).not.toBe(0);
+      expect(existsSync(store)).toBe(false);
+      const signed = await ghostly(["store", "sign", indexPath, "--key", store, "--out", tmp()]);
+      expect(ok(signed).keyCreated).toBe(true);
+      expect(signed.stderr).toContain(`new store key written to ${store}; back it up`);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  }, 60_000);
+
   it("refuses a key file others may read, and a store key", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);

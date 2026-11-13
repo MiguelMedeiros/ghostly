@@ -239,13 +239,15 @@ const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot h
 
 /**
  * A removal on its way goes with the chat's row, and the contact kept the message for good, though `message delete
- * --everyone` had said its removal goes on: `chat remove` and the engine's `removeLink` are refused until `--force`.
+ * --everyone` had said its removal goes on: `chat remove`, the engine's `removeLink` and `clearProfileData` (every
+ * chat's row at once) are refused until `--force`.
  */
-function noRemovalOnItsWay(ctx: ApiContext, linkId: string): void {
-  const pending = node(ctx).removalsPending({ linkId });
+function noRemovalOnItsWay(ctx: ApiContext, linkIds: readonly string[], clearing = false): void {
+  const pending = linkIds.flatMap((linkId) => node(ctx).removalsPending({ linkId }));
   if (!pending.length) return;
   const n = pending.length, one = n === 1;
-  throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: removing the chat now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and remove the chat then, or pass --force (force: true over the socket) to remove it now`, { messages: pending });
+  const [now, then, go] = clearing ? ["clearing the profile", "clear it then", "clear it"] : ["removing the chat", "remove the chat then", "remove it"];
+  throw new CliError("confirm", `${one ? "A message you deleted for everyone has" : `${n} messages you deleted for everyone have`} not reached the contact yet: ${now} now leaves ${one ? "it" : "them"} on their device. Keep this profile online until the contact is reachable (ghostly daemon --detach) and ${then}, or pass --force (force: true over the socket) to ${go} now`, { messages: pending });
 }
 
 const METHODS: Record<string, Method> = {
@@ -688,7 +690,7 @@ const METHODS: Record<string, Method> = {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
-    if (!bool(params, "force")) noRemovalOnItsWay(ctx, link.id);
+    if (!bool(params, "force")) noRemovalOnItsWay(ctx, [link.id]);
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
@@ -957,7 +959,7 @@ const METHODS: Record<string, Method> = {
     }
     const deletes = DESTRUCTIVE_CALLS.get(method);
     if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
-    if (method === "clearProfileData") return clearProfile(ctx);
+    if (method === "clearProfileData") return clearProfile(ctx, bool(params, "force"));
     // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
     const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
     const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
@@ -967,7 +969,7 @@ const METHODS: Record<string, Method> = {
     if (typeof args?.linkId === "string") {
       if (method === "removeLink") {
         noCallOn(ctx, args.linkId, "remove the chat");
-        if (!bool(params, "force")) noRemovalOnItsWay(ctx, args.linkId);
+        if (!bool(params, "force")) noRemovalOnItsWay(ctx, [args.linkId]);
       }
       else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
     }
@@ -1006,11 +1008,12 @@ const METHODS: Record<string, Method> = {
  * A daemon would go on serving the stopped engine's memory (chats and groups that are gone, new ones that are not
  * kept): it stops once it has answered, and the next command starts on the emptied profile.
  */
-async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+async function clearProfile(ctx: ApiContext, force: boolean): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
   // Every chat goes at once: mid-call, the call's hang-up had no chat left to cross, as with `chat remove` (`noCallOn`).
   const call = ctx.calls.list()[0];
   if (call) throw new CliError("busy", `A call is on in a chat: hang it up first (ghostly call hangup ${call.chat}), then clear the profile`, { call: call.call });
   const { links, groups } = state(ctx);
+  if (!force) noRemovalOnItsWay(ctx, links.map((link) => link.id), true);
   await node(ctx).clearProfileData();
   const cleared = { chats: links.length, groups: groups.length };
   if (ctx.mode !== "daemon" || !ctx.stop) return { cleared };

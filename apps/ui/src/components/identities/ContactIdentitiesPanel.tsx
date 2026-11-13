@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useDialogFocus } from "../../hooks/useDismiss";
@@ -32,6 +32,15 @@ import { sourceWords } from "../../lib/providerWords";
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
 
+/** What the panel shows of the contact's chat: their Ghostly card, their identities and their Nostr keys. */
+type PanelLink = Pick<LinkView, "id" | "peerNick" | "peerAvatar" | "peerPubKeyZ32" | "peerVerified" | "createdAt" | "nostr"> & {
+  identities?: Pick<NonNullable<LinkView["identities"]>, "received" | "error">;
+};
+const panelLink = (l: LinkView | undefined): PanelLink | undefined => l && {
+  id: l.id, peerNick: l.peerNick, peerAvatar: l.peerAvatar, peerPubKeyZ32: l.peerPubKeyZ32, peerVerified: l.peerVerified, createdAt: l.createdAt, nostr: l.nostr,
+  identities: l.identities && { received: l.identities.received, error: l.identities.error },
+};
+
 /**
  * A contact's identities, beside the chat (the chat's column is `chat-pane`, contact-panel.css): a side panel in a wide
  * column, over the chat in a narrow one, a sheet from the bottom on a phone. Only the contact's: a deck of their ID
@@ -48,9 +57,10 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   card?: { side: "mine" | "theirs"; id: string };
   onClose: () => void;
 }) {
-  // This contact's link, and whose each chat is with the identities they shared (the names the activity's chips
-  // show): not the whole state, which drew the panel again on every engine state while it stayed open.
-  const link = useEngineValue(state => state?.links.find(l => l.peerPubKeyZ32 === peerKey));
+  // What it shows of this contact's chat, and whose each chat is with the identities they shared (the names the
+  // activity's chips show): not the whole state, nor the chat's whole view (their typing, presence, round trip time),
+  // each of which drew the panel and every card again while it stayed open.
+  const link = useEngineValue(state => panelLink(linkOfPeer(state?.links, peerKey)));
   const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
   const { t, language } = useI18n();
   const ref = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null);
@@ -128,7 +138,7 @@ function useBeside(backdrop: RefObject<HTMLElement | null>) {
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
+function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: PanelLink; links: readonly ChipLink[]; name: string; nostr: NostrContactView[]; initial?: string }) {
   // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
   const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
@@ -173,7 +183,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
  * The contact's Ghostly card turned over: the name and picture as they sent them (not a proof), their key in this
  * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
-function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; turning: boolean; onCards: () => void }) {
+function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: PanelLink; name: string; turning: boolean; onCards: () => void }) {
   const { copied, failed, copy } = useCopyKey(card.subject);
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>

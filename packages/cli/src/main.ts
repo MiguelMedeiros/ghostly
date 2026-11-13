@@ -199,6 +199,19 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
   return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
+/** What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. */
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing"]);
+
+/**
+ * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
+ * chats unstarted (`deferChats`); the groups start, and their edges are never deferred. Started, each saved chat put its
+ * records and its leave packet on the relays: with 12 invites saved, one `group send` asked the relay 32 times (3 with
+ * none), its whole minute, and a text to an away contact, or the next one-shot, waited behind them.
+ */
+export function oneGroupOnly(method: string): boolean {
+  return GROUP_EDGES_ONLY.has(method);
+}
+
 /**
  * Reads that need nothing of a chat's history: a one-shot for one leaves every saved chat unstarted too (`deferChats`),
  * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
@@ -387,13 +400,14 @@ const TURNS_WAIT_MS = 60_000;
  * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
  * STARTING_WAIT_MS, and named as the holder. So is a profile a `daemon restart` or `daemon --detach` keeps for the daemon
  * it starts (`daemonClaim`): the commands that took the profile in turn in the gap kept that daemon from ever starting.
- * A `listen` with no daemon opens it the same way, as the daemon (`mode`).
+ * A `listen` with no daemon opens it the same way, as the daemon (`mode`). A wait that goes on past WAIT_NOTICE_MS says
+ * on a terminal what it waits for, once per kind of holder: it said nothing for up to 30 s (60 s behind commands in turn).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const from = performance.now();
-  // The process that holds the profile, as last seen, and since when.
-  let holder: unknown, since = from;
+  // The process that holds the profile, as last seen, and since when; the kind of holder the terminal was told of.
+  let holder: unknown, since = from, told: string | undefined;
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
@@ -411,6 +425,14 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
         if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${Math.round((now - since) / 1000)} s: ghostly daemon status shows when it is up`, { pid: starting });
         const held = now - since >= HOLDER_WAIT_MS ? `was not free after ${HOLDER_WAIT_MS / 1000} s` : `was taken by one process after another for ${TURNS_WAIT_MS / 1000} s`;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and ${held}: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      const kind = claimed !== null ? "claimed" : starting !== null ? "starting" : "command";
+      if (process.stderr.isTTY && now - from >= WAIT_NOTICE_MS && told !== kind) {
+        told = kind;
+        const line = claimed !== null ? `profile ${g.profile} is kept for the daemon that process ${claimed} (ghostly daemon) starts: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : starting !== null ? `profile ${g.profile}'s daemon (process ${starting}) is starting: waiting for it (up to ${STARTING_WAIT_MS / 1000} s`
+          : `profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command` : "another ghostly command"}: waiting for it to let go (up to ${HOLDER_WAIT_MS / 1000} s`;
+        process.stderr.write(`ghostly: ${line}; Ctrl-C stops waiting)\n`);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
     }
@@ -539,7 +561,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   }],
   ["settings get [--show-secret]", "The profile's settings: each key settings set takes with its value in effect (unset: the default)", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value> [--force]", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, daemonPresence, nick. daemonPresence true: contacts see this profile online while a daemon runs it (off by default). <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps", { force: o("boolean", "Set a nick even if it looks like a seed, a key or ecash") }],
-  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret, or remove a chat whose delete for everyone has not reached the contact") }],
+  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret, or remove a chat (or clear the profile) while a delete for everyone has not reached the contact") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
@@ -1444,7 +1466,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
     if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" || oneGroupOnly(spec.method) }));
 }
 
 /**
@@ -1553,7 +1575,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
