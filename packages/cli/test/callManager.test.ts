@@ -632,6 +632,26 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answer that cannot go out hangs up saying it could not connect: the caller's call failed, it was not declined", async () => {
+    const { a, b } = pairOfManagers();
+    const engine = (b.calls as unknown as { host: { engine: CallEngine } }).host.engine;
+    const setCallSignal = engine.setCallSignal;
+    const sent: string[] = [];
+    engine.setCallSignal = async (input) => {
+      if (input.signal?.includes('"t":"a"')) throw new Error("Calls need a live connection");
+      if (input.signal) sent.push(input.signal);
+      return setCallSignal(input);
+    };
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow(/live connection/);
+    // What an app sends when its answer fails (WISP 601 "Couldn't connect"): read as a decline, it was not one.
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual(expect.objectContaining({ t: "h", r: "u" }));
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("an unanswered call is missed on one side, declined on the other, and busy chats refuse a second", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
@@ -1391,7 +1411,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
-    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    // Told it could not connect (`r: "u"`): the contact's call never connected either.
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(signalsOf(a, "o")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(b, "a")).toHaveLength(MAX_REDIALS + 1);
     expect(signalsOf(a, "h")).toHaveLength(1);
