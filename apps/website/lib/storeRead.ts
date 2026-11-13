@@ -1,4 +1,6 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { readAppStore } from "./store-core/appStore";
+import { toBase64Url } from "./store-core/bytes";
 import { APP_ICON_PATH, APP_PERMISSIONS, appViewOf, readAppBundle, type AppBundle, type AppPermission, type AppViewMode } from "./store-core/appBundle";
 import { appFingerprint, appRef, appRefPublisher, readAppRevocations, type SignedAppRevocation } from "./store-core/appStatements";
 import { APPS_RELEASE, versionAtLeast } from "./appsGate";
@@ -124,7 +126,9 @@ function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: stri
  * Whether the publisher's own `ghostly-revoke.json` revokes this version, read where the app reads it before Install:
  * beside each URL of the listing and each `sources` URL of the verified manifest, on the app's hosts. Each file is read
  * with core's `readAppRevocations`, as the app reads it: one entry that does not verify refuses the whole file, and a
- * file that is missing, refused or over the app's bound revokes nothing. `files` keeps each file's answer for the read.
+ * file that is missing, refused or over the app's bound revokes nothing. `files` keeps each file's answer for the read,
+ * by its URL and by the SHA-256 of its bytes as the app keeps them: the same file at many URLs (a signature check per
+ * entry, up to 4096) is checked once, not once per URL that serves it.
  */
 function publisherRevoked(
   listing: { ref: string; digest: string; sequence: number; urls: string[] },
@@ -137,8 +141,17 @@ function publisherRevoked(
     let held = files.get(url);
     if (held === undefined) {
       const bytes = revocations[url];
-      const read = bytes !== undefined && bytes.length <= STORE_LIMITS.revocationsBytes ? readAppRevocations(bytes) : undefined;
-      held = read?.ok ? read.revocations : [];
+      held = [];
+      if (bytes !== undefined && bytes.length <= STORE_LIMITS.revocationsBytes) {
+        const id = toBase64Url(sha256(bytes));
+        const known = files.get(id);
+        if (known !== undefined) held = known;
+        else {
+          const read = readAppRevocations(bytes);
+          if (read.ok) held = read.revocations;
+          files.set(id, held);
+        }
+      }
       files.set(url, held);
     }
     if (revokedBy(held, listing.ref, listing.digest, listing.sequence)) return true;
