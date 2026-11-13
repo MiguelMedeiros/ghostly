@@ -61,6 +61,8 @@ function runLine(run: AppRunStatus, t: Translate): ReactNode {
   return null;
 }
 
+// A store's takedown reason (200 characters, which may hold no space: a link) and a store's or contact's name break
+// anywhere: unbroken, a reason pushed the screen 933 px sideways on a phone, its start off the left side in Arabic.
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
   const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
   return <p data-testid={testId} className={`text-xs whitespace-pre-line [overflow-wrap:anywhere] ${color}`}>{children}</p>;
