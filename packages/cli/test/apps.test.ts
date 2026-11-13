@@ -597,6 +597,35 @@ describe("app verify <url>", () => {
     expect(most).toBe(3);
   }, 60_000);
 
+  it("gives a URL one 60 s in all, its redirects included, not 60 s a hop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      // AbortSignal.timeout runs on Node's own clock: one on the fake clock in its place.
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), ms);
+        return controller.signal;
+      });
+      // Each hop redirects 50 s after it is asked, just inside a wait of its own.
+      const hops: string[] = [];
+      vi.stubGlobal("fetch", (at: string, init: RequestInit) => new Promise<Response>((answer, fail) => {
+        hops.push(at);
+        const timer = setTimeout(() => answer(new Response(null, { status: 302, headers: { location: `https://example.com/${hops.length}.ghostlyapp` } })), 50_000);
+        init.signal?.addEventListener("abort", () => { clearTimeout(timer); fail(init.signal!.reason); });
+      }));
+      const start = Date.now();
+      const read = verifyApp("https://example.com/0.ghostlyapp").then(() => undefined, (error: unknown) => ({ error, after: Date.now() - start }));
+      await vi.advanceTimersByTimeAsync(400_000);
+      const failed = await read;
+      expect(failed).toMatchObject({ error: { code: "timeout" } });
+      expect(failed!.after).toBe(60_000);
+      expect(hops).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "not_found" });
