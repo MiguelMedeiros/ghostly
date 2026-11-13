@@ -15,7 +15,7 @@ import { lightningSource, mint, TEST_MINT } from "./fixtures";
  * only that: a review started for the money before the edit is dropped, and Paid is only ever kept for what was paid.
  */
 
-const SETTLED_KEY = "ghostly_settled_money";
+const SETTLED_KEY = "ghostly_settled_marks";
 /** The key Paid is kept under: a digest of the whole invoice. */
 const settledMoneyId = (invoice: string) => Buffer.from(sha256(new TextEncoder().encode(invoice))).toString("hex");
 const message = (text: string) => ({ id: "m1", text, sender: "peer", timestamp: Date.now(), status: "delivered" }) as never;

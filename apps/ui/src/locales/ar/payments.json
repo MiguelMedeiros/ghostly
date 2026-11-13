@@ -35,6 +35,10 @@
       "amountMismatch": "الفاتورة لا تطابق المبلغ المطلوب",
       "feeAbove": "رسوم Lightning (حتى {{fee}} {{unit}}) تتجاوز الحد الأقصى لديك"
     },
+    "expiredNext": {
+      "mine": "اطلب مرة أخرى بطلب جديد",
+      "theirs": "اطلب من جهة الاتصال طلبًا جديدًا"
+    },
     "externalNote": {
       "ark": "يُدفع من أي محفظة Ark. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال.",
       "bitcoin": "يُدفع من أي محفظة Bitcoin. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال، بعد تأكيد واحد.",
@@ -58,6 +62,7 @@
     "preparing": "جارٍ التحضير…",
     "review": "مراجعة الدفع",
     "state": {
+      "checking": "جارٍ التحقق من الدفعة…",
       "closed": "مغلق",
       "lightningPending": "دفعة Lightning قيد المعالجة…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "تم الاستلام"
       },
       "request": {
+        "expired": "منتهي الصلاحية",
         "failed": "فشل",
         "pending": "في انتظار الدفع",
         "settled": "مدفوع"
@@ -257,7 +263,7 @@
     "alreadySpent": "أُنفق من قبل",
     "anyAmount": "أي مبلغ",
     "checking": "جارٍ التحقق…",
-    "confirmWhat": "{{amount}} sats (بالإضافة إلى رسوم حتى {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (بالإضافة إلى رسوم حتى {{fee}} {{feeUnit}})",
     "copied": "تم النسخ",
     "ecashRequest": "طلب دفع ecash",
     "ecashToken": "رمز ecash",
@@ -290,9 +296,11 @@
     "otherUnitToken": "رمز بوحدة {{unit}}",
     "paid": "مدفوعة ✓",
     "pay": "ادفع",
-    "payWithFee": "ادفع {{amount}} + رسوم حتى {{fee}}",
+    "payWithFee": "ادفع {{amount}} {{unit}} + رسوم حتى {{fee}}",
     "paying": "جارٍ الدفع…",
     "paysThrough": "يُدفع عبر {{domain}}",
+    "pending": "الدفعة قيد المعالجة…",
+    "pendingAtCard": "الدفعة قيد المعالجة لدى {{card}}…",
     "pendingAtMint": "الدفعة قيد المعالجة لدى دار السك…",
     "qrTooLong": "أطول من أن يتسع له رمز QR: انسخه بدلًا من ذلك.",
     "redeem": "استرداد",

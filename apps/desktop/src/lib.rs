@@ -37,6 +37,7 @@ mod file_stream;
 mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -79,6 +80,8 @@ mod types;
 mod unread_count;
 #[cfg(desktop)]
 mod viewer;
+#[cfg(any(target_os = "macos", test))]
+mod web_process;
 
 use commands::AppState;
 #[cfg(mobile)]
@@ -129,14 +132,18 @@ macro_rules! commands {
             app_sandbox::app_focused,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_post_bytes,
             app_sandbox::app_title,
+            clipboard::copy_secret,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::call_service,
             commands::close_service_windows,
+            commands::connection_service,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -145,11 +152,13 @@ macro_rules! commands {
             commands::get_profile,
             commands::get_public_key,
             commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
             commands::local_service_allow,
             commands::local_service_forget,
+            commands::open_app_settings,
             commands::open_payment_link,
             commands::open_project_link,
             commands::open_pubky_passport,
@@ -213,6 +222,7 @@ macro_rules! commands {
             native_call::native_call_close,
             native_call::native_call_devices,
             native_call::native_call_devices_watch,
+            native_call::native_call_levels,
             native_call::native_call_microphone,
             native_call::native_call_mute,
             native_call::native_call_offer,
@@ -224,6 +234,7 @@ macro_rules! commands {
             native_call::native_camera_open,
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
+            native_call::native_pictures_shown,
             native_call::native_speaker_test,
             notifications::native_clear_notification,
             notifications::native_clear_notifications,
@@ -231,6 +242,7 @@ macro_rules! commands {
             notifications::native_notification_tap,
             notifications::native_private_notification,
             notifications::open_notification_settings,
+            oidc::oidc_interrupted,
             oidc::oidc_loopback_cancel,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
@@ -286,6 +298,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
@@ -293,6 +308,10 @@ pub fn run() {
     // On a Mac, the app menu with New Chat (Cmd+N) and Settings… (Cmd+,); Linux and Windows keep no menu bar.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_window::menu);
+    // The Ghostly window's page whose process WebKit ended: loaded again a few times, waiting longer each time, then the
+    // person is asked instead of a window that reloads forever (`web_process`).
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(web_process::ended);
 
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -357,6 +376,7 @@ pub fn run() {
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
         .manage(paste_source())
+        .manage(clipboard::SecretSink::system())
         .manage(clipboard::PasteShelf::default())
         .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
@@ -364,6 +384,10 @@ pub fn run() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // The DHT node, unless the last run kept to the relays (Hide my IP from contacts).
+            app.state::<AppState>()
+                .pkarr
+                .start(app.path().app_data_dir().ok());
             notifications::install(app.handle());
             #[cfg(target_os = "linux")]
             {
@@ -913,6 +937,7 @@ mod tests {
         for command in [
             "app_open",
             "app_post",
+            "app_post_bytes",
             "app_focus",
             "app_focused",
             "app_title",
@@ -990,6 +1015,62 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("not allowed"), "{error}");
+    }
+
+    /// The Ghostly window's broker answers an app's read with the bytes as the request's raw body, the window and the
+    /// request it answers in its headers (`app_post_bytes`): through the real IPC path, as `apps/ui` desktopOpener sends it.
+    #[test]
+    fn the_ghostly_window_answers_an_app_with_raw_bytes() {
+        // covers: apps.desktop-sandbox
+        let app = app();
+        let request = serde_json::from_value(serde_json::json!({
+            "app": "ana/cinema", "title": "Cinema", "entry": "<p>cinema</p>",
+        }))
+        .unwrap();
+        let label = app_sandbox::open(app.handle(), request).unwrap();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let post = |body: InvokeBody, headers: &[(&'static str, &str)]| {
+            let mut map = tauri::http::HeaderMap::new();
+            for (name, value) in headers {
+                map.insert(*name, value.parse().unwrap());
+            }
+            get_ipc_response(
+                &main,
+                InvokeRequest {
+                    cmd: "app_post_bytes".into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body,
+                    headers: map,
+                    invoke_key: INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        };
+        // No request of that window waits for id 3: nobody to tell, as for `app_post`.
+        post(
+            InvokeBody::Raw(vec![0, 1, 2]),
+            &[("x-label", &label), ("x-id", "3")],
+        )
+        .unwrap();
+        let error = post(InvokeBody::Raw(vec![0]), &[("x-id", "3")]).unwrap_err();
+        assert!(error.contains("Missing x-label"), "{error}");
+        let error = post(
+            InvokeBody::Json(serde_json::json!({"label": label, "id": 3})),
+            &[("x-label", &label), ("x-id", "3")],
+        )
+        .unwrap_err();
+        assert!(error.contains("Expected raw bytes"), "{error}");
+        let error = post(
+            InvokeBody::Raw(vec![0]),
+            &[("x-label", "main"), ("x-id", "3")],
+        )
+        .unwrap_err();
+        assert!(error.contains("Not an app window"), "{error}");
     }
 
     #[test]
@@ -1145,6 +1226,7 @@ mod tests {
             "atlas".into(),
             "ybndrfg8ejkmcpqx".into(),
             "Atlas".into(),
+            None,
             None,
         )
         .unwrap();

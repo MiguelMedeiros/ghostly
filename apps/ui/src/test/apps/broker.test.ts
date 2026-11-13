@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, isJsonValue, jsonValueOf, runnerFor, watchApp, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, isJsonValue, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -237,6 +237,21 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.get", [""])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.get", [7])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.set", ["k", "x".repeat(MINI_APP_LIMITS.storageValueBytes)])).toMatchObject({ ok: false, error: "too-large" });
+    // A set with no value was answered too-large.
+    expect(await ask("storage.set", ["k"])).toMatchObject({ ok: false, error: "bad-request" });
+  });
+
+  it("takes a value of 64 KiB under the longest key: the request has room for both", async () => {
+    // The request carries the value with its key and {"id","type","args"} around them, so a 64 KiB request refused a
+    // value a few dozen bytes short of the 64 KiB WISP 1200 promises. The longest key is 256 control characters,
+    // six bytes each in JSON.
+    const { host, run, ask } = setup();
+    run();
+    const key = "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes);
+    const value = "x".repeat(MINI_APP_LIMITS.storageValueBytes - 2);
+    expect(await ask("storage.set", [key, value])).toMatchObject({ ok: true });
+    expect(host.stored.get(`${REF} ${LINK}`)?.get(key)).toBe(value);
+    expect(await ask("storage.set", [key, `${value}x`])).toMatchObject({ ok: false, error: "too-large" });
   });
 
   it("an engine refusal reaches the app by its code: a full storage is `full`, a missing file `no-file`", async () => {
@@ -280,7 +295,7 @@ describe("requests", () => {
     expect(posted.filter((p) => p.message.id === undefined || (p.message.id as number) < 0)).toEqual([]);
   });
 
-  it("refuses a request over 64 KiB before anything sees it", async () => {
+  it("refuses a request over 66 KiB before anything sees it", async () => {
     const { host, run, ask } = setup();
     run();
     const before = host.calls.length;
@@ -290,7 +305,7 @@ describe("requests", () => {
 
   it("refuses a huge or binary request without writing it as JSON first", () => {
     // A structured clone carries what JSON.stringify takes seconds to write (a 16 MiB Uint8Array took 1.6 s on the
-    // page's thread): it is refused from a count that stops at 64 KiB, and binary data from its type alone.
+    // page's thread): it is refused from a count that stops at 66 KiB, and binary data from its type alone.
     const { broker, posted, run } = setup();
     run();
     // Counted by hand: a spy would keep (and print) what it was called with.
@@ -1095,5 +1110,75 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await ask("files.list")).toMatchObject({ ok: true });
     expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
     expect(reads).toBe(2);
+  });
+});
+
+// WISP 1200 § The broker's messages: Desktop's IPC is read with serde_json, which refuses half a surrogate pair, so one
+// rule on both runners. The web took a request holding one, Desktop answered it `failed`; an answer holding one never
+// reached a Desktop app, which waited a minute. Desktop's runner and opener: desktopRunner.test.ts, desktopOpener.test.ts.
+describe("a lone surrogate (half an emoji)", () => {
+  const half = "\u{1F600}".slice(0, 1);
+  const low = "\u{1F600}".slice(1);
+
+  it("refuses a request holding one in a value or a member name as bad-request, and passes a whole emoji", async () => {
+    const { host, run, ask } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    for (const args of [[`k${half}`, "v"], ["k", `v${half}`], ["k", { [`m${half}`]: 1 }], ["k", { a: [{ b: low }] }]]) {
+      expect(await ask("storage.set", args), JSON.stringify(args)).toMatchObject({ ok: false, error: "bad-request" });
+    }
+    expect(await ask("storage.get", [`k${half}`])).toMatchObject({ ok: false, error: "bad-request" });
+    expect(await ask("chat.send", [{ text: `hi ${half}` }])).toMatchObject({ ok: false, error: "bad-request" });
+    expect(host.calls.filter((c) => c.op === "storage.set" || c.op === "storage.get")).toEqual([]);
+    expect(host.sent).toEqual([]);
+    // A member left out (undefined) is not sent, so its name is not read.
+    expect(await ask("storage.set", ["k", { [`m${half}`]: undefined, n: 1 }])).toMatchObject({ ok: true });
+    expect(await ask("storage.set", ["\u{1F600}", { "\u{1F600}": "\u{1F600}" }])).toMatchObject({ ok: true });
+    expect(await ask("chat.send", ["\u{1F600}"])).toMatchObject({ ok: true });
+    expect(host.sent).toEqual([{ linkId: LINK, ref: REF, data: "\u{1F600}" }]);
+  });
+
+  it("answers a stored value holding one at once, with U+FFFD in its place", async () => {
+    // Stored before this rule (a restored backup, a web client that took it): it cannot be refused now.
+    const { host, run, ask } = setup();
+    host.stored.set(`${REF} ${LINK}`, new Map<string, unknown>([["game", { [`m${half}`]: [`v${low}`, "\u{1F600}"] }], [`k${half}`, 1]]) as never);
+    run();
+    expect((await ask("storage.get", ["game"])).value).toEqual({ "m\uFFFD": ["v\uFFFD", "\u{1F600}"] });
+    expect((await ask("storage.keys")).value).toEqual(["game", "k\uFFFD"]);
+  });
+
+  it("hands the app a contact's message holding one with U+FFFD in its place", async () => {
+    const { host, run, posted } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    await Promise.resolve();
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    host.receive(LINK, { app: memoryAppId(LINK, REF), d: { move: `e4${half}`, [`${low}`]: true } });
+    await vi.waitFor(() => expect(posted.map((p) => p.message).filter((m) => m.event === "chat.message")).toEqual([
+      { event: "chat.message", data: { move: "e4\uFFFD", "\uFFFD": true } },
+    ]));
+  });
+
+  it("is found in strings and member names, nested, and replaced only there", () => {
+    expect(hasLoneSurrogate(half)).toBe(true);
+    expect(hasLoneSurrogate({ a: [{ [low]: 1 }] })).toBe(true);
+    expect(hasLoneSurrogate([1, null, true, { a: `x${low}${half}` }])).toBe(true);
+    for (const fine of ["\u{1F600}", `${half}${low}`, { "\u{1F600}": ["\u{1F600}"] }, 1, null, new Uint8Array([0xd8, 0x3d])]) expect(hasLoneSurrogate(fine)).toBe(false);
+    expect(typeof jsonValueOf({ a: half })).toBe("symbol");
+    expect(typeof jsonValueOf({ [half]: 1 })).toBe("symbol");
+    expect(isJsonValue([low])).toBe(false);
+    expect(isJsonValue({ [low]: 1 })).toBe(false);
+    expect(jsonValueOf({ a: "\u{1F600}" })).toEqual({ a: "\u{1F600}" });
+    // Nothing to replace: the very same value, its bytes and transfer list untouched.
+    const bytes = new ArrayBuffer(4);
+    const answer = { id: 1, ok: true, value: bytes };
+    expect(withoutLoneSurrogates(answer)).toBe(answer);
+    const fixed = withoutLoneSurrogates({ id: 2, ok: true, value: { [`${half}x`]: [half, bytes, "\u{1F600}"] } });
+    expect(fixed).toEqual({ id: 2, ok: true, value: { "\uFFFDx": ["\uFFFD", bytes, "\u{1F600}"] } });
+    expect(fixed.value["\uFFFDx"]![1]).toBe(bytes);
+    const proto = withoutLoneSurrogates(JSON.parse(`{"__proto__":{"a":"\\ud83d"}}`) as Record<string, unknown>);
+    expect(Object.keys(proto)).toEqual(["__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(proto, "__proto__")!.value).toEqual({ a: "\uFFFD" });
   });
 });

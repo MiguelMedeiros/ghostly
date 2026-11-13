@@ -1,11 +1,16 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { databaseName } from "@ghostly/browser/shared/idb";
 import { activeProfileId } from "./profiles";
-import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
+import { MUTE_EVENT, groupChat, mutedUntil } from "./chatMute";
 import { groupPath } from "./groups";
+import { contactName } from "./identities";
+import { chatsByPeer, ownsKey } from "./storage";
 import { chatPath } from "./url";
+import { useEngineValue } from "./engineState";
+import { useWindowAway } from "./windowAway";
+import { isSettingsStorageEvent, loadSettings } from "./settings";
 
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
@@ -20,11 +25,12 @@ export interface PushKeys {
   auth: string;
 }
 
-/** A row of the push worker's table: which chat a token names, and its mute. */
+/** A row of the push worker's table: which chat a token names, its mute, and a 1:1 chat's name (for an online notice). */
 export interface WakeTableEntry {
   token: string;
   path: string;
   mutedUntil?: number | "forever";
+  name?: string;
 }
 
 /**
@@ -35,6 +41,11 @@ export interface WakeWords {
   title: string;
   body: string;
   call?: string;
+  /** "{name} is online", with `{name}` left for the worker to fill, and the words without a name. */
+  online?: string;
+  onlineUnnamed?: string;
+  /** "Notify me when a contact comes online" is off: the worker shows no online notice of its own. */
+  onlineOff?: true;
   standby?: string;
   standbyCall?: string;
   standbyUnnamed?: string;
@@ -52,6 +63,11 @@ export interface PushPlatform {
   syncTable(profile: string, entries: readonly WakeTableEntry[], text: WakeWords): Promise<void>;
   /** The words and the database name alone, the tokens left as they are: a standby's page writes these. */
   syncText?(profile: string, text: WakeWords): Promise<void>;
+  /**
+   * Closes this profile's wake-up notices the app in front made stale: the quiet one, and with `path` that chat's
+   * message and online notices (never a call's).
+   */
+  closeNotices?(profile: string, path?: string): Promise<void>;
 }
 
 /** The device words of the push worker, with `{device}` left in for the worker to fill (`t` interpolates `{{device}}`). */
@@ -119,21 +135,34 @@ export function useNoPushService(): boolean {
 }
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
 
 /**
  * Whether this device is woken now (it shared a subscription of its own), as the engine has it. In a profile on several
  * devices a subscription that is another device's (the phone's, given to contacts while this desktop is active) is not
- * this device's: the switch is off here (WISP 06 § Push and the phone).
+ * this device's: the switch is off here (WISP 06 § Push and the phone). Drawn again only when the answer changes, not
+ * on every state of the engine.
  */
 export function useWakeOn(): boolean {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  return !!state?.settings.wake && state.wakeOwner !== "away";
+  return useSyncExternalStore(subscribeEngine, wakeIsOn);
 }
 
 /** Whether this device is woken now, as the engine has it (`useWakeOn`, read once). */
 export function wakeIsOn(): boolean {
   return !!engine.state?.settings.wake && engine.state.wakeOwner !== "away";
+}
+
+/**
+ * "Notify me when a contact comes online" (revision 2026-10-27): whether this profile shares a subscription at all
+ * (`shared`, this device's or another's), and whether contacts are asked for an online notice (`on`, the default).
+ * Drawn again only when one of the two changes.
+ */
+export function useWakeOnline(): { shared: boolean; on: boolean } {
+  return useEngineValue((state) => ({ shared: !!state?.settings.wake, on: state?.settings.wakeOnline !== false }));
+}
+
+/** Asks contacts for online notices, or stops asking: each live one is told now, the others on their next session. */
+export async function setWakeOnline(on: boolean): Promise<void> {
+  await engine.call("setWakeOnline", { on });
 }
 
 /**
@@ -192,6 +221,17 @@ async function notificationsRefused(): Promise<boolean> {
   return refused();
 }
 
+/**
+ * The person has this profile's app in front: the wake-up notices it made stale go from the system's list (WISP 401 §
+ * Wake-up push). Always the profile's quiet notice; with `path` (the chat on screen), that chat's "New message" and
+ * online notice. A ringing call's notice stays. Only the installed web app has them; elsewhere this does nothing.
+ */
+export function closeWakeNotices(path?: string): void {
+  const push = pushPlatform();
+  if (!push?.closeNotices) return;
+  void push.closeNotices(activeProfileId(), path).catch(() => {});
+}
+
 let rotating: Promise<void> | null = null;
 
 /**
@@ -220,28 +260,48 @@ export function rotateWake(): Promise<void> {
   return rotating;
 }
 
+/** Whether this profile has a lock screen, as stored (the lock's own test, `LockScreenContext`). */
+function lockScreenOn(): boolean {
+  const { enabled, passwordHash } = loadSettings().lockScreen;
+  return enabled && !!passwordHash;
+}
+const subscribeLockSetting = (listener: () => void) => {
+  const stored = (event: StorageEvent) => { if (isSettingsStorageEvent(event)) listener(); };
+  window.addEventListener("settings-updated", listener);
+  window.addEventListener("storage", stored);
+  return () => {
+    window.removeEventListener("settings-updated", listener);
+    window.removeEventListener("storage", stored);
+  };
+};
+
 /**
  * The table the push worker reads, kept in step with the chats: a token for each chat that shared one, its route
  * and its mute (#250: a muted chat is never shown). Also puts right a subscription the browser dropped while the
  * app was closed: made again when notifications are still allowed, else wake-ups are turned off.
  */
 export function useWakeTableSync(text: WakeWords): void {
-  const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
-  const wake = state?.settings.wake;
-  const owner = state?.wakeOwner;
-  const links = state?.links;
-  const groups = state?.groups;
-  const words = JSON.stringify({ ...text, db: databaseName() });
-  // What the table is made of, as one string. The engine builds `links` and `groups` anew in every state (up to one
-  // every 50 ms while someone types or a file moves), so the arrays themselves say nothing about a change: written on
-  // them, the table was a database transaction per state.
+  // What the table is made of, as one string, and the subscription, compared by content. The engine builds `links` and
+  // `groups` anew in every state (up to one every 50 ms while someone types or a file moves), so the arrays themselves
+  // say nothing about a change: written on them, the table was a database transaction per state, and read whole, they
+  // drew the app's shell (and every chat it holds) on each.
+  const { wake, owner, rotateAsked, onlineOff, held } = useEngineValue((state) => ({
+    wake: state?.settings.wake,
+    owner: state?.wakeOwner,
+    rotateAsked: !!state?.settings.wakeRotate,
+    onlineOff: state?.settings.wakeOnline === false,
+    held: state?.links && JSON.stringify([
+      state.links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
+      (state.groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
+    ]),
+  }));
+  // "Notify me when a contact comes online" turned off is kept by this device's worker itself, not only by the contacts'
+  // apps (each hears of it on its next session with this app open): the table says so, and is written again when it changes.
+  const words = JSON.stringify({ ...text, ...(onlineOff && { onlineOff: true }), db: databaseName() });
   const on = !!wake;
-  const held = links && JSON.stringify([
-    links.map((link) => [link.id, link.peerPubKeyZ32, link.wakeToken, !!link.wakeMuted]),
-    (groups ?? []).filter((group) => group.profile === "mesh").map((group) => [group.id, group.wakeTokens, !!group.wakeMuted]),
-  ]);
-  const latest = useRef({ links, groups });
-  latest.current = { links, groups };
+  // A profile with a lock screen names nobody outside it (WISP 04): the worker shows its notices over the system's lock
+  // too, so the table holds no contact's name, and is written again when the lock is turned on or off.
+  const locked = useSyncExternalStore(subscribeLockSetting, lockScreenOn);
   useEffect(() => {
     const push = pushPlatform();
     if (!push || !held) return;
@@ -249,20 +309,26 @@ export function useWakeTableSync(text: WakeWords): void {
     let muteEnds: ReturnType<typeof setTimeout> | undefined;
     const write = () => {
       clearTimeout(muteEnds);
-      const { links, groups } = latest.current;
+      // The engine's chats as they are now.
+      const links = engine.state?.links, groups = engine.state?.groups;
       if (!links) return;
       const entries: WakeTableEntry[] = [];
       let soonest = Infinity;
       if (on) {
+        // Every chat in one look through the stored chats, not one or two per link: this runs at each message that comes.
+        const chats = chatsByPeer();
         for (const link of links) {
-          const chat = chatOfLink(link.id, links);
-          if (!chat) continue;
+          const found = chats.get(link.peerPubKeyZ32);
+          if (!found) continue;
+          const chat = found.id;
           const until = mutedUntil(chat);
           if (typeof until === "number") soonest = Math.min(soonest, until);
           // A muted chat is not woken at all: its contact is told to forget the subscription (the worker checks too).
           if (!!link.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: link.id, muted: until !== undefined }).catch(() => {});
           if (!link.wakeToken) continue;
-          entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }) });
+          // The name this app shows for the chat: an online notice says it, since the push names nobody.
+          const name = locked ? undefined : contactName(found)?.trim();
+          entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }), ...(name && { name }) });
         }
         // Private groups (WISP 902 · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
         for (const group of groups ?? []) {
@@ -277,25 +343,34 @@ export function useWakeTableSync(text: WakeWords): void {
       // A mute that ends by itself: the contact is told to wake this chat again when it does, with no state to wait for.
       if (soonest !== Infinity) muteEnds = setTimeout(write, Math.min(Math.max(soonest - Date.now(), 0) + 50, 2 ** 31 - 1));
     };
+    // Another tab's write of this profile's keys (a mute, a chat), or the storage cleared. Not another profile's: a tab
+    // running one stores its chats a few times per text it gets, and each would rewrite this profile's table.
+    const stored = (event: StorageEvent) => { if (event.key === null || ownsKey(event.key)) write(); };
     write();
     window.addEventListener(MUTE_EVENT, write);
-    window.addEventListener("storage", write);
+    window.addEventListener("storage", stored);
     window.addEventListener("session-updated", write);
     return () => {
       clearTimeout(muteEnds);
       window.removeEventListener(MUTE_EVENT, write);
-      window.removeEventListener("storage", write);
+      window.removeEventListener("storage", stored);
       window.removeEventListener("session-updated", write);
     };
-  }, [on, held, words]);
+  }, [on, held, words, locked]);
 
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app. Not for
   // another device's subscription, which that device replaces.
-  const rotate = !!state?.settings.wakeRotate && !!wake && owner !== "away";
+  const rotate = rotateAsked && !!wake && owner !== "away";
   useEffect(() => {
     if (rotate) void rotateWake();
   }, [rotate]);
+
+  // The app in front says it all: the quiet notice a push with nothing to say left goes when it starts or comes back.
+  const away = useWindowAway();
+  useEffect(() => {
+    if (!away) closeWakeNotices();
+  }, [away]);
 
   const endpoint = wake?.endpoint;
   useEffect(() => {

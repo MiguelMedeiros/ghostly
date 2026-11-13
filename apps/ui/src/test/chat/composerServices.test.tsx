@@ -172,6 +172,27 @@ describe("the chat's apps strip", () => {
   });
 });
 
+describe("the chat's Services dialog's Open", () => {
+  it("is named with its app for a screen reader, the word on screen first: two apps' Opens sound different", async () => {
+    localApps(true);
+    const opened: string[] = [];
+    const openService = fakeEngine.openService;
+    fakeEngine.openService = async (...args: unknown[]) => { opened.push(String(args[1])); };
+    try {
+      const view = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
+      act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }, { id: "wiki", type: "http" }] })] }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getAllByTestId("chat-service-open").map((b) => b.textContent)).toEqual(["Open", "Open"]);
+      await view.user.click(within(dialog).getByRole("button", { name: "Open Demo, served from your contact's machine" }));
+      // An app with no name of its own goes by its ID, as its row shows it.
+      await view.user.click(within(dialog).getByRole("button", { name: "Open wiki, served from your contact's machine" }));
+      expect(opened).toEqual(["demo", "wiki"]);
+    } finally {
+      fakeEngine.openService = openService;
+    }
+  });
+});
+
 describe("Open on a contact's app that refuses", () => {
   const openService = fakeEngine.openService;
   // The web's refusal while a call is on screen; on Desktop, a window that cannot open.

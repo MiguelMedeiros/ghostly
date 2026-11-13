@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { failure, startRelay } from "../../../infra/services/push-relay/relay.mjs";
 
 // covers: push.wake.send
@@ -20,6 +20,51 @@ describe("the push relay's log of a failed forward (infra/services/push-relay)",
     });
     expect(answer.status).toBe(502);
     expect(lines).toEqual(["failed ECONNREFUSED"]);
+  });
+
+  it("refuses a header value fetch would not send with a 400, as a refusal, not a push service that did not answer", async () => {
+    const lines: string[] = [];
+    // Nothing listens at 127.0.0.1:443: a request that reached fetch would be `failed ECONNREFUSED`.
+    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], log: (...words: unknown[]) => lines.push(words.join(" ")) });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (headers: Record<string, string>) => fetch(url, {
+      method: "POST", headers: { Origin: "https://app.ghostly.tools" },
+      body: JSON.stringify({ endpoint: "https://127.0.0.1/x", headers: { Authorization: "vapid t=a.b.c, k=K", ...headers }, body }),
+    });
+    const nul = await post({ TTL: "6\u00000" });
+    expect(nul.status).toBe(400);
+    expect(await nul.json()).toEqual({ error: "Bad TTL value" });
+    const wide = await post({ Topic: "Āabc" });
+    expect(wide.status).toBe(400);
+    expect(await wide.json()).toEqual({ error: "Bad Topic value" });
+    // A value fetch takes still goes on to the push service.
+    expect((await post({ Urgency: "high\t" })).status).toBe(502);
+    expect(lines).toEqual(["refused Bad TTL value", "refused Bad Topic value", "failed ECONNREFUSED"]);
+    expect(relay.stats()).toMatchObject({ forwarded: 0, failed: 1, refused: 2 });
+  });
+
+  it("does not count fetch refusing a request before any connection as a push service that did not answer", async () => {
+    const lines: string[] = [];
+    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], log: (...words: unknown[]) => lines.push(words.join(" ")) });
+    close = relay.close;
+    const real = globalThis.fetch;
+    // The relay's own fetch refuses what it was handed, as Node's does a header value it cannot send.
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) => (String(input).startsWith("https://127.0.0.1/")
+      ? Promise.reject(new TypeError('Headers.append: "x" is an invalid header value.'))
+      : real(input, init)));
+    try {
+      const url = `http://127.0.0.1:${relay.port}/`;
+      const answer = await fetch(url, {
+        method: "POST", headers: { Origin: "https://app.ghostly.tools" },
+        body: JSON.stringify({ endpoint: "https://127.0.0.1/x", headers: { Authorization: "vapid t=a.b.c, k=K" }, body }),
+      });
+      expect(answer.status).toBe(400);
+      expect(lines).toEqual(["refused Not a request fetch can send"]);
+      expect(relay.stats()).toMatchObject({ failed: 0, refused: 1 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([

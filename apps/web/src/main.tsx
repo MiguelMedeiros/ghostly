@@ -15,20 +15,21 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
-import { forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, setLinkedFiles, takedownText } from "../../ui/src/lib/apps/open";
+import { appErrorText } from "../../ui/src/lib/apps/errors";
 import { idbPickStore, linkedFilesDatabase, pickSheetText, webLinkedFiles } from "../../ui/src/lib/apps/webFiles";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
-import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
-import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, forwardShare, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
+import { closeWakeNotices, currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
+import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, handShareOver, listenForShares, listenForTaps, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
 if (import.meta.env.VITE_APPS_TEST === "1") void import("../../ui/src/lib/apps/testHook").then((hook) => hook.installAppsTestHook());
@@ -47,7 +48,7 @@ listenForTaps(() => isPeer);
 // Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
 const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText, closeNotices: closeWakeNotices });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
@@ -84,21 +85,19 @@ const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
 let stopLink = () => {};
 await becomeThePeer(peerLock, () => {
   const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
-  // Opened for a share while the app runs in another tab: that tab gets it. Not at once: a share posted from this
-  // same tab (the system opens the app's window for it) replaces a page that holds the lock a moment longer on its
-  // way out, and a forward then would hand the share to that page as it goes. Once the lock is this tab's, it asks.
+  // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
+  // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
   const sharing = openedForShare();
-  if (sharing) setTimeout(() => { if (!isPeer) forwardShare(); }, SHARE_FORWARD_AFTER_MS);
+  if (sharing) handShareOver(() => isPeer, draw);
   // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
-  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it.
+  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it. A tab
+  // on standby opens none: it refuses it, and the link leaves this address all the same, kept for no one.
   const link = sharing ? null : linkInAddress(window.location.hash);
   if (link) {
-    stopLink = forwardLink(peerLock, link, () => {
-      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
-      draw("linkTaken");
-    }, SHARE_FORWARD_AFTER_MS);
+    const leave = () => history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
+    stopLink = forwardLink(peerLock, link, () => { leave(); draw("linkTaken"); }, SHARE_FORWARD_AFTER_MS, () => { leave(); draw("plain"); });
   }
-  draw(sharing ? "shared" : link ? "link" : "plain");
+  draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 // A tab that waited while another took a new version reloads into it instead, once that tab asked for the lock again.
@@ -118,10 +117,13 @@ setBrowserHost(webHost);
 if (gate.full) {
   startSessionSync();
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
-  listenForShares();
+  listenForShares(peerLock);
   askForShare();
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
   takeLinks(peerLock, (route) => { window.location.hash = route; });
+} else {
+  // On standby nothing takes them: a tab waiting with one drops it rather than keep it in its address.
+  dropLinks(peerLock);
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
 // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
@@ -138,6 +140,7 @@ if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
     openAgainLabel: () => profileTranslator()("apps.view.openAgain"),
+    errorText: (error) => appErrorText(error, profileTranslator()),
     // Files the person picks for an app granted `files`: the client's own sheet, links for this page's life.
     linkedFiles,
   }));

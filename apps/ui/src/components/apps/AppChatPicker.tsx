@@ -8,6 +8,7 @@ import { requestOpenInChat } from "../../lib/apps/running";
 import type { OpenAppOptions } from "../../lib/apps/open";
 import { chatTargetKeys, findChatTargets } from "../../lib/chatTargets";
 import { ChatTargetRow, ChatTargetSearch } from "../chat/ChatTargets";
+import { SearchStatus } from "../ui/SearchStatus";
 import { Button } from "../wallet/ui";
 
 /*
@@ -47,6 +48,7 @@ export function AppChatPicker({ app, options, onClose }: { app: InstalledAppView
           <p className="text-xs text-text-secondary mt-1">{t("apps.pick.hint")}</p>
         </div>
         {searchable && <ChatTargetSearch inputRef={search} list={list} testId="app-chat-picker-search" value={query} onChange={setQuery} />}
+        {searchable && <SearchStatus testId="app-chat-picker-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t("chat.forward.noMatch")} />}
         {/* The search stays in sight while the chats scroll under it; as tall as its rows, as in Forward. */}
         <div className="min-h-0 flex-auto overflow-y-auto">
           {!searchable

@@ -33,18 +33,34 @@
   color: var(--color-text-secondary);
   border-bottom: 1px solid rgb(127 127 127 / 0.2);
 }
+.rich-codeblock-hidden {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid rgb(127 127 127 / 0.2);
+}
+/* A direction control or an invisible character in code, drawn as its code point (CodeBlock.tsx showInvisible). */
+.rich-hidden-char {
+  font-size: 0.85em;
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--color-text-secondary);
+  background: rgb(127 127 127 / 0.22);
+}
 .rich-codeblock pre {
   margin: 0;
   padding: 6px 8px 8px;
-  font-size: 12.5px;
-  line-height: 17px;
+  /* 12.5px and 17px at the default text size, larger or smaller with Settings → Text size (index.css). */
+  font-size: calc(12.5rem / 16 * var(--chat-text-scale));
+  line-height: calc(17rem / 16 * var(--chat-text-scale));
   white-space: pre;
   overflow-x: auto;
   text-align: left;
 }
 
 .rich-action {
-  font-size: 12px;
+  font-size: calc(12rem / 16 * var(--chat-text-scale));
   color: var(--color-link);
   cursor: pointer;
   padding: 0 2px;
@@ -62,12 +78,20 @@
 }
 .rich-spoiler * { color: transparent !important; background: transparent !important; text-decoration-color: transparent !important; }
 .rich-spoiler:hover { background: var(--color-text-secondary); }
-.rich-spoiler:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.rich-spoiler:focus-visible,
+.rich-spoiler-shown:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .rich-spoiler-shown {
   border-radius: 3px;
   background: rgb(127 127 127 / 0.18);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+}
+/* Forced colors (Windows Contrast themes) replace the cover's background with the page's and its transparent text with
+   the theme's text colour, so the hidden words showed in plain view. The cover keeps its own colours there, drawn in the
+   theme's text colour (a muted one on hover); its words stay transparent, inherited by everything inside. */
+@media (forced-colors: active) {
+  .rich-spoiler { forced-color-adjust: none; background: CanvasText; }
+  .rich-spoiler:hover { background: GrayText; }
 }
 
 /* A long blob: one line with its actions, or all of it wrapped anywhere. */
@@ -83,7 +107,7 @@
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12.5px;
+  font-size: calc(12.5rem / 16 * var(--chat-text-scale));
 }
 .rich-blob-actions { flex: none; display: inline-flex; gap: 6px; }
 .rich-blob-open { flex-direction: column; gap: 2px; white-space: normal; }

@@ -8,7 +8,7 @@
 // writes one `<gate>=true|false` line per gate (`lint=`, `rust=`, `website=`, `website_e2e=`, `app=`, `packages=`,
 // `full=`, `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path
 // gate may only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts
-// holds the website's list to what the site's scripts actually read.
+// holds the website's list to what the site's scripts, tests and browser checks actually read.
 //
 // A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
@@ -28,6 +28,8 @@ export const RUST_INPUTS = [
   "native/transports/",
   "Cargo.toml",
   "Cargo.lock",
+  // The compiler, clippy and rustfmt the job runs: a bump is checked before it merges.
+  "rust-toolchain.toml",
   // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
   "apps/web/public/app-frame.html",
   "packages/core/src/miniApp.ts",
@@ -37,6 +39,8 @@ export const RUST_INPUTS = [
   "native/translation/",
   // viewer.rs: a test keeps its connection policy the same as `service open`'s.
   "packages/cli/src/services.ts",
+  // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
+  "packages/core/src/viewerGuard.ts",
 ];
 
 /**
@@ -52,6 +56,10 @@ export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.m
  */
 export const WEBSITE_INPUTS = [
   "apps/website/",
+  // The /android page's Android build facts, checked by apps/website/scripts/android-page.test.mjs.
+  "apps/desktop/tauri.android.conf.json",
+  "apps/desktop/gen/android/app/build.gradle.kts",
+  "docs/ANDROID.md",
   // Published under /reference by apps/website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
   "docs/wisps/",
   "docs/PROTOCOL.md",
@@ -67,6 +75,10 @@ export const WEBSITE_INPUTS = [
   "packages/cli/README.md",
   // llms.test.mjs checks the install line against the CLI's package name.
   "packages/cli/package.json",
+  // llms.test.mjs checks that the security model's events and press fields are the ones `listen --turns` emits.
+  "packages/cli/src/listen.ts",
+  // llms.test.mjs checks that llms.txt's Android line follows the Release workflow's ANDROID_FROM.
+  ".github/workflows/release.yml",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
@@ -89,8 +101,29 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/canonicalJson.ts",
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
-  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
+  "packages/core/src/text.ts",
+  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers, and the agents
+  // FAQ's relay hosts against the default Pkarr and Iroh relays.
   "packages/browser/src/proofs/domain.ts",
+  "packages/core/src/relay.ts",
+  "packages/browser/src/platform/irohWeb.ts",
+  // privacy-settings.test.mjs checks the privacy page's Settings paths against the app's section names.
+  "apps/ui/src/lib/settingsSections.ts",
+  "apps/ui/src/locales/en/settings.json",
+  "apps/ui/src/locales/en/network.json",
+  // The launch checklist (e2e/launch-checklist.spec.ts) checks the repository's social preview's size.
+  "docs/assets/social-preview.png",
+  // shots-version.test.mjs checks lib/release.ts's version against the app's.
+  "package.json",
+  // agents-webrtc.test.mjs checks the site's text against it.
+  "packages/cli/src/runtime/engine.ts",
+  "packages/browser/src/engine/node.ts",
+  // first-pairing.test.mjs checks the site's text against it.
+  "packages/core/src/ghostlink.ts",
+  "packages/core/src/capsRecord.ts",
+  // pkarr-ttl.test.mjs checks the site's text against it.
+  "packages/core/src/didDht.ts",
+  "packages/core/src/pkarr.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
@@ -109,11 +142,13 @@ export const NOT_APP = /^(apps\/website|docs)\//;
 export const PACKAGES_READ_FROM_SITE = [
   // packages/core's websiteInvite test: the join page's own copy of the invite rules.
   "apps/website/lib/invite.ts",
-  // packages/browser's atprotoOAuth test: the client metadata the site serves.
+  // packages/browser's atprotoOAuth test: the client metadata the site serves, and the home's Bluesky proof card.
   "apps/website/public/oauth/",
+  "apps/website/content/home.ts",
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
+  "docs/VOICE-AGENT.md",
   "apps/website/content/agents.ts",
   "apps/website/content/agentsThreat.ts",
   "docs/CLI.md",

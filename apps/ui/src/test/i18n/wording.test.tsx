@@ -69,3 +69,19 @@ describe("the Wallet page", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(lookup(language, "tabs.wallets")!);
   });
 });
+
+/*
+ * A message's Details (2026-11-04): a direct link reads "WebRTC, direct" inside "received live over …". In Arabic,
+ * Spanish and Italian "live" and "direct" were one word, said twice in a row; French already said "without a relay".
+ * The word "direct" adds is in no "live" sentence that wraps it, in any of its endings (Italian's diretta, diretto).
+ */
+describe("a message's Details say direct once", () => {
+  it.each(LANGUAGES)("in %s", (language) => {
+    const word = lookup(language, "messageDetails.path.direct")!.replace("{{name}}", "").replace(/^[\s,،、，]+/u, "").split(/\s+/u)[0]!.toLocaleLowerCase(language);
+    const direct = word.length > 3 ? word.slice(0, -1) : word;
+    const wrapping = [...flatten(LOCALES[language])].filter(([key, value]) => /^messageDetails\.summary\.(live|receivedLive)/.test(key) && typeof value === "string" && value.includes("{{over}}"));
+    expect(wrapping.length).toBeGreaterThan(0);
+    const repeated = wrapping.filter(([, value]) => (value as string).toLocaleLowerCase(language).includes(direct));
+    expect(repeated.map(([key, value]) => `${key}: ${value}`)).toEqual([]);
+  });
+});

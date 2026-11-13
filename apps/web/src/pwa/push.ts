@@ -1,5 +1,5 @@
 import type { VapidKeys } from "@ghostly/core";
-import { pushScope } from "../sw/policy";
+import { pushScope, quietWakeTag, seenChatWakeTags } from "../sw/policy";
 import { clearWakeEntries, writeWakeEntries, writeWakeText, type WakeEntry, type WakeText } from "../sw/wakeStore";
 import { clearWakeLimit } from "../sw/wakeLimit";
 
@@ -35,12 +35,25 @@ const toBase64Url = (buffer: ArrayBuffer | null) =>
   buffer ? btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : "";
 const fromBase64Url = (text: string) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
+/** The push workers this page asked the browser to look at again (`registration`): once each per page. */
+const looked = new Set<string>();
+
 async function registration(profile: string, create: boolean): Promise<ServiceWorkerRegistration | undefined> {
   const container = workers();
   if (!container) return undefined;
   const scope = new URL(pushScope(profile), location.origin).href;
   const found = await container.getRegistration(scope);
-  if (found?.scope === scope) return found;
+  if (found?.scope === scope) {
+    // No page runs in this scope, so the browser looks for a new script only on its own (Chromium: on a push, a day
+    // after its last look), and the worker may still be the build before this page's: one that reads an online
+    // wake-up (`o`) as "New message". This page's build asks now; it has no page to wait for, so it takes over once
+    // installed. Not awaited, and offline it stays as it is.
+    if (!looked.has(scope)) {
+      looked.add(scope);
+      void Promise.resolve().then(() => found.update()).catch(() => {});
+    }
+    return found;
+  }
   if (!create) return undefined;
   const made = await container.register(SCRIPT, { scope: pushScope(profile), updateViaCache: "none" });
   // Subscribing needs an active worker.
@@ -88,6 +101,19 @@ export async function unsubscribePush(profile: string): Promise<void> {
   await found?.unregister().catch(() => false);
   await clearWakeEntries(profile).catch(() => {});
   await clearWakeLimit(profile).catch(() => {});
+}
+
+/**
+ * Closes the wake-up notices of this profile that the app in front made stale (WISP 401 § Wake-up push): its quiet
+ * notice, and with `path` (a chat on screen) that chat's "New message" and online notice. A call's notice stays: it
+ * says the caller is waiting. Only this profile's push worker's notices are looked at, never another profile's.
+ */
+export async function closeWakeNotices(profile: string, path?: string): Promise<void> {
+  const found = await registration(profile, false).catch(() => undefined);
+  if (typeof found?.getNotifications !== "function") return;
+  for (const tag of [quietWakeTag(profile), ...(path ? seenChatWakeTags(profile, path) : [])]) {
+    for (const shown of await found.getNotifications({ tag }).catch(() => [])) shown.close();
+  }
 }
 
 /** The worker's table for this profile: which chat each token names, its mute, and the words to show. */

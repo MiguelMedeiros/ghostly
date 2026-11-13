@@ -511,11 +511,29 @@ mod webkit {
             return;
         };
         let staged = list.with_extension("json.tmp");
+        // It names contacts: the user's alone, as the log and the files are, on a machine whose home folders others
+        // may enter.
         if let Some(dir) = list.parent() {
             let _ = std::fs::create_dir_all(dir);
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
-        if std::fs::write(&staged, text).is_ok() {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let Ok(mut out) = options.open(&staged) else {
+            return;
+        };
+        // A staged file an older build left keeps its mode when opened again.
+        use std::os::unix::fs::PermissionsExt;
+        let written = out
+            .set_permissions(std::fs::Permissions::from_mode(0o600))
+            .and_then(|()| std::io::Write::write_all(&mut out, &text));
+        drop(out);
+        if written.is_ok() {
             let _ = std::fs::rename(&staged, list);
+        } else {
+            let _ = std::fs::remove_file(&staged);
         }
     }
 
@@ -943,6 +961,30 @@ mod webkit {
         }
 
         #[test]
+        fn the_list_and_its_folder_are_the_users_alone() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = scratch("modes");
+            let (data, cache) = (dir.join("data"), dir.join("cache"));
+            let app = dir.join("app");
+            std::fs::create_dir_all(&app).unwrap();
+            std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let list = app.join(LIST_FILE);
+            // A staged file an older build left readable.
+            let staged = list.with_extension("json.tmp");
+            std::fs::write(&staged, b"{}").unwrap();
+            std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o644)).unwrap();
+            note(
+                &list,
+                folders(&data, &cache),
+                &format!("keeper.{PEER}.{TAG}"),
+            );
+            let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&list), 0o600);
+            assert_eq!(mode(&app), 0o700);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
         fn a_list_that_is_not_one_goes() {
             let dir = scratch("broken");
             let list = dir.join(LIST_FILE);
@@ -1350,6 +1392,7 @@ r.onsuccess = () => {
                     "keeper".into(),
                     TAG.into(),
                     "Keeper".into(),
+                    None,
                     None,
                 )
                 .unwrap()

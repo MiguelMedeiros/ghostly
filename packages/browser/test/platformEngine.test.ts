@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHost, EngineConnection } from "../src/host";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../src/shared/rpc";
 import type { EngineState } from "../src/shared/types";
-// covers: extension.engine
+// covers: extension.engine, extension.reconnecting
 
 /**
  * The page's side of the RPC: a scripted host stands in for the extension port
@@ -27,13 +27,14 @@ function scriptedHost() {
 await import("../src/platform/engine");
 let engine: typeof import("../src/platform/engine").engine;
 let MESSAGE_CHANGES_TICK_MS: number;
+let RECONNECT_MAX_MS: number;
 let hostModule: typeof import("../src/host");
 let scripted: ReturnType<typeof scriptedHost>;
 
 beforeEach(async () => {
   vi.resetModules();
   hostModule = await import("../src/host");
-  ({ engine, MESSAGE_CHANGES_TICK_MS } = await import("../src/platform/engine"));
+  ({ engine, MESSAGE_CHANGES_TICK_MS, RECONNECT_MAX_MS } = await import("../src/platform/engine"));
   scripted = scriptedHost();
   hostModule.setBrowserHost(scripted.host);
 }, 60_000);
@@ -125,6 +126,200 @@ describe("calling the peer", () => {
     expect(scripted.connect).toHaveBeenCalledTimes(3);
     scripted.connections[1].deliver({ kind: "response", id: 1, result: null });
     await expect(call).resolves.toBeNull();
+  });
+
+  it("keeps reconnecting by itself, each time waiting longer, until the peer answers again", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    scripted.refuseWith(new Error("The offscreen document did not start"));
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(scripted.connect).toHaveBeenCalledTimes(2);
+    // Nothing on the page calls the peer (a tab in the background): it tries again by itself, less and less often.
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    const tries = scripted.connect.mock.calls.length;
+    expect(tries).toBeGreaterThan(3);
+    expect(tries).toBeLessThan(15);
+
+    scripted.refuseWith(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    expect(scripted.connections).toHaveLength(2);
+    // Connected again: no more tries.
+    const connected = scripted.connect.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(scripted.connect).toHaveBeenCalledTimes(connected);
+    const call = engine.call("usdtLock");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scripted.connections[1].sent).toEqual([{ kind: "request", id: 1, method: "usdtLock", params: undefined }]);
+    scripted.connections[1].deliver({ kind: "response", id: 1, result: null });
+    await expect(call).resolves.toBeNull();
+  });
+
+  it("says it is reconnecting between failed tries, and stops saying so once connected again", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    const heard: boolean[] = [];
+    engine.subscribe(() => heard.push(engine.reconnecting));
+    scripted.refuseWith(new Error("The offscreen document did not start"));
+    scripted.connections[0].drop();
+    // The first try comes half a second later: a peer that is back by then shows nothing.
+    expect(engine.reconnecting).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+    expect(heard).toEqual([true]);
+    // More failed tries: still reconnecting, and the listeners are not told it again.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(scripted.connect.mock.calls.length).toBeGreaterThan(3);
+    expect(engine.reconnecting).toBe(true);
+    expect(heard).toEqual([true]);
+
+    scripted.refuseWith(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    expect(scripted.connections).toHaveLength(2);
+    expect(engine.reconnecting).toBe(false);
+    expect(heard).toEqual([true, false]);
+  });
+
+  it("keeps trying by itself, and says so, when the page's first connection fails (a tab opened while the peer does not start)", async () => {
+    vi.useFakeTimers();
+    scripted.refuseWith(new Error("The Ghostly peer did not start. Reopen the extension to retry."));
+    engine.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scripted.connect).toHaveBeenCalledTimes(1);
+    expect(engine.reconnecting).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(scripted.connect.mock.calls.length).toBeGreaterThan(3);
+
+    // The peer starts (the minute check, or another tab): this page connects with nothing else asking it to.
+    scripted.refuseWith(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    expect(scripted.connections).toHaveLength(1);
+    expect(engine.reconnecting).toBe(false);
+  });
+
+  it("stops saying it is reconnecting when a call of the page connects before the next try", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    scripted.refuseWith(new Error("down"));
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+    scripted.refuseWith(null);
+    const call = engine.call("usdtLock");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.reconnecting).toBe(false);
+    scripted.connections[1].deliver({ kind: "response", id: 1, result: null });
+    await expect(call).resolves.toBeNull();
+  });
+});
+
+describe("what the page said of itself, to a peer that started again", () => {
+  /** The calls a connection was sent, as method and params, answers left out. */
+  const said = (index: number) => scripted.connections[index].sent.map((r) => r.kind === "request" ? [r.method, r.params] : [r.kind]);
+  /** Answers every call sent on a connection so far, as the peer would. */
+  const answer = (index: number) => {
+    for (const r of scripted.connections[index].sent) if (r.kind === "request") scripted.connections[index].deliver({ kind: "response", id: r.id, result: null });
+  };
+
+  it("tells the new peer the chat on screen, the person's presence and a call on, once each", async () => {
+    vi.useFakeTimers();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    void engine.call("setCallOn", { on: true });
+    void engine.call("usdtRefresh");
+    await vi.advanceTimersByTimeAsync(0);
+    // The first peer hears each once, from its own call.
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }], ["setCallOn", { on: true }], ["usdtRefresh", undefined]]);
+    answer(0);
+
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(scripted.connections).toHaveLength(2);
+    // The new one hears the page's words again, and nothing else (a call that only acts is not said again).
+    expect(said(1)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }], ["setCallOn", { on: true }]]);
+    // Their answers are nobody's: nothing breaks on them.
+    answer(1);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it("says the newest word only, and nothing a new peer starts with", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setActiveLink", { linkId: "group:g" });
+    void engine.call("setPresence", { presence: "active" });
+    void engine.call("setPresence", { presence: "idle" });
+    void engine.call("setCallOn", { on: true });
+    void engine.call("setCallOn", { on: false });
+    void engine.call("setFastPoll", { linkId: "a", fast: true });
+    void engine.call("setFastPoll", { linkId: "b", fast: true });
+    void engine.call("setFastPoll", { linkId: "a", fast: false });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(1)).toEqual([["setActiveLink", { linkId: "group:g" }], ["setPresence", { presence: "idle" }], ["setFastPoll", { linkId: "b", fast: true }]]);
+
+    // Nothing on screen any more: the next peer is told nothing of it.
+    void engine.call("setActiveLink", { linkId: null });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(1);
+    scripted.connections[1].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(2)).toEqual([["setPresence", { presence: "idle" }], ["setFastPoll", { linkId: "b", fast: true }]]);
+  });
+
+  it("leaves a word to the call that waits to send it, so it goes once and a newer one goes last", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+    scripted.refuseWith(new Error("down"));
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(engine.reconnecting).toBe(true);
+
+    // While the peer is away, the person opens another chat: that call waits for the connection.
+    scripted.refuseWith(null);
+    const opened = engine.call("setActiveLink", { linkId: "b" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(said(1)).toEqual([["setPresence", { presence: "active" }], ["setActiveLink", { linkId: "b" }]]);
+    answer(1);
+    await expect(opened).resolves.toBeNull();
+  });
+
+  it("tells a word whose call found no peer to the next one that runs", async () => {
+    vi.useFakeTimers();
+    scripted.refuseWith(new Error("The offscreen document did not start"));
+    await expect(engine.call("setActiveLink", { linkId: "a" })).rejects.toThrow("did not start");
+    scripted.refuseWith(null);
+    await engine.connect();
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }]]);
+  });
+
+  it("says idle, not active, when the last active word is older than the peer's idle wait", async () => {
+    vi.useFakeTimers();
+    await engine.connect();
+    void engine.call("setPresence", { presence: "active" });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    scripted.connections[0].drop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(said(1)).toEqual([["setPresence", { presence: "idle" }]]);
+  });
+
+  it("sends each word once on the first connection, and says nothing again while it lasts", async () => {
+    vi.useFakeTimers();
+    void engine.call("setActiveLink", { linkId: "a" });
+    void engine.call("setPresence", { presence: "active" });
+    await engine.connect();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(said(0)).toEqual([["setActiveLink", { linkId: "a" }], ["setPresence", { presence: "active" }]]);
+    expect(scripted.connections).toHaveLength(1);
   });
 });
 

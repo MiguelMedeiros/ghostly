@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as pgp from "openpgp";
 import { identityStatement, IDENTITY_MAX_EVIDENCE, newIdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { openpgp, normalizeFingerprint } from "../src/proofs/providers/openpgp";
-import { preparePgpEvidence, type PgpEvidence } from "../src/proofs/openpgp";
+import { PGP_NO_USER_IDS, preparePgpEvidence, type PgpEvidence } from "../src/proofs/openpgp";
 import { identityProvider, IDENTITY_PROVIDERS } from "../src/proofs/registry";
 import { verifyIdentity } from "../src/proofs/verify";
 import type { ExternalToolSigner, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -124,6 +124,19 @@ describe("OpenPGP provider", () => {
       const evidence = await keyserverSigner.parse(await clearsign("alice", s.text), s);
       expect(fetch).toHaveBeenCalledWith(`https://keys.openpgp.org/vks/v1/by-fingerprint/${fpr.alice}`, expect.objectContaining({ credentials: "omit" }));
       await expect(verify(s, evidence)).resolves.toMatchObject({ subject: fpr.alice });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("says a key keys.openpgp.org serves without user IDs (no email confirmed there) cannot be checked, and finds no confirmed email in it", async () => {
+    // What keys.openpgp.org serves until its owner confirms an email: the key and its subkeys, no user ID.
+    const key = await pgp.readKey({ armoredKey: vector("alice.pub.asc") });
+    const packets = new pgp.PacketList<pgp.AnyPacket>();
+    packets.push(key.keyPacket, ...key.subkeys.flatMap(s => [s.keyPacket, ...s.bindingSignatures]));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new pgp.PublicKey(packets).armor())));
+    try {
+      const s = statementAt(fpr.alice);
+      await expect(keyserverSigner.parse(await clearsign("alice", s.text), s)).rejects.toThrow(PGP_NO_USER_IDS);
+      await expect(openpgp.lookupDisplay!(fpr.alice, { signal: new AbortController().signal })).resolves.toBeUndefined();
     } finally { vi.unstubAllGlobals(); }
   });
 

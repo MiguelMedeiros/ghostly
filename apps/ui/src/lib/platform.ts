@@ -109,6 +109,18 @@ export interface NetworkSettings {
   /** The push relay (https://) wake-ups go through when this app may not post them itself; empty for none. */
   pushRelay: string;
   /**
+   * The push relay answered the last wake-up, but not as a push relay: its HTTP status and its own error text, when it
+   * gave one (`EngineState.pushRelayRefused`). Absent while it forwards them, or where this app posts them itself.
+   */
+  pushRelayRefused?: { http: number; text?: string };
+  /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): calls, chat connections and group links go through the TURN
+   * server only, and this app's own direct Iroh and HyperDHT endpoints are not offered. Needs `turn`. Where the DHT
+   * is reached directly (Desktop), reads and writes then go through the Pkarr relays alone, and nothing goes to the
+   * DHT itself.
+   */
+  relayOnly?: boolean;
+  /**
    * Present where the DHT is reached directly (Desktop): whether reads use the relays too, "Also use Pkarr
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
    */
@@ -205,7 +217,7 @@ export interface WalletState {
    * The Lightning card of this network the calls act on: the one a platform is bound to (`forLightning`), else the
    * network's default for receiving. Its source (the Cashu mints by default) and its latest operations.
    */
-  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive">>;
+  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive" | "sameWalletAs">>;
   /** Every Lightning card of this network, in the order they were added. */
   lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this network, if one is set up. */
@@ -418,6 +430,8 @@ export interface WalletPlatform {
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
+  /** The contact's payment of one of our requests that is still on its way (an on-chain one waits for a confirmation). */
+  paymentOnItsWay(requestId: string): ChatPayment | null;
   /**
    * Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`.
    * `confirmedReal`: required for a Mainnet request, as for `payQuote`.
@@ -510,8 +524,11 @@ export interface LinkedFilesHost {
    * keeps nothing, and the app gets no other one until it is answered (`too-fast`).
    */
   pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
-  /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */
-  list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /**
+   * Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet
+   * that goes on `signal`, as pick's). `ask` false (the app is not on screen): nobody is asked, and a later list may ask.
+   */
+  list(ref: string, title: string, signal?: AbortSignal, ask?: boolean): Promise<MiniAppLinkedFile[]>;
   /**
    * One link as `list` gives it (the person is not asked), or null for an id the app does not keep: what `files.serve`
    * reads, so serving one file of a library does not list every file. Absent: the broker finds it in `list`.
@@ -555,6 +572,12 @@ export interface ServicesPlatform {
   getSharedServices(): SharedService[];
   /** Throws with a readable message when the target is not acceptable or access was denied. */
   shareService(name: string, target: string): Promise<void>;
+  /**
+   * Is a shared app's address not yet allowed on this device (the extension: one that came with a restored or moved
+   * profile)? Its contacts are refused until `allowLocalAccess`, from a click. Left out where the share asked already.
+   */
+  localAccessNeeded?(target: string): Promise<boolean>;
+  allowLocalAccess?(target: string): Promise<void>;
   removeService(id: string): Promise<void>;
   setServiceEnabled(id: string, enabled: boolean): Promise<void>;
   /** Grants or withdraws one contact's access to one service. Nobody is granted by default. */
@@ -652,7 +675,7 @@ export interface ServicesPlatform {
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
   /** Saves the network settings given; `turn` left out keeps the TURN server as it is. */
-  setNetwork(settings: Pick<NetworkSettings, "relays"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "turn" | "hyperdhtRelay" | "readRelays" | "pushRelay">>): Promise<void>;
+  setNetwork(settings: Pick<NetworkSettings, "relays"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "turn" | "hyperdhtRelay" | "readRelays" | "pushRelay" | "relayOnly">>): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;

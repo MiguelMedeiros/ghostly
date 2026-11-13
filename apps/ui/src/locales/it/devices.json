@@ -98,7 +98,8 @@
       "older": "Aggiorna prima Ghostly su questo dispositivo.",
       "password": "Password errata.",
       "payment": "Un pagamento è ancora in corso. Riprova tra un momento.",
-      "refused": "{{device}} non permette a questo dispositivo di prendere il profilo.",
+      "refused": "{{device}} non ha permesso a questo dispositivo di prendere il profilo.",
+      "refusedNext": "Se qui sono state digitate password sbagliate, sblocca {{device}} e lascia riprovare questo dispositivo.",
       "room": "Non c'è abbastanza spazio su questo dispositivo.",
       "settle": "Impossibile verificare quale dispositivo è attivo. Controlla la connessione, poi riprova.",
       "stalled": "Lo spostamento si è fermato",
@@ -252,8 +253,7 @@
     "doneInfo": "Non può più prendere questo profilo. Gli altri tuoi dispositivi ricevono la modifica la prossima volta che aprono Ghostly.",
     "fail": {
       "busy": "Qualcos’altro sta cambiando i tuoi dispositivi. Riprova tra un momento.",
-      "failed": "Qualcosa è andato storto. Non è stato cambiato nulla.",
-      "offline": "Vai online per cambiare i tuoi dispositivi."
+      "failed": "Qualcosa è andato storto. Non è stato cambiato nulla."
     },
     "go": "Rimuovi",
     "lost": "Perso o rubato",
@@ -268,6 +268,7 @@
     },
     "label": "Nome del dispositivo",
     "save": "Salva",
+    "saving": "Salvataggio…",
     "title": "Rinomina {{device}}"
   },
   "restore": {
@@ -334,7 +335,6 @@
       "unreadable": "Non è stato avviato nulla."
     },
     "info": "Un solo dispositivo alla volta invia, riceve e paga, così i tuoi messaggi e il tuo denaro non sono mai in due posti.",
-    "link": "{{device}}: {{status}}",
     "links": "I tuoi dispositivi",
     "notice": {
       "hint": "Se questo elenco sembra sbagliato, non usare questo dispositivo.",
@@ -346,6 +346,15 @@
     "reenroll": {
       "hint": "Aggiungi di nuovo questo dispositivo dal dispositivo che usi ora.",
       "title": "I tuoi dispositivi sono cambiati mentre questo era spento"
+    },
+    "removeHere": {
+      "button": "Rimuovi questo profilo da qui",
+      "confirm": "Scrivi {{name}} per confermare",
+      "first": "Un profilo vuoto prende il suo posto qui.",
+      "go": "Rimuovi",
+      "hint": "Le sue chat, chiavi e portafogli vengono cancellati da questo dispositivo. Gli altri tuoi dispositivi mantengono il profilo.",
+      "removing": "Rimozione…",
+      "title": "Rimuovere {{name}} da questo dispositivo?"
     },
     "title": {
       "moving": "Ci siamo quasi",

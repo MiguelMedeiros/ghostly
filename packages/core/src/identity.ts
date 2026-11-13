@@ -14,26 +14,64 @@ export interface Identity {
   pubKeyZ32: string;
 }
 
-/** How many public keys `identityFromSeed` keeps: a start with 50 chats and 20 groups derives about 400 distinct ones. */
+/** How many public keys `identityFromSeed` keeps however long ago they were used: a start with 50 chats and 20 groups derives about 400 distinct ones. */
 export const IDENTITY_MEMO_SIZE = 1024;
+/**
+ * Past `IDENTITY_MEMO_SIZE`, a key is let go only once it has not been asked for this long: a start asks for all of a
+ * profile's keys within seconds (a 600-chat one, ~4,000 of them), then asks again for the running links' ones.
+ */
+export const IDENTITY_MEMO_IDLE_MS = 10 * 60_000;
+/** The most keys kept, used or not: ~410 bytes each in V8 (its id, its key and when it was used), ~6.7 MB in all. */
+export const IDENTITY_MEMO_MAX = 16_384;
 /**
  * Public keys already derived, by the SHA-256 of their seed, the most recently used last. A chat's start derives the
  * same few seeds' keys again and again (its link, its delivery, its capability record): ~0.25 ms each in V8, ~3.4x
  * that in JSC. The seed itself is never kept, so a seed its owner zeroes leaves nothing behind here.
  */
-const publicKeys = new Map<string, Uint8Array>();
+const publicKeys = new Map<string, { key: Uint8Array; at: number }>();
+
+/**
+ * A faster derivation of a seed's Ed25519 public key a host may give (the CLI gives node:crypto's, ~4x noble's): each
+ * process starts with an empty memo, so a one-shot command derives every chat's keys again. A throw, or an answer that
+ * is not 32 bytes, leaves the key to noble.
+ */
+export type PublicKeyFastPath = (seed: Uint8Array) => Uint8Array;
+
+let publicKeyFastPath: PublicKeyFastPath | null = null;
+
+/** Gives (or, with `null`, takes back) the faster derivation of every public key `identityFromSeed` derives. */
+export function setPublicKeyFastPath(derive: PublicKeyFastPath | null): void {
+  publicKeyFastPath = derive;
+}
+
+function derivePublicKey(seed: Uint8Array): Uint8Array {
+  if (publicKeyFastPath) {
+    try {
+      const key = publicKeyFastPath(seed);
+      if (key.length === 32) return Uint8Array.from(key);
+    } catch { /* noble's below */ }
+  }
+  return ed25519.getPublicKey(seed);
+}
 
 function publicKeyOf(seed: Uint8Array): Uint8Array {
   const id = toBase64Url(sha256(seed));
-  let key = publicKeys.get(id);
-  if (key) publicKeys.delete(id);
-  else {
-    key = ed25519.getPublicKey(seed);
-    if (publicKeys.size >= IDENTITY_MEMO_SIZE) publicKeys.delete(publicKeys.keys().next().value!);
+  const now = Date.now();
+  let entry = publicKeys.get(id);
+  if (entry) {
+    publicKeys.delete(id);
+    entry.at = now;
+  } else {
+    entry = { key: derivePublicKey(seed), at: now };
+    for (const [oldest, { at }] of publicKeys) {
+      if (publicKeys.size < IDENTITY_MEMO_SIZE) break;
+      if (publicKeys.size < IDENTITY_MEMO_MAX && now - at < IDENTITY_MEMO_IDLE_MS) break;
+      publicKeys.delete(oldest);
+    }
   }
-  publicKeys.set(id, key);
+  publicKeys.set(id, entry);
   // A copy: a caller that writes over its key never changes another's.
-  return key.slice();
+  return entry.key.slice();
 }
 
 export function identityFromSeed(seed: Uint8Array): Identity {

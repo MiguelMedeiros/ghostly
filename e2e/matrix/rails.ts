@@ -460,10 +460,13 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   // and one pass of the engine's 10 s payment check to see it.
   const confirmed = async (payer: Actor) => { await rpc("evm_mine"); await payer.page.waitForTimeout(11_000); };
   await bothWays(a, b, "usdt", [3, 2, 1, 1], confirmed);
+  // Each USDT request asks a little more than typed (under a thousandth): about n, either side of it. The balance is
+  // in the actor's language: a comma before the decimals in Portuguese ("3,000275").
+  const about = (n: number) => new RegExp(`^(${n - 1}[.,]99\\d*|${n}([.,]00\\d*)?) TEST-USDT`);
   await wallet(a, "usdt");
-  await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(/^7 TEST-USDT/, { timeout: 30_000 });
+  await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(about(7), { timeout: 30_000 });
   await wallet(b, "usdt");
-  await expect(tokens(b), "3 in, 2 in, 1 out, 1 out").toHaveText(/^3 TEST-USDT/, { timeout: 30_000 });
+  await expect(tokens(b), "3 in, 2 in, 1 out, 1 out").toHaveText(about(3), { timeout: 30_000 });
 }
 
 type Pair = { a: Actor; b: Actor };

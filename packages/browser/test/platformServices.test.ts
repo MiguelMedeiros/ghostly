@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, isViewerTag, viewerTag } from "@ghostly/core";
+import { LIMITS, NO_AUDIO_METADATA, NO_PICTURE_METADATA, NO_VIDEO_METADATA, isViewerTag, viewerTag } from "@ghostly/core";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
+import { taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { blobDigest, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -107,10 +108,18 @@ describe("opening a contact's app", () => {
   it("opens it in an origin of this profile's chat with the contact, never one every profile shares", async () => {
     withLinks(chat({ myPubKeyZ32: ME }));
     await services.openService("peer-1", "atlas");
-    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME));
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME), false);
     expect(isViewerTag(viewerTag(ME))).toBe(true);
     // Another profile's chat with the same contact, or this one after "Clear all data", has another key of its own.
     expect(viewerTag(ME_ELSEWHERE)).not.toBe(viewerTag(ME));
+  });
+
+  it("tells the host Hide my IP from contacts is on, so the app keeps to its own origin", async () => {
+    // covers: settings.network.relay-only
+    withLinks(chat({ myPubKeyZ32: ME }));
+    (engine.state as EngineState).settings.relayOnly = true;
+    await services.openService("peer-1", "atlas");
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME), true);
   });
 
   it("opens nothing for a contact the peer does not know yet", async () => {
@@ -330,6 +339,34 @@ describe("sending files", () => {
     expect(sent[0]!.file.video).toEqual(described);
   });
 
+  // covers: files.audio.metadata
+  it("an audio file goes without its tags (title, comment, place), to a chat and to a group: what is stored and digested is the stripped copy", async () => {
+    withLinks(chat({ id: "audio-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    for (const [recorded, name, mime] of [[taggedMp3(), "memo.mp3", "audio/mpeg"], [taggedM4a(), "memo.m4a", "audio/x-m4a"]] as const) {
+      const audio = () => new File([recorded], name, { type: mime });
+      for (const { file } of [await services.sendFile("peer-1", audio()), await services.sendGroupFile!("g1", audio())]) {
+        const stored = await fileStore.get(file.id);
+        const bytes = new Uint8Array(await stored!.blob!.arrayBuffer());
+        expect(hasPlace(bytes), name).toBe(false);
+        expect(bytes.length).toBe(recorded.length);
+        expect(file.size).toBe(bytes.length);
+        expect(stored!.digest).toBe(await blobDigest(new Blob([bytes])));
+        expect(file).toMatchObject({ name, mime });
+      }
+    }
+  });
+
+  it("an audio file whose tags cannot be removed is refused, to a chat and to a group, and nothing of it is stored or sent", async () => {
+    withLinks(chat({ id: "bad-audio-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const bad = new File([taggedMp3().subarray(0, 40)], "cut.mp3", { type: "audio/mpeg" });
+    await expect(services.sendFile("peer-1", bad)).rejects.toThrow(NO_AUDIO_METADATA);
+    await expect(services.sendGroupFile!("g1", bad)).rejects.toThrow(NO_AUDIO_METADATA);
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck"]);
+    expect(await fileStore.listForLink("bad-audio-link")).toEqual([]);
+  });
+
   it("a video whose metadata cannot be removed is refused, to a chat and to a group, and nothing of it is stored or sent", async () => {
     withLinks(chat({ id: "bad-video-link" }));
     engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
@@ -503,6 +540,19 @@ describe("wallet and settings", () => {
     } as never;
     expect(services.wallet.answerTo("ask-1")).toMatchObject({ id: "theirs" });
     expect(services.wallet.answerTo("ask-2")).toBeNull();
+  });
+
+  it("finds the contact's payment of a request of ours only while it is on its way", () => {
+    withLinks();
+    (engine.state as EngineState).payments = {
+      req: { id: "req", kind: "request", direction: "out", state: "pending" },
+      sent: { id: "sent", requestId: "req", kind: "payment", direction: "out", state: "pending" },
+      failed: { id: "failed", requestId: "req", kind: "payment", direction: "in", state: "failed" },
+      theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "pending" },
+    } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toMatchObject({ id: "theirs" });
+    (engine.state as EngineState).payments = { theirs: { id: "theirs", requestId: "req", kind: "payment", direction: "in", state: "settled" } } as never;
+    expect(services.wallet.paymentOnItsWay("req")).toBeNull();
   });
 
   it("reads nothing before the first state, and the peer's view after", () => {

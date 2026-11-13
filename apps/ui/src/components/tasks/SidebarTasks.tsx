@@ -56,7 +56,7 @@ export function SidebarTasks({ active, onOpen, rail }: { active: boolean; onOpen
   return (
     <div className="px-3 pb-2 bg-sidebar-bg">
       <button type="button" data-testid="sidebar-tasks" onClick={onOpen} aria-label={label} aria-current={active ? "page" : undefined}
-        className={`flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-11 ${
+        className={`current-mark relative flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-11 ${
           active ? "bg-surface-hover text-text-primary" : "bg-search-bg text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`}>
         <TasksIcon size={16} />
         <span className="min-w-0 flex-1 truncate font-medium">{t("cards.panel.button")}</span>

@@ -1,5 +1,5 @@
 import { dnsProofName, domainTxtRecord, domainWellKnownFile, normalizeDomain, wellKnownUrl, type DomainRecord, type IdentityStatement } from "@ghostly/core";
-import type { IdentityProofProvider, InAppSigner, PublishSigner, SignerSession } from "../contract";
+import { englishSay, type IdentityProofProvider, type InAppSigner, type PublishSigner, type SignerSession } from "../contract";
 import { assertDomainRecord, assertNip05, chosenResolver, resolverById } from "../domain";
 import { extensionSigner, withNostrSigner } from "../nostr";
 import { nostr, nostrProofTemplate, type NostrEvent } from "./nostr";
@@ -39,13 +39,13 @@ const exactKeys = (raw: unknown, keys: string) => !!raw && typeof raw === "objec
 const dnsSigner: PublishSigner<DomainEvidence> = {
   id: "dns", kind: "publish", label: "DNS TXT record",
   description: "Add a TXT record at your DNS host. Contacts' apps look it up through a DNS-over-HTTPS resolver.",
-  instructions(statement) {
+  instructions(statement, say = englishSay) {
     const domain = statement.binding.subject;
     return { steps: [
-      { text: `Open the DNS settings of ${domain} at your registrar or DNS host and add a TXT record with this name. Some hosts add the domain themselves: then enter only the part before ${domain}.`, copy: dnsProofName(domain) },
-      { text: "Value (one string, exactly as shown):", copy: domainTxtRecord(recordFor(statement)) },
-      { text: "Set the TTL to 300 seconds or less, so removing the record takes effect quickly. Then press Check: DNS changes can take a few minutes to appear." },
-      { text: "The record stays public while the proof is in use. Removing it withdraws this proof from every contact at their next check." },
+      { text: say("dns.name", "Open the DNS settings of {{domain}} at your registrar or DNS host and add a TXT record with this name. Some hosts add the domain themselves: then enter only the part before {{domain}}.", { domain }), copy: dnsProofName(domain) },
+      { text: say("dns.value", "Value (one string, exactly as shown):"), copy: domainTxtRecord(recordFor(statement)) },
+      { text: say("dns.ttl", "Set the TTL to 300 seconds or less, so removing the record takes effect quickly. Then press Check: DNS changes can take a few minutes to appear.") },
+      { text: say("dns.public", "The record stays public while the proof is in use. Removing it withdraws this proof from every contact at their next check.") },
     ] };
   },
   evidence: () => ({ method: "dns" }),
@@ -54,13 +54,13 @@ const dnsSigner: PublishSigner<DomainEvidence> = {
 const httpsSigner: PublishSigner<DomainEvidence> = {
   id: "https", kind: "publish", label: "File on your website",
   description: "Upload a small file to your website. Contacts' apps download it from your server.",
-  instructions(statement) {
+  instructions(statement, say = englishSay) {
     const domain = statement.binding.subject;
     return { steps: [
-      { text: `Create this file on the web server of ${domain}:`, copy: wellKnownUrl(domain) },
-      { text: "With exactly this content:", copy: domainWellKnownFile([recordFor(statement)]) },
-      { text: "Serve it over HTTPS at exactly that address, without any redirect (not even to www), and with this header so browsers may read it:", copy: "Access-Control-Allow-Origin: *" },
-      { text: "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check." },
+      { text: say("https.file", "Create this file on the web server of {{domain}}:", { domain }), copy: wellKnownUrl(domain) },
+      { text: say("https.content", "With exactly this content:"), copy: domainWellKnownFile([recordFor(statement)]) },
+      { text: say("https.serve", "Serve it over HTTPS at exactly that address, without any redirect (not even to www), and with this header so browsers may read it:"), copy: "Access-Control-Allow-Origin: *" },
+      { text: say("https.check", "Then press Check. The file stays public while the proof is in use; deleting it withdraws this proof from every contact at their next check.") },
     ] };
   },
   evidence: () => ({ method: "https" }),
@@ -85,7 +85,7 @@ function nip05Signer(id: "nip05-nip07" | "nip05-nip46"): InAppSigner<DomainEvide
         const session: SignerSession<DomainEvidence> = {
           subject: async () => domain,
           sign: async statement => {
-            ctx.onProgress("Approve the Ghostly identity statement in your signer.");
+            ctx.onProgress((ctx.say ?? englishSay)("nip05.approve", "Approve the Ghostly identity statement in your signer."));
             return { method: "nip05", event: (await signer.signEvent(nostrProofTemplate(statement))) as NostrEvent };
           },
         };

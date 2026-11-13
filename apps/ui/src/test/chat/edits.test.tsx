@@ -60,6 +60,24 @@ describe("the edited mark", () => {
     expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
   });
 
+  // A picture link draws its time on a chip over the picture, not beside a text: the mark goes there too.
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  it.each([["mine", "me"], ["the contact's", "peer"]] as const)("on %s picture, a text edited into it says edited on the chip over it", (_, sender) => {
+    const { container } = renderApp(<MessageBubble message={mine({ sender, id: `${sender}_${WIRE}`, text: PNG, edit: edited() })} peerPubKey="peer" />);
+    const mark = screen.getByTestId("message-edited");
+    expect(mark).toHaveTextContent("edited");
+    expect(mark.getAttribute("title")).toMatch(/^Edited /);
+    expect(mark.closest("[data-picture-time]")).not.toBeNull();
+    expect(container.querySelector("[data-picture-time]")).toHaveTextContent(/^edited/);
+  });
+
+  it("a picture never edited has no mark on its chip", () => {
+    const { container } = renderApp(<MessageBubble message={mine({ text: PNG })} peerPubKey="peer" />);
+    expect(container.querySelector("[data-picture-time]")).not.toBeNull();
+    expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
+  });
+
   it("the details list the earlier versions, the original first", () => {
     const model = buildDetails(mine({ text: "Done", edit: edited() }), null);
     const section = model.sections.find(s => s.id === "edits")!;
@@ -69,6 +87,12 @@ describe("the edited mark", () => {
     expect(section.rows.slice(1).map(r => [r.label.split(",")[0], r.value])).toEqual([["Original", "Working…"], ["Before", "Step 1"]]);
     expect(buildDetails(mine({ edit: edited({ pending: true }) }), null).sections.find(s => s.id === "edits")!.rows[1]).toMatchObject({ label: "Contact" });
     expect(buildDetails(mine(), null).sections.find(s => s.id === "edits")).toBeUndefined();
+  });
+
+  it("only the first version kept reads as the original, whatever time a later one carries", () => {
+    const history = [{ at: 1_700_000_030_000, text: "Step 1" }, { at: 1_700_000_000_000, text: "Forged" }];
+    const rows = buildDetails(mine({ text: "Done", edit: edited({ history }) }), null).sections.find(s => s.id === "edits")!.rows;
+    expect(rows.slice(1).map(r => r.label.split(",")[0])).toEqual(["Before", "Before"]);
   });
 });
 
@@ -123,6 +147,30 @@ describe("the composer while editing", () => {
     await user.click(screen.getByTestId("composer-edit-cancel"));
     expect(field()).toHaveValue("draft");
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("what is typed while an edit is being saved stays in the field after it, with the draft", async () => {
+    // A save that takes a while: the extension's peer starting again answers in about a second.
+    let done!: (error: string | null) => void;
+    const onSave = vi.fn(() => new Promise<string | null>(resolve => { done = resolve; }));
+    const { user } = renderApp(<Composer onSave={onSave} />);
+    await user.type(field(), "draft");
+    await user.click(screen.getByText("edit it"));
+    await user.clear(field());
+    await user.type(field(), "Done{Enter}");
+    expect(onSave).toHaveBeenCalledWith("Done", undefined);
+    // Typed on after the saved words, and a pasted text in place of them: both stay.
+    await user.type(field(), " next");
+    await act(async () => done(null));
+    expect(screen.queryByTestId("composer-edit")).not.toBeInTheDocument();
+    expect(field()).toHaveValue("draft next");
+
+    await user.clear(field());
+    await user.click(screen.getByText("edit it"));
+    await user.keyboard("{Enter}");
+    act(() => { fireEvent.change(field(), { target: { value: "pasted" } }); });
+    await act(async () => done(null));
+    expect(field()).toHaveValue("pasted");
   });
 
   it("the field goes back to one line when an edit of a long text ends, saved or not", async () => {

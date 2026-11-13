@@ -12,8 +12,12 @@
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
+    "notSent": "Votre message « {{text}} » n’a pas été envoyé",
+    "notSentCount": "{{count}} messages non envoyés",
     "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
-    "rowMoved": "Maintenant à la place {{place}} sur {{count}}"
+    "rowMoved": "Maintenant à la place {{place}} sur {{count}}",
+    "waiting": "Votre message « {{text}} » attend que votre contact soit en ligne",
+    "waitingCount": "{{count}} messages en attente que votre contact soit en ligne"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -190,8 +194,15 @@
   "forward": {
     "forward": "Transférer",
     "forwarded": "Transféré",
+    "found": "{{count}} discussions",
+    "found_one": "{{count}} discussion",
+    "found_other": "{{count}} discussions",
+    "limit": "Vous pouvez transférer à {{count}} conversations à la fois",
+    "limit_one": "Vous pouvez transférer à {{count}} conversation à la fois",
     "many": "Transféré de nombreuses fois",
     "messages": "{{count}} messages",
+    "more": "{{count}} autres",
+    "more_one": "{{count}} autre",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
     "partial": "{{sent}} sur {{count}} envoyés",
@@ -231,7 +242,6 @@
     "newOne": "1 nouveau message, aller en bas"
   },
   "keyChanged": "Cette discussion s'est arrêtée : la clé de votre contact a changé.",
-  "lastSeen": "Vu {{time}}",
   "listTime": {
     "days": "{{count}} j",
     "hours": "{{count}} h",
@@ -304,17 +314,33 @@
   "online": "en ligne",
   "options": "Options",
   "payments": {
-    "needLive": "Les paiements nécessitent une liaison directe",
+    "needLive": "Envoyer demande que votre contact soit en ligne : l'ecash n'attend jamais dans une file. Une demande peut attendre son retour.",
     "noWallet": "Votre contact n'a pas encore de portefeuille",
     "off": "Désactivé dans cette discussion : activez un moyen dans Accepter",
     "offOrOld": "Votre contact a désactivé les paiements dans cette discussion, ou doit mettre à jour Ghostly"
   },
+  "pictureHiddenIp": "Non affichée : Masquer mon IP est activé",
   "pinned": {
     "bar": "Message épinglé",
     "info": "Un message épinglé par discussion, vu par tous ses membres. Un nouveau remplace l’ancien. Dans une communauté, seul l’admin épingle.",
     "notHere": "Absent de cet appareil",
     "pin": "Épingler",
     "unpin": "Désépingler"
+  },
+  "presence": {
+    "availability": {
+      "away": "Absent",
+      "busy": "Occupé",
+      "dnd": "Ne pas déranger"
+    },
+    "dot": {
+      "away": "En ligne, absent",
+      "busy": "En ligne, occupé",
+      "dnd": "En ligne, ne pas déranger",
+      "idle": "En ligne, inactif",
+      "online": "En ligne"
+    },
+    "status": "Statut : {{status}}"
   },
   "preview": {
     "arkAddress": "Adresse Ark",
@@ -366,7 +392,9 @@
     "copied": "Copié",
     "copy": "Copier",
     "copyCode": "Copier le code",
+    "hiddenChars": "Ce code contient des caractères cachés ou qui changent le sens du texte, affichés comme {{marker}}. Copier le code les copie aussi.",
     "localTime": "{{time}} chez vous",
+    "notCopied": "Non copié",
     "showAll": "Tout afficher",
     "showLess": "Afficher moins",
     "spoiler": "Texte masqué. Touchez pour l’afficher",
@@ -456,10 +484,13 @@
     "showTranslation": "Afficher la traduction",
     "translate": "Traduire"
   },
-  "typeMessage": "Tapez un message...",
   "typing": "écrit…",
   "typingRecording": "enregistre un audio…",
   "typingThinking": "réfléchit…",
+  "unconfirmed": {
+    "hint": "Envoyé avec une demande de contact. Son app n'a pas encore confirmé l'avoir envoyé.",
+    "label": "Non confirmé"
+  },
   "video": {
     "arriving": "En cours d'arrivée",
     "cantPlay": "Cet appareil ne peut pas lire cette vidéo ({{format}}). Téléchargez-la pour la regarder.",
@@ -483,6 +514,7 @@
     "limit": "Les messages vocaux durent au plus {{minutes}} minutes",
     "message": "Message vocal",
     "micDenied": "Pas d'accès au micro. Autorisez-le dans les réglages du navigateur ou du système.",
+    "micDeniedAndroid": "Pas d'accès au micro. Autorisez-le quand Android le demande, ou pour Ghostly dans les réglages d'Android.",
     "micUnavailable": "Aucun micro trouvé. Branchez-en un, ou fermez l'app qui l'utilise.",
     "micUnsupported": "Ce navigateur ne peut pas enregistrer de messages vocaux.",
     "pause": "Mettre le message vocal en pause",

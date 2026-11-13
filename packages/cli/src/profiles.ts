@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, type Stats } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync, type Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { MAX_NICK_LENGTH } from "@ghostly/core";
+import { cleanName, shownName } from "./apiKit";
+import { childEnv } from "./childEnv";
 import { CliError } from "./errors";
 import { runtimePath } from "./privateFolder";
 
@@ -45,16 +48,29 @@ export function checkProfileName(name: string): string {
 
 /**
  * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
- * trimmed, up to 64 characters on one line, as a group's name; empty is no name. `settings set nick` took any length
- * and every one took a line break, printed whole by `status`. `field` names it in the refusal.
+ * cleaned as a group's name is (`shownName`: a tab or a line break is a space, invisible characters go), then up to 64
+ * characters as stored; empty (or spaces) is no name. `settings set nick` took any length and every one took a line
+ * break, printed whole by `status`; a name with nothing that shows was kept as given, and contacts saw no name. `field`
+ * names it in the refusal.
  */
 export function checkShownName(name: unknown, field = "name"): string {
-  const shown = typeof name === "string" ? name.trim() : undefined;
-  // Core's MAX_NICK_LENGTH: this file loads before any command, without the engine.
-  if (shown === undefined || [...shown].length > 64 || /\p{Cc}/u.test(shown)) {
-    throw new CliError("bad_request", `${field} must be up to 64 characters on one line`);
-  }
-  return shown;
+  if (typeof name !== "string") throw new CliError("bad_request", `${field} must be up to ${MAX_NICK_LENGTH} characters on one line`);
+  if (!name.trim()) return "";
+  return shownName(name, MAX_NICK_LENGTH, field, " (an empty one is no name)");
+}
+
+/**
+ * `--name` of `profile create` and `profile set`, checked before the profile opens: `checkShownName`'s rule, counted as
+ * it counts (code points once cleaned, so a line break is a space and e + a combining accent is one), refused as a
+ * usage error (exit 2) that names the option, as `app init --title` is. It was the engine's `bad_request` (exit 1),
+ * "name must be up to 64 characters on one line", which named neither the option nor the length given.
+ */
+export function checkShownNameOption(name: string): string {
+  const shown = cleanName(name, Infinity) ?? "";
+  const length = [...shown].length;
+  if (length > MAX_NICK_LENGTH) throw new CliError("usage", `--name is up to ${MAX_NICK_LENGTH} characters, not ${length} characters`);
+  if (name.trim() && !shown) throw new CliError("usage", "--name needs a character that shows (an empty one is no name)");
+  return checkShownName(name);
 }
 
 export function currentProfile(home: string, option?: string): string {
@@ -104,6 +120,67 @@ export function startingDaemon(paths: ProfilePaths): number | null {
 }
 
 /**
+ * The file in which `daemon restart` or `daemon --detach` keeps the profile for the daemon it starts (`claimForDaemon`):
+ * its pid, the file touched every CLAIM_TOUCH_MS while it waits.
+ */
+export function claimPath(dir: string): string {
+  return join(dir, "daemon.claim");
+}
+
+const CLAIM_TOUCH_MS = 1_000;
+/** A claim not touched for that long is a start that ended without removing it (killed): none. */
+const CLAIM_FRESH_MS = 10_000;
+
+/**
+ * The pid of the `daemon restart` or `daemon --detach` that keeps the profile for the daemon it starts, from the stop
+ * of the old one until the new one holds the profile: the lock is free in between, and one-shot commands that kept
+ * taking it in turn (a bot's typing indicator every few seconds) left the new daemon, seconds to boot, never finding
+ * it free. Null when no live start claims it.
+ */
+export function daemonClaim(paths: ProfilePaths): number | null {
+  const file = claimPath(paths.dir);
+  let pid: number;
+  try {
+    if (Date.now() - statSync(file).mtimeMs > CLAIM_FRESH_MS) return null;
+    pid = Number(readFileSync(file, "utf8").trim());
+  } catch { return null; }
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM") return null; }
+  return pid;
+}
+
+/**
+ * Keeps the profile for the daemon this process starts (`daemonClaim`): until the function it returns is called, only
+ * this process and its children take the profile's lock; any other command waits for the daemon's socket instead.
+ * Another live start's claim stands (its daemon is the one that comes up); a claim that cannot be written is none.
+ */
+export function claimForDaemon(paths: ProfilePaths): () => void {
+  if (daemonClaim(paths) !== null) return () => {};
+  const mine = String(process.pid), file = claimPath(paths.dir), draft = `${file}.${mine}`;
+  try {
+    writeFileSync(draft, mine, { mode: 0o600 });
+    renameSync(draft, file);
+  } catch {
+    rmSync(draft, { force: true });
+    return () => {};
+  }
+  const ours = () => { try { return readFileSync(file, "utf8").trim() === mine; } catch { return false; } };
+  const touch = setInterval(() => {
+    if (!ours()) return;
+    const now = new Date();
+    try { utimesSync(file, now, now); } catch { /* removed meanwhile */ }
+  }, CLAIM_TOUCH_MS);
+  touch.unref();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    clearInterval(touch);
+    if (ours()) rmSync(file, { force: true });
+  };
+}
+
+/**
  * The daemon's socket: in the profile's folder, unless that path is longer than a Unix socket may be (104 bytes on
  * macOS); then in a folder of the user's runtime folder named after the profile's (`runtimePath`), which the daemon
  * makes owner-only and checks before use (`privateFolder`), and whose socket a client connects to only when it is this
@@ -145,8 +222,12 @@ export function listProfiles(home: string): string[] {
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
+/** A profile this home lacks, as `profile use` and `--profile` both say it: quoted, with how to list or make one. */
+export const noProfile = (name: string): CliError =>
+  new CliError("not_found", `No profile ${JSON.stringify(name)} (ghostly profile list, or ghostly profile create ${name})`);
+
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw new CliError("not_found", `No profile ${name}`);
+  if (!profileExists(home, name)) throw noProfile(name);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }
@@ -166,8 +247,14 @@ export function selectProfile(home: string, name: string): void {
  * reboot) whose pid now belongs to another process is then stale too: it held the profile for good, every command busy
  * until someone found the file. It is written before the lock is placed, so a lock of this release never lacks it for
  * a moment; one without it (an older release's) is held while its pid is alive, as before.
+ *
+ * While a `daemon restart` or `daemon --detach` keeps the profile for the daemon it starts (`daemonClaim`), it is busy
+ * for every other process: a one-shot then waits for that daemon's socket (`openOneShot`).
  */
 export function acquireLock(paths: ProfilePaths): () => void {
+  // Kept for the daemon a start brings up (`daemonClaim`): its own process and the daemon it spawns take it, no other.
+  const claim = daemonClaim(paths);
+  if (claim !== null && claim !== process.pid && claim !== process.ppid) throw new CliError("busy", `Profile ${paths.name} is kept for the daemon that process ${claim} starts`, { pid: claim });
   const mine = String(process.pid);
   const draft = `${paths.lock}.${mine}`;
   const start = startPath(paths.lock, process.pid);
@@ -226,7 +313,7 @@ export function processStart(pid: number): string | null {
     }
     if (process.platform === "win32") return null;
     const lstart = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, env: { ...process.env, LC_ALL: "C" },
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, env: { ...childEnv(), LC_ALL: "C" },
     }).trim();
     return lstart || null;
   } catch {

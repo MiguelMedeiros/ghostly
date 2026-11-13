@@ -63,9 +63,41 @@ export function getPrefix(): string {
  */
 export function ownsKey(key: string): boolean {
   if (!key.startsWith(getPrefix())) return false;
-  if (_profile) return true;
-  const rest = key.slice(getPrefix().length);
-  return !PROFILE_KEY.test(rest) && !otherSpaces().some((ns) => rest.startsWith(`${ns}_`));
+  return !!_profile || ownsUnprefixed(key);
+}
+/**
+ * `ownsKey` for a pass over every local key: the other storage spaces are read once for the pass. Read again for each
+ * key, the first profile's pass read all of local storage once per key, seconds of a frozen page at a few thousand.
+ */
+export function keyOwner(): (key: string) => boolean {
+  if (_profile) return ownsKey;
+  const spaces = otherSpaces();
+  return (key) => key.startsWith("ghostly_") && ownsUnprefixed(key, spaces);
+}
+/**
+ * The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. Every
+ * profile here reads them: Keep awake, Stay connected, the call's small window (CallOverlay: its choice, its place and
+ * size, the self view's) and the update notice dismissed (UpdateContext).
+ */
+const DEVICE_KEYS = new Set([
+  "ghostly_keep_awake", "ghostly_stay_connected",
+  "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed",
+]);
+// Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, taking
+// it back dropped them with its old copy's keys, and its backups and moves carried them (bug hunt, 2026-11-11).
+const ownsUnprefixed = (key: string, spaces = otherSpaces()) => {
+  const rest = key.slice("ghostly_".length);
+  return !DEVICE_KEYS.has(key) && !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
+};
+/**
+ * Which keys are the first profile's own in its original namespace (`ghostly_` with no other profile's id or space
+ * after it), whichever profile or space this page runs as: one a handoff installed elsewhere leaves them behind.
+ * Never one of this device's switches. The registry of profiles is the caller's to keep. For one pass over the keys,
+ * as `keyOwner` is.
+ */
+export function originalKeyOwner(): (key: string) => boolean {
+  const spaces = otherSpaces();
+  return (key) => key.startsWith("ghostly_") && ownsUnprefixed(key, spaces);
 }
 /**
  * Other storage spaces in this storage area (Desktop's GHOSTLY_PROFILE, and their profiles): each keeps
@@ -84,6 +116,15 @@ const PROFILE_KEY = /^[a-z0-9]{10}_/;
 
 function getKey(sessionId: string): string {
   return `${getPrefix()}${sessionId}`;
+}
+
+/**
+ * The key a chat's id is read from, or null for an id no chat has: a chat's id never has `_` (`isSessionKey`), and one
+ * that has it (a chat address's `chat_folders`) names another of the profile's keys or, in the first profile, whose
+ * prefix starts every other profile's, another profile's chat.
+ */
+function readableKey(sessionId: string): string | null {
+  return sessionId && !sessionId.includes("_") ? getKey(sessionId) : null;
 }
 
 /** Whether a stored key is one of this profile's chats: the prefix and the chat's id; a longer key is another profile's, or not a chat. */
@@ -330,8 +371,10 @@ function makeRoom(chatId: string, write: () => boolean): void {
 
 /** A session as stored, unparsed: to tell cheaply whether it changed. */
 export function storedSession(sessionId: string): string | null {
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
-    return readKey(getKey(sessionId));
+    return readKey(key);
   } catch {
     return null;
   }
@@ -339,8 +382,10 @@ export function storedSession(sessionId: string): string | null {
 
 /** The session as stored, its older messages left out (see `STORED_MESSAGES`). */
 function loadStored(sessionId: string): ChatSession | null {
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
-    const raw = readKey(getKey(sessionId));
+    const raw = readKey(key);
     if (!raw) return null;
     return JSON.parse(raw) as ChatSession;
   } catch {
@@ -492,6 +537,8 @@ export function deleteSession(sessionId: string): void {
   whole.delete(sessionId);
   inEngine.delete(sessionId);
   gaveRoom.delete(sessionId);
+  // A draft typed in its last moments is not written back after it.
+  unsavedDrafts.delete(sessionId);
   for (const key of [
     // So do the card and network tab the payment sheet last used with them (lib/chatPayments.ts), kept by their key.
     ...(lastOfPeer ? [`${getPrefix()}face_${peer}`, `${getPrefix()}payment_rail_${peer}`, `${getPrefix()}payment_network_${peer}`] : []),
@@ -532,10 +579,29 @@ export function deleteAllSessions(): void {
   for (const session of listSessions()) deleteSession(session.id);
 }
 
+/**
+ * Drafts typed and not written yet (the composer writes after a pause in the typing): each one's write, run once, then
+ * or on demand. A draft written or cleared meanwhile (sent, its chat deleted, its group left) drops its pending write,
+ * so a cleared draft is never written back.
+ */
+const unsavedDrafts = new Map<string, () => void>();
+export function setSessionDraftLater(id: string, write: () => void): void {
+  unsavedDrafts.set(id, write);
+}
+/** The draft's pending write, now (the pause over, the page going, the chat closed). */
+export function flushSessionDraft(id: string): void {
+  const write = unsavedDrafts.get(id);
+  if (!write) return;
+  unsavedDrafts.delete(id);
+  write();
+}
+
 export function getSessionDraft(id: string): string {
+  flushSessionDraft(id);
   try { return localStorage.getItem(`${getPrefix()}draft_${id}`) ?? ""; } catch { return ""; }
 }
 export function setSessionDraft(id: string, text: string): void {
+  unsavedDrafts.delete(id);
   try { const key=`${getPrefix()}draft_${id}`; if(text) localStorage.setItem(key,text); else localStorage.removeItem(key); } catch { /* Keep the in-memory draft if storage is unavailable. */ }
 }
 
@@ -590,10 +656,10 @@ export function moveInOrder(order: readonly string[], id: string, index: number)
 /** This profile's pinned chats, top first. Only a pinned chat the stored order does not name is read (for its time). */
 export function pinnedOrder(): string[] {
   const start = `${getPrefix()}pin_`;
-  const pinned: string[] = [];
+  const pinned: string[] = [], owns = keyOwner();
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (!key?.startsWith(start) || key === pinOrderKey() || !ownsKey(key) || localStorage.getItem(key) !== "1") continue;
+    if (!key?.startsWith(start) || key === pinOrderKey() || !owns(key) || localStorage.getItem(key) !== "1") continue;
     const id = key.slice(start.length);
     if (localStorage.getItem(getKey(id)) !== null) pinned.push(id);
   }
@@ -671,7 +737,8 @@ export function listShownSessions(): ChatSession[] {
 
 /** A chat's session through the page's one cache: as stored (`parsed`), and with its older messages (`session`). */
 function readShown(sessionId: string): { parsed: ChatSession; session: ChatSession } | null {
-  const key = getKey(sessionId);
+  const key = readableKey(sessionId);
+  if (!key) return null;
   try {
     const raw = readKey(key);
     return raw ? readThrough(key, raw, shownCache) : null;
@@ -777,7 +844,8 @@ function contactOf(key: string): ChatKeys | undefined {
 
 /** The contact's key in the chat `sessionId`, without reading its messages again: what finds its link in the engine's state. */
 export function sessionPeerKey(sessionId: string): string | undefined {
-  return contactOf(getKey(sessionId))?.peer;
+  const key = readableKey(sessionId);
+  return key ? contactOf(key)?.peer : undefined;
 }
 
 /**
@@ -813,8 +881,15 @@ const names = new Map<string, { raw: string; label?: string; nick?: string }>();
  */
 export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?: string } | undefined {
   const chat = firstOf(chatKeys().filter((c) => c.peer === peerPubKeyB64));
-  const raw = chat && readKey(chat.key);
-  if (!chat || !raw) return undefined;
+  const found = chat && namesOf(chat);
+  forgetGoneNames();
+  return found;
+}
+
+/** A chat's names, its stored copy parsed again only when it changed. Undefined when it is not stored or unreadable. */
+function namesOf(chat: ChatKeys): { label?: string; nick?: string } | undefined {
+  const raw = readKey(chat.key);
+  if (!raw) return undefined;
   let known = names.get(chat.key);
   if (known?.raw !== raw) {
     try {
@@ -824,8 +899,32 @@ export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?
       return undefined;
     }
   }
-  for (const key of names.keys()) if (!contacts.has(key)) names.delete(key);
   return { label: known.label, nick: known.nick };
+}
+
+function forgetGoneNames(): void {
+  for (const key of names.keys()) if (!contacts.has(key)) names.delete(key);
+}
+
+/**
+ * Per contact's key: the chat `sessionIdForPeer` finds, with the names `chatNamesForPeer` gives, from one look through
+ * the stored chats. Each look walks every key of the page's storage, so a list of every contact (the push worker's
+ * table, built again at each message that comes) asking one contact at a time walked it once or twice per chat.
+ */
+export function chatsByPeer(): Map<string, { id: string; label?: string; nick?: string }> {
+  const byPeer = new Map<string, ChatKeys[]>();
+  for (const chat of chatKeys()) {
+    const same = byPeer.get(chat.peer);
+    if (same) same.push(chat);
+    else byPeer.set(chat.peer, [chat]);
+  }
+  const found = new Map<string, { id: string; label?: string; nick?: string }>();
+  for (const [peer, matches] of byPeer) {
+    const chat = firstOf(matches);
+    if (chat) found.set(peer, { id: chat.id, ...namesOf(chat) });
+  }
+  forgetGoneNames();
+  return found;
 }
 
 /** Per storage prefix, per chat's key: the stored text and what it counts, `after[i]` the unread from message `i` on. */

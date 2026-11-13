@@ -3,6 +3,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { NativeEndpoint } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { STORES, transact } from "../src/shared/idb";
+import { createIrohWebEndpoint } from "../src/platform/irohWeb";
+
+vi.mock("../src/platform/irohWeb", async (actual) => ({
+  ...await actual<typeof import("../src/platform/irohWeb")>(),
+  createIrohWebEndpoint: vi.fn(async (): Promise<NativeEndpoint> => { throw new Error("not started here"); }),
+}));
 // covers: transport.iroh, transport.hyperdht, transport.hyperdht-relay
 
 /*
@@ -44,6 +50,23 @@ it("offers contacts no host Iroh or HyperDHT while it is on, HyperDHT through th
   const devices = node["deviceNativeFactories"] as Factories;
   expect(Object.keys(devices).sort()).toEqual(["hyperdht/1", "iroh/1"]);
   expect(devices["hyperdht/1"]).toBe(hyperdht);
+});
+
+/*
+ * A browser, extension or CLI profile runs Iroh's browser build, relayed only, so it stays for contacts. But it reaches a
+ * contact through the relay the contact names: with it on, only through one of the profile's own Iroh relays.
+ */
+it("keeps the browser's Iroh for contacts on the profile's own Iroh relays only; device links dial any", async () => {
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false, irohWeb: true });
+  nodes.push(node);
+  const create = vi.mocked(createIrohWebEndpoint);
+  const seed = Buffer.alloc(32, 7).toString("base64url");
+  const start = async (factories: Factories) => { create.mockClear(); await (factories["iroh/1"] as (seed: string) => Promise<NativeEndpoint>)(seed).catch(() => {}); return create.mock.calls[0]?.[1]; };
+  expect(await start(node["nativeFactories"] as Factories)).not.toHaveProperty("ownRelaysOnly");
+
+  await node.updateSettings({ settings: { iceServers: [TURN], relayOnly: true, irohRelays: ["https://relay.example.org/"] } });
+  expect(await start(node["nativeFactories"] as Factories)).toEqual({ relays: ["https://relay.example.org/"], ownRelaysOnly: true });
+  expect(await start(node["deviceNativeFactories"] as Factories)).toEqual({ relays: ["https://relay.example.org/"] });
 });
 
 it("leaves HyperDHT out for contacts with no HyperDHT relay set", async () => {

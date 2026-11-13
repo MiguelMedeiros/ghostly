@@ -17,23 +17,29 @@ function fakeEndpoint(): NativeEndpoint {
 /** A chat's link as the engine drives it: which endpoints it holds, and whether it may give one up. */
 function stubLink() {
   const available = ["webrtc/1"] as string[];
+  const endpoints: NativeEndpoint[] = [];
   return {
-    available,
+    available, endpoints,
     get availableTransports() { return [...available]; },
-    registerEndpoint: vi.fn((endpoint: NativeEndpoint) => { available.push(endpoint.transport); }),
-    canReleaseEndpoint: vi.fn(() => true),
+    // As GhostLink: an endpoint that says it is unavailable is dropped.
+    registerEndpoint: vi.fn((endpoint: NativeEndpoint) => {
+      available.push(endpoint.transport);
+      endpoints.push(endpoint);
+      endpoint.onUnavailable = () => { if (available.includes(endpoint.transport)) available.splice(available.indexOf(endpoint.transport), 1); };
+    }),
+    canReleaseEndpoint: vi.fn(() => true), canYieldEndpoint: vi.fn(() => false), lastActivityAt: 0,
     releaseEndpoint: vi.fn(async (transport: string) => { available.splice(available.indexOf(transport), 1); }),
     isDataLinkOpen: false, allowsPayment: vi.fn(() => true), paymentEnabled: vi.fn(() => true),
     setNick: vi.fn(), setAvatar: vi.fn(), refreshServices: vi.fn(async () => {}),
     stop: vi.fn(async () => {}), wake: vi.fn(), depart: vi.fn(), session: { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() },
   };
 }
-async function addChat(node: GhostlyNode, link: ReturnType<typeof stubLink>) {
+async function addChat(node: GhostlyNode, link: ReturnType<typeof stubLink>, lastMessageAt = 0) {
   const row: StoredLink = { id: `chat-${crypto.randomUUID().slice(0, 8)}`, profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64,
     encKeyB64: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64, pairedPeerKey: createIdentity().pubKeyZ32 };
   await db.putLink(row);
   node["links"].set(row.id, { stored: row, myPubKeyZ32: "me", link: link as never, status: "online", dataLink: "open",
-    presence: { online: true, lastPacketAt: 0, services: null }, lastMessageAt: 0, peerAck: 0, lastSyncAt: 0,
+    presence: { online: true, lastPacketAt: 0, services: null }, lastMessageAt, peerAck: 0, lastSyncAt: 0,
     poll: { polling: false, nextAt: 0, interval: 0 }, files: { receivedBytes: 0, wireIds: new Set(), incoming: new Map() } });
   return row;
 }
@@ -110,6 +116,27 @@ it("says why when the relay cannot be reached, and moves chats to a new relay or
   const calls = relayed.create.mock.calls.length;
   await node["ensureNativeEndpoints"](chat.id);
   expect(relayed.create).toHaveBeenCalledTimes(calls);
+});
+
+it("lets a chat's relay error go with that relay: emptied or changed, the chat no longer says the old relay is unreachable", async () => {
+  const node = engine();
+  const link = stubLink();
+  const chat = await addChat(node, link);
+  const errorOf = () => node.getState().links.find(l => l.id === chat.id)?.transportErrors?.["hyperdht/1"];
+  relayed.create.mockRejectedValue(new Error("Could not reach the HyperDHT relay"));
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://typo.example" } });
+  await vi.waitFor(() => expect(errorOf()).toMatch(/Could not reach/));
+
+  // Emptied: there is no relay to be unreachable. Before, the chat said so until the app restarted.
+  await node.updateSettings({ settings: { hyperdhtRelay: "" } });
+  expect(errorOf()).toBeUndefined();
+
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://typo.example" } });
+  await vi.waitFor(() => expect(errorOf()).toMatch(/Could not reach/));
+  // Changed to another one still starting: nothing is known of it yet.
+  relayed.create.mockImplementation(() => new Promise(() => {}));
+  await node.updateSettings({ settings: { hyperdhtRelay: "wss://fixed.example" } });
+  expect(errorOf()).toBeUndefined();
 });
 
 it("leaves a chat's session on the old relay alone until it can let go", async () => {
@@ -218,3 +245,48 @@ it("starts the chat opened while the relay is out of reach before every other ch
   await run(20);
   expect(starts.filter(start => start.at > first!.at && start.seed !== seed()).length).toBeGreaterThan(0);
 }, 60_000);
+
+it.each([12, 20])("with %i paired chats, the chats whose listeners went with a silently lost relay connection get them back", async (count) => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  // The browser's socket closed with no close reaching the relay (a network switch, a NAT that forgot it): the relay
+  // still holds the old connection's keys until its ping drops it (30-60 s, 55 s measured) and refuses them meanwhile.
+  // The chats that held no listener had free keys and took the free slots, and the eight that held them found every
+  // slot full once their keys were free again, backing off up to 5 minutes, told the slots were in use.
+  const run = async (seconds: number) => {
+    for (let second = 0; second < seconds; second++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (let k = 0; k < 4; k++) await new Promise(resolve => setImmediate(resolve));
+    }
+  };
+  const node = engine();
+  node["settings"] = { ...node["settings"], hyperdhtRelay: "wss://relay.example" };
+  const links: ReturnType<typeof stubLink>[] = [], ids: string[] = [];
+  // Newest first, as the app starts them: chat 0 is the one used last.
+  for (let i = 0; i < count; i++) {
+    const link = stubLink();
+    links.push(link);
+    ids.push((await addChat(node, link, Date.now() - i * 60_000)).id);
+  }
+  node["startGroupEntries"]();
+  for (const id of ids) void node["ensureNativeEndpoints"](id);
+  await run(5);
+  const holders = ids.filter((_, i) => links[i].available.includes("hyperdht/1"));
+  expect(holders).toEqual(ids.slice(0, 8));
+  const held = new Set(holders.map(id => node["links"].get(id)!.stored.transportSeeds?.["hyperdht/1"]));
+  const lost = Date.now();
+  relayed.create.mockImplementation(async (seed: string) => {
+    if (held.has(seed) && Date.now() - lost < 55_000) throw new Error("The HyperDHT relay did not let this chat listen");
+    return fakeEndpoint();
+  });
+  for (const link of links) for (const endpoint of link.endpoints) endpoint.onUnavailable?.();
+  node["retryRelayLater"]();
+  const slotsLine = /slots are in use/;
+  const errorOf = (id: string) => node.getState().links.find(l => l.id === id)?.transportErrors?.["hyperdht/1"];
+  for (let second = 0; second < 90; second++) {
+    await run(1);
+    for (const id of holders) expect(errorOf(id) ?? "").not.toMatch(slotsLine);
+  }
+  await run(10 * 60 - 90);
+  expect(ids.filter((_, i) => links[i].available.includes("hyperdht/1"))).toEqual(holders);
+  for (const id of holders) expect(errorOf(id)).toBeUndefined();
+}, 120_000);

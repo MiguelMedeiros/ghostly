@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { CliError } from "../src/errors";
-import { acquireLock, createProfile, processStart, type ProfilePaths } from "../src/profiles";
+import { acquireLock, claimForDaemon, claimPath, createProfile, processStart, type ProfilePaths } from "../src/profiles";
 
 // covers: headless.cli
 
@@ -151,6 +151,66 @@ describe.skipIf(process.platform === "win32")("a lock whose pid is another proce
     writeFileSync(paths.lock, String(pid));
     expect(busy(paths)).toMatchObject({ code: "busy", details: { pid } });
     expect(readdirSync(paths.dir)).toEqual(["daemon.lock"]);
+  });
+});
+
+/**
+ * `daemon restart` and `daemon --detach` keep the profile for the daemon they start, from before the stop until that
+ * daemon holds it: one-shot commands taking the free lock in turn kept the new daemon from ever starting.
+ */
+describe.skipIf(process.platform === "win32")("a profile kept for the daemon a start brings up", () => {
+  const sleepers: ChildProcess[] = [];
+  afterAll(() => { for (const child of sleepers) child.kill("SIGKILL"); });
+
+  /** A live process: the `daemon restart` that claims the profile. */
+  async function claimant(): Promise<number> {
+    const child = spawn("sleep", ["60"], { stdio: "ignore" });
+    sleepers.push(child);
+    await new Promise((resolve) => child.once("spawn", resolve));
+    return child.pid!;
+  }
+
+  it("is busy for any other process while the claimant lives, and names it", async () => {
+    const paths = profile("claimed");
+    const pid = await claimant();
+    writeFileSync(claimPath(paths.dir), String(pid));
+    const failure = busy(paths);
+    expect(failure).toMatchObject({ code: "busy", details: { pid } });
+    expect(failure.message).toBe(`Profile claimed is kept for the daemon that process ${pid} starts`);
+    expect(readdirSync(paths.dir)).toEqual(["daemon.claim"]);
+  });
+
+  it("is taken by the claimant and by the daemon it spawns (a child of the claimant)", () => {
+    for (const [name, pid] of [["claim-own", process.pid], ["claim-parent", process.ppid]] as const) {
+      const paths = profile(name);
+      writeFileSync(claimPath(paths.dir), String(pid));
+      const release = acquireLock(paths);
+      expect(readFileSync(paths.lock, "utf8")).toBe(String(process.pid));
+      release();
+    }
+  });
+
+  it("a claim whose process is gone, or not touched for over 10 s, is none", async () => {
+    const gone = profile("claim-gone");
+    writeFileSync(claimPath(gone.dir), String(await deadPid()));
+    acquireLock(gone)();
+    const old = profile("claim-old");
+    writeFileSync(claimPath(old.dir), String(await claimant()));
+    const then = new Date(Date.now() - 11_000);
+    utimesSync(claimPath(old.dir), then, then);
+    acquireLock(old)();
+  });
+
+  it("claimForDaemon writes this pid and removes it on release; another live claim stands", async () => {
+    const paths = profile("claim-write");
+    const release = claimForDaemon(paths);
+    expect(readFileSync(claimPath(paths.dir), "utf8")).toBe(String(process.pid));
+    release();
+    expect(readdirSync(paths.dir)).toEqual([]);
+    const other = await claimant();
+    writeFileSync(claimPath(paths.dir), String(other));
+    claimForDaemon(paths)();
+    expect(readFileSync(claimPath(paths.dir), "utf8")).toBe(String(other));
   });
 });
 

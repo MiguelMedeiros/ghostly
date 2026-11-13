@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
-import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
-import { activeProfileId } from "../../lib/profiles";
+import { SHARE_FORWARD_AFTER_MS, applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, handShareOver, listenForShares, listenForTaps, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
+import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare, sendShareTo, takeShareFor } from "../../lib/incomingShare";
+import { activeProfileId, createProfile, unregisterProfile } from "../../lib/profiles";
 
 // covers: app.pwa.update, app.pwa.share-target
 
@@ -188,12 +188,87 @@ describe("a share, on the page's side", () => {
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-forward", profile: activeProfileId() }]));
   });
 
+  describe("a tab opened for it while another tab is the app", () => {
+    beforeEach(() => { vi.useFakeTimers(); window.location.hash = "#/shared"; });
+    afterEach(() => { vi.useRealTimers(); });
+    const forwards = () => registration.active!.posted.filter((message) => (message as { type: string }).type === "share-forward");
+    const say = (type: string) => container.dispatchEvent(Object.assign(new Event("message"), { data: { type } }));
+
+    it("forwards it after the wait, and says it went only once the worker answers", () => {
+      const answered = vi.fn();
+      handShareOver(() => false, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS - 1);
+      expect(forwards()).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      expect(answered).not.toHaveBeenCalled();
+      say("share-forwarded");
+      expect(answered).toHaveBeenCalledWith("shared");
+    });
+
+    it("closed before the wait is over, it forwards at once as it goes, and only once", () => {
+      handShareOver(() => false, () => {});
+      window.dispatchEvent(new Event("pagehide"));
+      // Said as the page goes: nothing later of it runs.
+      expect(forwards()).toEqual([{ type: "share-forward", profile: activeProfileId() }]);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      expect(forwards()).toHaveLength(1);
+    });
+
+    it("nothing held to forward: it says so, not that it went", () => {
+      const answered = vi.fn();
+      handShareOver(() => false, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      say("share-none");
+      expect(answered).toHaveBeenCalledWith("shareNone");
+    });
+
+    it("the tab took over meanwhile: it asks for the share itself, nothing is forwarded", () => {
+      const answered = vi.fn();
+      handShareOver(() => true, answered);
+      vi.advanceTimersByTime(SHARE_FORWARD_AFTER_MS);
+      window.dispatchEvent(new Event("pagehide"));
+      expect(forwards()).toEqual([]);
+    });
+  });
+
   it("the page that takes shares tells the worker its profile, when it starts and whenever it comes to the front", async () => {
     listenForShares();
     await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-here", profile: activeProfileId() }]));
     window.dispatchEvent(new Event("focus"));
     await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(2));
     expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
+  });
+
+  it("asked by a worker that restarted with a share to forward, it says it takes shares again, without coming to the front", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share-where" } }));
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(2));
+    expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
+  });
+
+  it("says how Web Locks names it as its peer lock's holder, which the worker checks before it forwards a share here", async () => {
+    const query = vi.fn(async () => ({ held: [{ name: "ghostly-peer-work", clientId: "other-tab", mode: "exclusive" }, { name: "ghostly-peer", clientId: "this-tab", mode: "exclusive" }] }));
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { query } });
+    try {
+      listenForShares("ghostly-peer");
+      await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-here", profile: activeProfileId(), lock: "this-tab" }]));
+      window.dispatchEvent(new Event("focus"));
+      // (Pages of the tests before listen too: only this one's say the lock.)
+      await vi.waitFor(() => expect(registration.active!.posted.filter((message) => (message as { lock?: string }).lock === "this-tab")).toHaveLength(2));
+      // Asked once: the page holds that lock for as long as it lives.
+      expect(query).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("the app's page on its way out tells the worker, so no share is forwarded to it", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    window.dispatchEvent(new Event("pagehide"));
+    expect(registration.active!.posted.slice(1)).toEqual([{ type: "share-away" }]);
   });
 
   it("a share never replaces one waiting in the picker: it is offered once that one is put aside", () => {
@@ -205,8 +280,9 @@ describe("a share, on the page's side", () => {
       container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text, url: "", files: [] } } }));
     }
     expect(incomingShare()).toMatchObject(mine);
-    // The person left the picker for a chat: one waiting behind does not take them back to it.
-    expect(window.location.hash).toBe("#/chat/abc");
+    // The person left the picker for a chat with it still waiting: a new share opens the picker again, on the one
+    // waiting, never behind one that nothing shows.
+    expect(window.location.hash).toBe("#/shared");
     dropIncomingShare();
     expect(incomingShare()).toMatchObject({ text: "a page's" });
     dropIncomingShare();
@@ -214,6 +290,35 @@ describe("a share, on the page's side", () => {
     // Three at most: the newest past that was dropped.
     dropIncomingShare();
     expect(incomingShare()).toBeNull();
+  });
+
+  it("a share sent to a chat with more waiting: a later share opens the picker on the next one waiting", () => {
+    listenForShares();
+    const say = (text: string) => container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text, url: "", files: [] } } }));
+    say("one");
+    say("two");
+    expect(window.location.hash).toBe("#/shared");
+    sendShareTo("chat1");
+    expect(incomingShare()).toMatchObject({ text: "two" });
+    // The person went to a chat anyway (the back button): the share that waits is not on screen.
+    window.location.hash = "#/chat/chat1";
+    say("three");
+    expect(window.location.hash).toBe("#/shared");
+    expect(incomingShare()).toMatchObject({ text: "two" });
+    dropIncomingShare();
+    expect(incomingShare()).toMatchObject({ text: "three" });
+  });
+
+  it("a share sent to a chat whose composer has not taken it yet goes back to the worker with the page, ahead of those waiting", () => {
+    listenForShares();
+    const one = { title: "", text: "one", url: "", files: [] };
+    const two = { title: "", text: "two", url: "", files: [] };
+    for (const item of [one, two]) container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
+    sendShareTo("chat1");
+    window.dispatchEvent(new Event("pagehide"));
+    const kept = registration.active!.posted.filter((message) => (message as { type: string }).type === "share-keep");
+    expect(kept).toEqual([{ type: "share-keep", item: one }, { type: "share-keep", item: two }]);
+    expect(takeShareFor("chat1")).toBeNull();
   });
 
   it("a page not opened for one asks for nothing", async () => {
@@ -244,6 +349,28 @@ describe("a share, on the page's side", () => {
     // No worker controls the page: nothing can keep it.
     container.controller = null;
     expect(carryIncomingShare()).toBe(false);
+  });
+
+  it("a share into the same window replaces the page: the shares in its picker go back to the worker, once, ahead of the new one", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(1));
+    const shown = { title: "", text: "shown", url: "", files: [] };
+    const behind = { title: "", text: "behind", url: "", files: [] };
+    for (const item of [shown, behind]) container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
+    const kept = () => registration.active!.posted.filter((message) => (message as { type: string }).type === "share-keep");
+    window.dispatchEvent(new Event("pagehide"));
+    expect(kept()).toEqual([{ type: "share-keep", item: shown }, { type: "share-keep", item: behind }]);
+    // Handed back, they are the next page's: a profile switch that carried them already, then the page going, gives them once.
+    expect(incomingShare()).toBeNull();
+    expect(carryIncomingShare()).toBe(false);
+    window.dispatchEvent(new Event("pagehide"));
+    expect(kept()).toHaveLength(2);
+  });
+
+  it("the shares the worker could not keep are said with the share shown", () => {
+    listenForShares();
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text: "one", url: "", files: [] }, dropped: 2 } }));
+    expect(incomingShare()).toMatchObject({ text: "one", dropped: 2 });
   });
 
   it("a wake-up's chat is not this listener's: a tab hears taps before it takes shares (listenForTaps)", () => {
@@ -296,5 +423,44 @@ describe("a wake-up notification tapped, on the page's side", () => {
     listenForTaps(() => false);
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile: activeProfileId() } }));
     expect(window.location.hash).toBe("#/chat/abc");
+  });
+
+  describe("told on a guess (it said nothing in time: frozen or busy)", () => {
+    /** A `silent` open-chat for `profile`: whether this page switched, and what it answered on the port. */
+    const guess = (profile: string) => {
+      const port = { postMessage: vi.fn() };
+      const switched: string[] = [];
+      const heard = (event: Event) => switched.push((event as CustomEvent<{ id: string }>).detail.id);
+      addEventListener("profile-switching", heard);
+      container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "open-chat", path: "/chat/abc", profile, silent: true }, ports: [port] }));
+      removeEventListener("profile-switching", heard);
+      return { switched, answered: port.postMessage.mock.calls };
+    };
+    let other: string;
+    // A switch restarts the page a moment later: that moment never comes here.
+    beforeEach(() => { vi.useFakeTimers(); other = createProfile("Work").id; });
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); sessionStorage.clear(); unregisterProfile(other); });
+
+    it("running another profile's peer, it stays that profile and hands the chat back", () => {
+      listenForTaps(() => true);
+      const { switched, answered } = guess(other);
+      expect(switched).toEqual([]);
+      expect(window.location.hash).toBe("");
+      expect(answered).toEqual([[{ taken: false }]]);
+    });
+
+    it("its own profile's frozen window takes it", () => {
+      listenForTaps(() => true);
+      const { answered } = guess(activeProfileId());
+      expect(window.location.hash).toBe("#/chat/abc");
+      expect(answered).toEqual([[{ taken: true }]]);
+    });
+
+    it("a tab that runs nothing yet (waiting behind another) switches to the notice's profile, as before", () => {
+      listenForTaps(() => false);
+      const { switched, answered } = guess(other);
+      expect(switched).toEqual([other]);
+      expect(answered).toEqual([[{ taken: true }]]);
+    });
   });
 });

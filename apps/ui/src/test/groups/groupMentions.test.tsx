@@ -77,6 +77,13 @@ describe("the composer's @", () => {
     expect(composer()).toHaveFocus();
   });
 
+  it("outlines the member the arrows are on in forced colors, where its background is gone, and no other", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@");
+    await user.keyboard("{ArrowDown}");
+    expect(options().map(o => o.classList.contains("forced-colors:outline-[color:Highlight]"))).toEqual([false, true]);
+  });
+
   it("gives each member a 44 px row on a phone, and the desktop keeps its rows", async () => {
     const { user } = openGroup(active());
     await user.type(composer(), "@");
@@ -110,6 +117,14 @@ describe("the composer's @", () => {
     const { user } = openGroup(active());
     await user.type(composer(), "me@b");
     expect(screen.queryByTestId("mention-picker")).not.toBeInTheDocument();
+  });
+
+  it("reads a member's key end left to right in every language: in Arabic the \"…\" stays before it", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@b");
+    expect(within(options()[0]).getByText("…" + BOB.slice(-6))).toHaveAttribute("dir", "ltr");
+    // The name in its own: a Latin one cut in Arabic keeps its start.
+    expect(within(options()[0]).getByText("Bob")).toHaveAttribute("dir", "auto");
   });
 
   it("tells two members of one name apart by key", async () => {
@@ -224,6 +239,17 @@ describe("an unread mention in the chat list", () => {
     expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
     expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument();
     again.unmount();
+  });
+
+  it("goes at once when an edit takes the mention out: the engine's view moves the group's mark back", async () => {
+    const t = 1_700_000_000_000;
+    markGroupRead("group-1", t - 10);
+    list([active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t })]);
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    // The edited message is still the newest, unread; the mention before it was read.
+    act(() => { fakeEngine.update({ groups: [active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t - 20 })] }); });
+    await waitFor(() => expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument());
+    expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
   });
 
   it("goes grey in a muted group only when mentions are kept quiet too", () => {

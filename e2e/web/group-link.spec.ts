@@ -91,8 +91,9 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   await expect(field).not.toHaveValue(url);
   await alice.page.keyboard.press("Escape");
   await dave.page.goto(url);
-  // Bob's and Carol's knocks may still be fresh in the old link's record: then he is told the admin's app may be busy.
-  await expect(dave.page.getByTestId("group-joining")).toContainText(/once the admin's app is open|admin's app may be busy/, { timeout: 30_000 });
+  // Bob and Carol took their knocks out of the old link's record once let in: nobody else waits there.
+  await expect(dave.page.getByTestId("group-joining")).toContainText("once the admin's app is open", { timeout: 30_000 });
+  await expect(dave.page.getByTestId("group-joining")).not.toContainText("admin's app may be busy");
   await dave.page.waitForTimeout(20_000);
   await expect(groupChat(dave)).toHaveAttribute("data-status", "invitation");
   await expect(alice.page.getByTestId("group-members")).toContainText("3 members");

@@ -101,7 +101,8 @@ describe("a taker points each restored file record at its staged bytes", () => {
 
     await staging.restore(new Uint8Array(), files.map(({ id, size, sha256 }) => ({ id, size, sha256 })));
 
-    expect(restored.transactions).toEqual(Array.from({ length: 3 }, () => `${staging.database} readwrite`));
+    // And one read of the staging's notes, for all of them.
+    expect(restored.transactions.filter((tx) => !tx.endsWith(" versionchange"))).toEqual(["ghostly-staging readonly", ...Array.from({ length: 3 }, () => `${staging.database} readwrite`)]);
     const rows = new Map((await rowsOf(staging.database)).map((value) => [value.id as string, value]));
     for (const file of files) {
       const stored = rows.get(file.id)!;
@@ -126,7 +127,7 @@ describe("a taker points each restored file record at its staged bytes", () => {
     await staging.restore(new Uint8Array(), files);
 
     // Three files of 12 MiB reach the 32 MiB a transaction takes: 3 + 3 + 1.
-    expect(restored.transactions).toHaveLength(3);
+    expect(restored.transactions.filter((tx) => tx.startsWith(staging.database))).toHaveLength(3);
     for (const stored of await rowsOf(staging.database)) expect((stored.blob as Blob).size).toBe(bytes.length);
   });
 
@@ -140,6 +141,38 @@ describe("a taker points each restored file record at its staged bytes", () => {
 
     const rows = await rowsOf(staging.database);
     expect(rows.map((value) => [value.id, value.digest, value.bytes])).toEqual([["chat1-in-kept", own, "opfs"]]);
+  });
+
+  /*
+   * Every read and removal is a round trip to the file storage's worker, which serves different files at once. One
+   * after the other, a move of 8,000 small files spent 7.2 s reading them and 6.1 s removing them while both devices
+   * were frozen (Chromium, bug hunt, 2026-11-07).
+   */
+  it("the small files of a transaction are read at once, and removed at once after", async () => {
+    const staging = await handoffProfileHost("1.1.8", "web").staging.open();
+    const files = Array.from({ length: 300 }, (_, i) => {
+      const id = `chat1-in-${i}`, bytes = Uint8Array.from({ length: 10 }, (_, at) => (at + i) % 251);
+      storage.files.set(`${staging.database}/${id}`, bytes);
+      return { id, size: bytes.length, sha256: digestText(sha256(bytes)) };
+    });
+    restored.rows = files.map((file) => row(file.id));
+    const most = { read: 0, remove: 0 }, now = { read: 0, remove: 0 };
+    const slow = <A extends unknown[], R>(op: "read" | "remove", call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => {
+      most[op] = Math.max(most[op], ++now[op]);
+      try { await new Promise((resolve) => setTimeout(resolve, 1)); return await call(...args); } finally { now[op]--; }
+    };
+    const forSpace = storage.store.forSpace!;
+    storage.store.forSpace = (space: string) => {
+      const view = forSpace(space);
+      return { ...view, read: slow("read", view.read), remove: slow("remove", view.remove) };
+    };
+
+    await staging.restore(new Uint8Array(), files);
+
+    expect(most.read).toBe(200);
+    expect(most.remove).toBe(200);
+    for (const file of files) expect(storage.files.has(`${staging.database}/${file.id}`)).toBe(false);
+    expect((await rowsOf(staging.database)).filter((value) => value.blob)).toHaveLength(300);
   });
 
   it("a staged file shorter than it says stops the restore", async () => {

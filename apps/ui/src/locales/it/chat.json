@@ -12,8 +12,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "notSent": "Il tuo messaggio «{{text}}» non è stato inviato",
+    "notSentCount": "{{count}} messaggi non inviati",
     "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate",
-    "rowMoved": "Ora al posto {{place}} di {{count}}"
+    "rowMoved": "Ora al posto {{place}} di {{count}}",
+    "waiting": "Il tuo messaggio «{{text}}» è in attesa che il tuo contatto sia online",
+    "waitingCount": "{{count}} messaggi in attesa che il tuo contatto sia online"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
@@ -190,8 +194,15 @@
   "forward": {
     "forward": "Inoltra",
     "forwarded": "Inoltrato",
+    "found": "{{count}} chat",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chat",
+    "limit": "Puoi inoltrare a {{count}} chat alla volta",
+    "limit_one": "Puoi inoltrare a {{count}} chat alla volta",
     "many": "Inoltrato molte volte",
     "messages": "{{count}} messaggi",
+    "more": "altre {{count}}",
+    "more_one": "un'altra",
     "noChats": "Ancora nessuna chat",
     "noMatch": "Nessuna chat con questo nome",
     "partial": "{{sent}} di {{count}} inviati",
@@ -231,7 +242,6 @@
     "newOne": "1 nuovo messaggio, scorri in fondo"
   },
   "keyChanged": "Questa chat si è fermata: la chiave del tuo contatto è cambiata.",
-  "lastSeen": "Ultimo accesso {{time}}",
   "listTime": {
     "days": "{{count}} g",
     "hours": "{{count}} h",
@@ -304,17 +314,33 @@
   "online": "online",
   "options": "Opzioni",
   "payments": {
-    "needLive": "I pagamenti richiedono una connessione diretta",
+    "needLive": "Invia richiede che il tuo contatto sia online: l'ecash non resta mai in coda. Una richiesta può aspettare il suo ritorno.",
     "noWallet": "Il tuo contatto non ha ancora un portafoglio",
     "off": "Disattivato in questa chat: attiva un metodo in Accetta",
     "offOrOld": "Il tuo contatto ha disattivato i pagamenti in questa chat, o deve aggiornare Ghostly"
   },
+  "pictureHiddenIp": "Non mostrata con Nascondi il mio IP attivo",
   "pinned": {
     "bar": "Messaggio fissato",
     "info": "Un messaggio fissato per chat, visibile a tutti. Uno nuovo sostituisce il precedente. In una community, solo l’admin fissa.",
     "notHere": "Non è su questo dispositivo",
     "pin": "Fissa",
     "unpin": "Non fissare"
+  },
+  "presence": {
+    "availability": {
+      "away": "Assente",
+      "busy": "Occupato",
+      "dnd": "Non disturbare"
+    },
+    "dot": {
+      "away": "Online, assente",
+      "busy": "Online, occupato",
+      "dnd": "Online, non disturbare",
+      "idle": "Online, inattivo",
+      "online": "Online"
+    },
+    "status": "Stato: {{status}}"
   },
   "preview": {
     "arkAddress": "Indirizzo Ark",
@@ -366,7 +392,9 @@
     "copied": "Copiato",
     "copy": "Copia",
     "copyCode": "Copia codice",
+    "hiddenChars": "Questo codice contiene caratteri nascosti o che cambiano la direzione del testo, mostrati come {{marker}}. Copia codice copia anche quelli.",
     "localTime": "{{time}} nel tuo fuso orario",
+    "notCopied": "Non copiato",
     "showAll": "Mostra tutto",
     "showLess": "Mostra meno",
     "spoiler": "Testo nascosto. Tocca per mostrarlo",
@@ -456,10 +484,13 @@
     "showTranslation": "Mostra traduzione",
     "translate": "Traduci"
   },
-  "typeMessage": "Scrivi un messaggio...",
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",
   "typingThinking": "sta pensando…",
+  "unconfirmed": {
+    "hint": "Inviato con una richiesta di contatto. La sua app non ha ancora confermato di averlo inviato.",
+    "label": "Non confermato"
+  },
   "video": {
     "arriving": "In arrivo",
     "cantPlay": "Questo dispositivo non può riprodurre questo video ({{format}}). Scaricalo per guardarlo.",
@@ -483,6 +514,7 @@
     "limit": "I messaggi vocali durano al massimo {{minutes}} minuti",
     "message": "Messaggio vocale",
     "micDenied": "Nessun accesso al microfono. Consentilo nelle impostazioni del browser o del sistema.",
+    "micDeniedAndroid": "Nessun accesso al microfono. Consentilo quando Android lo chiede, o a Ghostly nelle impostazioni di Android.",
     "micUnavailable": "Nessun microfono trovato. Collegane uno, o chiudi l'app che lo usa.",
     "micUnsupported": "Questo browser non può registrare messaggi vocali.",
     "pause": "Metti in pausa il messaggio vocale",

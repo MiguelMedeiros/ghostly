@@ -7,6 +7,17 @@ const snapshot = () => engine.state;
 /** The engine's state, re-rendered on every change. What draws identities uses the one in `./identities`. */
 export const useEngineState = () => useSyncExternalStore(subscribe, snapshot);
 
+const reconnectingNow = () => engine.reconnecting;
+/**
+ * This page lost the Ghostly peer and its tries to reach it again fail (an extension tab, `EngineClient.reconnecting`):
+ * the state it holds is the last one it was told, so what it says of a connection or a contact being online is stale.
+ */
+export const useEngineReconnecting = () => useSyncExternalStore(subscribe, reconnectingNow);
+
+/** Each 1:1 chat's link id and contact key, for `useEngineValue`: what maps a chat's cards to its contact. */
+export const chatKeys = (state: typeof engine.state): [id: string, peerKey: string | undefined][] =>
+  (state?.links ?? []).map((link) => [link.id, link.peerPubKeyZ32]);
+
 /**
  * What `select` reads of the engine's state, drawn again only when that changes by content: the engine sends its whole
  * state anew on every change (up to 20 a second while a file moves), so what reads one part of it would draw on each.

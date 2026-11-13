@@ -22,6 +22,8 @@
     "unreadCount": "{{name}} 中有 {{count}} 条未读",
     "unreadOne": "{{name}} 中有 1 条未读"
   },
+  "foundCount": "找到 {{count}} 个聊天",
+  "foundOne": "找到 1 个聊天",
   "group": {
     "adminAnswered": "管理员的应用已回应…",
     "answerFailed": "没有成功。请重试。",
@@ -31,6 +33,7 @@
     "inviterAwayUnknown": "邀请你的联系人尚未连接。请稍后重试。",
     "letting": "有成员正在让你加入…",
     "linkUnanswered": "链接没有回应",
+    "others": "另一个群组使用此 ID：请选择",
     "takenBack": "邀请已被收回",
     "unanswered": "邀请人的应用没有回应。请再次接受，或拒绝。",
     "waitingAdmin": "正在等待管理员的应用…",
@@ -50,9 +53,7 @@
     "groupHint": "任何人都能打开的链接",
     "label": "创建群组或聊天"
   },
-  "noChats": "暂无聊天",
   "noResults": "没有找到结果",
-  "pinned": "已置顶",
   "quiet": "这里很安静...",
   "quietHint": "该去吓唬谁了！👻",
   "rail": {
@@ -75,10 +76,10 @@
     "unread_one": "{{count}} 条未读消息",
     "unread_other": "{{count}} 条未读消息"
   },
+  "searchLabel": "搜索聊天",
   "searchPlaceholder": "搜索聊天...",
   "settings": "设置",
   "sharedIdentity": "分享了一个身份",
   "skipToContent": "跳到内容",
-  "startChat": "新建聊天",
-  "unread": "未读消息"
+  "startChat": "新建聊天"
 }

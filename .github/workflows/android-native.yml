@@ -6,7 +6,8 @@ name: Android native
 # - apk: arm64-v8a (phones, and an arm64 emulator on a Mac) and x86_64 (the emulator here), one artifact each.
 # - emulator: the x86_64 APK on an Android emulator (KVM): it launches, the UI renders, the engine starts, and the
 #   probe measures what the native app depends on (tools/scripts/android-smoke.mjs). Results are an artifact.
-# On pull requests that touch the Desktop crate or this lane, and by hand.
+# On pull requests that touch the Rust workspace (its crates, Cargo.toml, Cargo.lock, rust-toolchain.toml) or this
+# lane, and by hand (tools/scripts/test/androidNativeWorkflow.test.ts).
 on:
   pull_request:
     # ready_for_review: a draft skips this (see the draft job below); leaving draft builds it.
@@ -14,7 +15,9 @@ on:
     paths:
       - "apps/desktop/**"
       - "native/transports/**"
+      - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
       - "tools/scripts/android-smoke.mjs"
       - ".github/workflows/android-native.yml"
   workflow_dispatch:
@@ -76,7 +79,7 @@ jobs:
 
       # The Android Gradle Plugin of Tauri's generated project runs on JDK 17.
       - name: Setup JDK 17
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"

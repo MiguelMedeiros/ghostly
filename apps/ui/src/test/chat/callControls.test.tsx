@@ -56,6 +56,27 @@ describe("the chat header's call buttons", () => {
     expect(onCall).not.toHaveBeenCalled();
   });
 
+  it("when the chat cannot call, show why on screen as a press finds them off, where a phone has no title to show", async () => {
+    const onCall = vi.fn();
+    const { user, rerender } = renderApp(<CallButtons phone blocked="Calls need a live connection" busy={false} onCall={onCall} />);
+    expect(screen.queryByTestId("call-blocked")).toBeNull();
+    await user.click(screen.getByTestId("call-audio"));
+    expect(screen.getByTestId("call-blocked-text")).toHaveTextContent("Calls need a live connection");
+    expect(screen.getByTestId("call-blocked-region")).toHaveAttribute("role", "status");
+    // Under the header, beside the buttons: over the whole window it sat on the message field's + and emoji
+    // (e2e/web/paired-calls.spec.ts measures it).
+    expect(screen.getByTestId("call-blocked-region")).toHaveClass("toast-place-header");
+    expect(screen.getByTestId("call-blocked-region").parentElement).not.toBe(document.body);
+    expect(onCall).not.toHaveBeenCalled();
+
+    // During a call the buttons are off with no reason to give: nothing new is said.
+    await user.click(screen.getByTestId("call-blocked-close"));
+    rerender(<CallButtons phone blocked={null} busy onCall={onCall} />);
+    await user.click(screen.getByTestId("call-audio"));
+    expect(screen.queryByTestId("call-blocked")).toBeNull();
+    expect(onCall).not.toHaveBeenCalled();
+  });
+
   it("keep the keyboard focus during a call, and start no second one", async () => {
     const onCall = vi.fn();
     const { user, rerender } = renderApp(<CallButtons blocked={null} busy={false} onCall={onCall} />);
@@ -412,6 +433,26 @@ describe("the call's clock", () => {
       vi.useRealTimers();
     }
   });
+
+  it("counts the time the call lasts when the device's clock is set forward or back meanwhile", () => {
+    vi.useFakeTimers();
+    try {
+      const hour = 60 * 60_000;
+      overlay({ callStartedAt: Date.now() - 4000 });
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:05");
+      // The clock is put an hour ahead (a phone fixing its time): the call is still 6 s old, not an hour.
+      vi.setSystemTime(Date.now() + hour);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:06");
+      // And two hours back: never a negative clock.
+      vi.setSystemTime(Date.now() - 2 * hour);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByTestId("call-status")).toHaveTextContent("Audio call00:07");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("a call ringing while you are on another (End and answer)", () => {
@@ -502,7 +543,7 @@ describe("the contact's sound", () => {
     try {
       const remote = new FakeMediaStream([new FakeTrack("audio"), new FakeTrack("video")]);
       const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
-        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn() };
+        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn() };
       overlay({ remoteStream: remote as unknown as MediaStream, remoteHasVideo: true, devices });
       const showing = [...document.querySelectorAll<HTMLMediaElement>("audio, video")].filter((element) => given.get(element) === remote);
       // The <audio> and the picture both show the contact's stream; only one may sound, or the voice comes out twice.

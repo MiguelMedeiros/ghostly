@@ -3,6 +3,7 @@ import { cardLinkHost, taskProgress } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
+import { formatAt } from "../../lib/time";
 import { STATUS_TONE, isFinished } from "../../lib/statusCards";
 import { boardCardLabel, chatNames, partsDone, progressText, type BoardGrouping, type BoardTask } from "../../lib/taskBoard";
 import type { PrChecks } from "@ghostly/core";
@@ -24,6 +25,8 @@ const CHECKS_MARK: Record<PrChecks, { mark: string; tone: string }> = {
 };
 
 const chip = "inline-flex min-w-0 items-center gap-1 rounded-full bg-text-primary/[0.07] px-1.5 py-px text-[11px] leading-4 text-text-secondary";
+/** A chip that takes a tap: on a phone a clear 3 px border above and below makes its box 24 px tall; the pill keeps its look. */
+const chipTarget = "pointer-events-auto relative z-10 border-transparent bg-clip-padding max-md:border-y-[3px] hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent";
 
 export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKeys, onTag }: {
   task: BoardTask;
@@ -53,8 +56,11 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
   const everywhere = chatNames(task);
   // A 1:1 chat's bot is its contact: one chip says both. Grouped by chat, the column says the chat and the chip the others.
   const chats = everywhere.filter((chat) => grouping === "bot" ? true : grouping === "chat" ? chat !== task.chat : chat !== task.bot);
-  const prTitle = card.pr && [t("cards.board.card.openPr", { host: cardLinkHost(card.pr.url) }), card.pr.state && t(`cards.board.card.prState.${card.pr.state}`),
-    card.pr.checks && t(`cards.board.card.checks.${card.pr.checks}`)].filter(Boolean).join(" · ");
+  // A pull request's link goes wherever its sender chose: its host is on the chip, in its name and in Details, as in the chat.
+  const prHost = card.pr ? cardLinkHost(card.pr.url) : "";
+  const prName = card.pr?.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber");
+  const prStanding = [card.pr?.state && t(`cards.board.card.prState.${card.pr.state}`), card.pr?.checks && t(`cards.board.card.checks.${card.pr.checks}`)];
+  const prTitle = [t("cards.board.card.openPr", { host: prHost }), ...prStanding].filter(Boolean).join(" · ");
   const chips: ReactNode[] = [
     // The column says the status when the board is in columns by status; grouped otherwise, the card does.
     ...(grouping !== "status" ? [
@@ -75,17 +81,19 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       </span>] : []),
     ...(card.pr ? [
       // The only thing on a card that leaves the app: an https link (the reader's rule), opened outside, by its host.
-      <a key="pr" data-testid="board-card-pr" data-state={card.pr.state} {...externalLinkProps(card.pr.url)} title={prTitle}
-        className={`${chip} pointer-events-auto relative z-10 shrink-0 no-underline hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent`}>
+      <a key="pr" data-testid="board-card-pr" data-state={card.pr.state} {...externalLinkProps(card.pr.url)} title={prTitle} aria-label={`${prName} · ${prTitle}`}
+        className={`${chip} ${chipTarget} no-underline`}>
         {card.pr.checks && (
-          <span data-testid="board-card-checks" data-checks={card.pr.checks} className={`font-semibold ${CHECKS_MARK[card.pr.checks].tone}`}>
+          <span data-testid="board-card-checks" data-checks={card.pr.checks} className={`shrink-0 font-semibold ${CHECKS_MARK[card.pr.checks].tone}`}>
             <span aria-hidden="true">{CHECKS_MARK[card.pr.checks].mark}</span>
             <span className="sr-only">{t(`cards.board.card.checks.${card.pr.checks}`)}</span>
           </span>
         )}
-        <span>{card.pr.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber")}</span>
+        <span className="shrink-0">{prName}</span>
+        {/* A long host gives way from its start: the end, the domain it belongs to, stays in sight. */}
+        <span className="min-w-0 truncate [direction:rtl]"><bdi data-testid="board-card-pr-host" dir="ltr">{prHost}</bdi></span>
         {(card.pr.additions !== undefined || card.pr.deletions !== undefined) && (
-          <span dir="ltr" className="inline-flex gap-1 tabular-nums">
+          <span dir="ltr" className="inline-flex shrink-0 gap-1 tabular-nums">
             {card.pr.additions !== undefined && <span className="text-accent">+{card.pr.additions}</span>}
             {card.pr.deletions !== undefined && <span className="text-danger-ink">−{card.pr.deletions}</span>}
           </span>
@@ -93,7 +101,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       </a>] : []),
     ...(card.tags ?? []).map((tag) => (
       <button key={`tag ${tag}`} type="button" data-testid="board-card-tag" onClick={() => onTag?.(tag)} title={t("cards.board.tagFilter", { tag })}
-        className={`${chip} pointer-events-auto relative z-10 cursor-pointer border-none hover:bg-text-primary/[0.14] hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent`}>
+        className={`${chip} ${chipTarget} cursor-pointer`}>
         <bdi className="min-w-0 truncate">{tag}</bdi>
       </button>)),
   ].slice(0, 3);
@@ -131,19 +139,20 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
             <dt className="font-semibold">{t("cards.board.card.chatLabel")}</dt>
             <dd data-testid="board-card-chats" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{everywhere.join(", ")}</bdi></dd>
             {card.branch && <><dt className="font-semibold">{t("cards.task.branch")}</dt><dd className="m-0 min-w-0 font-mono [overflow-wrap:anywhere]"><bdi>{card.branch}</bdi></dd></>}
-            {(card.pr?.state || card.pr?.checks) && <><dt className="font-semibold">{t("cards.board.card.prLabel")}</dt>
-              <dd data-testid="board-card-pr-standing" className="m-0">{[card.pr.state && t(`cards.board.card.prState.${card.pr.state}`), card.pr.checks && t(`cards.board.card.checks.${card.pr.checks}`)].filter(Boolean).join(" · ")}</dd></>}
+            {card.pr && <><dt className="font-semibold">{t("cards.board.card.prLabel")}</dt>
+              <dd data-testid="board-card-pr-standing" className="m-0 min-w-0 [overflow-wrap:anywhere]">
+                <bdi dir="ltr">{prHost}</bdi>{prStanding.filter(Boolean).map((words) => ` · ${words}`).join("")}</dd></>}
             {card.pr?.files !== undefined && <><dt className="font-semibold">{t("cards.board.card.filesLabel")}</dt><dd className="m-0 tabular-nums">{card.pr.files}</dd></>}
             {card.tags && <><dt className="font-semibold">{t("cards.board.card.tagsLabel")}</dt><dd data-testid="board-card-tags" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{card.tags.join(", ")}</bdi></dd></>}
             <dt className="font-semibold">{t("cards.board.card.updatedLabel")}</dt>
-            <dd className="m-0">{new Date(task.at).toLocaleString(language, { dateStyle: "medium", timeStyle: "short" })}</dd>
+            <dd className="m-0">{formatAt(task.at, { dateStyle: "medium", timeStyle: "short" }, language)}</dd>
           </dl>
         )}
         {parts && task.parts && (
           <div data-testid="board-card-stack" data-open={stackOpen ? "" : undefined} className="mt-1.5 ps-4">
             {/* The tasks that are parts of this one, stacked under it: how many are done, and the parts on a tap. */}
             <button type="button" data-testid="board-card-stack-toggle" aria-expanded={stackOpen} aria-controls={stackId} onClick={() => setStackOpen(!stackOpen)}
-              className="pointer-events-auto relative z-10 -ms-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-text-primary/10 hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-8">
+              className="pointer-events-auto relative z-10 -ms-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-text-primary/10 hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent min-h-6 max-md:min-h-8">
               <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
                 className={`transition-transform motion-reduce:transition-none ${stackOpen ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
               <span data-testid="board-card-parts">{t("cards.board.card.parts", parts)}</span>
@@ -168,8 +177,8 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
       {/* Progress along the card's foot: a still bar, never a spinner (an app nobody touches draws nothing). */}
       {progress !== undefined && (
         <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} data-testid="board-card-progress"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
-          <div className={`h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
+          className="progress-track pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-text-primary/10">
+          <div className={`progress-fill h-full ${tone.bar}`} style={{ width: `${progress}%` }} />
         </div>
       )}
     </article>

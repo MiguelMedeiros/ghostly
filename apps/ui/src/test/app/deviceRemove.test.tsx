@@ -6,6 +6,7 @@ import { DevicesSection } from "../../components/devices/DevicesSection";
 import { LostChecklist } from "../../components/devices/RemoveDeviceDialog";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { listNames, lostWalletLines, reenrollHere } from "../../lib/devices";
+import { removeProfileHere } from "../../lib/profileData";
 import { renderApp } from "../render";
 // covers: devices.remove, devices.remove.own-set
 
@@ -13,6 +14,7 @@ import { renderApp } from "../render";
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
 vi.mock("../../lib/devices", async (original) => ({ ...(await original<typeof import("../../lib/devices")>()), reenrollHere: vi.fn() }));
+vi.mock("../../lib/profileData", async (original) => ({ ...(await original<typeof import("../../lib/profileData")>()), removeProfileHere: vi.fn() }));
 
 const DESKTOP = "D".repeat(43), PHONE = "P".repeat(43), TABLET = "T".repeat(43);
 const activeSet = (patch: Partial<DeviceSetView> = {}): DeviceSetView => ({
@@ -109,6 +111,35 @@ describe("Remove, on the active device", () => {
     await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual([{ key: PHONE }]));
   });
 
+  it("the checklist before a removal has Back to Remove, not a Done that ends with the device still in the set", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-lost"));
+    expect(screen.queryByTestId("device-lost-done")).toBeNull();
+    await user.click(screen.getByTestId("device-lost-back"));
+    expect(screen.getByTestId("device-remove")).toHaveTextContent("Remove Phone?");
+    expect(engine.callsTo("deviceRemove")).toEqual([]);
+  });
+
+  it("while Removing… runs, × and Escape do nothing, and a refusal is said in the dialog", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet());
+    let refuse!: () => void;
+    engine.on("deviceRemove", () => new Promise((_, reject) => { refuse = () => reject(new Error("remove-busy: The profile is moving. Try again after it.")); }));
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    await screen.findByTestId("device-remove-busy");
+    const dialog = screen.getByTestId("device-remove");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    act(() => { dialog.dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.getByTestId("device-remove")).toBe(dialog);
+    act(() => refuse());
+    expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
+  });
+
   it("shows who has not taken the new secret yet, and makes a new device secret on request", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet({ waiting: [{ key: PHONE, name: "Phone" }] }));
@@ -121,7 +152,7 @@ describe("Remove, on the active device", () => {
 
   it("after a takeover offers to remove the device that stopped, the checklist when it was lost, or not now", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
-    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone", lost: true } }));
+    engine.on("deviceSet", () => activeSet({ secretOffer: { key: PHONE, device: "Phone", lost: true } }));
     engine.on("deviceSecretOfferDismiss", () => undefined);
     expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from Phone.");
     expect(screen.getByTestId("device-secret-offer-remove")).toHaveTextContent("Remove Phone");
@@ -130,6 +161,61 @@ describe("Remove, on the active device", () => {
     await user.click(screen.getByTestId("device-lost-done"));
     await user.click(screen.getByTestId("device-secret-offer-dismiss"));
     await waitFor(() => expect(engine.callsTo("deviceSecretOfferDismiss")).toHaveLength(1));
+  });
+
+  it("once Not now takes the takeover's offer away, the keyboard focus goes to the stopped device's row, not to the page", async () => {
+    let secretOffer: DeviceSetView["secretOffer"] = { key: PHONE, device: "Phone", lost: true };
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ ...(secretOffer && { secretOffer }) }));
+    engine.on("deviceSecretOfferDismiss", () => { secretOffer = undefined; });
+    await user.click(await screen.findByTestId("device-secret-offer-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("device-secret-offer")).toBeNull(), { timeout: 5_000 });
+    // The Phone is not connected: no Move to, so its ⋮.
+    await waitFor(() => expect(within(screen.getAllByTestId("device-row")[1]).getByTestId("device-menu")).toHaveFocus());
+  });
+
+  it("once a new secret takes an unnamed offer away, the keyboard focus goes to Add a device", async () => {
+    let secretOffer: DeviceSetView["secretOffer"] = { key: "X".repeat(43), device: "Old" };
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ ...(secretOffer && { secretOffer }) }));
+    engine.on("deviceNewSecret", () => { secretOffer = undefined; return activeSet(); });
+    await user.click(await screen.findByTestId("device-secret-offer-new"));
+    await waitFor(() => expect(screen.queryByTestId("device-secret-offer")).toBeNull(), { timeout: 5_000 });
+    expect(await screen.findByTestId("device-secret-done")).toHaveTextContent("New device secret made.");
+    await waitFor(() => expect(screen.getByTestId("device-add-open")).toHaveFocus());
+  });
+
+  it("a Not now the engine refuses keeps the offer and the focus on Not now", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ secretOffer: { key: PHONE, device: "Phone" } }));
+    engine.on("deviceSecretOfferDismiss", () => { throw new Error("The device record could not be written"); });
+    await user.click(await screen.findByTestId("device-secret-offer-dismiss"));
+    await screen.findByTestId("device-secret-offer-error");
+    expect(screen.getByTestId("device-secret-offer-dismiss")).toHaveFocus();
+  });
+
+  it("after a takeover, Remove and the checklist's Remove take out the device that stopped by its key, whatever the names", async () => {
+    // A lost "Phone" (stopped) and another "Phone" listed before it.
+    const OTHER = "O".repeat(43);
+    const devices = [activeSet().devices[0], { key: OTHER, name: "Phone", slot: 1, self: false, active: false, status: "live" as const }, { ...activeSet().devices[1], slot: 2 }];
+    for (const [i, via] of [["device-secret-offer-remove"], ["device-secret-offer-lost", "device-lost-remove"]].entries()) {
+      const { user, engine, unmount } = renderApp(<DevicesSection />);
+      engine.on("deviceSet", () => activeSet({ devices, secretOffer: { key: PHONE, device: "Phone", lost: true } }));
+      engine.on("deviceRemove", () => activeSet({ devices }));
+      await screen.findByTestId("device-secret-offer-remove");
+      for (const testId of via) await user.click(screen.getByTestId(testId));
+      await user.click(screen.getByTestId("device-remove-go"));
+      await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual(Array(i + 1).fill({ key: PHONE })));
+      unmount();
+    }
+  });
+
+  it("after a takeover whose stopped device is not known, offers a new device secret and removes nothing by name", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => activeSet({ secretOffer: { device: "Phone" } }));
+    expect(await screen.findByTestId("device-secret-offer")).toHaveTextContent("You took over from another device.");
+    expect(screen.queryByTestId("device-secret-offer-remove")).toBeNull();
+    expect(screen.getByTestId("device-secret-offer-new")).toBeInTheDocument();
   });
 
   it("on a standby offers no Remove and no new secret", async () => {
@@ -236,6 +322,24 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby-reenroll")).toHaveTextContent("Add this device to my profile");
   });
 
+  it("out of the set for good: the old set is not listed, its Active device is not the one in use now", async () => {
+    const old = (): DeviceSetView => ({ state: "standby", devices: [
+      { key: DESKTOP, name: "Desktop", slot: 0, self: false, active: true, status: "connecting" },
+      { key: PHONE, name: "Phone", slot: 1, self: false, active: false, status: "connecting" },
+      { key: TABLET, name: "Tablet", slot: 2, self: true, active: false },
+    ] });
+    const first = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop" }} />);
+    first.engine.on("deviceSet", old);
+    // A move that goes on lists the set it belongs to.
+    expect(await screen.findAllByTestId("device-standby-link")).toHaveLength(2);
+    first.unmount();
+    const { engine } = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop", reenroll: true }} />);
+    engine.on("deviceSet", old);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByTestId("device-standby-reenroll")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-standby-links")).toBeNull();
+  });
+
   it("removed while its screen is open: the keyboard focus on Use here goes to Add this device, not to the page", async () => {
     const { rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
     act(() => screen.getByTestId("handoff-use-here").focus());
@@ -259,6 +363,48 @@ describe("the standby screen after a removal", () => {
     renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
     await act(async () => {});
     expect(screen.getByTestId("device-standby-reenroll")).not.toHaveFocus();
+  });
+
+  it("removed, or out of the set for good: Remove this profile here takes the copy off this device, once the profile's name is typed", async () => {
+    vi.mocked(removeProfileHere).mockReset().mockReturnValue(new Promise<void>(() => {}));
+    const first = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Tablet", reenroll: true }} />);
+    expect(screen.getByTestId("device-standby-remove-here")).toHaveTextContent("Remove this profile here");
+    first.unmount();
+    const { user } = renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("device-standby-remove-here"));
+    const dialog = screen.getByTestId("device-remove-here");
+    expect(dialog).toHaveTextContent("Remove Personal from this device?");
+    expect(dialog).toHaveTextContent("Your other devices keep the profile.");
+    // The first profile stays on the list, empty.
+    expect(dialog).toHaveTextContent("An empty profile takes its place here.");
+    const go = within(dialog).getByTestId("device-remove-here-go");
+    expect(go).toBeDisabled();
+    await user.type(within(dialog).getByTestId("device-remove-here-name"), "Persona");
+    expect(go).toBeDisabled();
+    await user.click(go);
+    expect(removeProfileHere).not.toHaveBeenCalled();
+    await user.type(within(dialog).getByTestId("device-remove-here-name"), "l");
+    await user.click(go);
+    expect(removeProfileHere).toHaveBeenCalledOnce();
+    expect(go).toHaveTextContent("Removing…");
+  });
+
+  it("Remove this profile here that fails says why, and the screen stays", async () => {
+    vi.mocked(removeProfileHere).mockReset().mockRejectedValue(new Error("This profile is open in another window. Close it, then try again."));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("device-standby-remove-here"));
+    await user.type(screen.getByTestId("device-remove-here-name"), "Personal");
+    await user.click(screen.getByTestId("device-remove-here-go"));
+    expect(await screen.findByTestId("device-remove-here-error")).toBeInTheDocument();
+    expect(screen.getByTestId("device-remove-here-go")).toHaveTextContent("Remove");
+  });
+
+  it("a device still in the set, or one that may get back in, has no Remove this profile here", () => {
+    for (const gate of [{ state: "standby" as const, activeDevice: "Desktop" }, { state: "moving" as const, activeDevice: "Desktop" }, { state: "superseded" as const, activeDevice: "Desktop" }]) {
+      const view = renderApp(<DeviceStandby gate={gate} />);
+      expect(screen.queryByTestId("device-standby-remove-here")).toBeNull();
+      view.unmount();
+    }
   });
 });
 

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { isLetterKey } from "../lib/appCommands";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
 import { revealMessage } from "./useRowWindow";
+import { useShownTranslations } from "./useTranslation";
 import { useIsLocked } from "../contexts/LockScreenContext";
 import { modalOpen } from "./useAppCommands";
 
@@ -67,7 +69,8 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   useEffect(() => {
     if (!active || locked) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.key.toLowerCase() !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      // F's key on a keyboard that types no Latin letter there too (Arabic, Russian): the browser's own Find opened.
+      if (e.defaultPrevented || !isLetterKey(e, "f") || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       // A dialog over the chat keeps its keys and its focus, as the app's other shortcuts leave it.
       if (modalOpen()) return;
       e.preventDefault();
@@ -84,8 +87,10 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   }, [query]);
 
   // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
-  // or a picture is found by its kind in the profile's language too.
-  const items = useMemo(() => (open ? searchable(messages, t) : []), [open, messages, t]);
+  // or a picture is found by its kind in the profile's language too. `translated`: a received text shown translated is
+  // found by the words shown (folded again when a translation comes or Show original is pressed).
+  const translated = useShownTranslations(chat, open);
+  const items = useMemo(() => (open ? searchable(messages, t, translated) : []), [open, messages, t, translated]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);

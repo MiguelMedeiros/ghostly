@@ -137,6 +137,7 @@
       "needsKey": "需要密钥",
       "noFederation": "没有联盟",
       "noSource": "没有来源",
+      "shared": "使用你的 {{name}} 余额",
       "unavailable": "不可用"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "本地 EVM · 测试代币",
       "usdtSepolia": "Sepolia · 测试代币"
     },
+    "sameBalance": "与你的 {{name}} 卡余额相同",
     "status": {
       "away": "在别处",
       "checkSettings": "检查设置",
@@ -176,7 +178,6 @@
   "cashu": {
     "add": "添加",
     "addMintPlaceholder": "添加铸币厂：https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "正在询问铸币厂…",
     "backupCopied": "备份已复制。谁拥有这些代币，谁就拥有这些 sats。",
     "contactHint": "要付款给联系人？请在聊天中使用 ⚡。",
@@ -190,7 +191,7 @@
       "perProofTest": "每个证明 {{fee}} 测试 sat（每笔付款约 1 测试 sat）"
     },
     "history": {
-      "fee": "手续费 {{amount}}",
+      "fee": "手续费 {{amount}} {{unit}}",
       "feesPaid": "已付手续费：{{amount}} {{unit}}",
       "movements": "{{count}} 笔记录",
       "movementsOne": "1 笔记录",
@@ -611,6 +612,9 @@
     "paste": "粘贴",
     "scan": "扫描"
   },
+  "sentEcash": {
+    "title": "在已删除的聊天中发送"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "正在创建你的 Mainnet 钱包…",
@@ -873,6 +877,22 @@
       "github": "它需要 GitHub 登录，所以 Ghostly 不会替你申请。",
       "login": "它需要登录，所以 Ghostly 不会替你申请。"
     }
+  },
+  "total": {
+    "away": "在 {{device}} 上，不计入总额",
+    "federation": "由联盟保管的 ecash",
+    "info": "总额只加上 Ghostly 刚才能读取的余额。读取不到的卡不计入，Testnet 也从不与 Mainnet 相加。",
+    "label": "余额",
+    "mint": "由你的铸币所保管的 ecash",
+    "none": "未设置",
+    "ready": "现在可用",
+    "shared": "与 {{name}} 是同一余额，只计一次",
+    "title": "余额来源",
+    "total": "总额",
+    "uncounted": "{{count}} 张卡未计入",
+    "uncounted_one": "{{count}} 张卡未计入",
+    "unknown": "暂时无法读取，不计入总额",
+    "waiting": "{{amount}} {{unit}} 暂不可用"
   },
   "ui": {
     "amountIn": "以 {{unit}} 计的金额",

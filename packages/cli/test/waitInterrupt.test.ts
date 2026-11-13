@@ -65,6 +65,19 @@ describe("a wait on a terminal, and Ctrl-C", { timeout: 120_000 }, () => {
     expect(history.messages.map((m) => m.text)).toContain("kept on Ctrl-C");
   });
 
+  // A one-shot's own default waits are in "knows the waits a one-shot does by default" below: on this chat, which nobody
+  // joined, a file send without --wait answers at once.
+  it("a one-shot file send that waits says so too; Ctrl-C says the file still goes", async () => {
+    const path = join(dir, "notes.txt");
+    writeFileSync(path, "kept on Ctrl-C\n");
+    const send = start(["file", "send", "solo", path, "--wait", "sent"], onTty);
+    await said(send, "ghostly: waiting for it to go out to solo (up to 300 s; Ctrl-C stops waiting, it still goes)\n");
+    send.child.kill("SIGINT");
+    expect(await send.exited(15_000)).toBe(130);
+    expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): it is kept here and goes with this profile's next command, or keep it online with `ghostly daemon --detach`\n");
+    expect(lockFiles()).toEqual([]);
+  });
+
   it("through a daemon, Ctrl-C ends the command (exit 130) and the daemon runs on; the daemon's own Ctrl-C still stops it, exit 0", async () => {
     const daemon = start(["daemon"]);
     await daemon.waitFor((line) => line.daemon === "ready");
@@ -92,5 +105,32 @@ describe("what a wait says", () => {
       stopped: "file f1's transfer goes on while this profile is online",
     });
     expect(waitNotice("file.save", { file: "f1", wait: true, timeout: 9 }, "one-shot")?.waiting).toContain("up to 9 s");
+  });
+
+  it("names a chat's state in words that read: --until text is a chat that can carry text", () => {
+    // It read "waiting for chat bob to be text", and Ctrl-C "chat bob was not text yet".
+    expect(waitNotice("chat.wait", { chat: "bob", until: "text" }, "daemon")).toEqual({
+      waiting: "waiting for chat bob to carry text (up to 60 s; Ctrl-C stops waiting)",
+      stopped: "chat bob could not carry text yet",
+    });
+    expect(waitNotice("chat.wait", { chat: "bob" }, "daemon")).toEqual({ waiting: "waiting for chat bob to be live (up to 60 s; Ctrl-C stops waiting)", stopped: "chat bob was not live yet" });
+    expect(waitNotice("chat.wait", { chat: "bob", until: "paired" }, "daemon")?.stopped).toBe("chat bob was not paired yet");
+  });
+
+  it("knows the waits a one-shot does by default, with no --wait, and that a daemon answers those at once", () => {
+    expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 300 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("chat.react", { chat: "bob", message: "m", emoji: "👍" }, "one-shot")?.waiting).toBe("waiting for bob's app to confirm it (up to 30 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("chat.pin", { chat: "bob", message: "m", timeout: 5 }, "one-shot")?.waiting).toBe("waiting for bob's app to confirm it (up to 5 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("group.react", { group: "crew", message: "m", emoji: "👍" }, "one-shot")?.waiting).toBe("waiting for a member's edge in group crew to take it (up to 30 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("chat.delete", { chat: "bob", message: "m", everyone: true }, "one-shot")).not.toBeNull();
+    expect(waitNotice("chat.pin", { chat: "group:crew", message: "m" }, "one-shot")?.waiting).toBe("waiting for a member's edge in group crew to take it (up to 30 s; Ctrl-C stops waiting, it still goes)");
+    expect(waitNotice("file.send", { chat: "group:crew", path: "/f" }, "one-shot")).toBeNull();
+    expect(waitNotice("task.send", { chat: "bob", title: "t" }, "one-shot")).not.toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "one-shot")?.waiting).toBe("waiting for it to go out to bob (up to 30 s; Ctrl-C stops waiting, it still goes)");
+    // Asked not to wait, or through a daemon (it answers at once), or a call that never waits: nothing.
+    expect(waitNotice("file.send", { chat: "bob", path: "/f", wait: "none" }, "one-shot")).toBeNull();
+    expect(waitNotice("file.send", { chat: "bob", path: "/f" }, "daemon")).toBeNull();
+    expect(waitNotice("chat.delete", { chat: "bob", message: "m" }, "one-shot")).toBeNull();
+    expect(waitNotice("chat.send", { chat: "bob", text: "hi" }, "daemon")).toBeNull();
   });
 });

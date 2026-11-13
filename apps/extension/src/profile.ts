@@ -1,4 +1,4 @@
-import { activeProfileId, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
+import { activeProfileId, announceSwitch, lastRouteOf, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one
@@ -46,12 +46,29 @@ export function followEngineRestart(onRestart: () => void): () => void {
   return () => removeEventListener("storage", restarted);
 }
 
+let unfinished: () => Promise<unknown> | null = () => null;
+/**
+ * What this page finishes before it starts again for a switch (ui/main.tsx: a "Clear all data" in progress). Cut short,
+ * most of the profile's data would stay after the page said it was cleared.
+ */
+export function finishBeforeSwitching(work: () => Promise<unknown> | null): void {
+  unfinished = work;
+}
+
 /**
  * Starts this page again as the profile in use, on the page that profile was left on, as the tab that switched does
  * (`switchProfile`). The address this page showed belongs to the profile before the switch: a chat or group of its
- * own reads as gone from this device in the other one.
+ * own reads as gone from this device in the other one. Once what it has to finish is over.
+ * Under the profile's overlay, as on the tab that switched: until the reload lands, this page re-reads the registry and
+ * showed the old profile's page under the new one's name and picture.
  */
 export function startAsProfileInUse(): void {
+  const work = unfinished();
+  if (work) {
+    void work.catch(() => {}).then(startAsProfileInUse);
+    return;
+  }
+  announceSwitch(activeProfileId());
   history.replaceState(null, "", `#${lastRouteOf(activeProfileId())}`);
   location.reload();
 }

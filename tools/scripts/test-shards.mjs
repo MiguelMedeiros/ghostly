@@ -5,8 +5,9 @@
 // cli 178 s). Here they split into shards of about the same time, each on its own runner. The unit is a package:
 // its files run in parallel inside one Vitest, and each part of a package cut in two pays a start of Vitest (and the
 // package's globalSetup), so only a package too heavy for one shard is cut, by its files (see split). A file in ALONE
-// is a unit of its own that no other unit joins: the CLI's two-peer story (twoPeers.test.ts, about 3 minutes of
-// designed waits in one sequence of tests) sets the floor, so nothing else waits behind it or loads its runner.
+// is a unit of its own that runs first on its shard, in a Vitest of its own with nothing beside it: the CLI's
+// two-peer story (twoPeers.test.ts, about 2 minutes of designed waits in one sequence of tests) must not share its
+// runner. Other units run after it on that shard, so its runner does not idle while the others work.
 // Heaviest first to the least loaded shard, by the seconds CI took per file (tools/scripts/test-durations.json; a file not
 // in it counts as a typical one). A stale durations file only unbalances the shards, it never drops a test: every
 // file Vitest lists for a package goes to exactly one shard, and a shard that runs part of a package checks that
@@ -16,7 +17,7 @@
 //   node tools/scripts/test-shards.mjs --record a.json …  # tools/scripts/test-durations.json from Vitest JSON reports
 //
 // CI's packages shards upload their JSON reports (artifact "packages-test-reports-<shard>"): download them all and
-// --record them after adding a slow test file.
+// --record them after adding a slow test file. --plan and shard 1 warn when over a tenth of the files have no time.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +29,13 @@ const durationsFile = join(root, "tools/scripts/test-durations.json");
 
 /** Files that run on a shard of their own (repository paths). */
 export const ALONE = ["packages/cli/test/twoPeers.test.ts"];
+
+/**
+ * Vitest's workers on a CI runner (4 cores, a worker per core but one): a package's files share the runner with each
+ * other, an ALONE file holds it for its whole time, so it weighs this many times its seconds. Measured on CI: a part
+ * of a package took 0.3-0.5 s of the job per second of its files, twoPeers 1 s per second.
+ */
+export const WORKERS = 3;
 
 /** The workspaces `npm run test:packages` tests, in its order, with their folders. */
 export function packages() {
@@ -69,8 +77,8 @@ function listed(dir, filters = []) {
 }
 
 /**
- * Units (a package's files, or one ALONE file) to shards. ALONE units first, one per shard, which nothing else
- * joins; then heaviest first to the least loaded of the others. A package heavier than one of those shards' fair share
+ * Units (a package's files, or one ALONE file) to shards. ALONE units first, one per shard, each as its shard's first
+ * unit; then heaviest first to the least loaded shard, which runs them after. A package heavier than the fair share
  * cannot fit in one: its files go one by one, heaviest first, and the files of it that land on the same shard run as
  * one part of it (@ghostly/browser was over a third of all the time, and its shard alone set CI's length). Ties go by
  * name, by file and by shard number, so every shard computes the same split.
@@ -80,17 +88,17 @@ function listed(dir, filters = []) {
 export function split(units, seconds, of) {
   const known = Object.values(seconds).sort((a, b) => a - b);
   const typical = known.length ? known[Math.floor(known.length / 2)] : 1;
-  const weight = (u) => u.files.reduce((sum, f) => sum + (seconds[f] ?? typical), 0);
+  const weight = (u) => u.files.reduce((sum, f) => sum + (seconds[f] ?? typical), 0) * (u.alone ? WORKERS : 1);
   const alone = units.filter((u) => u.alone);
-  if (alone.length >= of) throw new Error(`${alone.length} files run alone: that needs more than ${of} shards`);
-  const shards = Array.from({ length: of }, () => ({ load: 0, units: [], alone: false }));
+  if (alone.length > of) throw new Error(`${alone.length} files run alone: that needs at least ${alone.length} shards`);
+  const shards = Array.from({ length: of }, () => ({ load: 0, units: [] }));
   const order = (a, b) => weight(b) - weight(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : a.files[0] < b.files[0] ? -1 : 1);
-  for (const [i, unit] of [...alone].sort(order).entries()) Object.assign(shards[i], { load: weight(unit), units: [unit], alone: true });
+  for (const [i, unit] of [...alone].sort(order).entries()) Object.assign(shards[i], { load: weight(unit), units: [unit] });
   const rest = units.filter((u) => !u.alone && u.files.length);
-  const share = rest.reduce((sum, u) => sum + weight(u), 0) / (of - alone.length);
+  const share = units.reduce((sum, u) => sum + weight(u), 0) / of;
   const pieces = rest.flatMap((u) => (weight(u) > share ? u.files.map((f) => ({ ...u, files: [f], of: u })) : [u]));
   for (const piece of pieces.sort(order)) {
-    const lightest = shards.filter((s) => !s.alone).reduce((best, s) => (s.load < best.load ? s : best));
+    const lightest = shards.reduce((best, s) => (s.load < best.load ? s : best));
     lightest.load += weight(piece);
     const part = piece.of && lightest.units.find((u) => u.of === piece.of);
     if (part) part.files.push(...piece.files);
@@ -114,6 +122,19 @@ function units() {
   }
   for (const file of ALONE) if (!out.some((u) => u.alone && u.files[0] === file)) throw new Error(`ALONE names ${file}, which no package's Vitest lists`);
   return out;
+}
+
+/**
+ * A warning when more than a tenth of the test files have no recorded time (each counts as a typical file, so the
+ * shards drift apart as slow new files pile up), or null. As a GitHub annotation, it shows on the CI run.
+ * @param {{ files: string[] }[]} units
+ * @param {Record<string, number>} seconds
+ */
+export function staleWarning(units, seconds) {
+  const files = units.flatMap((u) => u.files);
+  const missing = files.filter((f) => !(f in seconds)).length;
+  if (missing * 10 <= files.length) return null;
+  return `::warning::${missing} of the ${files.length} test files have no time in tools/scripts/test-durations.json, so the packages shards are uneven: download the packages-test-reports-* artifacts of a green run and node tools/scripts/test-shards.mjs --record them.`;
 }
 
 const describe = (shards) => shards.map((s, i) => `  ${i + 1}: about ${Math.round(s.load)} s of test time: ${s.units.map((u) => (u.alone ? u.id : `${u.id} (${u.files.length} file${u.files.length === 1 ? "" : "s"})`)).join(", ") || "nothing"}`).join("\n");
@@ -147,6 +168,8 @@ function main(argv) {
     const all = units();
     const shards = split(all, seconds(), of);
     console.log(`${of} shards:\n${describe(shards)}`);
+    const stale = staleWarning(all, seconds());
+    if (stale) console.log(stale);
     const every = all.flatMap((u) => u.files).sort();
     const assigned = shards.flatMap((s) => s.units.flatMap((u) => u.files)).sort();
     if (every.join("\n") !== assigned.join("\n") || new Set(every).size !== every.length) {
@@ -164,9 +187,13 @@ function main(argv) {
   const reportDir = reportIndex >= 0 ? resolve(rest[reportIndex + 1]) : null;
   if (reportDir) mkdirSync(reportDir, { recursive: true });
 
-  const shards = split(units(), seconds(), of);
+  const all = units();
+  const shards = split(all, seconds(), of);
   const mine = shards[shard - 1];
   console.log(`Shard ${shard}/${of} of npm run test:packages. All shards:\n${describe(shards)}`);
+  const stale = staleWarning(all, seconds());
+  // One annotation per run, not one per shard.
+  if (stale && shard === 1) console.log(stale);
   let failed = 0;
   for (const unit of mine.units) {
     // A whole package runs as `npm test` runs it; part of one runs by its files, which Vitest must select exactly.

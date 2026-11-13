@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText, type RoutineCard, type TaskCard } from "@ghostly/core";
 import type { CardIndexRow, StoredMessage } from "@ghostly/browser/shared/types";
 import { SidebarTasks } from "../../components/tasks/SidebarTasks";
@@ -93,7 +93,7 @@ describe("the Tasks board", () => {
     const card = screen.getByTestId("board-card");
     expect(within(card).getByTestId("board-card-chips").children).toHaveLength(3);
     const pr = within(card).getByTestId("board-card-pr");
-    expect(pr).toHaveTextContent("PR #612+123−45");
+    expect(pr).toHaveTextContent("PR #612github.com+123−45");
     expect(pr).toHaveAttribute("href", "https://github.com/o/r/pull/612");
     expect(pr).toHaveAttribute("target", "_blank");
     expect(pr).toHaveAttribute("rel", "noopener noreferrer");
@@ -297,6 +297,17 @@ describe("the Tasks board", () => {
     expect(cardIds("running")).toHaveLength(100);
   });
 
+  it("keeps the chosen view, grouping and tag filled in forced colors, where the accent's background is gone", async () => {
+    const { user } = profile([...rowsOfThree(), row("link-1", task({ id: "t", tags: ["core"] })), row("group:g1", routine(), { member: "hermes-key" })]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    await user.click(screen.getAllByTestId("tasks-tag")[0]);
+    const pills = [screen.getByTestId("tasks-view-tasks"), screen.getByTestId("tasks-view-routines"), ...screen.getAllByRole("radio"), ...screen.getAllByTestId("tasks-tag")];
+    const chosen = (el: HTMLElement) => el.getAttribute("aria-pressed") === "true" || el.getAttribute("aria-checked") === "true";
+    expect(pills.filter(chosen).map((el) => el.dataset.testid)).toEqual(["tasks-view-tasks", "tasks-group-bot", "tasks-tag"]);
+    for (const pill of pills) expect(pill.classList.contains("forced-colors:bg-[color:Highlight]"), pill.dataset.testid).toBe(chosen(pill));
+  });
+
   it("lists routines on their own tab, a line each, never in the columns", async () => {
     const rows = [...rowsOfThree(), row("group:g1", routine({ lastRun: { at: NOW - 3_600_000, result: "ok" } }), { member: "hermes-key" })];
     const { user } = profile(rows);
@@ -376,6 +387,18 @@ describe("richer task cards on the board", () => {
     expect(within(card("wait")).getByTestId("board-card-pr-standing")).toHaveTextContent("Draft · Checks pending");
   });
 
+  it("the pull request's chip shows where it goes on the card, in its name and in Details, not only on hover", async () => {
+    const { user } = profile([row("link-1", task({ pr: { url: "https://evil.example/github.com/o/r/pull/612", number: 612, additions: 3, deletions: 1 } }))]);
+    await loaded();
+    const card = screen.getByTestId("board-card");
+    const chip = within(card).getByTestId("board-card-pr");
+    expect(chip).toHaveAttribute("href", "https://evil.example/github.com/o/r/pull/612");
+    expect(within(chip).getByTestId("board-card-pr-host")).toHaveTextContent(/^evil\.example$/);
+    expect(chip).toHaveAccessibleName("PR #612 · Open on evil.example");
+    await user.click(within(card).getByRole("button", { name: "Details" }));
+    expect(within(card).getByTestId("board-card-pr-standing")).toHaveTextContent(/^evil\.example$/);
+  });
+
   it("shows tags as chips (three chips at most, all of them in Details) and filters by one", async () => {
     const { user } = profile([
       row("link-1", task({ id: "a", tags: ["core", "web"] })),
@@ -402,6 +425,38 @@ describe("richer task cards on the board", () => {
     await user.click(within(card("a")).getAllByTestId("board-card-tag")[0]);
     expect(screen.getAllByTestId("board-card").map((c) => c.getAttribute("data-card-id")).sort()).toEqual(["a", "b"]);
     expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
+  });
+
+  it("in Arabic, cuts a long Latin tag to filter by in the tag's own direction, so it keeps its start", async () => {
+    // The pill cut the tag in the page's direction with the tag in a <bdi> inside it: in Arabic a Latin tag longer than
+    // the pill's 160 px lost its start. The <bdi> (dir=auto) is the box that cuts, as a card's own tag chip is.
+    const long = "infrastructure-releasing";
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const rendered = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    rendered.engine.on("statusCardIndex", () => [row("link-1", task({ id: "a", tags: [long] }))]).setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })], groups: [] });
+    await loaded();
+    const pill = within(screen.getByTestId("tasks-tags")).getByTestId("tasks-tag");
+    const name = pill.querySelector("bdi")!;
+    expect(name).toHaveTextContent(long);
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // The pill lays the tag out at 160 px at most and does not cut it in the page's direction itself.
+    expect(pill).toHaveClass("max-w-40");
+    expect(pill).not.toHaveClass("truncate");
+  });
+
+  it("gives a card's tag and pull request chips a 24 px tall box on a phone, keeping the pill's look, and its parts toggle 24 px", async () => {
+    profile([
+      row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
+      row("link-1", task({ id: "part", title: "Part", parent: "b" })),
+    ]);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-testid="board-card"][data-card-id="b"]')!;
+    // An 18 px pill in a transparent 3 px border on each side: the box is 24 px, the colour stays on the pill.
+    for (const target of [within(card).getByTestId("board-card-tag"), within(card).getByTestId("board-card-pr")]) {
+      expect(target).toHaveClass("max-md:border-y-[3px]", "border-transparent", "bg-clip-padding");
+      expect(target).not.toHaveClass("border-none");
+    }
+    expect(within(card).getByTestId("board-card-stack-toggle")).toHaveClass("min-h-6", "max-md:min-h-8");
   });
 
   it("stacks a task's parts under it with how many are done; a part opens its own message", async () => {
@@ -490,6 +545,28 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent).sort()).toEqual(["Coordinator2", "Phone1", "Sala de Máquinas1"]);
   });
 
+  it("a member of another group who takes the bot's name and card id has a card of their own, under that group", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const state = {
+      links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })],
+      groups: [groupView({ id: "town", name: "Town square", status: "active", members: [{ key: "me-key", me: true, nick: "Me" }, { key: "namesake", me: false, nick: "Coordinator" }] as never })],
+    };
+    const rows = [
+      row("link-1", task({ id: "deploy", title: "Deploy to prod" }), { id: "in-chat", timestamp: NOW - 60_000 }),
+      row("group:town", task({ id: "deploy", title: "Approve the deploy at the link", status: "blocked" }), { id: "in-town", member: "namesake", timestamp: NOW - 50_000 }),
+    ];
+    const { engine } = renderApp(<Tasks />, { route: "/tasks" });
+    engine.on("statusCardIndex", () => rows).setState(state);
+    await loaded();
+    expect(cardIds("running")).toEqual(["deploy"]);
+    expect(cardIds("blocked")).toEqual(["deploy"]);
+    const real = column("running").querySelector<HTMLElement>('[data-card-id="deploy"]')!;
+    expect(real).toHaveTextContent("Deploy to prod");
+    expect(real).not.toHaveTextContent("Town square");
+    expect(within(column("blocked")).getByTestId("board-card-chat")).toHaveTextContent("Town square");
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 2 tasks");
+  });
+
   it("counts once on the way to the board", async () => {
     const state = everywhere();
     const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
@@ -525,6 +602,61 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("keeps the chosen tab filled in forced colors, where the accent's background is gone", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    await user.click(tabs[3]);
+    expect(tabs.map((tab) => tab.classList.contains("forced-colors:bg-[color:Highlight]"))).toEqual([false, false, false, true, false]);
+  });
+
+  it("keeps the columns off screen out of Tab and the screen reader: Tab from a tab goes into its own column", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    const inert = () => [...screen.getByTestId("tasks-board").querySelectorAll("[data-board-column]")].map((panel) => panel.hasAttribute("inert"));
+    expect(inert()).toEqual([false, true, true, true, true]);
+    await user.click(tabs[3]);
+    expect(inert()).toEqual([true, true, true, false, true]);
+    // What Tab can reach on the board (user-event's Tab does not know inert; tasks-board.spec.ts presses the real one).
+    const reachable = [...screen.getByTestId("tasks-board").querySelectorAll("button, a[href]")].filter((el) => !el.closest("[inert]"));
+    expect(new Set(reachable.map((el) => el.closest("[data-testid=board-card]")?.getAttribute("data-card-id")))).toEqual(new Set(["ci"]));
+  });
+
+  it("a tab's slide past other columns keeps its tab chosen, and its column out of inert, all the way", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const board = screen.getByTestId("tasks-board");
+    Object.defineProperty(board, "clientWidth", { configurable: true, value: 375 });
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    await user.click(tabs[3]);
+    // The slide on its way, over Running: Done stays chosen.
+    act(() => { board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(tabs[3]).toHaveAttribute("aria-selected", "true");
+    expect(column("done")).not.toHaveAttribute("inert");
+    act(() => { board.scrollLeft = 375 * 3; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[3]).toHaveAttribute("aria-selected", "true"));
+    // Then a swipe of the person's own chooses where it ends.
+    act(() => { board.dispatchEvent(new Event("pointerdown", { bubbles: true })); board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[1]).toHaveAttribute("aria-selected", "true"));
+  });
+
+  it("the arrow keys to another column choose its tab and take the focus there", async () => {
+    viewport(375, 740);
+    const { user } = profile(rowsOfThree());
+    await loaded();
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    within(column("queued")).getByTestId("board-card-open").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    expect(column("running")).not.toHaveAttribute("inert");
+    expect(document.activeElement?.closest("[data-testid=board-card]")).toHaveAttribute("data-card-id", "relay");
+  });
+
   it("a swipe to another column chooses its tab, on a page opened before its cards were read", async () => {
     // The page draws the board only once the cards are read, after its first render: the swipe is heard on the board
     // it draws then (tasks-board.spec.ts, 3 runs in 10 on a Mac: the tab stayed on Running with Done on screen).
@@ -538,6 +670,25 @@ describe("the Tasks board on a phone", () => {
     await waitFor(() => expect(tabs[3]).toHaveAttribute("aria-selected", "true"));
     act(() => { board.scrollLeft = 375; board.dispatchEvent(new Event("scroll")); });
     await waitFor(() => expect(tabs[1]).toHaveAttribute("aria-selected", "true"));
+  });
+
+  it("a swipe to another column brings its tab into view in the tab row", async () => {
+    // Six tabs of about 80 px don't fit a 375 px row: after a swipe to the last column its tab was off screen.
+    viewport(375, 740);
+    profile(rowsOfThree());
+    await loaded();
+    const board = screen.getByTestId("tasks-board");
+    Object.defineProperty(board, "clientWidth", { configurable: true, value: 375 });
+    const tabs = within(screen.getByRole("tablist", { name: "Columns" })).getAllByRole("tab");
+    const shown = tabs.map((tab) => (tab.scrollIntoView = vi.fn()));
+    act(() => { board.scrollLeft = 375 * 4; board.dispatchEvent(new Event("scroll")); });
+    await waitFor(() => expect(tabs[4]).toHaveAttribute("aria-selected", "true"));
+    expect(shown[4]).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest", inline: "nearest" }));
+    expect(shown.filter((call, i) => i !== 4 && call.mock.calls.length)).toHaveLength(0);
+    // A scroll that stays on the same column leaves the tab row alone.
+    act(() => { board.scrollLeft = 375 * 4 + 10; board.dispatchEvent(new Event("scroll")); });
+    await new Promise((done) => requestAnimationFrame(() => done(undefined)));
+    expect(shown[4]).toHaveBeenCalledTimes(1);
   });
 });
 

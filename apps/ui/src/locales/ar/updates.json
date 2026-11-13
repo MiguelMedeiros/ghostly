@@ -9,6 +9,7 @@
   "downloading": "جارٍ التنزيل... {{percent}}%",
   "errorDetails": "ما قاله برنامج التحديث",
   "failed": "تعذّر البحث عن التحديثات",
+  "installFailed": "لم يُثبَّت التحديث. حاول مرة أخرى.",
   "installing": "جارٍ التحديث...",
   "lastChecked": "آخر فحص في {{when}}",
   "later": "لاحقًا",

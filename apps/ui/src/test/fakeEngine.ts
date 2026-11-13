@@ -158,6 +158,8 @@ export class FakeEngine implements BrowserHost {
   readClipboardText?: BrowserHost["readClipboardText"];
   /** The desktop host's native read of copied files or a picture, when a test gives one. */
   readClipboardFiles?: BrowserHost["readClipboardFiles"];
+  /** The Android app's sensitive copy, when a test gives one; left out, a secret is copied by the page. */
+  copySecret?: BrowserHost["copySecret"];
   /** The desktop host's "Keep this computer awake", when a test gives one (WISP 06). */
   keepAwake?: BrowserHost["keepAwake"];
   /** Where mini-apps run (the web app's runner page), when a test turns Apps on; left out, no client runs apps. */
@@ -169,9 +171,14 @@ export class FakeEngine implements BrowserHost {
 
   private handlers = new Map<EngineMethod, (params: never) => unknown>();
   private send: ((message: EngineEvent | RpcResponse) => void) | null = null;
+  private disconnect: (() => void) | null = null;
+  /** Set by a test: the page's tries to connect fail with it, as when the peer does not start again. */
+  refuse: Error | null = null;
 
-  async connect(onMessage: (message: EngineEvent | RpcResponse) => void) {
+  async connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect?: () => void) {
+    if (this.refuse) throw this.refuse;
     this.send = onMessage;
+    this.disconnect = onDisconnect ?? null;
     onMessage({ kind: "state", state: this.state });
     return { send: (request: ClientMessage) => (request.kind === "history" ? this.history(request.linkId) : this.handle(request)) };
   }
@@ -192,7 +199,9 @@ export class FakeEngine implements BrowserHost {
     });
   }
 
-  requestLocalAccess = async () => false;
+  requestLocalAccess = async (_pattern: string, _origin: string) => false;
+  /** The extension's: whether an address was allowed in this browser. Left out as on the web app and Desktop. */
+  localAccessAllowed?: (origin: string) => Promise<boolean>;
   openService = async () => {};
 
   /** Answers `method` from now on. */
@@ -215,6 +224,14 @@ export class FakeEngine implements BrowserHost {
   /** Patches the current state. */
   update(patch: StatePatch): void {
     this.setState({ ...this.state, ...patch } as StatePatch);
+  }
+
+  /** The peer goes away (the extension's restarted): the page loses its connection and tries again by itself. */
+  drop(): void {
+    const disconnect = this.disconnect;
+    this.send = null;
+    this.disconnect = null;
+    disconnect?.();
   }
 
   emit(event: EngineEvent): void {
@@ -240,6 +257,7 @@ export class FakeEngine implements BrowserHost {
     this.fullscreenWindow = undefined;
     this.readClipboardText = undefined;
     this.readClipboardFiles = undefined;
+    this.copySecret = undefined;
     this.keepAwake = undefined;
     this.appRunner = undefined;
     this.appRunnerServed = undefined;

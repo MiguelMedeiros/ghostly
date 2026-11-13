@@ -32,7 +32,7 @@ describe("react", () => {
     expect(positionals(COMMANDS.react, ["alice", "peer_x", "👍"])).toEqual({ chat: "alice", message: "peer_x", emoji: "👍" });
     expect(positionals(COMMANDS.react, ["alice", "peer_x"])).toEqual({ chat: "alice", message: "peer_x", emoji: undefined });
     expect(() => positionals(COMMANDS.react, ["alice"])).toThrow(/Missing <message>/);
-    expect(COMMANDS["group react"].usage).toBe("group react <group> <message> <emoji> [--remove]");
+    expect(COMMANDS["group react"].usage).toBe("group react <group> <message> <emoji> [--remove] [--wait none|sent] [--timeout s]");
   });
 
   it("goes to the engine; --remove is the empty emoji; what the engine refuses is said", async () => {
@@ -85,6 +85,46 @@ describe("react in a 1:1 chat, without a daemon", () => {
     const { ctx, node } = fake(undefined, "one-shot");
     await expect(callApi(ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", wait: "sent" })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.react).not.toHaveBeenCalled();
+  });
+});
+
+describe("group react waits for an edge, as group send does", () => {
+  /** A group reaction numbered 7; `took` says how many edges took it at each look. */
+  function inGroup(mode: "one-shot" | "daemon", took: () => number) {
+    const { ctx, node } = fake({ error: null, n: 7 } as { error: null });
+    const groupTaken = vi.fn(took);
+    Object.assign(node, { groupTaken });
+    return { ctx: { ...ctx, mode } as ApiContext, node, groupTaken };
+  }
+
+  it("a one-shot stays until an edge took it, and says how many did", async () => {
+    let looks = 0;
+    const { ctx, groupTaken } = inGroup("one-shot", () => (++looks > 2 ? 1 : 0));
+    expect(await callApi(ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "🙏" })).toEqual({ group: "g1", messageId: "k:0:1", emoji: "🙏", removed: false, sent: true, edges: 1 });
+    expect(groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "k:0:1", reaction: 7 });
+    expect(looks).toBe(3);
+  });
+
+  it("a one-shot no edge took in time: a timeout (exit 4) that says it is kept and goes with a later command", async () => {
+    const { ctx } = inGroup("one-shot", () => 0);
+    await expect(callApi(ctx, "group.react", { group: "Crew", message: "k:0:1", remove: true, timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: "Timed out after 1 s: no member's edge took it yet (it stays in the group and goes when one opens). It goes with this profile's next command, or keep it online with `ghostly daemon --detach`",
+      details: { messageId: "k:0:1", reaction: 7 },
+    });
+  });
+
+  it("a daemon answers at once (it goes on saying it), unless asked to wait", async () => {
+    const { ctx, groupTaken } = inGroup("daemon", () => 0);
+    expect(await callApi(ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "🙏" })).toMatchObject({ sent: false, edges: 0 });
+    expect(groupTaken).toHaveBeenCalledTimes(1);
+    await expect(callApi(ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "🙏", wait: "sent", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: expect.stringMatching(/still goes by itself while this profile is online/) });
+    await expect(callApi(ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "🙏", wait: "confirmed" })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  it("takes --wait and --timeout", () => {
+    const spec = COMMANDS["group react"];
+    const parsed = parseArgs(["Crew", "k:0:1", "🙏", "--wait", "none", "--timeout", "5"], spec.options ?? {});
+    expect(spec.params!(parsed, { group: "Crew", message: "k:0:1", emoji: "🙏" })).toEqual({ group: "Crew", message: "k:0:1", emoji: "🙏", remove: false, wait: "none", timeout: 5 });
   });
 });
 

@@ -92,6 +92,19 @@ describe("a link preview in the composer", () => {
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
+
+  it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
+    const fetch = sites();
+    composer();
+    type("guess the ending: ||https://news.example/ending||");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
+    type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
 
 describe("a link preview in a message", () => {
@@ -120,6 +133,58 @@ describe("a link preview in a message", () => {
     expect(container.querySelector("iframe, video, embed, object")).toBeNull();
   });
 
+  it("never names another site than the link's, and keeps the end of a long host, which says whose it is", () => {
+    const url = "https://paypal.com.receipts.account-verify.secure-login-session-0042.attacker-owned.example/r/91";
+    renderApp(<MessageBubble message={{ id: "m6", text: `[Your PayPal receipt](${url})`, sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { u: url, t: "PayPal: receipt for your payment", d: "You sent $250.00 USD", s: "paypal.com" } }} />);
+    const card = screen.getByTestId("link-preview-card");
+    const host = "paypal.com.receipts.account-verify.secure-login-session-0042.attacker-owned.example";
+    // The sender's site name reads as another address: the link's own host is drawn instead.
+    expect(within(card).getByTestId("link-preview-site")).toHaveTextContent(host);
+    expect(within(card).getByTestId("link-preview-site")).not.toHaveTextContent(/^paypal\.com$/);
+    // The address line is cut at its start, never its end, and reads left to right on its own.
+    for (const id of ["link-preview-site", "link-preview-url"]) {
+      const line = within(card).getByTestId(id);
+      expect(line.className).not.toMatch(/\btruncate\b/);
+      expect(line.querySelector("bdi[dir=ltr]")).toHaveTextContent(host);
+    }
+  });
+
+  it("keeps a site name that is a name, or the link's own host", () => {
+    for (const [u, s] of [["https://github.com/x", "GitHub"], ["https://www.theverge.com/a", "The Verge"], ["https://news.github.com/a", "github.com"], ["https://a.example/", "Example 📰 News"]]) {
+      const view = renderApp(<MessageBubble message={{ id: "m7", text: u, sender: "peer", timestamp: 1_700_000_000_000, preview: { u, t: "A page", s } }} />);
+      expect(screen.getByTestId("link-preview-site")).toHaveTextContent(s);
+      view.unmount();
+    }
+    // Another host, a look-alike, or hidden characters: the link's host instead.
+    for (const s of ["paypal.com", "https://paypal.com/login", "paypal。com", "‮moc.lapyap", "Pay​Pal"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m8", text: "https://evil.example/a", sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://evil.example/a", t: "A page", s } }} />);
+      expect(screen.getByTestId("link-preview-site"), s).toHaveTextContent(/^evil\.example$/);
+      view.unmount();
+    }
+  });
+
+  it("is not drawn for a link the text shows only inside a spoiler, as an older app still sends one", () => {
+    const secret: LinkPreview = { u: "https://news.example/ending||", t: "The butler did it", s: "Example News", i: thumbnail };
+    const view = renderApp(<MessageBubble message={{ id: "m10", text: "guess: ||https://news.example/ending||", sender: "peer", timestamp: 1_700_000_000_000, preview: secret }} />);
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    expect(document.body).not.toHaveTextContent("The butler did it");
+    view.unmount();
+    // A link whose words are a spoiler hides where it goes too.
+    renderApp(<MessageBubble message={{ id: "m11", text: "[||the ending||](https://news.example/ending)", sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { ...secret, u: "https://news.example/ending" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+  });
+
+  it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
+      expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
+      view.unmount();
+    }
+  });
+
   it("shows nothing extra for a message without a preview or a place", () => {
     renderApp(<MessageBubble message={{ id: "m3", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000 }} />);
     expect(screen.queryByTestId("message-link-cards")).toBeNull();
@@ -139,6 +204,93 @@ describe("a location card", () => {
     expect(tiles).toHaveLength(4);
     for (const tile of tiles) expect(tile.getAttribute("src")).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
     expect(within(card).getByTestId("location-open").getAttribute("href")).toMatch(/^(https:\/\/maps\.apple\.com\/|geo:|https:\/\/www\.openstreetmap\.org\/)/);
+  });
+
+  it("is not drawn for a place the text names only inside a spoiler: its coordinates would say what the spoiler hides", () => {
+    for (const text of ["meet me at ||geo:48.8584,2.2945||", "||meet at https://www.google.com/maps/@48.8584,2.2945,15z tonight||",
+      "> the place: ||geo:48.8584,2.2945||", "- *||https://www.openstreetmap.org/#map=15/48.8584/2.2945||*", "[||guess||](https://www.google.com/maps/@48.8584,2.2945,15z)"]) {
+      const view = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+      expect(screen.queryByTestId("location-card"), text).toBeNull();
+      expect(document.body, text).not.toHaveTextContent("48.85840");
+      view.unmount();
+    }
+    // The same place outside the spoiler too: the bubble shows it, so its card tells nothing hidden.
+    renderApp(<MessageBubble message={{ id: "m14", text: "geo:48.8584,2.2945 or is it ||geo:48.8584,2.2945||", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+  });
+
+  const torre = "meet me at geo:0,0?q=38.6916,-9.2160(Torre%20de%20Bel%C3%A9m)";
+
+  it("moves the focus to the map when Show map is used from the keyboard", async () => {
+    const { user } = renderApp(<MessageBubble message={{ id: "m6", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const button = screen.getByTestId("location-show-map");
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).not.toBe(document.body);
+    const map = screen.getByRole("group", { name: "Torre de Belém" });
+    expect(map).toHaveFocus();
+    expect(map).toHaveAttribute("tabindex", "-1");
+    expect(within(map).getByTestId("location-map")).toBeInTheDocument();
+  });
+
+  it("keeps the focus on the map's place when its tiles fail to load", async () => {
+    const { user } = renderApp(<MessageBubble message={{ id: "m7", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    screen.getByTestId("location-show-map").focus();
+    await user.keyboard("{Enter}");
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("group", { name: "Torre de Belém" })).toHaveFocus();
+  });
+
+  it("takes no focus when Show map is tapped while the focus is elsewhere", () => {
+    renderApp(<MessageBubble message={{ id: "m8", text: torre, sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const outside = document.body.appendChild(document.createElement("button"));
+    try {
+      outside.focus();
+      fireEvent.click(screen.getByTestId("location-show-map"));
+      expect(screen.getByTestId("location-map")).toBeInTheDocument();
+      expect(outside).toHaveFocus();
+    } finally { outside.remove(); }
+  });
+
+  it("asks again before loading the map of another place a contact's edit names, and forgets a failed one's line", () => {
+    const at = (text: string, seq?: number) => ({ id: "m15", text, sender: "peer" as const, timestamp: 1_700_000_000_000,
+      ...(seq && { edit: { seq, at: 1_700_000_000_000 + seq, history: [] } }) });
+    const { container, rerender } = renderApp(<MessageBubble message={at(torre)} />);
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // Shown for the Torre de Belém: an edit to another place is not what Show map was pressed for.
+    rerender(<MessageBubble message={at("meet me at geo:48.8584,2.2945", 1)} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+    expect(container.querySelector("img[src*='openstreetmap']")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // The same place again (a typo fixed around it): the map stays as it was asked for.
+    rerender(<MessageBubble message={at("meet me there: geo:48.8584,2.2945", 2)} />);
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // A map that failed to load: its line is not said of the next place, which loads once asked.
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    rerender(<MessageBubble message={at(torre, 3)} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+  });
+
+  it("names the map link's site cut at its start, as a preview's address", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
+    renderApp(<MessageBubble message={{ id: "m9", text: "https://www.google.com/maps/place/@38.6916,-9.2160,17z", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const source = screen.getByTestId("location-source");
+    expect(source.className).not.toMatch(/\btruncate\b/);
+    expect(source.querySelector("bdi[dir=ltr]")).toHaveTextContent("google.com");
+  });
+
+  it("draws its coordinates left to right, so a right-to-left language keeps each minus before its number", () => {
+    renderApp(<MessageBubble message={{ id: "m10", text: "https://maps.google.com/?q=-23.5505,-46.6333", sender: "peer", timestamp: 1_700_000_000_000 }} />);
+    const coordinates = screen.getByTestId("location-coordinates");
+    expect(coordinates).toHaveTextContent("-23.55050, -46.63330");
+    expect(coordinates).toHaveAttribute("dir", "ltr");
   });
 
   it("comes from a map link too", () => {

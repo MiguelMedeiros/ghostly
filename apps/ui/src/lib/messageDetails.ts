@@ -241,6 +241,8 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
   const duration = (ms: number) => formatDuration(ms, t);
   const time = (at: number) => formatTime(at, language);
   const path = (step: Pick<MessageSend, "path" | "relayed" | "relays">) => pathWords(step, t);
+  // A send's outcome in the app's language; the engine's reason for a failure stays as it came.
+  const sendWords = (s: MessageSend) => s.result === "failed" && s.error ? t("messageDetails.send.failedBecause", { error: s.error }) : t(`messageDetails.send.${s.result ?? "sending"}`);
   const timeRow = (label: string, at: number): DetailRow => ({ label: L(label), value: time(at), mono: true, copy: new Date(at).toISOString() });
   const keyRow = (label: string, key: string): DetailRow => ({ label: L(label), value: publicKeyLabel(key), mono: true, copy: key });
   const idRow = (label: string, id: string): DetailRow => ({ label: L(label), value: id.length > 28 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id, mono: true, copy: id });
@@ -258,12 +260,13 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
     view ? { label: L("textSize"), value: bytes(view.message.textBytes) } : undefined,
   ]);
 
-  // An edited text (WISP 400 § Edits): how often, when last, and every earlier version kept, oldest first.
+  // An edited text (WISP 400 § Edits): how often, when last, and every earlier version kept, oldest first. Only the
+  // first can be the original: a later one's time is its author's to give.
   const edit = message.edit;
   if (edit) add("edits", [
     { label: L("edits"), value: V("edits", { count: edit.seq, time: time(edit.at) }) },
     edit.pending ? group ? { label: L("group"), value: V("groupNotSent") } : { label: L("contact"), value: V("contactNotShown") } : undefined,
-    ...edit.history.map((version): DetailRow => ({ label: t(version.at === shownTime(message) ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
+    ...edit.history.map((version, i): DetailRow => ({ label: t(i === 0 && version.at === shownTime(message) ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
   ]);
 
   const last = d?.sends?.[d.sends.length - 1];
@@ -272,7 +275,7 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
     step ? { label: L(mine ? "sentOver" : "receivedOver"), value: path(step) } : undefined,
     step?.relays?.length ? { label: L("relay"), value: step.relays.join(", "), mono: true, copy: step.relays.join(", ") } : undefined,
     step?.rttMs !== undefined ? { label: L("roundTripThen"), value: duration(step.rttMs) } : undefined,
-    d?.sends && d.sends.length > 1 ? { label: L("sends"), value: d.sends.map((s, i) => `${d.attempts && d.attempts > d.sends!.length && i > 0 ? "…" : ""}${time(s.at)} ${path(s)} (${s.result ?? "sending"}${s.error ? `: ${s.error}` : ""})`).join("\n"), mono: true } : undefined,
+    d?.sends && d.sends.length > 1 ? { label: L("sends"), value: d.sends.map((s, i) => `${d.attempts && d.attempts > d.sends!.length && i > 0 ? "…" : ""}${time(s.at)} ${path(s)} (${sendWords(s)})`).join("\n"), mono: true } : undefined,
     link?.transportNow ? { label: L("connectionNow"), value: link.rttNowMs !== undefined
       ? V("connectionNow", { path: path({ path: link.transportNow, relayed: link.relayedNow }), rtt: duration(link.rttNowMs) })
       : path({ path: link.transportNow, relayed: link.relayedNow }) } : undefined,

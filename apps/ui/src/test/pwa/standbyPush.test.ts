@@ -28,6 +28,11 @@ describe("a push on a device that is not the active one", () => {
     expect(call).toMatchObject({ body: "Call for you. Active on MacBook.", call: false, quiet: true });
   });
 
+  it("an online notice shows nothing there: the person is on the active device", () => {
+    expect(pushNotice({ token: TOKEN, kind: "online" }, chat, standby, options)).toBeNull();
+    expect(pushNotice({ token: TOKEN, kind: "online" }, { entry: { path: "/chat/abc", name: "Ana" }, text: chat.text }, active, options)).toMatchObject({ body: "Ana is online" });
+  });
+
   it("in the app's language when a page wrote its words, and without a name when the record names no other device", () => {
     const text = { title: "Ghostly", standby: "Nova mensagem. Ativo em {device}.", standbyCallUnnamed: "Chamada para você. Abra o Ghostly no seu dispositivo ativo." };
     expect(pushNotice({ token: TOKEN, kind: "message" }, chat, standby, { ...options, text })!.body).toBe("Nova mensagem. Ativo em MacBook.");
@@ -76,6 +81,15 @@ describe("a wake-up from another of the person's devices", () => {
     expect(pushNotice({ token: TOKEN, kind: "device" }, chat, active, options)).toBeNull();
     expect(pushNotice({ token: DEVICE_TOKEN, kind: "device" }, undefined, null, options)).toBeNull();
     expect(pushNotice({ token: DEVICE_TOKEN, kind: "device" }, undefined, active, { ...options, appVisible: true })).toBeNull();
+  });
+
+  it("shows nothing for a token that names what every object has, whatever the device set looks like", () => {
+    const inherited = Object.getOwnPropertyNames(Object.prototype).filter((name) => /^[A-Za-z0-9_-]{16,64}$/.test(name));
+    expect(inherited).toContain("__defineGetter__");
+    const view = pushDeviceView({ state: "standby", activeSlot: 0, ownSlot: 1, deviceSet: [{ key: "K".repeat(43), name: "MacBook" }], push: { own: { tokens: { ["K".repeat(43)]: DEVICE_TOKEN } } } })!;
+    for (const token of inherited) {
+      for (const device of [active, standby, view, { state: "removed", tokens: {} }]) expect(pushNotice({ token, kind: "device" }, undefined, device, options)).toBeNull();
+    }
   });
 });
 

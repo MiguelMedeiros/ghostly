@@ -1,4 +1,5 @@
 {
+  "added": "已添加 {{app}}。在“联系人”中选择谁可以打开它。",
   "fromContacts": "来自联系人",
   "fromContactsEmpty": "联系人共享的应用会显示在这里。",
   "ghostlyOnline": "Ghostly 在线",
@@ -19,6 +20,9 @@
   "peopleDone": "完成",
   "remove": "移除",
   "removeNamed": "移除 {{app}}",
+  "removeText": "你共享给的联系人将无法再打开它。",
+  "removeTitle": "移除 {{app}}？",
+  "removed": "已移除 {{app}}。",
   "requestCount": "· {{count}} 次请求",
   "requestCount_one": "· {{count}} 次请求",
   "share": "共享",
@@ -32,6 +36,7 @@
     "stopped": "已停止"
   },
   "window": {
+    "blocked": "此浏览器阻止了 {{app}} 在这里打开所需的内容：嵌在另一个网站中的网站的存储。请为此网站允许它，或在 Ghostly 桌面应用或扩展中打开 {{app}}。",
     "busy": "{{app}} 正在你联系人的机器上同时加载太多页面。请稍后再试。",
     "callOn": "正在通话中。结束通话后才能打开 {{app}}。",
     "elsewhere": "{{app}} 试图把你带到别处，超出了联系人共享的范围。",
@@ -42,6 +47,7 @@
     "owner": "这是 {{contact}} 的应用，运行在对方的设备上。它不是 Ghostly：切勿在这里输入你的恢复词或密码。",
     "retry": "重试",
     "tooSlow": "{{app}} 在联系人的机器上没有及时响应。请稍后再试。",
+    "unguarded": "{{app}} 的这个页面无法在这里显示：它阻止了 Ghostly 的保护在其中运行。请让你的联系人检查一下。",
     "unreachable": "无法访问此服务。服务仅在其幽灵在线时存在。",
     "unshared": "{{app}} 已不再与你共享。"
   },

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { hasVisible, stripHidden } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { engine } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
-import { providerLabel, useEngineState } from "../../lib/identities";
+import { providerLabel, useEngineValue } from "../../lib/identities";
+import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
 
 /*
@@ -64,17 +66,15 @@ export function forgetFaceChoice(peerKey: string): void {
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 
-const subscribeChoices = (listener: () => void) => {
-  // Only a choice's key: a list of contacts redraws for each, and another page writes other keys many times a second.
-  const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}face_`)) listener(); };
-  window.addEventListener(FACE_EVENT, listener);
-  window.addEventListener("storage", stored);
-  return () => { window.removeEventListener(FACE_EVENT, listener); window.removeEventListener("storage", stored); };
-};
+// Every row of the chat list reads its contact's choice: they share one window listener, which calls a contact's own.
+const subscribeChoice = keyedStorage(FACE_EVENT, (key) => key.startsWith(`${getPrefix()}face_`) ? key.slice(`${getPrefix()}face_`.length) : undefined);
+/** Any contact's choice. */
+const subscribeChoices = (listener: () => void) => subscribeChoice(null, listener);
 
 /** The stored choice for one contact, redrawn when it changes. */
 export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefined {
-  return parseChoice(useSyncExternalStore(subscribeChoices, () => rawChoice(peerKey)));
+  const subscribe = useCallback((listener: () => void) => peerKey ? subscribeChoice(peerKey, listener) : () => {}, [peerKey]);
+  return parseChoice(useSyncExternalStore(subscribe, () => rawChoice(peerKey)));
 }
 
 /**
@@ -84,9 +84,9 @@ export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefin
  */
 export function cleanFaceName(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
-  // eslint-disable-next-line no-control-regex
-  const text = value.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
-  return Array.from(text).slice(0, 64).join("").trim() || undefined;
+  const text = stripHidden(value.replace(/\s+/g, " ")).replace(/\s+/g, " ").trim();
+  const name = Array.from(text).slice(0, 64).join("").trim();
+  return name && hasVisible(name) ? name : undefined;
 }
 
 /** How a contact can be shown: one of their verified identities with a public profile that has a name or a photo. */
@@ -148,10 +148,13 @@ export function shownContactName({ nickname, face, nick, fallback }: { nickname?
 const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) =>
   peerKey ? links?.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received : undefined;
 
-/** The contact's face as chosen, redrawn when the engine or the choice changes. */
+/**
+ * The contact's face as chosen, redrawn when their identities or the choice change: not on every engine state, which
+ * drew the chat it shows in each time.
+ */
 export function useContactFace(peerKey: string | undefined): ContactFace | undefined {
-  const state = useEngineState();
-  return contactFace(receivedOf(state?.links, peerKey), useFaceChoice(peerKey));
+  const received = useEngineValue((state) => receivedOf(state?.links, peerKey));
+  return contactFace(received, useFaceChoice(peerKey));
 }
 
 const version = { n: 0 };
@@ -160,12 +163,21 @@ const subscribeVersion = (listener: () => void) => subscribeChoices(() => { vers
 /** For a list of contacts that reads `faceChoice` itself: a number that changes when any contact's choice does. */
 export const useFaceChoices = (): number => useSyncExternalStore(subscribeVersion, () => version.n);
 
-/** For a list of contacts: a function from a contact key to its face, redrawn when the engine or any choice changes. */
+/** Each contact's received identities, by key, for `useEngineValue`: all a list of contacts reads to show their faces. */
+const receivedByKey = (state: typeof engine.state): [peerKey: string, received: ReceivedIdentityView[]][] =>
+  (state?.links ?? []).flatMap((l) => (l.identities?.received ? [[l.peerPubKeyZ32, l.identities.received] as [string, ReceivedIdentityView[]]] : []));
+
+/**
+ * For a list of contacts: a function from a contact key to its face, redrawn when a contact's identities or any choice
+ * change: not on every engine state, which drew the whole chat list each time.
+ */
 export function useContactFaces(): (peerKey: string | undefined) => ContactFace | undefined {
-  const state = useEngineState();
+  const received = useEngineValue(receivedByKey);
   const v = useFaceChoices();
+  // The first chat with a key, as `receivedOf` finds it.
+  const byKey = useMemo(() => new Map([...received].reverse()), [received]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useCallback((peerKey: string | undefined) => contactFace(receivedOf(state?.links, peerKey), faceChoice(peerKey)), [state, v]);
+  return useCallback((peerKey: string | undefined) => contactFace(peerKey ? byKey.get(peerKey) : undefined, faceChoice(peerKey)), [byKey, v]);
 }
 
 /**
@@ -195,7 +207,7 @@ export function useChosenProfile(peerKey: string | undefined): void {
  * nicknames). Members who are not contacts are unchanged.
  */
 export function withContactFaces<G extends { members: { key: string; me: boolean; nick?: string }[]; memberLinks: Record<string, string> }>(
-  group: G, links: LinkView[] | undefined, faceOf: (peerKey: string | undefined) => ContactFace | undefined, nicknameOf: (peerKey: string) => string | undefined,
+  group: G, links: readonly Pick<LinkView, "id" | "peerPubKeyZ32">[] | undefined, faceOf: (peerKey: string | undefined) => ContactFace | undefined, nicknameOf: (peerKey: string) => string | undefined,
 ): G {
   let changed = false;
   const members = group.members.map(m => {

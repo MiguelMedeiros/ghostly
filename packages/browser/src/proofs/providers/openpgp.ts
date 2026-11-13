@@ -1,9 +1,10 @@
 import type { IdentityStatement } from "@ghostly/core";
-import type { ExternalToolSigner, IdentityProofProvider, SignerInstructions } from "../contract";
+import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type ProviderSay, type SignerInstructions } from "../contract";
 import {
   KEYSERVER, PgpProofError, assertSignableStatement, fetchKeyFromKeyserver, formatFingerprint, keyserverVerifiedEmails, parsePgpEvidence,
   preparePgpEvidence, splitPgpPaste, verifyPgpEvidence, type PgpEvidence,
 } from "../openpgp";
+import { OPENPGP_KEYSERVER_SOURCE as KEYSERVER_SOURCE, OPENPGP_USER_ID_SOURCE as USER_ID_SOURCE } from "../displaySource";
 
 /**
  * OpenPGP keys, signed with the person's own gpg — a YubiKey or another OpenPGP card works unchanged,
@@ -18,11 +19,8 @@ export function normalizeFingerprint(input: string): string {
   throw new PgpProofError("Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).");
 }
 
-/** The user ID is its holder's own words: shown with that caveat, never as a checked name. */
-const USER_ID_SOURCE = "User ID on the key, written by its holder: not proof that the name or email is theirs";
-const KEYSERVER_SOURCE = "Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's";
 
-function steps(statement: IdentityStatement, exportKey: boolean): SignerInstructions {
+function steps(statement: IdentityStatement, exportKey: boolean, say: ProviderSay): SignerInstructions {
   assertSignableStatement(statement.text);
   // The statement is one line of space-separated fields with no quote in it, so it is safe in single quotes.
   if (statement.text.includes("'")) throw new PgpProofError("Statement is not signable as plain text");
@@ -30,13 +28,16 @@ function steps(statement: IdentityStatement, exportKey: boolean): SignerInstruct
   const sign = `gpg --local-user ${fpr} --clearsign --output - ghostly-identity.txt`;
   return {
     steps: [
-      { text: "Save the statement to a file (it is one line, with no newline at the end):", copy: `printf '%s' '${statement.text}' > ghostly-identity.txt` },
+      { text: say("steps.save", "Save the statement to a file (it is one line, with no newline at the end):"), copy: `printf '%s' '${statement.text}' > ghostly-identity.txt` },
       exportKey
-        ? { text: "Sign it and export your public key, then copy everything this prints:", copy: `${sign} && gpg --armor --export --export-options export-minimal ${fpr}` }
-        : { text: "Sign it, then copy everything this prints:", copy: sign },
-      { text: "On a YubiKey or another OpenPGP card, gpg asks for the card's PIN, and for a touch if the card requires one. Without a shell, save the statement below in a text file and sign that file.", copy: statement.text },
+        ? { text: say("steps.signExport", "Sign it and export your public key, then copy everything this prints:"), copy: `${sign} && gpg --armor --export --export-options export-minimal ${fpr}` }
+        : { text: say("steps.sign", "Sign it, then copy everything this prints:"), copy: sign },
+      { text: say("steps.card", "On a YubiKey or another OpenPGP card, gpg asks for the card's PIN, and for a touch if the card requires one. Without a shell, save the statement below in a text file and sign that file."), copy: statement.text },
     ],
-    paste: { label: exportKey ? "Signed statement and public key" : "Signed statement", placeholder: "-----BEGIN PGP SIGNED MESSAGE-----", multiline: true },
+    paste: {
+      label: exportKey ? say("paste.signedAndKey", "Signed statement and public key") : say("paste.signed", "Signed statement"),
+      placeholder: "-----BEGIN PGP SIGNED MESSAGE-----", multiline: true,
+    },
   };
 }
 
@@ -49,7 +50,7 @@ async function evidenceFrom(statement: IdentityStatement, signature: string, pub
 const gpg: ExternalToolSigner<PgpEvidence> = {
   id: "gpg", kind: "external-tool", label: "gpg",
   description: "Sign with gpg and paste what it prints, public key included. Nothing is looked up.",
-  instructions: statement => steps(statement, true),
+  instructions: (statement, say = englishSay) => steps(statement, true, say),
   async parse(pasted, statement) {
     const { signature, publicKey } = splitPgpPaste(pasted);
     if (!publicKey) throw new PgpProofError("Paste your public key too: the second command prints it (-----BEGIN PGP PUBLIC KEY BLOCK-----).");
@@ -60,7 +61,7 @@ const gpg: ExternalToolSigner<PgpEvidence> = {
 const gpgKeyserver: ExternalToolSigner<PgpEvidence> = {
   id: "gpg-keys-openpgp-org", kind: "external-tool", label: "gpg, key from keys.openpgp.org",
   description: "Sign with gpg and paste the signature; Ghostly then fetches your public key from keys.openpgp.org, which learns which key was looked up.",
-  instructions: statement => steps(statement, false),
+  instructions: (statement, say = englishSay) => steps(statement, false, say),
   async parse(pasted, statement) {
     const { signature, publicKey } = splitPgpPaste(pasted);
     // Only here, on the person's choice of this signer, is the keyserver contacted.

@@ -1,5 +1,6 @@
 import { WALLET_NETWORKS, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
+import { composingKey } from "../hooks/useComposition";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, type ChatAccepts } from "../lib/chatPayments";
@@ -11,7 +12,9 @@ import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, spendable, walletCards, type InstanceCard } from "./walletCardData";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { sharedBalanceCards } from "./walletTotals";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
@@ -25,6 +28,8 @@ import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 
 interface PaymentComposerProps {
   balance: number;
@@ -89,7 +94,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
   const chat = reviewContext?.peer;
-  const peer = useServicesPlatform()?.getPeer(chat ?? "");
+  // What the sheet reads of the platform as it draws, compared by content: the contact's link and the wallets' state.
+  // The whole platform drew it (every card, and the amount being typed) again on every engine state, up to 20 a second
+  // while a file moves.
+  const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
   const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
   /**
@@ -171,6 +179,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   /** A send with no review on real money: the second step is open, and only it sends. */
   const [confirmSend, setConfirmSend] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  /**
+   * The memo reaches the contact as a message's text does: one that looks like a seed or a key (or a Cashu token) asks
+   * first, as the composer does (SecretGuardDialog), and `go` is what Send anyway goes on with.
+   */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; go(): void } | null>(null);
+  const guarded = (go: () => void) => { const found = findSecret(memo); if (found) setSecret({ finding: found, go }); else go(); };
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
   // The review takes the amount's place after Send, and is taller: on a short screen (a phone with its keyboard up) it
@@ -202,7 +216,13 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const blocked = card ? unavailable(card) : undefined;
   const turning = !!card && !atRest;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
-  const shown = netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; });
+  /**
+   * The cards' faces: a card that spends another card's balance (Lightning through the Cashu mints) says "Uses your
+   * Cashu balance" where its amount was, as on the wallet page, so the deck never reads as twice the balance. The back
+   * of a turned card keeps its number: it is the only one shown there.
+   */
+  const faces = (cs: InstanceCard[]) => state ? WALLET_NETWORKS.reduce((acc, n) => sharedBalanceCards(state, n, acc, t), cs) : cs;
+  const shown = faces(netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; }));
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: string) => {
@@ -218,17 +238,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
    * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
    * on the card's text leaves it on the page), so this listens on the document before anything else does; the
    * sheet's dismissal (useOutsideDismiss) leaves an Escape handled here alone. A card under review stays: its
-   * review has taken the card's place.
+   * review has taken the card's place. A dialog over the sheet (the memo's SecretGuardDialog) answers its own Escape.
    */
   const escapeToCards = useRef<() => boolean>(() => false);
   escapeToCards.current = () => {
     // Already on its way back to the deck: a second Escape closes.
-    if (side !== "back" || leaving.current || !cards.length || review) return false;
+    if (side !== "back" || leaving.current || !cards.length || review || document.querySelector("dialog[open]")) return false;
     backToCards();
     return true;
   };
   useEffect(() => {
-    const key = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && escapeToCards.current()) e.preventDefault(); };
+    const key = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !composingKey(e, null) && !e.defaultPrevented && escapeToCards.current()) e.preventDefault(); };
     document.addEventListener("keydown", key, true);
     return () => document.removeEventListener("keydown", key, true);
   }, []);
@@ -263,12 +283,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("payments.composer.error.prepare") }); }
     finally { setBusy(null); }
   };
-  // The contact's app answers an ask with a request: review it here, as Pay on that request would.
+  // The contact's app answers an ask with a request: review it here, as Pay on that request would. The wait is the ask's
+  // own: the chat behind builds its review context and the card its wallet on every draw, and a poll keyed on those
+  // started its 45 s again at each, so in a live chat it never gave up. It reads them as they are now instead.
+  const askWith = useRef({ reviewContext, bound, who, t });
+  askWith.current = { reviewContext, bound, who, t };
   useEffect(() => {
-    if (!asking || !reviewContext || !bound) return;
-    const context = reviewContext, started = Date.now();
+    if (!asking) return;
+    const started = Date.now();
     const timer = setInterval(() => {
-      const answer = context.wallet.answerTo(asking);
+      const { reviewContext: context, bound, who, t } = askWith.current;
+      const answer = context && bound ? context.wallet.answerTo(asking) : undefined;
       if (answer && !answer.target && answer.federations) {
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
@@ -276,7 +301,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         setError(answer.invoice
           ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
           : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
-      } else if (answer?.target) {
+      } else if (answer?.target && context && bound) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
@@ -289,7 +314,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       }
     }, 400);
     return () => clearInterval(timer);
-  }, [asking, reviewContext, bound, who, t]);
+  }, [asking]);
 
   const request = async () => {
     setError(null); setBusy("request");
@@ -307,7 +332,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // money, so no amount is too much for it.
   const tooMuch = canSend && holds !== undefined && value > holds;
   /** What Send and Request do on this card, with this contact. */
-  const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
+  // A card that could Send says why it cannot now (the contact away), where it would say what Send does: a tooltip
+  // alone is never seen on a phone. Lightning only Requests in a chat, and says so.
+  const how = (id: ChatRail) => describe ? describe(id) : sendUnavailable && id !== "lightning" ? sendUnavailable : t(HOW[id], { name: who });
 
   const back = (
     <div className={`payment-back${card ? ` wallet-card-${card.rail}` : ""}`} data-testid="payment-back" data-network={network}>
@@ -324,7 +351,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             <span className="payment-back-meta">{card ? t("payments.composer.balanceWith", { balance: card.balance, name: who }) : t("payments.composer.withTitle", { name: who })}</span>
           </span>
         </div>
-        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
+        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} to={review.method === "cashu" ? who : undefined} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
               aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} />
@@ -333,16 +360,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
+            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
-            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
+            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </button>
           </div>}
         </>}
         {error && <Notice problem={error} className="text-xs m-0" />}
+        {secret && <SecretGuardDialog finding={secret.finding} recipient={contact} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); secret.go(); }} />}
       </div>
     </div>
   );
@@ -396,7 +424,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       data-mode={onSaveMethods ? mode : undefined}
       className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       data-network={accepting ? undefined : network}
-      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onClose(); } }}
+      // Not one from a dialog portalled out of the sheet (SecretGuardDialog): React hands it here too, and it is the dialog's.
+      // Nor an input method's, dropping a candidate in the memo.
+      onKeyDown={(e) => { if (e.key === "Escape" && !composingKey(e.nativeEvent, null) && !e.defaultPrevented && e.currentTarget.contains(e.target as Node)) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={t("payments.composer.with", { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>
@@ -414,7 +444,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
           <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
             className="payment-tab-panel wallet-network-view" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
-          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={acceptCards} network={net} onSave={onSaveMethods} empty={noWallet} />
+          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={faces(acceptCards)} network={net} onSave={onSaveMethods} empty={noWallet} />
           : !mine.includes(net) ? noWallet
           : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
             <p className="composer-sheet-hint">{t("payments.none.text")}</p>
@@ -433,7 +463,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </>}
           </div>
         </>}
-      </> : card ? <CardFlip className="payment" flipped={flipped} onSettle={setAtRest} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
+      </> : card ? <CardFlip className="payment" flipped={flipped} onSettle={setAtRest} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={faces([card])[0]} tagAll />} back={back} /> : back}
     </ComposerSheet>
   );
 }

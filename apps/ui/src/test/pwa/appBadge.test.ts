@@ -155,4 +155,44 @@ describe("keeping it in step", () => {
     expect(icon).toEqual([3, 5]);
     unmount();
   });
+
+  // Another profile open in another tab writes its keys a few times for each message it gets: none of them is one the
+  // icon counts here, and each read every chat of this profile again (1 ms per write at 300 chats).
+  it("does not read the chats again for another profile's writes in another tab", () => {
+    setAppBadgeTarget({ setAppBadge: async () => {}, clearAppBadge: async () => {} });
+    saveSession(session("a", 2));
+    saveSession(session("b", 1));
+    const real = localStorage;
+    let chatReads = 0;
+    const chatKeys = new Set([`${getPrefix()}a`, `${getPrefix()}b`]);
+    vi.stubGlobal("localStorage", {
+      get length() { return real.length; },
+      key: (i: number) => real.key(i),
+      getItem: (key: string) => { if (chatKeys.has(key)) chatReads++; return real.getItem(key); },
+      setItem: (key: string, value: string) => real.setItem(key, value),
+      removeItem: (key: string) => real.removeItem(key),
+      clear: () => real.clear(),
+    });
+    try {
+      const { unmount } = renderHook(() => useAppBadge());
+      chatReads = 0;
+      act(() => {
+        for (let i = 0; i < 30; i++) {
+          for (const key of ["ghostly_w0rkpr0f1l_c0ffee", "ghostly_w0rkpr0f1l_read_c0ffee", "ghostly_w0rkpr0f1l_app_settings"]) {
+            window.dispatchEvent(new StorageEvent("storage", { key }));
+          }
+        }
+      });
+      expect(chatReads).toBe(0);
+
+      // This profile's own keys, and a storage cleared, still count it again.
+      act(() => { window.dispatchEvent(new StorageEvent("storage", { key: `${getPrefix()}mute_a` })); });
+      expect(chatReads).toBe(2);
+      act(() => { window.dispatchEvent(new StorageEvent("storage", { key: null })); });
+      expect(chatReads).toBe(4);
+      unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

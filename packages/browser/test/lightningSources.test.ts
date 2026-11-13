@@ -2,12 +2,13 @@ import "fake-indexeddb/auto";
 import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { bech32 } from "@scure/base";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { decodeBolt11 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
 import { CashuMintLightning, cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import type { LightningProvider, LightningProviderDescriptor } from "../src/engine/paymentAdapters/providers/lightning";
-import { LightningService, type LightningEvents, type LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
+import { LightningService, journaledPayment, type LightningEvents, type LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import { ProviderSources } from "../src/engine/paymentAdapters/providers/sources";
 import { FakeLightningProvider, fakeInvoice, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 import type { ProviderDescriptor, ProviderNetwork } from "../src/engine/paymentAdapters/providers/types";
@@ -27,7 +28,9 @@ const journal = (op: LightningOp) => transact([STORES.settings], (s) => { s[STOR
 beforeEach(async () => { await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); lightningJournalWritten(); });
 
 const services: LightningService[] = [];
-afterEach(async () => { for (const s of services.splice(0)) await s.stop(); });
+// A pass under way when its service stops still writes what it heard: one that wrote after the next test's
+// `beforeEach` cleared the journal left a "failed" op in it. A pass after `stop` waits for it, then does nothing.
+afterEach(async () => { for (const s of services.splice(0)) { await s.stop(); await s.reconcile(); } });
 
 function service(provider: LightningProvider = new FakeLightningProvider({ settleMs: 600_000 }), extra: Partial<LightningProviderDescriptor> = {}) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
@@ -98,6 +101,17 @@ describe("the invoice a contact is handed", () => {
     Object.assign(fake, { capabilities: { ...fake.capabilities, receive: false } });
     const { lightning } = await ready(fake);
     await expect(lightning.createInvoice(10)).rejects.toThrow("cannot create invoices");
+  });
+
+  it("comes only from a source that can also look it up: one it could never see paid is not made", async () => {
+    // An NWC connection with make_invoice but not lookup_invoice, a WebLN wallet with makeInvoice but no lookupInvoice.
+    const fake = new FakeLightningProvider();
+    Object.assign(fake, { capabilities: { ...fake.capabilities, lookup: false } });
+    const created = vi.spyOn(fake, "createInvoice");
+    const { lightning } = await ready(fake);
+    await expect(lightning.createInvoice(100, { paymentId: "req-1" })).rejects.toThrow("cannot look up its invoices");
+    expect(created, "the source is not asked for one").not.toHaveBeenCalled();
+    expect((await keys()).filter((k) => k.startsWith("lightningOp-")), "nothing journaled").toEqual([]);
   });
 
   it("is refused when the source returns another amount or another payment hash than it says", async () => {
@@ -234,8 +248,9 @@ describe("paying a quote", () => {
     const fake = new FakeLightningProvider({ behaviour: "hang" });
     Object.assign(fake, { capabilities: { ...fake.capabilities, lookup: false } });
     const { lightning } = await ready(fake);
-    expect(await lightning.pay((await lightning.quote(fakeInvoice(10, hash()))).quote)).toBe(false);
-    expect((await lightning.list())[0]).toMatchObject({ state: "unknown", error: expect.stringContaining("check this payment in the wallet itself") });
+    const paymentHash = hash();
+    expect(await lightning.pay((await lightning.quote(fakeInvoice(10, paymentHash))).quote)).toBe(false);
+    expect(await opOf(lightning, bytesToHex(paymentHash))).toMatchObject({ state: "unknown", error: expect.stringContaining("check this payment in the wallet itself") });
   });
 });
 
@@ -428,6 +443,22 @@ describe("a payment through the mints that the app was cut off from", () => {
     expect(await opOf(down.lightning, down.paymentHash)).toMatchObject({ state: "unknown" });
     expect(events.resolved).not.toHaveBeenCalled();
     expect(down.events.resolved).not.toHaveBeenCalled();
+  });
+
+  // A contact's request still marked as being paid at a restart is read against the journal (PaymentDesk.start).
+  it("the journal says what became of a request's payment: none left, one under way, or paid", async () => {
+    expect(await journaledPayment("req-1"), "nothing journaled: nothing left the wallet").toBeUndefined();
+    await journal(op({ paymentHash: "70", paymentId: "req-1", state: "failed" }));
+    await journal(op({ direction: "in", paymentHash: "71", paymentId: "req-1", state: "paid" }));
+    await journal(op({ paymentHash: "72", paymentId: "req-2", state: "paid" }));
+    expect(await journaledPayment("req-1"), "a failed one and our own invoice's are not a payment out").toBeUndefined();
+    for (const state of ["sending", "pending", "unknown"] as const) {
+      await journal(op({ paymentHash: "73", paymentId: "req-1", state }));
+      expect(await journaledPayment("req-1"), state).toBe("pending");
+    }
+    await journal(op({ paymentHash: "73", paymentId: "req-1", state: "paid" }));
+    expect(await journaledPayment("req-1")).toBe("paid");
+    expect(await journaledPayment("req-2")).toBe("paid");
   });
 });
 

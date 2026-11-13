@@ -98,7 +98,8 @@
       "older": "Mettez d'abord Ghostly à jour sur cet appareil.",
       "password": "Mot de passe incorrect.",
       "payment": "Un paiement est encore en cours. Réessayez dans un instant.",
-      "refused": "{{device}} ne laisse pas cet appareil prendre le profil.",
+      "refused": "{{device}} n'a pas laissé cet appareil prendre le profil.",
+      "refusedNext": "Si des mots de passe erronés ont été saisis ici, déverrouillez {{device}} et laissez cet appareil réessayer.",
       "room": "Pas assez d'espace sur cet appareil.",
       "settle": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion, puis réessayez.",
       "stalled": "Le transfert s'est arrêté",
@@ -252,8 +253,7 @@
     "doneInfo": "Il ne peut plus prendre ce profil. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
     "fail": {
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
-      "failed": "Un problème est survenu. Rien n’a été modifié.",
-      "offline": "Passez en ligne pour modifier vos appareils."
+      "failed": "Un problème est survenu. Rien n’a été modifié."
     },
     "go": "Retirer",
     "lost": "Perdu ou volé",
@@ -268,6 +268,7 @@
     },
     "label": "Nom de l’appareil",
     "save": "Enregistrer",
+    "saving": "Enregistrement…",
     "title": "Renommer {{device}}"
   },
   "restore": {
@@ -334,7 +335,6 @@
       "unreadable": "Rien n'a été démarré."
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
-    "link": "{{device}} : {{status}}",
     "links": "Vos appareils",
     "notice": {
       "hint": "Si cette liste vous semble fausse, n’utilisez pas cet appareil.",
@@ -346,6 +346,15 @@
     "reenroll": {
       "hint": "Ajoutez cet appareil à nouveau depuis l’appareil que vous utilisez maintenant.",
       "title": "Vos appareils ont changé pendant que celui-ci était éteint"
+    },
+    "removeHere": {
+      "button": "Retirer ce profil d'ici",
+      "confirm": "Tapez {{name}} pour confirmer",
+      "first": "Un profil vide prend sa place ici.",
+      "go": "Retirer",
+      "hint": "Ses discussions, clés et portefeuilles sont effacés de cet appareil. Vos autres appareils gardent le profil.",
+      "removing": "Retrait…",
+      "title": "Retirer {{name}} de cet appareil ?"
     },
     "title": {
       "moving": "Presque terminé",

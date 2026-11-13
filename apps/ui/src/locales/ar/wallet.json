@@ -149,6 +149,7 @@
       "needsKey": "تحتاج إلى مفتاح",
       "noFederation": "لا يوجد اتحاد",
       "noSource": "لا يوجد مصدر",
+      "shared": "يستخدم رصيد {{name}}",
       "unavailable": "غير متاحة"
     },
     "deck": {
@@ -175,6 +176,7 @@
       "usdtLocal": "EVM محلية · رمز تجريبي",
       "usdtSepolia": "Sepolia · رمز تجريبي"
     },
+    "sameBalance": "نفس رصيد بطاقة {{name}}",
     "status": {
       "away": "في مكان آخر",
       "checkSettings": "تحقق من الإعدادات",
@@ -191,8 +193,7 @@
   },
   "cashu": {
     "add": "إضافة",
-    "addMintPlaceholder": "أضف دار سك: https://…",
-    "amountSats": "{{amount}} sats",
+    "addMintPlaceholder": "أضف دار سك: \u2066https://…\u2069",
     "askingMint": "جارٍ سؤال دار السك…",
     "backupCopied": "نُسخت النسخة الاحتياطية. من يملك هذه الرموز يملك الـ sats.",
     "contactHint": "تدفع لجهة اتصال؟ استخدم ⚡ في المحادثة.",
@@ -206,7 +207,7 @@
       "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
-      "fee": "رسوم {{amount}}",
+      "fee": "رسوم {{amount}} {{unit}}",
       "feesPaid": "الرسوم المدفوعة: {{amount}} {{unit}}",
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
@@ -275,7 +276,7 @@
     "working": "جارٍ العمل…"
   },
   "fedimint": {
-    "about": "الاتحاد مجموعة من الحرّاس يحفظون البيتكوين معًا ويصدرون مقابلها ecash. الانضمام إلى اتحاد يعني أن تأتمنهم على ما تحفظه لديهم. الصق رمز الدعوة الخاص به (fed1…).",
+    "about": "الاتحاد مجموعة من الحرّاس يحفظون البيتكوين معًا ويصدرون مقابلها ecash. الانضمام إلى اتحاد يعني أن تأتمنهم على ما تحفظه لديهم. الصق رمز الدعوة الخاص به (\u2066fed1…\u2069).",
     "across": "{{amount}} {{unit}} موزعة على {{count}} اتحادات. ecash اتحاد ما ليس ecash لاتحاد آخر.",
     "across_many": "{{amount}} {{unit}} موزعة على {{count}} اتحادًا. ecash اتحاد ما ليس ecash لاتحاد آخر.",
     "across_other": "{{amount}} {{unit}} موزعة على {{count}} اتحاد. ecash اتحاد ما ليس ecash لاتحاد آخر.",
@@ -322,7 +323,7 @@
     "hide": "إخفاء",
     "inviteInput": "رمز دعوة الاتحاد",
     "invitesInput": "رموز الدعوة المراد استعادتها",
-    "invitesPlaceholder": "رموز الدعوة، رمز في كل سطر (fed1…)",
+    "invitesPlaceholder": "رموز الدعوة، رمز في كل سطر (\u2066fed1…\u2069)",
     "invoiceNote": "يرتفع الرصيد بعد دفعها (تأخذ البوابة رسومها).",
     "join": "الانضمام إلى اتحاد",
     "joinAnother": "الانضمام إلى اتحاد آخر",
@@ -475,8 +476,8 @@
       "fedimint": "Ecash لاتحاد تنضم إليه برمز دعوته.",
       "intro": "كل محفظة تعيش على شبكة واحدة. العملات التجريبية والأموال الحقيقية لا تختلط أبدًا.",
       "lightning": "محفظة أو عقدة Lightning خاصة بك: NWC وLND وCore Lightning وغيرها.",
-      "spark": "محفظة Spark ‏(Breez) على Bitcoin، بمفتاح Breez API الخاص بك.",
-      "sparkTestnet": "محفظة Spark ‏(Breez)، على regtest.",
+      "spark": "محفظة Spark \u200f(Breez) على Bitcoin، بمفتاح Breez API الخاص بك.",
+      "sparkTestnet": "محفظة Spark \u200f(Breez)، على regtest.",
       "usdt": "USDT على Ethereum.",
       "usdtTestnet": "USDT تجريبي على Sepolia."
     },
@@ -645,6 +646,9 @@
     "paste": "لصق",
     "scan": "مسح"
   },
+  "sentEcash": {
+    "title": "أُرسل في محادثة محذوفة"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
@@ -726,7 +730,7 @@
           "script": {
             "label": "العناوين",
             "options": {
-              "bip84": "SegWit الأصلي (BIP84، bc1q…)"
+              "bip84": "SegWit الأصلي (BIP84، \u2066bc1q…\u2069)"
             }
           }
         }
@@ -735,7 +739,7 @@
         "description": "محفظة على عقدة Bitcoin Core الخاصة بك، عبر RPC الخاص بها. عقدتك تحتفظ بالمفاتيح وتوقّع. تحتاج إلى تطبيق سطح المكتب.",
         "fields": {
           "password": {
-            "help": "rpcpassword، أو محتوى ملف ‎.cookie الخاص بالعقدة (يتغير عند إعادة تشغيل bitcoind).",
+            "help": "rpcpassword، أو محتوى ملف \u200e.cookie الخاص بالعقدة (يتغير عند إعادة تشغيل bitcoind).",
             "label": "كلمة مرور RPC أو cookie"
           },
           "url": {
@@ -743,7 +747,7 @@
             "label": "عنوان RPC"
           },
           "user": {
-            "help": "اتركه فارغًا للصق ملف ‎.cookie أدناه.",
+            "help": "اتركه فارغًا للصق ملف \u200e.cookie أدناه.",
             "label": "مستخدم RPC"
           },
           "wallet": {
@@ -759,7 +763,7 @@
         "description": "تُدفع الفواتير إلى رصيد Cashu الخاص بك ومنه. الـ mints تحتفظ بالـ sats."
       },
       "core-lightning": {
-        "description": "عقدة Core Lightning الخاصة بك، عبر Commando باستخدام rune. عقدتك تحتفظ بالـ sats. لا يصل إليها تطبيق الويب إلا عبر wss://.",
+        "description": "عقدة Core Lightning الخاصة بك، عبر Commando باستخدام rune. عقدتك تحتفظ بالـ sats. لا يصل إليها تطبيق الويب إلا عبر \u2066wss://\u2069.",
         "fields": {
           "nodeId": {
             "help": "lightning-cli getinfo → id. يُصادَق الاتصال بناءً عليه.",
@@ -771,7 +775,7 @@
             "placeholder": "rune مقيّدة بطرق Ghostly"
           },
           "url": {
-            "help": "مستمع bind-addr=ws:… الخاص بالعقدة، خلف وكيل wss:// لتطبيق الويب؛ ws:// إلى هذا الجهاز فقط.",
+            "help": "مستمع \u2066bind-addr=ws:…\u2069 الخاص بالعقدة، خلف وكيل \u2066wss://\u2069 لتطبيق الويب؛ \u2066ws://\u2069 إلى هذا الجهاز فقط.",
             "label": "عنوان WebSocket"
           }
         }
@@ -787,7 +791,7 @@
             "label": "شهادة TLS"
           },
           "macaroon": {
-            "help": "لا تستخدم أبدًا macaroon المسؤول: أنشئ واحدًا بالأمر {{command}} (invoices:… فقط للاستلام فقط)."
+            "help": "لا تستخدم أبدًا macaroon المسؤول: أنشئ واحدًا بالأمر {{command}} (\u2066invoices:…\u2069 فقط للاستلام فقط)."
           },
           "url": {
             "help": "منفذ REST الخاص بـ LND (restlisten، و8080 افتراضيًا). في المتصفح يجب أن تسمح العقدة لهذا التطبيق عبر restcors وأن تكون لها شهادة يثق بها المتصفح؛ أما تطبيق سطح المكتب فلا يحتاج إلى أي منهما.",
@@ -908,6 +912,25 @@
       "login": "يطلب تسجيل الدخول، لذا لا يطلب Ghostly نيابةً عنك."
     }
   },
+  "total": {
+    "away": "على {{device}}، خارج المجموع",
+    "federation": "ecash يحتفظ به الاتحاد",
+    "info": "يجمع المجموع فقط الأرصدة التي تمكّن Ghostly من قراءتها الآن. البطاقة التي تعذّرت قراءتها تبقى خارجه، ولا تُجمع Testnet مع Mainnet أبدًا.",
+    "label": "الأرصدة",
+    "mint": "ecash تحتفظ به منافذ السكّ الخاصة بك",
+    "none": "غير مُعدّة",
+    "ready": "جاهز للإنفاق الآن",
+    "shared": "الرصيد نفسه في {{name}}، يُحسب مرة واحدة",
+    "title": "مصدر الرصيد",
+    "total": "المجموع",
+    "uncounted": "{{count}} بطاقات خارج المجموع",
+    "uncounted_many": "{{count}} بطاقةً خارج المجموع",
+    "uncounted_one": "بطاقة واحدة خارج المجموع",
+    "uncounted_other": "{{count}} بطاقة خارج المجموع",
+    "uncounted_two": "بطاقتان خارج المجموع",
+    "unknown": "تعذّرت قراءته الآن، خارج المجموع",
+    "waiting": "{{amount}} {{unit}} غير قابلة للإنفاق بعد"
+  },
   "ui": {
     "amountIn": "المبلغ بـ {{unit}}",
     "amountUnclear": "المبلغ غير واضح: اكتبه هكذا {{example}}",
@@ -951,7 +974,7 @@
     "networkTest": "تحمل Sepolia والسلسلة المحلية رموزًا تجريبية بلا قيمة.",
     "receiveNote": "{{token}} على {{place}} فقط. تظهر التحويلات الواردة تلقائيًا.",
     "receiveNoteLocal": "{{token}} على هذه السلسلة المحلية فقط. تظهر التحويلات الواردة تلقائيًا.",
-    "recipientPlaceholder": "عنوان المستلم (0x…)",
+    "recipientPlaceholder": "عنوان المستلم (\u20660x…\u2069)",
     "rpcInput": "عنوان URL لـ RPC",
     "rpcProvider": "مزوّد RPC",
     "seesAddress": "يرى عنوانك العام",
@@ -959,7 +982,7 @@
     "switchNetwork": "تبديل الشبكة",
     "token": "الرمز",
     "tokenContract": "عقد الرمز",
-    "tokenContractPlaceholder": "عقد الرمز (0x…)",
+    "tokenContractPlaceholder": "عقد الرمز (\u20660x…\u2069)",
     "wallet": "محفظة USDT"
   }
 }

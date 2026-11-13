@@ -3,11 +3,12 @@ import { BLOCKED_DIAL_WAIT_MS, GhostLink } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity, type Identity } from "../src/identity";
-import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
+import { emptyDhtDeliveryState, LEAVING_SIGNAL_READS, type DhtDeliveryState } from "../src/dhtDelivery";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
 import type { FrameChannel } from "../src/frames";
 import type { NativeEndpoint } from "../src/pairedTransports";
+import { RelayTransport } from "../src/relay";
 
 // covers: invite.delivery-mode, chat.paired.reconnect, transport.webrtc
 
@@ -116,12 +117,12 @@ function side(params: LinkParams, me: Identity, peer: Identity, mode: "dht" | "s
 
 const links: GhostLink[] = [];
 /** `advertises: false`: its link packets carry no presence, as an offer's packet with no room left for it. */
-function open(s: Side, pkarr: MemoryPkarr, active: boolean, advertises = true): GhostLink {
+function open(s: Side, pkarr: MemoryPkarr | PkarrTransport, active: boolean, advertises = true): GhostLink {
   const link = new GhostLink({
     params: s.params,
     pairing: { credentials: { seedB64: s.seedB64, peerKey: s.peerKey, requireSignedSignals: true }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: { state: s.state, save: async state => { s.state = state; } },
-    transport: pkarr.transport(),
+    transport: pkarr instanceof MemoryPkarr ? pkarr.transport() : pkarr,
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
@@ -187,6 +188,110 @@ describe("leaving DHT-only after the contact reloaded", () => {
   }
 });
 
+/**
+ * The matrix's extension chat back from DHT only with each side's relay minute spent just before (E2E full,
+ * 2026-11-05): the side that does not dial read the contact's link once, and its next reads, plain chat reads, waited
+ * 41 s for the minute, so the offer out since then was never read (mx-d7d53ebb). The side that dials read the contact's
+ * mailbox once a moment before the contact's envelope saying it left got there, and its next reads waited as long, so
+ * it never dialled (mx-47d9d4bb). Each side has its own budget on one relay they share, as the e2e's.
+ */
+/** One relay both sides use: each side's `RelayTransport` over it has its own budget, as the e2e's. */
+function relayFetch(): typeof fetch {
+  const stored = new Map<string, Uint8Array>();
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const key = new URL(String(input)).pathname.slice(1);
+    if (init?.method === "PUT") { stored.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
+    const body = stored.get(key);
+    return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
+  }) as typeof fetch;
+}
+
+describe("leaving DHT-only with the relay minute spent", () => {
+  for (const dialer of ["a", "b"] as const) for (const first of ["a", "b"] as const) for (const gap of [0, 3_000]) {
+    it(`is live in seconds · ${dialer.toUpperCase()} dials · ${first.toUpperCase()} leaves ${gap / 1000} s first`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      const a = open(pair.a, relay.a, false), b = open(pair.b, relay.b, false);
+      await run(10_000);
+      const [one, two] = first === "a" ? [a, b] : [b, a];
+      await one.setDeliveryMode("stream");
+      await run(gap);
+      await two.setDeliveryMode("stream");
+      // The switch's first read and its envelope go; what else each profile asks the relay for (its other chats, its
+      // groups) spends the rest of its minute then.
+      await run(500);
+      const other = createIdentity();
+      for (const side of [relay.a, relay.b]) for (let i = 0; i < 40; i++) await side.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after both left DHT-only").toBeLessThanOrEqual(15_000);
+    }, 60_000);
+  }
+
+  /**
+   * The minute spent before either side leaves (E2E full, 2026-11-07 and 2026-11-08: the matrix's steps before, an
+   * identity, a wallet, a group and a DHT chat, had spent the extension's in 30 s). The side that left first held back
+   * its envelope saying so (55 s) and, where the contact dials, its presence too: the contact held the offer, or never
+   * dialled, until then. The side that dials read the answer 31 s late: its read as it left took one of the few
+   * requests past the minute. Each contact is pinned (`peerPinned: "seen"`), as after a pairing a while ago.
+   */
+  for (const dialer of ["a", "b"] as const) for (const first of ["a", "b"] as const) for (const kind of ["writes", "reads"] as const) {
+    it(`is live in seconds with the minute spent before · ${dialer.toUpperCase()} dials · ${first.toUpperCase()} leaves first, its minute spent by ${kind}`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      for (const s of [pair.a, pair.b]) s.state = { ...s.state, peerPinned: "seen" };
+      const a = open(pair.a, relay.a, false), b = open(pair.b, relay.b, false);
+      await run(20_000);
+      const [one, two] = first === "a" ? [a, b] : [b, a];
+      const spender = first === "a" ? relay.a : relay.b, other = createIdentity();
+      for (let i = 0; i < 40; i++) {
+        if (kind === "writes") await spender.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+        else await spender.resolve(createIdentity().pubKeyZ32).catch(() => {});
+      }
+      await run(5_000);
+      await one.setDeliveryMode("stream");
+      await run(900);
+      await two.setDeliveryMode("stream");
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after both left DHT-only").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
+});
+
+/**
+ * The matrix's chat after pairing on DHT only (E2E full, 2026-11-07 and 11-08): only A chose it, B stayed on Automatic
+ * with the chat open, and B's relay minute was spent by the steps before. A left; B's reads of A's mailbox, plain reads
+ * at the open chat's pace, were held until the minute freed 40 s later, and the chat stayed "On DHT · retrying live".
+ */
+describe("the contact leaving DHT only with this side's relay minute spent", () => {
+  for (const dialer of ["a", "b"] as const) for (const spentBefore of [5_000, 500]) {
+    it(`is live in seconds · ${dialer.toUpperCase()} dials · B's minute spent ${spentBefore / 1000} s before A leaves`, async () => {
+      const fetch = relayFetch();
+      const relay = { a: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }),
+        b: new RelayTransport({ relays: ["https://relay.test"], log: () => {}, fetch }) };
+      const pair = pairWhere(dialer);
+      // Only A chose DHT only: B is on Automatic and has read A's mailbox saying so.
+      pair.b.params.deliveryMode = "stream";
+      pair.a.state.peerMode = "stream";
+      const a = open(pair.a, relay.a, true), b = open(pair.b, relay.b, true);
+      // Both chats on screen, as the matrix's: B reads A's mailbox at the open chat's pace.
+      for (const link of [a, b]) link.setChatActive(true);
+      await run(20_000);
+      expect(b.dhtDelivery?.peerMode).toBe("dht");
+      // What else B's profile asks the relay for (its other chats, its groups) spends its minute.
+      const other = createIdentity();
+      for (let i = 0; i < 40; i++) await relay.b.publish(other, [{ label: "_x", value: `${i}` }]).catch(() => {});
+      await run(spentBefore);
+      await a.setDeliveryMode("stream");
+      const took = await untilLive(a, b, 60_000);
+      expect(took, "live after A left DHT only").toBeLessThanOrEqual(15_000);
+    }, 60_000);
+  }
+});
+
 describe("back from a hold after the contact read the mailbox", () => {
   /** A and B live, then A holds the chat on the DHT (`chat disconnect --hold`) and B reads A's mailbox saying so. */
   async function held(dialer: "a" | "b", advertises: boolean) {
@@ -241,4 +346,48 @@ describe("back from a hold after the contact read the mailbox", () => {
       }
     }, 60_000);
   }
+
+  /**
+   * Nothing authenticates a connection on a native endpoint before the session it carries, and that session waits for
+   * the read that says the contact left DHT only. Connections that keep coming while the contact stays there (anyone
+   * who can dial the endpoint, with any identities) start that read as a fresh link packet does: once, then after the
+   * wait `peerLinkPacket` holds it to, not at the DHT pace as signaling on every one.
+   */
+  it("dials that keep coming while the contact stays on DHT only start its signaling reads once, not on every dial", async () => {
+    const pkarr = new MemoryPkarr();
+    const pair = pairWhere("a", "stream");
+    const a = open(pair.a, pkarr, false, false);
+    const inner = pkarr.transport();
+    // Signaling reads by when they went: one read of the mailbox may resolve more than one key.
+    let reads = 0, counting = false;
+    const signaling = new Set<number>();
+    const counted: PkarrTransport = { ...inner, resolve: async (key, options) => {
+      if (counting) { reads++; if (options?.signal) signaling.add(Date.now()); }
+      return inner.resolve(key, options);
+    } };
+    const b = open(pair.b, counted, false);
+    expect(await untilLive(a, b, 60_000), "live at first").toBeLessThan(Infinity);
+    await a.setDeliveryMode("dht");
+    for (let waited = 0; b.dhtDelivery?.peerMode !== "dht" && waited < 60_000; waited += 1_000) await run(1_000);
+    expect(b.dhtDelivery?.peerMode).toBe("dht");
+    await run(60_000);
+    const endpoint: NativeEndpoint = { transport: "iroh/1", descriptor: { id: "b:iroh/1" }, onConnection: null, onDescriptor: null,
+      connect: async () => { throw new Error("not in this test"); }, close: async () => {} };
+    b.registerEndpoint(endpoint);
+    // What B reads in a minute with no dial at all.
+    counting = true;
+    await run(60_000);
+    const quiet = reads;
+    reads = 0; signaling.clear();
+    // A connection a second for a minute, each with made-up identities.
+    for (let s = 0; s < 60; s++) {
+      const dial: FrameChannel & { closed: boolean } = { closed: false, bufferedAmount: 0, onMessage: null, onClose: null,
+        send: () => {}, drained: async () => {}, close() { if (this.closed) return; this.closed = true; this.onClose?.(); } };
+      endpoint.onConnection!({ channel: dial, binding: { transport: "iroh/1", context: "00".repeat(32), identities: [(s + 16).toString(16).repeat(64).slice(0, 64), "dd".repeat(32)] } });
+      await run(1_000);
+    }
+    expect(b.dhtDelivery?.peerMode, "A is still on DHT only").toBe("dht");
+    expect(signaling.size, "signaling reads").toBeLessThanOrEqual(LEAVING_SIGNAL_READS);
+    expect(reads, `reads with a dial a second (${quiet} with none)`).toBeLessThanOrEqual(quiet + 10);
+  }, 240_000);
 });

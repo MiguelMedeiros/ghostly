@@ -111,15 +111,104 @@ describe("the app's height and the keyboard", () => {
 
   it("in an installed web app or on Android, where the page shrinks with the keyboard", () => {
     renderHook(() => useViewportHeight());
-    resize(471, 471);
-    expect(appHeight()).toBe("471px");
-    expect(keyboard()).toBe("true");
-    // iOS puts `innerHeight` back a moment later, with no event: the answer stays the same.
-    inner = 874;
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
-    expect(keyboard()).toBe("true");
-    resize(874, 874);
-    expect(keyboard()).toBe("false");
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(471, 471);
+      expect(appHeight()).toBe("471px");
+      expect(keyboard()).toBe("true");
+      // iOS puts `innerHeight` back a moment later, with no event: the answer stays the same.
+      inner = 874;
+      act(() => { viewport.dispatchEvent(new Event("scroll")); });
+      expect(keyboard()).toBe("true");
+      resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("turned with the keyboard up where the page shrinks with it, the keyboard stays up both ways", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(471, 471);
+      expect(keyboard()).toBe("true");
+      // On its side, the keyboard still up: no height seen there says how tall the screen is without it.
+      resize(180, 180, 874);
+      expect(appHeight()).toBe("180px");
+      expect(keyboard()).toBe("true");
+      // Upright again: the whole height seen upright still counts.
+      resize(471, 471, 402);
+      expect(keyboard()).toBe("true");
+      // On its side again, and the keyboard goes down there.
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      // The keyboard up again on its side is measured against the height now seen there.
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+      // Turned to a width never seen, and the field loses the focus there: the keyboard goes with it.
+      resize(300, 300, 600);
+      expect(keyboard()).toBe("true");
+      act(() => field.blur());
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("turned with the keyboard up on Android, which gives the whole height first: the keyboard goes down there", () => {
+    // As the API 35 emulator reports it: upright 412×842, on its side 866×364, the keyboard laid out after the turn.
+    viewport.width = 412;
+    viewport.height = 842;
+    inner = 842;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(530, 530);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      // Back takes the keyboard down, the field keeps the focus.
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+      resize(842, 842, 412);
+      expect(keyboard()).toBe("false");
+      // On its side once more, a height seen there now.
+      resize(530, 530);
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("a window made shorter with nothing focused is not a keyboard (split screen, a quarter of the screen)", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      resize(674, 674);
+      expect(appHeight()).toBe("674px");
+      expect(keyboard()).toBe("false");
+      // A field in the shorter window has the focus, and no keyboard comes up (a laptop).
+      act(() => field.focus());
+      expect(keyboard()).toBe("false");
+      act(() => field.blur());
+      resize(437, 437);
+      expect(keyboard()).toBe("false");
+      resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
   });
 
   it("a browser toolbar that slides away is not a keyboard", () => {
@@ -180,13 +269,55 @@ describe("the app's height and the keyboard", () => {
     }
   });
 
+  describe("back from the background, the keyboard gone with no resize heard", () => {
+    /** The page in the background, or shown again: its visibility, and the window's focus as it comes back. */
+    function visibility(state: "hidden" | "visible") {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        if (state === "visible") window.dispatchEvent(new FocusEvent("focus"));
+      });
+    }
+    afterEach(() => { Reflect.deleteProperty(document, "visibilityState"); vi.useRealTimers(); });
+
+    it("is measured again as the page shows", () => {
+      renderHook(() => useViewportHeight());
+      resize(538);
+      expect(keyboard()).toBe("true");
+      visibility("hidden");
+      viewport.height = 874;
+      visibility("visible");
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+    });
+
+    it("and again while iOS settles: the keyboard's height a moment longer, then the whole one unheard", () => {
+      vi.useFakeTimers();
+      renderHook(() => useViewportHeight());
+      resize(538);
+      visibility("hidden");
+      visibility("visible");
+      expect(keyboard()).toBe("true");
+      viewport.height = 874;
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+    });
+  });
+
   it("starts over when the phone turns", () => {
     renderHook(() => useViewportHeight());
-    // Landscape: a much shorter screen, with no keyboard.
-    resize(402, 402, 874);
-    expect(keyboard()).toBe("false");
-    resize(180, 180, 874);
-    expect(keyboard()).toBe("true");
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      // Landscape: a much shorter screen, with no keyboard.
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+    } finally {
+      field.remove();
+    }
   });
 });
 

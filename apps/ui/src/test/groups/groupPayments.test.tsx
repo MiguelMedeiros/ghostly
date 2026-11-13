@@ -1,4 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { GroupMemberView, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -35,7 +36,47 @@ function composer(state: StatePatch = {}) {
   return { ...view, closed: () => closed };
 }
 
+const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+
 describe("GroupPaymentComposer: whom first", () => {
+  it("on a phone keeps Tab and Shift+Tab in the members' sheet, never on the page behind its backdrop", async () => {
+    viewport(390, 844);
+    try {
+      fakeEngine.setState({ groups: [group()], edges, wallet: everyWallet() });
+      const { user } = renderApp(<><button>Before</button><GroupPaymentComposer group={group()} onClose={() => {}} /><button>After</button></>);
+      const sheet = screen.getByTestId("group-pay-recipients");
+      act(() => screen.getAllByTestId("group-pay-recipient")[0].focus());
+      for (const shift of [false, true]) {
+        for (let i = 0; i < 6; i++) {
+          await user.tab({ shift });
+          expect(sheet).toContainElement(document.activeElement as HTMLElement);
+        }
+      }
+    } finally { viewport(1024, 768); }
+  });
+
+  it("Escape closes the members' sheet and is spent there: a notice behind it that also answers Escape stays", async () => {
+    fakeEngine.setState({ groups: [group()], edges, wallet: everyWallet() });
+    let closed = 0;
+    function Opened() {
+      const [open, setOpen] = useState(true);
+      return open ? <GroupPaymentComposer group={group()} onClose={() => { closed++; setOpen(false); }} /> : null;
+    }
+    // As the app's top notice decides (Root.tsx): once the key has gone everywhere, one nobody spent is its own.
+    const spent: boolean[] = [];
+    const listen = (e: KeyboardEvent) => { if (e.key === "Escape") setTimeout(() => spent.push(e.defaultPrevented)); };
+    window.addEventListener("keydown", listen);
+    try {
+      const { user } = renderApp(<Opened />);
+      act(() => screen.getAllByTestId("group-pay-recipient")[0].focus());
+      await user.keyboard("{Escape}");
+      await act(() => new Promise(resolve => setTimeout(resolve, 10)));
+      expect(screen.queryByTestId("group-pay-recipients")).toBeNull();
+      expect(closed).toBe(1);
+      expect(spent).toEqual([true]);
+    } finally { window.removeEventListener("keydown", listen); }
+  });
+
   it("lists the other members; one who is away or whose app takes no payments says why and cannot be chosen", () => {
     composer();
     const rows = screen.getAllByTestId("group-pay-recipient");
@@ -179,6 +220,23 @@ describe("GroupChat: payments in the timeline", () => {
     expect(shown).toHaveLength(1);
     expect(shown[0]).toHaveTextContent("Alice asked the group");
     expect(within(screen.getByTestId("group-payment")).queryByTestId("group-pay-caption")).not.toBeInTheDocument();
+  });
+
+  it("my payment of a member's request under another member's note id never hides that note; one of the request it pays is said once", async () => {
+    const paying = (linkId: string) => ({ "pay-7": paymentView({ id: "pay-7", linkId, kind: "payment", direction: "out", amount: 500, requestId: "req-1", state: "settled" }) });
+    const history = (linkId: string) => [
+      line({ id: `${linkId}:me_3`, sender: "me", paymentId: "pay-7", text: "⚡ 500 sats" }),
+      line({ id: "gpay:req-1", groupPay: note({ from: "*", to: ALICE }) }),
+    ];
+    // Bob asked me under the id of Alice's request to the group: both lines show.
+    const view = openGroup(history("edge-b"), { payments: paying("edge-b") });
+    await screen.findByTestId("group-payment");
+    expect(screen.getByTestId("group-pay-note")).toHaveTextContent("Alice asked the group");
+    view.unmount();
+    // Alice's own request, paid over her edge: her note is said by my bubble.
+    openGroup(history("edge-a"), { payments: paying("edge-a") });
+    await screen.findByTestId("group-payment");
+    expect(screen.queryByTestId("group-pay-note")).not.toBeInTheDocument();
   });
 
   it("+ → Payment opens whom-to-pay; with nobody else in the group it says so", async () => {

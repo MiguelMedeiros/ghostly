@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
-import type { OptionSpec, Parsed } from "../args";
+import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
 
@@ -52,6 +52,31 @@ export function here(path: unknown): string | undefined {
   return typeof path === "string" ? userPath(path) : undefined;
 }
 
+/** The most a command reads of stdin or of a file it sends: the longest request line a daemon reads (client.ts `MAX_LINE`). */
+export const INPUT_BYTES = 16 * 1024 * 1024;
+export const STDIN_TOO_BIG = "More than 16 MiB came on stdin, more than any command takes (a long text goes as a file: ghostly file send <chat|group> <path>)";
+
+/**
+ * A file's text, or stdin's (`0`), up to `INPUT_BYTES`: more is refused as it comes. `app send … -`, a card's `--json`
+ * and the files `identity complete` and `x401 credential add` send were read whole: 600 MiB answered V8's "Cannot
+ * create a string longer than 0x1fffffe8 characters", and past 16 MiB a daemon cut the line ("The daemon went away").
+ */
+export function readInput(file: string | 0): string {
+  const fd = file === 0 ? 0 : openSync(file, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      const read = readSync(fd, chunk, 0, chunk.length, null);
+      if (!read) return Buffer.concat(chunks).toString("utf8");
+      bytes += read;
+      if (bytes > INPUT_BYTES) throw new CliError("bad_request", file === 0 ? STDIN_TOO_BIG : `${file} holds more than 16 MiB, more than any command takes (a file to share goes as one: ghostly file send <chat|group> <path>)`);
+      chunks.push(chunk.subarray(0, read));
+    }
+  } finally { if (file !== 0) closeSync(fd); }
+}
+
 /**
  * A list option that names chats (`--to`, `--from`): "" or "group:" alone (an unset variable in a script) names
  * nothing, and is a usage error before the profile opens; it was a prefix of every id and took the only chat or group.
@@ -63,10 +88,16 @@ export function refs(values: unknown, flag: string, what: string): void {
   }
 }
 
-/** A whole number of sats from the command line. */
+/**
+ * A whole number of sats from the command line (`<sats>`), refused in a number flag's words: `<sats> takes a whole
+ * number from 1 up, not -5`, a number as typed, other words quoted. Before: "Not an amount in sats: \"-5\"".
+ */
 export function sats(value: string | undefined): number {
-  const n = Number(value);
-  if (!value || !Number.isSafeInteger(n) || n <= 0) throw new CliError("usage", `Not an amount in sats: ${JSON.stringify(value)}`);
+  const n = decimalNumber(value ?? "");
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    const shown = Number.isNaN(n) ? JSON.stringify(value) : value;
+    throw new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`);
+  }
   return n;
 }
 
@@ -178,8 +209,8 @@ export function cardJson(value: unknown): Record<string, unknown> {
   // with its path, as `x401 credential add` says it: before, Node's text, and a folder's named no path.
   const file = text.startsWith("{") || text === "-" ? undefined : here(text)!;
   let raw: string;
-  try { raw = text.startsWith("{") ? text : readFileSync(file ?? 0, "utf8"); }
-  catch (error) { throw (file !== undefined && localFileError(error, file)) || new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
+  try { raw = text.startsWith("{") ? text : readInput(file ?? 0); }
+  catch (error) { throw (error instanceof CliError && error) || (file !== undefined && localFileError(error, file)) || new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new CliError("usage", "--json is not valid JSON"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CliError("usage", "--json is a JSON object of the card's fields");
@@ -364,22 +395,63 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
 }
 
 /** How the time flags say the dates they take (`--next`, `--resets`, `--also`'s `@`). */
-const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
+export const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
 
 /** An ISO date with no time, which `Date.parse` alone reads as UTC midnight: `2026-09-30`, `2026-09`. */
 const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/** What `Date.parse` takes between a month's name and a number: `Apr 31`, `Apr-31`, `31/Apr`, `Apr.31`, `31 Apr,`. */
+const NAME_SEP = "[\\s,./-]*";
+/** What `Date.parse` takes between two numbers of a date: `2026-4-31`, `2026/4/31`, `2026.4.31`, `2026, 4, 31`. */
+const NUMBER_SEP = "[\\s,./-]+";
+const MONTH_DAY = new RegExp(`\\b(${MONTHS.join("|")})[a-z]*${NAME_SEP}(\\d{1,2})(?!\\d)`, "i");
+const DAY_MONTH = new RegExp(`(?<!\\d)(\\d{1,2})${NAME_SEP}(${MONTHS.join("|")})`, "i");
+
+/**
+ * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `2026.4.31`, `4/31/2026`
+ * (month first, as `Date.parse` reads it, also with a two-digit year), `Apr 31 2026`, `31-Apr-2026`. Between the numbers
+ * `Date.parse` takes dashes, slashes, dots, commas and spaces alike (`2026 4 31`), so these do too. `Date.parse` takes
+ * any day up to 31 and moves it past the month's end, so the day is checked here.
+ */
+function writtenDay(text: string): [number, number, number] | undefined {
+  const numeric = new RegExp(`^([+-]\\d{6}|\\d{4})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{1,2})(?!\\d)`).exec(text);
+  if (numeric) return [Number(numeric[1]), Number(numeric[2]), Number(numeric[3])];
+  const monthFirst = new RegExp(`^(\\d{1,2})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{4}|\\d{2})(?!\\d)`).exec(text);
+  // A two-digit year is 1950 to 2049, as `Date.parse` takes it.
+  const yy = (y: string) => (y.length === 2 ? Number(y) + (Number(y) < 50 ? 2000 : 1900) : Number(y));
+  if (monthFirst) return [yy(monthFirst[3]!), Number(monthFirst[1]), Number(monthFirst[2])];
+  const year = /\b(\d{4})\b/.exec(text), monthDay = MONTH_DAY.exec(text), dayMonth = monthDay ? null : DAY_MONTH.exec(text);
+  const [word, day] = monthDay ? [monthDay[1]!, monthDay[2]!] : dayMonth ? [dayMonth[2]!, dayMonth[1]!] : [];
+  return year && word ? [Number(year[1]), MONTHS.indexOf(word.toLowerCase()) + 1, Number(day)] : undefined;
+}
 
 /**
  * A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). A date with no
  * zone is local time in every form: `Date.parse` reads `2026-09-30 01:00` and `Sep 30 2026` as local but an ISO date
  * alone as UTC midnight (21:00 the day before in UTC-03, agents#2355), so that one is read as `2026-09-30T00:00`.
+ * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1. A time more than a year
+ * ahead is a usage error that names the flag and the last time it takes: before, it reached the card's check and failed
+ * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken.
+ * `forms` is what a time it cannot read is told to be, for a flag that takes more (`status set --until 2h`).
  */
-export function cardTime(value: unknown, flag: string): number | undefined {
+export function cardTime(value: unknown, flag: string, forms = `a time in milliseconds or a date: ${CARD_TIME_FORMS}`): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
   const day = ISO_DAY.exec(text);
   const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes ${forms}, not ${JSON.stringify(value)}`);
+  const written = writtenDay(text);
+  if (written) {
+    const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (date > days) throw new CliError("usage", `--${flag} takes a day the month has (${year}-${String(month).padStart(2, "0")} has ${days}), not ${JSON.stringify(value)}`);
+  }
+  const last = new Date(Date.now() + STATUS_CARD_LIMITS.nextRunMs);
+  if (ms > last.getTime()) {
+    const two = (n: number) => String(n).padStart(2, "0");
+    const shown = `${last.getFullYear()}-${two(last.getMonth() + 1)}-${two(last.getDate())} ${two(last.getHours())}:${two(last.getMinutes())}`;
+    throw new CliError("usage", `--${flag} takes a time within a year from now (until ${shown}), not ${JSON.stringify(value)}`);
+  }
   return ms;
 }
 
@@ -418,7 +490,7 @@ export const routineOptions: Record<string, OptionSpec> = {
   schedule: { type: "string", description: "When it runs, as people say it: \"every day 01:00\" (80 characters)" },
   cron: { type: "string", description: "Its cron line, shown beside the schedule (never run)" },
   state: { type: "string", description: "active (default on send) or paused" },
-  next: { type: "string", description: `Its next run: milliseconds or a date: ${CARD_TIME_FORMS}` },
+  next: { type: "string", description: `Its next run, within a year: milliseconds or a date: ${CARD_TIME_FORMS}` },
   run: { type: "string", description: "Record a run now: ok, failed or skipped, with :a summary if you like (it becomes the last run)" },
   ...cardOptions,
 };
@@ -481,7 +553,7 @@ export const usageOptions: Record<string, OptionSpec> = {
   label: { type: "string", description: "What the quota is of, like Claude (24 characters)" },
   account: { type: "string", description: "Which of your accounts it is, short (24 characters)" },
   window: { type: "string", description: "The quota's window, as people say it: \"5 h\", \"week\" (16 characters)" },
-  resets: { type: "string", description: `When the window starts again: milliseconds or a date: ${CARD_TIME_FORMS}` },
+  resets: { type: "string", description: `When the window starts again, within a year: milliseconds or a date: ${CARD_TIME_FORMS}` },
   also: { type: "list", description: "Another window, window=percent[@time], like week=80@2026-10-10T00:00:00Z or week=80@2026-10-10 (up to 3; shown in the details; a time as --resets takes, no zone: local time)" },
   id: { type: "string", description: "The card's id (default usage: one card per chat)" },
   all: { type: "boolean", description: "Every 1:1 chat with a contact, instead of one chat" },

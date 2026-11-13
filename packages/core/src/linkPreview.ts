@@ -56,6 +56,19 @@ const LINK_STOP = /[、。〈-】！（），：；？،؛؟۔]/;
 /** What a link leaves out at its end: a sentence's punctuation ("…", "»", "”" too), never a path's "/". */
 export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
 
+/**
+ * What a chat puts right after a link with no space and no address ends with: an emoji ("https://x.example/a🔥", with
+ * its skin tone, presentation selector, joiners and flag tags) and characters that draw as nothing. Read one code point
+ * at a time from the end, so an emoji inside an address stays in it.
+ */
+const LINK_TAIL = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200b\u200c\u2060\ufeff\u{e0020}-\u{e007f}]|\u200d|\ufe0e|\ufe0f)$/u;
+
+/** How many UTF-16 units of `url` before `end` are an emoji's or an invisible character's last code point (0: none). */
+export function linkTail(url: string, end: number): number {
+  const units = end > 1 && /[\udc00-\udfff]/.test(url[end - 1]) && /[\ud800-\udbff]/.test(url[end - 2]) ? 2 : 1;
+  return end > 0 && LINK_TAIL.test(url.slice(end - units, end)) ? units : 0;
+}
+
 /** A link up to the first `LINK_STOP`: "https://x.example/a。" opens /a, not /a%E3%80%82. */
 export function linkStop(url: string): string {
   const at = url.search(LINK_STOP);
@@ -64,10 +77,22 @@ export function linkStop(url: string): string {
 
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", in any of
- * the app's languages) and a closing bracket or quote the link did not open ("(https://x.example/a)") are left as
- * text. The same rule as the message bubble's links.
+ * the app's languages), an emoji or invisible character (`linkTail`) and a closing bracket or quote the link did not
+ * open ("(https://x.example/a)") are left as text. The same rule as the message bubble's links.
  */
 export function linkEnd(whole: string): string {
+  return trimEnd(whole, true);
+}
+
+/**
+ * A payment link (`bitcoin:`, `monero:`…) ends as a web link does, but keeps an emoji at its end: its label or message
+ * is text written as it is ("…&label=Pizza 🍕"), cut at 140 characters wherever that falls.
+ */
+export function uriEnd(whole: string): string {
+  return trimEnd(whole, false);
+}
+
+function trimEnd(whole: string, tails: boolean): string {
   const url = linkStop(whole);
   // Brackets counted once, then taken off as they go: linear in the link, however many ")" a peer puts at its end.
   const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
@@ -76,6 +101,8 @@ export function linkEnd(whole: string): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
+    const tail = tails ? linkTail(url, end) : 0;
+    if (tail) { end -= tail; continue; }
     if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;
     end--;

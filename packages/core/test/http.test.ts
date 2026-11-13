@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CHUNK_KIND,
@@ -20,6 +21,13 @@ import {
   utf8Decode,
   utf8Encode,
   viewerResponseHeaders,
+  VIEWER_DROPPED_DIRECTIVES,
+  VIEWER_DROPPED_HEADERS,
+  VIEWER_PERMISSIONS_POLICY,
+  VIEWER_SERVICE_CSP,
+  VIEWER_SERVICE_CSP_RELAY_ONLY,
+  viewerServicePolicy,
+  withViewerPolicy,
   type FrameChannel,
   type LocalFetch,
   type LocalRequest,
@@ -180,6 +188,105 @@ describe("header hygiene", () => {
       ["Set-Cookie", "other=2; HttpOnly"],
       ["X-Domain", "Domain=kept"],
     ]);
+  });
+
+  it("passes on none of a contact's headers that send reports or early requests to a place it names", () => {
+    // With Hide my IP from contacts on, a report to the contact's server showed it this device's address: Ghostly's
+    // policy refused the app's pictures from there, but a violation of the contact's own policy was reported to it.
+    expect(
+      viewerResponseHeaders([
+        ["Content-Type", "text/html"],
+        ["Content-Security-Policy", "default-src 'self'; report-uri https://contact.example/r; img-src *; Report-To main"],
+        ["content-security-policy", "report-uri https://contact.example/r, script-src 'self';report-to main"],
+        ["content-security-policy", "report-uri https://contact.example/r"],
+        ["Content-Security-Policy-Report-Only", "default-src 'none'; report-uri https://contact.example/r"],
+        ["Reporting-Endpoints", "main=\"https://contact.example/r\""],
+        ["Report-To", "{\"group\":\"main\",\"max_age\":86400,\"endpoints\":[{\"url\":\"https://contact.example/r\"}]}"],
+        ["NEL", "{\"report_to\":\"main\",\"max_age\":86400}"],
+        ["Link", "<https://contact.example>; rel=preconnect"],
+        ["X-Kept", "report-uri https://contact.example/r"],
+      ]),
+    ).toEqual([
+      ["Content-Type", "text/html"],
+      ["Content-Security-Policy", "default-src 'self'; img-src *"],
+      ["content-security-policy", "script-src 'self'"],
+      ["X-Kept", "report-uri https://contact.example/r"],
+    ]);
+  });
+
+  it("drops the headers and directives Desktop's viewer and `service open` drop", () => {
+    const list = (items: readonly string[]) => items.map((item) => `"${item}"`).join(", ");
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_DROPPED_HEADERS = [${list(VIEWER_DROPPED_HEADERS)}];`);
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_DROPPED_DIRECTIVES = [${list(VIEWER_DROPPED_DIRECTIVES)}];`);
+  });
+
+  it("adds Ghostly's connection policy after the contact's own, in one header, so theirs can only narrow it", () => {
+    expect(withViewerPolicy([["Content-Type", "text/html"]])).toEqual([
+      ["Content-Type", "text/html"],
+      ["content-security-policy", VIEWER_SERVICE_CSP],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
+    ]);
+    expect(
+      withViewerPolicy([
+        ["Content-Security-Policy", "default-src *"],
+        ["X-Kept", "1"],
+        ["content-security-policy", "img-src *"],
+      ]),
+    ).toEqual([
+      ["X-Kept", "1"],
+      ["content-security-policy", `default-src *, img-src *, ${VIEWER_SERVICE_CSP}`],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
+    ]);
+  });
+
+  it("lets a contact's app ask for no camera, microphone, location or device, whatever its own headers say", () => {
+    // A grant would be a browser site setting of the app's origin, which no Delete chat, Clear all data or Delete profile clears.
+    const served = withViewerPolicy([
+      ["Permissions-Policy", "camera=*, geolocation=*"],
+      ["Feature-Policy", "camera *; microphone *"],
+      ["permissions-policy", "usb=("],
+    ]);
+    const features = served.filter(([name]) => /^(permissions|feature)-policy$/i.test(name));
+    expect(features).toHaveLength(1);
+    const [[name, value]] = features;
+    expect(name).toBe("permissions-policy");
+    const denied = new Map(value.split(",").map((entry) => entry.trim().split("=") as [string, string]));
+    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "storage-access"]) {
+      expect(denied.get(feature), feature).toBe("()");
+    }
+    expect([...denied.values()].every((allow) => allow === "()")).toBe(true);
+  });
+
+  it("keeps a viewer's page off plain http and so off this machine's and the local network's services", () => {
+    const policy = new Map(VIEWER_SERVICE_CSP.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+    for (const directive of ["default-src", "connect-src", "form-action"]) {
+      expect(policy.get(directive)).toContain("'self'");
+      expect(policy.get(directive)!.filter((source) => /^(\*|http:|ws:)$|^https?:\/\/|^wss?:\/\//.test(source))).toEqual([]);
+    }
+  });
+
+  it("uses the policy Desktop's viewer and `service open` add", () => {
+    const literal = `"${VIEWER_SERVICE_CSP}"`;
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_CSP = ${literal};`);
+    expect(readFileSync(new URL("../../../apps/desktop/src/viewer.rs", import.meta.url), "utf8")).toContain(`const SERVICE_CSP: &str = ${literal};`);
+    const relayOnly = `"${VIEWER_SERVICE_CSP_RELAY_ONLY}"`;
+    expect(readFileSync(new URL("../../cli/src/services.ts", import.meta.url), "utf8")).toContain(`export const OPENED_SERVICE_CSP_RELAY_ONLY = ${relayOnly};`);
+    expect(readFileSync(new URL("../../../apps/desktop/src/viewer.rs", import.meta.url), "utf8")).toContain(`const SERVICE_CSP_RELAY_ONLY: &str = ${relayOnly};`);
+  });
+
+  it("keeps a viewer's page on its own origin while Hide my IP from contacts is on, and as it was while it is off", () => {
+    // covers: settings.network.relay-only
+    expect(viewerServicePolicy(false)).toBe(VIEWER_SERVICE_CSP);
+    expect(viewerServicePolicy(true)).toBe(VIEWER_SERVICE_CSP_RELAY_ONLY);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
+    // No https: (a picture, script, font or frame from a server the contact names would show it this device's address);
+    // its own origin, inline, data: and blob: content as before, and requests and forms on its own origin.
+    const policy = new Map(VIEWER_SERVICE_CSP_RELAY_ONLY.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+    expect(policy.get("default-src")).toEqual(["'self'", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"]);
+    expect(policy.get("connect-src")).toEqual(["'self'"]);
+    expect(policy.get("form-action")).toEqual(["'self'"]);
+    expect([...policy.keys()]).toEqual(["default-src", "connect-src", "form-action"]);
   });
 });
 

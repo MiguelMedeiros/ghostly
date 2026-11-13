@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, StatusCard, TypingKind } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, PersonStatus, Presence, StatusCard, TypingKind } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -163,13 +163,13 @@ export interface EngineApi {
    * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
    * person per message: a new one replaces the old.
    */
-  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean };
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
-   * community only the admin pins.
+   * community only the admin pins. In a group, `n` is the pin's number, for `groupTaken`.
    */
-  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean };
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
    * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by
@@ -193,7 +193,7 @@ export interface EngineApi {
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /**
    * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
-   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * side's linked file id) while both have the app open, across a reconnect. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
   appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
@@ -208,13 +208,18 @@ export interface EngineApi {
   appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number; digest?: string }): { bytes: Uint8Array; size: number } | { error: string };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
-  /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
-  deleteMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. A waiting text
+   * of mine is cancelled (Cancel sending); one the outbox's retry already handed to the link is deleted for everyone
+   * instead, and `everyone` says so.
+   */
+  deleteMessage(params: { linkId: string; messageId: string }): { everyone: boolean };
   /**
    * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
    * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   * In a group, `e` is the removal's edit number, for `groupTaken`.
    */
-  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean; e?: number };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
@@ -351,6 +356,23 @@ export interface EngineApi {
    */
   setGroupTyping(params: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
   /**
+   * The person is using the app (`active`, on input: a key, a click, a touch), or a page knows they left (`idle`). The
+   * engine says `idle` by itself 10 minutes after the last `active` (WISP 401 § Presence and status). Nothing is said
+   * before a page's first word, nor while Settings `sharePresence` is off. `null` takes it back: frames say no
+   * presence again (a headless daemon whose `daemonPresence` was turned off).
+   */
+  setPresence(params: { presence: Presence | null }): void;
+  /**
+   * This profile's status (availability, one emoji, a text of 60 characters, `until` in Unix ms), checked, kept and said
+   * to every paired 1:1 contact whose app offers `status/1`, now or on its next session. While its availability is
+   * `dnd` (until its end) messages make no sound and no notice here; calls still ring. Ends by itself at `until`.
+   */
+  setOwnStatus(params: { status: PersonStatus }): Promise<void>;
+  /** No status any more: every contact is told. */
+  clearOwnStatus(): Promise<void>;
+  /** What this profile says now: its presence (as a page last said), its status while it lasts, and the switch. */
+  getOwnStatus(): { presence?: Presence; status?: PersonStatus; sharePresence: boolean };
+  /**
    * This profile's push subscription (the installed web app, WISP 401 § Wake-up push), or null to stop being woken:
    * shared with every paired contact whose app offers `wake/1`, under a new token per chat each time it changes.
    */
@@ -366,6 +388,8 @@ export interface EngineApi {
    * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /** Whether paired contacts are asked to say when they come online while this app is closed (on by default): each live one is told again. */
+  setWakeOnline(params: { on: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
   wakeForCall(params: { linkId: string }): Promise<boolean>;
   /**
@@ -383,6 +407,10 @@ export interface EngineApi {
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;
   declineGroupInvitation(params: { groupId: string }): void;
+  /** Another group came under this one's id (`GroupView.others`): the one held is the real one; the others' inviters are told no. */
+  keepGroup(params: { groupId: string }): void;
+  /** Another group under this one's id is the real one (`to`: its `linkId`, or its `link`): the one held goes, as Delete takes it. */
+  switchGroup(params: { groupId: string; to: string }): void;
   /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
   enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
   disableGroupLink(params: { groupId: string }): void;
@@ -394,8 +422,11 @@ export interface EngineApi {
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
   /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 406 · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
-  /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
-  groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /**
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, the `n`
+   * of `react`, or my pin numbered `pin`, the `n` of `pinMessage`): members' edges in a private group, hubs' in a community.
+   */
+  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number; pin?: number }): number;
   /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
   chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
@@ -567,10 +598,16 @@ export interface EngineApi {
   appStoreRefresh(params?: { key?: string }): import("../engine/apps").AppStoreSummary[];
   /** Fetches and checks an app for its install screen: a pasted URL, a store's listing or a chat card's pointer. Nothing is stored. */
   appPreview(params: import("../engine/apps").AppSource): import("../engine/apps").AppPreview;
-  /** Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for. */
-  appInstall(params: { digest: string; grant: string[] }): import("../engine/apps").InstalledAppView;
-  /** Installs the waiting update whose new permissions the person accepted. */
-  appUpdateAccept(params: { ref: string }): import("../engine/apps").InstalledAppView;
+  /**
+   * Installs (or updates to) the app `appPreview` fetched, by its digest; `grant` holds every permission it asks for,
+   * `asks` what the screen listed (`AppPreview.asks`): an install that adds more now is refused with `permissions-changed`.
+   */
+  appInstall(params: { stage?: string; digest: string; grant: string[]; asks?: string[] }): import("../engine/apps").InstalledAppView;
+  /**
+   * Installs the waiting update whose new permissions the person accepted; `sequence` and `added` what the screen listed
+   * (`InstalledAppView.pending`): another update waiting now, or one that adds more, is refused with `permissions-changed`.
+   */
+  appUpdateAccept(params: { ref: string; sequence?: number; added?: string[] }): import("../engine/apps").InstalledAppView;
   /** The update check, now (the Apps page opened). Nothing is asked for with no app installed. */
   appCheckUpdates(): import("../engine/apps").AppCheckResult[];
   /** Uninstalls an app: its files, its record and its storage in every chat. */
@@ -697,3 +734,31 @@ export type EngineEvent =
    * every engine call fails.
    */
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
+
+/**
+ * The pictures a posted state left out, as the ones that client was sent last: the profile's own (`settings.avatar`), and
+ * by id each chat's and group edge's contact's (`peerAvatar`) and each group's (`picture`). The public profile pictures:
+ * this profile's identities' by proof id (`identityProofs`) and its Nostr keys' by key (`nostrOwn`), and by chat id a
+ * contact's identities' (`received`) and Nostr keys' (`nostr`), the same way (`shared/keptPictures`).
+ */
+export interface KeptPictures {
+  avatar?: true; links?: string[]; edges?: string[]; groups?: string[];
+  identityProofs?: string[]; nostrOwn?: string[]; received?: Record<string, string[]>; nostr?: Record<string, string[]>;
+}
+
+/**
+ * The chats (`links`), group edges (`edges`) and groups a posted state left out as the ones that client was sent last:
+ * each list here is every id of the state's list, in its order, and the state's list holds only the views that changed
+ * or are new. An id the state's list lacks is the page's view from the state before (its pictures with it); an id no
+ * longer here is gone.
+ */
+export interface KeptViews { links?: string[]; edges?: string[]; groups?: string[] }
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and so is each picture (`keptPictures`) and each chat's,
+ * group edge's and group's view (`keptViews`); the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">> & { keptPictures?: KeptPictures; keptViews?: KeptViews };
+/** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
+export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;

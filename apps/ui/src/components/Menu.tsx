@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
 
@@ -54,16 +54,24 @@ type MenuProps = {
    * its opener's edge, down and towards the line's end as the webview's menu would, and follows the opener on scroll.
    */
   at?: MenuPoint;
+  /**
+   * How high it is drawn, as a popover over the whole page or a phone's sheet: the menus' usual `z-50`, or higher for
+   * an opener that is itself over everything (a call over a video filling the window).
+   */
+  stack?: string;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, stack = "z-50", className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
+  // A phone's sheet covers the page with its backdrop, as a dialog does: Tab and Shift+Tab go round its rows. They went
+  // on to the page behind it, the sheet still open (the composer's + there opened a second sheet over it).
+  useTabTrap(ref, open && phone);
   const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
   const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 
@@ -144,8 +152,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   // had it as the menu opened, its button. A row that moved the focus elsewhere keeps it there, and a field is left
   // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
   // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
+  const openedFrom = useRef<Element | null>(null);
   useLayoutEffect(() => {
     const opener = document.activeElement, menu = ref.current;
+    openedFrom.current = opener;
     return () => {
       if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
       if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
@@ -156,6 +166,18 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
     const rows = usable(ref.current);
+    // Hung on the page's body, a portal's popover comes last in the Tab order: Tab past its last row went to the top of
+    // the page, behind whatever layer it opened from (a whole-window call), the menu still open. It takes the place a
+    // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes.
+    if (portal && !phone && (e.key === "Tab" || e.code === "Tab") && rows.length) {
+      const opener = openedFrom.current;
+      const leaving = e.shiftKey ? document.activeElement === rows[0] : document.activeElement === rows[rows.length - 1];
+      if (!leaving || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected) return;
+      opener.focus({ preventScroll: true });
+      if (e.shiftKey) e.preventDefault();
+      onClose();
+      return;
+    }
     if (!rows.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -165,9 +187,9 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   };
 
   if (phone) return createPortal(<>
-    <div aria-hidden="true" data-testid="menu-backdrop" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
+    <div aria-hidden="true" data-testid="menu-backdrop" className={`fixed inset-0 ${stack} bg-black/40 animate-fade-in`} />
     <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      className={`menu-sheet fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
+      className={`menu-sheet fixed inset-x-0 bottom-0 ${stack} max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
       {children}
     </div>
@@ -176,7 +198,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
-      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, document.body);
 
@@ -211,7 +233,7 @@ function titleIfCut(row: HTMLElement) {
   else row.removeAttribute("title");
 }
 
-export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked }: {
+export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
   /** A second, quieter line under the label; one line too. */
@@ -233,11 +255,17 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
    * it (axe's aria-required-parent). The keys stay the menu's: arrows, Home and End move to it; Space or Enter toggle.
    */
   checked?: boolean;
+  /**
+   * With `checked`: a row of a pick-one list (a device, a language, a folder), the one picked checked. A radio
+   * (`role="radio"`), so a screen reader does not say the others could be on too; wrap the list in a `role="radiogroup"`
+   * named for what it picks where the menu holds more than one.
+   */
+  radio?: boolean;
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
-      {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
+      {...(checked === undefined ? {} : { role: radio ? "radio" : "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
       className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}

@@ -54,8 +54,41 @@ export function looksLikeInvite(fragment: string): boolean {
   return /^ghostly1/i.test(fragment.trim());
 }
 
-/** The same reasons, in the same order, as the app. `code` comes back in lower case. */
+/** What a token is copied with before it, and after it (packages/core/src/text.ts `unwrapPasted`). */
+const PASTE_OPENERS = "\"'“‘«‹<[({`";
+const PASTE_CLOSERS = "\"'”’»›>])}`.,!?;:…";
+const PASTE_SPACES = " \t\n\r  ";
+
+function trimEnd(text: string, chars: string): string {
+  let end = text.length;
+  while (end > 0 && chars.includes(text[end - 1])) end--;
+  return text.slice(0, end);
+}
+
+/** The last word of what was copied, without the quotes, brackets and sentence marks around it. */
+function unwrapPasted(text: string): string {
+  const words = trimEnd(text.trim(), PASTE_CLOSERS + PASTE_SPACES).split(/\s+/);
+  const last = words[words.length - 1] ?? "";
+  let start = 0;
+  while (start < last.length && PASTE_OPENERS.includes(last[start])) start++;
+  return trimEnd(last.slice(start), PASTE_CLOSERS);
+}
+
+/**
+ * The same reasons, in the same order, as the app. `code` comes back in lower case. A code copied with the
+ * sentence around it (a link `ghostly.tools/#ghostly1….` or `…)`) is read once more without it, as the app
+ * does (`readInviteCode`'s `pastedAgain`): taken when it reads, and its refusal said over "not an invite".
+ */
 export function checkInvite(input: string): InviteCheck {
+  const reading = readCode(input);
+  if (reading.ok) return reading;
+  const bare = unwrapPasted(input);
+  if (bare === input.trim() || !bare) return reading;
+  const again = readCode(bare);
+  return again.ok || reading.reason === "not-ghostly" ? again : reading;
+}
+
+function readCode(input: string): InviteCheck {
   const code = input.trim().replace(/^.*#/, "").toLowerCase();
   if (!code.startsWith(`${HRP}1`)) return { ok: false, reason: "not-ghostly" };
   if (code.length > MAX_LENGTH) return { ok: false, reason: "not-ghostly" };

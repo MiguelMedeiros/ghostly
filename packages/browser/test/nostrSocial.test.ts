@@ -62,6 +62,14 @@ describe("parsing kinds 0, 3, 1 and 10000", () => {
     expect(followHints([B, C], [A, C], [B], A)).toEqual({ followsYou: true, youFollow: true, mutual: [C] });
     expect(followHints([], [], [B], A)).toEqual({ followsYou: false, youFollow: false, mutual: [] });
   });
+  it("a profile's name is one line of plain text: no separator, invisible or direction-changing character", () => {
+    const name = "Alice Verified by GitHub ​⁠﻿؜‎‏\u{e0041}";
+    const p = parseProfile(signed({ kind: 0, content: JSON.stringify({ name, display_name: name }) }), A)!;
+    expect(p.name).toBe("AliceVerified by GitHub");
+    expect(p.handle).toBeUndefined();
+    expect(parseProfile(signed({ kind: 0, content: JSON.stringify({ display_name: "​⁠\u{e0041}", name: "alice" }) }), A)!.name).toBe("alice");
+    for (const ok of ["مريم", "שלום עליכם", "👩🏽‍💻 Ana", "नमस्ते", "Zoë 🇧🇷", "山田 太郎"]) expect(plainText(ok, 64)).toBe(ok);
+  });
   it("plain text never keeps controls or bidi overrides", () => {
     expect(plainText("a\u0000b‮c⁦d", 10)).toBe("abcd");
     expect(plainText("x".repeat(1000), 10)).toBe("x".repeat(10));
@@ -132,7 +140,7 @@ describe("the relay client", () => {
     relay.add({ kind: 1, tags: [], content: "first", created_at: now - 3 }, alice);
     relay.add({ kind: 1, tags: [], content: "second", created_at: now - 2 }, alice);
     relay.add({ kind: 1, tags: [], content: "bob's", created_at: now - 1 }, bob);
-    const result = await readRelays([relay.url, "ws://127.0.0.1:1", relay.url.replace("ws://", "ws://") + "/"], { kinds: [1], authors: [A] }, { makeSocket: nodeSocket, timeoutMs: 3000 });
+    const result = await readRelays([relay.url, "ws://127.0.0.1:1", relay.url + "/"], { kinds: [1], authors: [A] }, { makeSocket: nodeSocket, timeoutMs: 3000 });
     expect(result.events.map(e => e.content)).toEqual(["second", "first"]);
     expect(result.answered).toEqual([relay.url, relay.url + "/"]);
     expect(result.failed).toEqual(["ws://127.0.0.1:1"]);

@@ -3,6 +3,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Menu, MenuItem, MenuSeparator } from "../../components/Menu";
+import { useTabTrap } from "../../hooks/useDismiss";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -177,6 +178,52 @@ describe("Menu: one line per row", () => {
     const backdrop = screen.getByTestId("menu-backdrop");
     act(() => { backdrop.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); backdrop.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); });
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+  });
+
+  it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its rows, never to the page behind its backdrop", async () => {
+    // From the last row Tab went on to the page under the backdrop (the chat's Back, its messages, the composer), the
+    // sheet still open over it; Shift+Tab from the first row went to the composer, whose + opened a second sheet.
+    viewport(390, 844);
+    const { user } = renderApp(<><Harness /><button>Behind</button></>);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const [short, long] = [screen.getByTestId("short"), screen.getByTestId("long")];
+    short.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(long);
+    await user.tab();
+    expect(document.activeElement).toBe(short);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(long);
+    expect(screen.getByTestId("menu")).toBeInTheDocument();
+  });
+
+  it("portal: Tab past its last row goes on from its button, and Shift+Tab before its first row goes back to it, closing it", async () => {
+    // Hung on the page's body, the menu came last in the Tab order: from a call's Devices menu Tab went to the page
+    // behind the whole-window call (Skip to content, New chat, Join chat), the menu still open, and Enter worked them unseen.
+    function Trapped() {
+      const box = useRef<HTMLDivElement>(null);
+      useTabTrap(box);
+      return <><button>Behind</button><div ref={box} role="dialog" aria-label="Call"><Harness portal /><button>After</button></div></>;
+    }
+    const { user } = renderApp(<Trapped />);
+    const options = screen.getByRole("button", { name: "Options" });
+    await user.click(options);
+    screen.getByTestId("long").focus();
+    await user.tab();
+    expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "After" }));
+
+    await user.click(options);
+    screen.getByTestId("short").focus();
+    await user.tab({ shift: true });
+    expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
+
+    // Between its rows Tab still goes from one to the next.
+    await user.click(options);
+    screen.getByTestId("short").focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByTestId("long"));
   });
 
   it("closes on Escape", async () => {

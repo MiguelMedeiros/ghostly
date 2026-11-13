@@ -46,7 +46,7 @@ describe("ghostly edit", () => {
     const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row(), row({ id: "peer_x", sender: "peer" })]);
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" })).rejects.toMatchObject({ code: "refused" });
     // A message that is not in the chat at all: not found (exit 3), naming what to give, never "your own messages".
-    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "me_typo", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "me_typo" in this chat: give the messageId send printed' });
+    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "me_typo", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "me_typo" in this chat (ghostly chat history Alice)' });
     // Its wire id names it too.
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
     // The secret guard, as on send.
@@ -148,7 +148,7 @@ describe("ghostly group edit", () => {
     expect(await callApi(away.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 3, sent: false, edges: 0 });
     const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow(), groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
-    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group: give the messageId group send printed' });
+    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group (ghostly group history Crew)' });
     // --wait sent: until an edge took this edit number.
     const nobody = groupFake(undefined, [groupRow({ edit: { seq: 4, at: 5, history: [], pending: true } })]);
     nobody.node.groupTaken.mockImplementation(() => 0);

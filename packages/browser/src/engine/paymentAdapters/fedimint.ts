@@ -39,7 +39,7 @@ export class FedimintAdapter implements PaymentAdapter<FedimintPrepared> {
     if (!federation || federation.network !== target.network) throw new Error("You have not joined this federation in the Fedimint wallet of its network");
     if (!Number.isSafeInteger(feeCap) || feeCap < 0) throw new Error("Invalid maximum fee");
     const balance = Math.floor(await this.wallet.client(target.provider).balance() / 1000);
-    if (balance < amount) throw new Error(`Not enough in this federation: ${balance.toLocaleString()} sats`);
+    if (balance < amount) throw new Error(`Not enough in this federation: ${balance.toLocaleString("en-US")} sats`);
     // Spending notes costs nothing; the contact pays the federation's fee when redeeming them.
     return { fee: 0, prepared: { federation: target.provider, amount } };
   }

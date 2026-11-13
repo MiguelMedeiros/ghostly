@@ -88,7 +88,10 @@ test("three people: only the admin renames the group, everyone sees the new name
 
   await shows(bob, "Reading circle");
   await expect(headerPicture(bob)).toHaveAttribute("data-picture", "set");
-  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice renamed the group to “Reading circle”" })).toBeVisible();
+  // Alice is the admin: her name in the line carries the admin's mark.
+  const renamed = bob.page.getByTestId("group-event").filter({ hasText: "Alice admin renamed the group to “Reading circle”" });
+  await expect(renamed).toBeVisible();
+  await expect(renamed.getByTestId("group-event-admin")).toBeVisible();
 
   // Carol joins later by the link and sees the new name; nobody renamed it again.
   await join(carol, url);

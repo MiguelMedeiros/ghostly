@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { GhostLink, RESUME_WAIT_MS } from "../src/ghostlink";
+import { GhostLink, RELAYED_FIRST_MS, RESUME_WAIT_MS } from "../src/ghostlink";
 import { identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import type { PairedTransport } from "../src/pairedTransports";
@@ -20,7 +20,7 @@ interface App { name: string; link: GhostLink; stopped?: Promise<void> }
 let pkarr: MemoryPkarr, native: NativeWorld;
 const apps: App[] = [];
 
-function startApp(name: string, side: Side, contact: { side: Side; name: string }, opts: { resume?: PairedTransport; endpoints: ("iroh/1" | "hyperdht/1")[] }): App {
+function startApp(name: string, side: Side, contact: { side: Side; name: string }, opts: { resume?: PairedTransport; endpoints: ("iroh/1" | "hyperdht/1")[]; automatic?: boolean }): App {
   const app = { name } as App;
   app.link = new GhostLink({
     params: side.params,
@@ -31,7 +31,9 @@ function startApp(name: string, side: Side, contact: { side: Side; name: string 
         "iroh/1": { id: native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] },
         "hyperdht/1": { publicKey: native.key("hyperdht/1", contact.name) },
       },
-      peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], peerFallback: true, preferred: "iroh/1", automatic: false,
+      // On Automatic the contact's app puts Iroh first, as this one does (WISP 100, revision 2026-11-08).
+      peerTransports: opts.automatic ? ["iroh/1", "webrtc/1", "hyperdht/1"] : ["webrtc/1", "hyperdht/1", "iroh/1"], peerFallback: true,
+      preferred: "iroh/1", automatic: !!opts.automatic,
     },
     ...(opts.resume ? { resume: opts.resume } : {}),
     transport: pkarr.transport(),
@@ -90,4 +92,47 @@ for (const restarted of ["lower", "higher"] as const) it(`back after a crash on 
   console.log(`RESUME_ENDPOINT_DOWN ${restarted}: live again ${took / 1000} s after the restart, on ${transportOf(goes)} (resume wait ${RESUME_WAIT_MS / 1000} s)`);
   expect(took).toBeLessThan(3_000);
   expect(transportOf(goes)).toBe("hyperdht/1");
+}, 240_000);
+
+it("back over WebRTC on Automatic, resumed on Iroh first: with the contact's Iroh out of reach, the WebRTC offer still says it resumes", async () => {
+  const { inviter, joiner } = invitationWhere("inviter");
+  let goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { endpoints: ["iroh/1"], automatic: true });
+  const stays = startApp("stays", joiner, { side: inviter, name: "goes" }, { endpoints: ["iroh/1"], automatic: true });
+  expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+  await run(5_000);
+
+  native.kill("goes"); killRtc("goes");
+  goes.stopped = goes.link.stop(false);
+  await run(3_000);
+  // Back as a resume over WebRTC (the chat was live on it), which Automatic dials on Iroh first; the contact's Iroh is
+  // off its relay, so that dial fails and the same attempt's WebRTC offer carries the chat.
+  native.offRelay.add("stays");
+  goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { resume: "webrtc/1", endpoints: ["iroh/1"], automatic: true });
+  const offeredOf = (app: App) => (app.link as unknown as { offered?: { resume?: boolean; woke?: boolean } }).offered;
+  let offered: { resume?: boolean } | undefined;
+  expect(await until(() => !!(offered = offeredOf(goes)), 60_000), "a WebRTC offer goes out").toBeLessThan(Infinity);
+  expect(native.dialFailures, "the Iroh dial went first").toBeGreaterThan(0);
+  expect(offered?.resume).toBe(true);
+}, 240_000);
+
+it("back on Automatic with the contact's Iroh out of reach, the chat is live over WebRTC in seconds, not after Iroh's connect timeout", async () => {
+  // The web and CLI Iroh gives up a dial that reaches nobody after its 20 s connect timeout (irohWeb.ts `connectMs`):
+  // measured on the real wasm against a killed, a blackholed and a contact-less relay alike.
+  native.dialFailMs = 20_000;
+  const { inviter, joiner } = invitationWhere("inviter");
+  let goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { endpoints: ["iroh/1"], automatic: true });
+  const stays = startApp("stays", joiner, { side: inviter, name: "goes" }, { endpoints: ["iroh/1"], automatic: true });
+  expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+  await run(5_000);
+
+  native.kill("goes"); killRtc("goes");
+  goes.stopped = goes.link.stop(false);
+  await run(3_000);
+  native.offRelay.add("stays");
+  goes = startApp("goes", inviter, { side: joiner, name: "stays" }, { resume: "webrtc/1", endpoints: ["iroh/1"], automatic: true });
+  const took = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000);
+  console.log(`IROH_FIRST_RELAY_DOWN: live again ${took / 1000} s after the restart, on ${transportOf(goes)}`);
+  expect(native.dialFailures, "the Iroh dial went first").toBeGreaterThan(0);
+  expect(took).toBeLessThan(RELAYED_FIRST_MS + 8_000);
+  expect(transportOf(goes)).toBe("webrtc/1");
 }, 240_000);

@@ -1,9 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
+import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
-import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
-import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { onAppInput } from "../../lib/apps/open";
+import { ANSWER_AHEAD_BYTES, BRIDGE_READY, BRIDGE_REFUSED, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { createHash } from "node:crypto";
+import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
 
@@ -73,6 +75,49 @@ describe("the cookies one opened app keeps", () => {
     jar.take("=nameless");
     expect(jar.header()).toBeNull();
   });
+  it("read Max-Age before Expires, and skip a Max-Age that is no number of seconds", () => {
+    const jar = new CookieJar();
+    const past = new Date(Date.now() - 3_600_000).toUTCString();
+    // What Express sends for `maxAge` when the contact's clock is behind this device's.
+    jar.take(`sid=abc; Max-Age=3600; Path=/; Expires=${past}; HttpOnly`);
+    jar.take("a=2; Max-Age=");
+    jar.take("b=3; Max-Age=soon");
+    expect(jar.header()).toBe("sid=abc; a=2; b=3");
+    jar.take(`sid=; Expires=${new Date(Date.now() + 3_600_000).toUTCString()}; Max-Age=-1`);
+    jar.take("a=; Max-Age=60; Max-Age=0");
+    expect(jar.header()).toBe("b=3");
+  });
+  it("go only to the paths each was set for, the longer path first, as a browser sends them", () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/", "/login");
+    jar.take("sid=admin; Path=/admin", "/admin/login");
+    // No path of its own: the directory of the address that set it.
+    jar.take("step=2", "/wizard/one?x=1");
+    expect(jar.header("/")).toBe("sid=root");
+    expect(jar.header("/admin/users")).toBe("sid=admin; sid=root");
+    expect(jar.header("/administrator")).toBe("sid=root");
+    expect(jar.header("/wizard/two")).toBe("step=2; sid=root");
+    // Gone at its own path only: the one at / stays.
+    jar.take("sid=; Path=/admin; Max-Age=0", "/admin/logout");
+    expect(jar.header("/admin")).toBe("sid=root");
+  });
+  it("stop going once their Max-Age or Expires has passed, while the app stays open", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-12T12:00:00Z"));
+      const jar = new CookieJar();
+      jar.take("flash=saved; Max-Age=5");
+      jar.take("csrf=t1; Expires=Thu, 12 Nov 2026 12:00:10 GMT");
+      jar.take("sid=abc");
+      expect(jar.header()).toBe("flash=saved; csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:06Z"));
+      expect(jar.header()).toBe("csrf=t1; sid=abc");
+      vi.setSystemTime(new Date("2026-11-12T12:00:11Z"));
+      expect(jar.header()).toBe("sid=abc");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("hold a bounded number of names", () => {
     const jar = new CookieJar();
     for (let i = 0; i < CookieJar.MAX + 10; i++) jar.take(`c${i}=1`);
@@ -96,7 +141,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -108,11 +153,71 @@ describe("one request from the app, over the contact's link", () => {
       async (request) => { sent.push(request); return answer(200, [["content-type", "text/plain"], ["set-cookie", "theme=dark; Path=/"], ["x-bad", "a\r\nb"]], ["he", "llo"]); }, jar, words);
     expect(sent[0]).toMatchObject({ method: "POST", path: "/api", headers: [["content-type", "text/plain"], ["cookie", "sid=abc"]] });
     expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
-    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"]] });
+    // A page the clipboard guard cannot go into (no destination said, so taken for one) runs no script.
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
     expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
     expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
+  });
+
+  it("sends each request the cookies of its own path, and keeps one an answer sets at that answer's path", async () => {
+    const jar = new CookieJar();
+    jar.take("sid=root; Path=/");
+    jar.take("sid=admin; Path=/admin");
+    const cookies: (string | undefined)[] = [];
+    const send = async (request: ClientRequest) => {
+      cookies.push(request.headers?.find(([name]) => name === "cookie")?.[1]);
+      return answer(200, request.path.startsWith("/shop/") ? [["set-cookie", "cart=3"]] : [], []);
+    };
+    for (const path of ["/admin/users?page=2", "/shop/item", "/shop/cart", "/"]) {
+      await serve(recorder().port, { type: "request", method: "GET", path, headers: [], body: null }, send, jar, words);
+    }
+    expect(cookies).toEqual(["sid=admin; sid=root", "sid=root", "cart=3; sid=root", "sid=root"]);
+  });
+
+  it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
+    // covers: settings.network.relay-only
+    const { port, replies } = recorder();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
+    expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
+    // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's
+    // and the clipboard guard's.
+    const off = recorder();
+    await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+      async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
+    expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]] });
+  });
+
+  it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
+    // covers: settings.network.relay-only
+    const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
+    const served = async (destination: string | undefined, relayOnly: boolean, type = "text/html") => {
+      const { port, replies } = recorder();
+      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null, ...(destination === undefined ? {} : { destination }) },
+        async () => answer(200, [["content-type", type], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], [page.slice(0, 7), page.slice(7)]), new CookieJar(), words, undefined, relayOnly);
+      const head = replies[0] as Extract<ServiceReply, { type: "head" }>;
+      const text = replies.filter((r) => r.type === "chunk").map((r) => new TextDecoder().decode((r as { bytes: Uint8Array }).bytes)).join("");
+      return { headers: head.headers, text };
+    };
+    const guarded = await served("iframe", true);
+    expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    // The contact's policy lets it run; its length is not the page's any more.
+    expect(guarded.headers).toEqual([
+      ["content-type", "text/html"],
+      ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}`],
+      ["content-security-policy", VIEWER_GUARD_CSP],
+      ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY],
+    ]);
+    // A page the guard cannot go into runs no script.
+    expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"]);
+    // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
+    expect((await served("", true)).text).toBe(page);
+    expect((await served("script", true, "text/javascript")).text).toBe(page);
+    const off = await served("iframe", false);
+    expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+    expect(off.headers).toEqual([["content-type", "text/html"], ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}`], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
   });
 
   it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -175,13 +280,275 @@ describe("one request from the app, over the contact's link", () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it("drops what is not a request, sending nothing", async () => {
-    const { port, replies, closed } = recorder();
-    let called = false;
-    await serve(port, { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null }, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
-    expect(called).toBe(false);
-    expect(replies).toEqual([]);
+  it("holds a bounded number of the app's requests and their bodies in this page, however many it sends: past it, refused at once", async () => {
+    vi.useFakeTimers();
+    try {
+      // The real link client, on a link where the contact never answers: what goes out is counted.
+      let sentOnLink = 0;
+      const channel = {
+        bufferedAmount: LIMITS.sendHighWaterMark + 1, drained: () => new Promise<void>(() => {}), close() {}, onMessage: null, onClose: null,
+        send(data: string | Uint8Array) { if (typeof data === "string" && decodeControl(data)?.t === "req") sentOnLink++; },
+      };
+      const client = new HttpClient(channel);
+      const send = (request: ClientRequest) => client.request("demo", request);
+      const jar = new CookieJar();
+      // One 8 MiB buffer for every POST, as the app can: what counts is what the page holds for each.
+      const body = new ArrayBuffer(MAX_REQUEST_BYTES);
+      const requests = Array.from({ length: 40 }, () => {
+        const r = recorder();
+        let ended = false;
+        void serve(r.port, { type: "request", method: "POST", path: "/up", headers: [], body }, send, jar, words).finally(() => { ended = true; });
+        return { ...r, ended: () => ended };
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const held = requests.filter((r) => !r.ended());
+      const refused = requests.filter((r) => r.ended());
+      expect(held.length * MAX_REQUEST_BYTES, "the bodies this page still holds").toBeLessThanOrEqual(32 * 1024 * 1024);
+      expect(refused.length).toBe(40 - held.length);
+      for (const r of refused) expect(r.replies).toEqual([{ type: "error", status: 503, text: "Failed" }]);
+      // Once those end (here: unanswered in time), the app has its room again.
+      await vi.advanceTimersByTimeAsync(ANSWER_BY_MS);
+      expect(requests.every((r) => r.ended())).toBe(true);
+      const again = recorder();
+      void serve(again.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, send, jar, words);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(again.replies).toEqual([]);
+      expect(sentOnLink).toBe(held.length + 1);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("takes every file of a page that asks for more at once than the page sends together: the rest wait their turn, none refused", async () => {
+    // A gallery's images and its modules: Chromium hands the services worker 100 at once (60 images and 40 modules
+    // under one page), well past the requests this page has on the link together.
+    const jar = new CookieJar();
+    const waiting: (() => void)[] = [];
+    let live = 0, most = 0, sent = 0;
+    const send = async (request: ClientRequest) => {
+      sent++;
+      most = Math.max(most, ++live);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      live--;
+      return answer(200, [["content-type", "image/png"]], [request.path]);
+    };
+    const requests = Array.from({ length: 100 }, (_, i) => {
+      const r = recorder();
+      const done = serve(r.port, { type: "request", method: "GET", path: `/img/${i}.png`, headers: [], body: null, destination: "image" }, send, jar, words);
+      return { ...r, done };
+    });
+    // One the page let go of while it waited (the image scrolled away) leaves its turn and never reaches the contact.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    requests[99]!.cancel();
+    while (waiting.length) { waiting.shift()!(); await new Promise((resolve) => setTimeout(resolve, 0)); }
+    await Promise.all(requests.map((r) => r.done));
+    expect(most).toBeLessThanOrEqual(MAX_PENDING_REQUESTS);
+    expect(sent).toBe(99);
+    for (const [i, r] of requests.slice(0, 99).entries()) {
+      expect(r.replies[0]?.type, `/img/${i}.png`).toBe("head");
+      expect(r.replies[r.replies.length - 1]).toEqual({ type: "end" });
+    }
+    expect(requests[99]!.replies.every((r) => r.type === "error")).toBe(true);
+    // Past what may wait in this page too, a request is refused at once, as before.
+    const held: (() => void)[] = [];
+    const stuck = async () => { await new Promise<void>((resolve) => held.push(resolve)); return answer(200, [], []); };
+    const more = Array.from({ length: MAX_PENDING_REQUESTS + MAX_WAITING_REQUESTS + 1 }, () => {
+      const r = recorder();
+      void serve(r.port, { type: "request", method: "GET", path: "/", headers: [], body: null }, stuck, jar, words);
+      return r;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(more.filter((r) => r.replies.length).map((r) => r.replies)).toEqual([[{ type: "error", status: 503, text: "Failed" }]]);
+    for (const r of more) r.cancel();
+    for (const go of held) go();
+  });
+
+  it("sends nothing on the link for what is not a request, and says it failed at once: the worker would wait for an answer", async () => {
+    // A path past what the page takes (a long query), a method it does not read, a full URL: none reaches the contact,
+    // and each is answered now, in the profile's words, never left to the worker's English after HEAD_TIMEOUT_MS.
+    for (const data of [
+      { type: "request", method: "GET", path: `/search?q=${"a".repeat(9000)}`, headers: [], body: null },
+      { type: "request", method: "patch", path: "/api", headers: [], body: null },
+      { type: "request", method: "GET", path: "https://evil.example/", headers: [], body: null },
+      null,
+    ]) {
+      const { port, replies, closed } = recorder();
+      let called = false;
+      await serve(port, data, async () => { called = true; return answer(200, [], []); }, new CookieJar(), words);
+      expect(called).toBe(false);
+      expect(replies).toEqual([{ type: "error", status: 400, text: "Failed" }]);
+      expect(closed()).toBe(true);
+    }
+  });
+});
+
+/**
+ * A port as the browser's: what is posted reaches the worker by structured clone, and a transferred buffer moves (it
+ * reads empty on the page after), so a test sees what the worker gets and what the page copied to send it.
+ */
+function workerPort() {
+  const replies: ServiceReply[] = [];
+  const transfers: ArrayBuffer[][] = [];
+  let closed = false;
+  const port = {
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    postMessage: (reply: ServiceReply, transfer: Transferable[] = []) => {
+      transfers.push(transfer as ArrayBuffer[]);
+      replies.push(structuredClone(reply, { transfer }));
+    },
+    close: () => { closed = true; },
+  };
+  return { port: port as unknown as MessagePort, replies, transfers, closed: () => closed, cancel: () => port.onmessage?.({ data: { type: "cancel" } }) };
+}
+
+/** The engine's own client for one contact's link, with the link's side recorded: answers are fed as link frames. */
+function linkClient() {
+  const sent: (string | Uint8Array)[] = [];
+  const client = new HttpClient({ send: (data) => { sent.push(data); }, bufferedAmount: 0, drained: async () => {}, close: () => {}, onMessage: null, onClose: null });
+  const controls = () => sent.filter((d): d is string => typeof d === "string").map((d) => JSON.parse(d) as { t: string; id: number });
+  /** One body chunk as it comes off the link: its payload a view into the frame, as `decodeChunk` gives it. */
+  const chunk = (id: number, payload: Uint8Array, end: boolean) => client.handleChunk(decodeChunk(encodeChunk({ kind: CHUNK_KIND.responseBody, id, end, payload }))!);
+  return { client, controls, chunk };
+}
+
+/** Bytes copied by `Uint8Array.prototype.slice` while `run` runs. */
+async function bytesSliced(run: () => Promise<void>): Promise<{ calls: number; bytes: number }> {
+  const slice = Uint8Array.prototype.slice;
+  const counted = { calls: 0, bytes: 0 };
+  const spy = vi.spyOn(Uint8Array.prototype, "slice").mockImplementation(function (this: Uint8Array, ...args: [number?, number?]) {
+    const copy = slice.apply(this, args);
+    counted.calls++;
+    counted.bytes += copy.byteLength;
+    return copy;
+  });
+  try { await run(); } finally { spy.mockRestore(); }
+  return counted;
+}
+
+const sha256 = (parts: Uint8Array[]) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest("hex"); };
+
+describe("a contact's answer on its way to the services worker", () => {
+  it("copies each chunk once: a 10 MB answer costs 10 MB of copies, not 20, and reaches the worker byte for byte", async () => {
+    const size = 10_000_000;
+    const body = new Uint8Array(size);
+    for (let i = 0; i < size; i++) body[i] = (i * 31 + (i >>> 11)) & 0xff;
+    const link = linkClient();
+    const { port, replies, transfers, closed } = workerPort();
+    const copied = await bytesSliced(async () => {
+      const done = serve(port, { type: "request", method: "GET", path: "/big.bin", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+      await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+      link.client.handleResponse({ t: "res", id: 1, st: 200, h: [["content-type", "application/octet-stream"]], b: true });
+      for (let at = 0; at < size; at += MAX_CHUNK_PAYLOAD_BYTES) {
+        link.chunk(1, body.subarray(at, Math.min(size, at + MAX_CHUNK_PAYLOAD_BYTES)), at + MAX_CHUNK_PAYLOAD_BYTES >= size);
+      }
+      await done;
+    });
+    const chunks = replies.filter((r): r is Extract<ServiceReply, { type: "chunk" }> => r.type === "chunk");
+    const links = Math.ceil(size / MAX_CHUNK_PAYLOAD_BYTES);
+    expect(chunks).toHaveLength(links);
+    expect(replies).toHaveLength(links + 2);
+    expect(replies[0]).toMatchObject({ type: "head", status: 200 });
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    // One copy per chunk, out of the link's frame (`HttpClient`): none more on the page to send it on.
+    expect(copied).toEqual({ calls: links, bytes: size });
+    // Each chunk's own buffer moved to the worker, exactly its bytes: none left behind on the page.
+    for (const [i, transfer] of transfers.slice(1, -1).entries()) {
+      expect(transfer).toHaveLength(1);
+      expect(transfer[0]!.byteLength, `chunk ${i} left on the page`).toBe(0);
+      expect(chunks[i]!.bytes.byteLength).toBe(chunks[i]!.bytes.buffer.byteLength);
+    }
+    const received = chunks.map((c) => c.bytes);
+    expect(received.reduce((n, c) => n + c.byteLength, 0)).toBe(size);
+    expect(sha256(received)).toBe(sha256([body]));
     expect(closed()).toBe(true);
+  });
+
+  it("copies a chunk that is only part of its buffer, and leaves that buffer whole", async () => {
+    const shared = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    const { port, replies, transfers } = workerPort();
+    await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, async () => ({
+      status: 200, headers: [], bytes: async () => new Uint8Array(),
+      body: (async function* () { yield shared.subarray(0, 3); yield shared.subarray(3); })(),
+    }), new CookieJar(), words);
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && [...r.bytes])).toEqual([[1, 2, 3], [4, 5, 6, 7, 8]]);
+    expect(transfers.slice(1, -1).map((t) => t.map((b) => b === shared.buffer))).toEqual([[false], [false]]);
+    expect([...shared]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("still stops the contact's answer when the page stops reading partway, sending nothing after", async () => {
+    const link = linkClient();
+    const { port, replies, cancel, closed } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let seen = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      sent(reply, transfer as Transferable[]);
+      if (reply.type === "chunk" && ++seen === 3) cancel();
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    for (let i = 0; i < 10; i++) link.chunk(1, new Uint8Array(1024).fill(i), false);
+    await done;
+    expect(replies.filter((r) => r.type === "chunk").map((r) => r.type === "chunk" && r.bytes[0])).toEqual([0, 1, 2]);
+    expect(replies.map((r) => r.type)).toEqual(["head", "chunk", "chunk", "chunk", "end"]);
+    expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 }));
+    expect(closed()).toBe(true);
+  });
+
+  /** A request the worker says what the frame read of (`flow`), its answer fed off the link by `feed`. */
+  async function flowing(reads: boolean) {
+    const link = linkClient();
+    const { port, replies, cancel } = workerPort();
+    const sent = port.postMessage.bind(port);
+    let taken = 0;
+    port.postMessage = ((reply: ServiceReply, transfer?: Transferable[]) => {
+      // Its length before it goes: the send moves its buffer.
+      const length = reply.type === "chunk" ? reply.bytes.byteLength : 0;
+      sent(reply, transfer as Transferable[]);
+      if (reads && reply.type === "chunk") {
+        taken += length;
+        const bytes = taken;
+        setTimeout(() => port.onmessage?.({ data: { type: "read", bytes } } as MessageEvent));
+      }
+    }) as typeof port.postMessage;
+    const done = serve(port, { type: "request", method: "GET", path: "/video.mp4", headers: [], body: null, flow: true }, (request) => link.client.request("app", request), new CookieJar(), words);
+    await vi.waitFor(() => expect(link.controls().some((f) => f.t === "req")).toBe(true));
+    link.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    let fed = 0;
+    const feed = (bytes: number, end = false) => {
+      for (let left = bytes; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) {
+        const n = Math.min(MAX_CHUNK_PAYLOAD_BYTES, left);
+        fed += n;
+        link.chunk(1, new Uint8Array(n), end && left <= MAX_CHUNK_PAYLOAD_BYTES);
+      }
+      return fed;
+    };
+    const worker = () => replies.reduce((n, r) => n + (r.type === "chunk" ? r.bytes.byteLength : 0), 0);
+    return { link, replies, cancel, done, feed, worker };
+  }
+
+  it("sends the worker no more than a MiB past what the app's frame read: an answer it leaves unread stays on the link, which lets it go", async () => {
+    const { link, cancel, done, feed, worker } = await flowing(false);
+    feed(16 * 1024 * 1024);
+    await vi.waitFor(() => expect(link.controls()).toContainEqual(expect.objectContaining({ t: "rst", id: 1 })));
+    expect(worker()).toBeGreaterThanOrEqual(ANSWER_AHEAD_BYTES);
+    expect(worker()).toBeLessThanOrEqual(ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
+    cancel();
+    await done;
+  });
+
+  it("sends the whole answer to a frame that reads it", async () => {
+    const { link, replies, done, feed, worker } = await flowing(true);
+    const step = 512 * 1024;
+    for (let i = 1; i <= 16; i++) {
+      const fed = feed(step, i === 16);
+      await vi.waitFor(() => expect(worker()).toBe(fed));
+    }
+    await done;
+    expect(worker()).toBe(16 * step);
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
+    expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
   });
 });
 
@@ -220,6 +587,88 @@ describe("a contact's app shown over the app", () => {
     // Closed, it hears nothing more.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(listeners.size).toBe(0);
+  });
+
+  it("counts the person's taps and keys in the app for the lock screen, as the browser's activation says, and only while it is open", async () => {
+    // Real input in a frame activates every frame above it, this page too; no script, the contact's included, can.
+    const activation = { isActive: false };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    let heard = 0;
+    const stop = onAppInput(() => { heard += 1; });
+    vi.useFakeTimers();
+    try {
+      await open("demo");
+      vi.advanceTimersByTime(10_000);
+      expect(heard, "no input, nothing").toBe(0);
+      // The contact's page saying so itself counts for nothing.
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "activity" }, origin: new URL(frame.src).origin, source: frame.contentWindow }));
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(0);
+      activation.isActive = true;
+      vi.advanceTimersByTime(1_000);
+      expect(heard).toBeGreaterThan(0);
+      activation.isActive = false;
+      const before = heard;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+      // Closed: the page's own listeners hear its input again, and nothing is counted twice.
+      closeServiceView();
+      activation.isActive = true;
+      vi.advanceTimersByTime(10_000);
+      expect(heard).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      stop();
+      delete (navigator as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("says why in the person's words when the bridge shows no app (the browser refused it its worker), until Try again loads it anew", async () => {
+    // Firefox blocking third-party cookies refuses the bridge its services worker: the services host is a site of its own.
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const first = frame.src;
+    const origin = new URL(first).origin;
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const refused = (reason: string, from: { origin: string; source: unknown } = { origin, source: inFrame }) =>
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_REFUSED, reason }, origin: from.origin, source: from.source as Window }));
+    // Only the bridge in the view's frame is heard.
+    refused("blocked", { origin: "https://other.example", source: inFrame });
+    refused("blocked", { origin, source: window });
+    expect(notice.hidden).toBe(true);
+    refused("blocked");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.style.display).toBe("none");
+    // The contact's presence changing leaves it said, and loads nothing.
+    frame.src = "about:blank";
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    // Offline goes first, and back online it is said again.
+    offline = true;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
+    offline = false;
+    for (const l of listeners) l();
+    expect(notice.textContent).toBe("This browser blocks Demo hereTry again");
+    expect(frame.src).toBe("about:blank");
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    retry.focus();
+    retry.click();
+    expect(notice.hidden).toBe(true);
+    expect(frame.style.display).toBe("");
+    expect(frame.src, "the bridge is loaded anew").toBe(first);
+    expect(document.activeElement, "the focus goes to the app, not the page's body").toBe(frame);
+    // A page of the app the bridge would not show.
+    refused("unguarded");
+    expect(notice.textContent).toBe("This page of Demo cannot be shown hereTry again");
   });
 
   it("opens on the notice when the contact is already offline", async () => {
@@ -281,6 +730,25 @@ describe("a contact's app shown over the app", () => {
     expect(signals.map((s) => s.aborted), "the frame loaded again: the old page's requests end").toEqual([true, true, true, false, false]);
     document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
+  });
+
+  it("answers every request of an app with the viewer policy, and the one that keeps it to its own origin while Hide my IP from contacts is on", async () => {
+    for (const relayOnly of [true, false]) {
+      await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]), words, relayOnly });
+      const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+      const inFrame = { postMessage: vi.fn() };
+      Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin: new URL(frame.src).origin, source: inFrame as unknown as Window }));
+      const channel = (inFrame.postMessage.mock.calls[0]![2] as MessagePort[])[0]!;
+      const reply = new MessageChannel();
+      const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
+      channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
+      const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
+      expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
+      // The bridge, on the app's origin, runs the WebRTC guard too while it is on.
+      expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly });
+      document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    }
   });
 
   it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {

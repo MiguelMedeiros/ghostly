@@ -267,6 +267,27 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
+  it("a check marked ahead of the clock (the clock went back since) is not fresh: the check after start runs, and marks it now", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    // Checked while the device's clock ran a year ahead.
+    const ahead = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    const first = apps(net, { now: () => ahead });
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.checkUpdates();
+    expect(await first.list()).toMatchObject([{ checkedAt: ahead }]);
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch, "the check after start").toHaveBeenCalled();
+    const [app] = await store.list();
+    expect(app!.checkedAt, "marked at the clock's time, so the next start judges it").toBeLessThanOrEqual(Date.now());
+    store.stop();
+  });
+
   it("the scheduled check waits while the network is off", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
@@ -368,6 +389,29 @@ describe("stores", () => {
     expect(await store.refreshStores()).toMatchObject([{ sequence: 7, apps: [{ ref: v1.ref }], problem: "rollback" }]);
   });
 
+  it("a store's own URL behind the copy the person took is not checked again while its bytes stay the same", async () => {
+    const PINNED_STORE = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    const store = apps(net);
+    await net.putStore(await storeFiles({ sequence: 5 }), PINNED_STORE);
+    await store.addStore({ url: PINNED_STORE });
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    await store.previewStore({ url: STORE_URL });
+    await store.addStore({ url: STORE_URL });
+    await store.refreshStores();
+    // Each Apps page visit reads both URLs: the pinned one's index never changes, and was checked whole already.
+    vi.mocked(readAppStoreSteps).mockClear();
+    for (let i = 0; i < 3; i++) {
+      const [read] = await store.refreshStores();
+      expect(read).toMatchObject({ url: PINNED_STORE, sequence: 6 });
+      expect(read!.problem).toBeUndefined();
+    }
+    expect(readAppStoreSteps, "neither URL's bytes changed").not.toHaveBeenCalled();
+    // An index changed at the copy's URL is read whole, once.
+    await net.putStore(await storeFiles({ sequence: 7 }));
+    expect(await store.refreshStores()).toMatchObject([{ sequence: 7 }]);
+    expect(readAppStoreSteps).toHaveBeenCalledTimes(1);
+  });
+
   it("a store's preview says whether the person has it already, and the held index's sequence; a removed one is new again", async () => {
     const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
     const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
@@ -463,6 +507,26 @@ describe("stores", () => {
       await store.removeStore({ key: keyOf(STORE_KEY) });
       await expect(store.addStore({ url: STORE_URL })).rejects.toThrow(/^rollback/);
     }
+  });
+
+  it("the preview of a store removed says what Add would refuse: an index older than the last one taken, or another under its sequence", async () => {
+    const OLD_URL = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    await net.putStore(await storeFiles({ sequence: 5 }), OLD_URL);
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    const older = await store.previewStore({ url: OLD_URL });
+    expect(older).toMatchObject({ sequence: 5, refused: "rollback" });
+    expect(older.held, "a store removed is not one the person has").toBeUndefined();
+    await expect(store.addStore({ url: OLD_URL })).rejects.toThrow(/^rollback/);
+    await net.putStore(await storeFiles({ sequence: 6, apps: [listing(await bundle())] }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).toMatchObject({ sequence: 6, refused: "equivocation" });
+    // The one last taken, or a newer one, is offered as the first time.
+    expect(await store.previewStore({ url: STORE_URL })).not.toHaveProperty("refused");
+    await net.putStore(await storeFiles({ sequence: 7 }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).not.toHaveProperty("refused");
+    expect(await store.addStore({ url: OLD_URL })).toMatchObject({ sequence: 7 });
   });
 
   it("an index whose bytes have not changed is not checked again, only its expiry; a changed one is read whole", async () => {

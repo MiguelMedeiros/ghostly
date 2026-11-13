@@ -2,6 +2,7 @@ import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "../apps/showApps";
 import { fakeEngine, paymentView } from "../fakeEngine";
 import { TEST_MINT } from "../payments/fixtures";
 
@@ -108,12 +109,24 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).not.toHaveTextContent("Requested");
   });
 
+  it("a payment the wallet does not know yet reads in the app's language too, not the engine's English line", () => {
+    fakeEngine.setState({ payments: {} });
+    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "pt" });
+    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer("⚡ Requested 1,234 test sats", { paymentId: "pay-1" })]} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: ⚡ Pediu a você 1\.234 sats de teste$/);
+  });
+
   it("an app card reads as the card names it, in the app's language, not its English fallback with the bundle's link", () => {
     const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp", opened: true } as const;
-    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
-    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
-    wait(ANNOUNCE_WINDOW_MS);
-    expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+    // A 1:1 chat where Apps shows: its bubble draws the card (elsewhere both say its text, appCardLineWhereShown.test.tsx).
+    showApps();
+    try {
+      const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
+      view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
+      wait(ANNOUNCE_WINDOW_MS);
+      expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+    } finally { hideApps(); }
   });
 
   it("a voice message or a video reads as the chat list says it, in the app's language, not the history's English line", () => {
@@ -141,6 +154,29 @@ describe("a new message, read out to a screen reader", () => {
     const { update } = setup(HISTORY);
     update([peer("older"), peer("older still"), ...HISTORY]);
     update([peer("older"), peer("older still"), { ...HISTORY[0], text: "an old one, edited" }, HISTORY[1]]);
+    wait(ANNOUNCE_WINDOW_MS * 2);
+    expect(region()).toHaveTextContent("");
+  });
+
+  it("a message that comes as my last one takes its sent id, or goes, is still read out", () => {
+    // Sent at the same moment as the contact's answer: mine is drawn under a draft id, then takes its own, and the
+    // answer came in that same update. The row known last was no longer there, so the answer was taken for nothing new.
+    const draft = { ...mine("crossed"), id: "me_1794035724000" };
+    const { update } = setup([...HISTORY, draft]);
+    const sent = [...HISTORY, { ...draft, id: "me_7LjSmwilpLn" }, peer("crossed too")];
+    update(sent);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: crossed too$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    // The last one deleted in the same update as a new one coming.
+    update([...HISTORY, sent[2], peer("after a delete")]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: after a delete$/);
+  });
+
+  it("a list with none of the rows known is not read out as news", () => {
+    const { update } = setup(HISTORY);
+    update([peer("x"), peer("y")]);
     wait(ANNOUNCE_WINDOW_MS * 2);
     expect(region()).toHaveTextContent("");
   });

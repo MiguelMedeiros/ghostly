@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "تم التسليم (وصل الإشعار)",
-    "failed": "فشل",
+    "failed": "لم تُرسل",
     "held": "محفوظة لجهة الاتصال",
     "queued": "لم يُؤكَّد بعد، يُعاد الإرسال تلقائيًا",
     "sending": "جارٍ الإرسال",
@@ -141,7 +141,7 @@
   "path": {
     "aRelay": "مرحِّل",
     "dht": "أرضية DHT (Pkarr)",
-    "direct": "{{name}}، مباشر",
+    "direct": "{{name}}، دون مرحِّل",
     "hold": "تخزين الحفظ (hold/1)",
     "legacyDatalink": "WebRTC (محادثة التوافق)",
     "legacyDht": "DHT (محادثة التوافق)",
@@ -161,6 +161,12 @@
     "timing": "التوقيت",
     "voice": "الصوت",
     "wire": "الشبكة"
+  },
+  "send": {
+    "failed": "فشل",
+    "failedBecause": "فشل: {{error}}",
+    "sending": "جارٍ الإرسال",
+    "sent": "أُرسل"
   },
   "storage": {
     "blob": "الملف كاملًا في IndexedDB",

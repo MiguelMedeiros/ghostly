@@ -1,7 +1,8 @@
 import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
-import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
-import type { StoredMessage } from "../shared/types";
+import type { AttentionEvent, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
+import type { MessagePage, StoredMessage } from "../shared/types";
+import { db } from "./db";
 import { errorLine, profileOpenFailure } from "../shared/idb";
 import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
@@ -41,14 +42,30 @@ export class EngineServer implements PeerServer {
    * call (WISP 06 § States and events). A client that goes away (a tab closed mid-call) is taken out with it.
    */
   private readonly onCall = new Set<EngineClientSink>();
+  /**
+   * The clients whose last presence word (`setPresence`) was `active`: the engine hears `idle` only once none is, so a
+   * tab hidden, locked or closed does not tell the contacts the profile is idle while another tab is in use. A client
+   * that goes away is taken out with it.
+   */
+  private readonly present = new Set<EngineClientSink>();
   /** How many history changes the engine told; per chat or group, the count at its last one (`historyMark`). */
   private changes = 0;
   private readonly changedAt = new Map<string, number>();
+  /**
+   * An attention event while no client is attached to hear it: the host tells the person itself. The extension's peer
+   * runs with no tab open, and a message that came then showed nothing until Ghostly was opened.
+   */
+  unheardAttention?: (event: AttentionEvent) => void;
 
-  constructor(options: NodeOptions = {}) {
+  /**
+   * `keepNewest`: the start keeps each chat's and group's newest rows that many, from the whole histories it reads anyway,
+   * for `takeStartNewest` (the CLI's event check at start, which read them again).
+   */
+  constructor(options: NodeOptions & { keepNewest?: number } = {}) {
+    if (options.keepNewest) db.keepNewest(options.keepNewest);
     this.node = new GhostlyNode(
       {
-        onAttention: (event) => this.broadcast({kind:"attention", event}),
+        onAttention: (event) => (this.clients.size ? this.broadcast({kind:"attention", event}) : this.unheardAttention?.(event)),
         onState: (state) => this.broadcast({ kind: "state", state }),
         onMessages: (linkId, messages) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}); },
         onMessageChanges: (linkId, changes) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}); },
@@ -70,7 +87,17 @@ export class EngineServer implements PeerServer {
     );
     this.ready = this.node.start();
     // A start that fails is told to each client as it attaches; nothing else may be left to report it as unhandled.
-    this.ready.catch(() => {});
+    // Nobody takes what it kept then.
+    this.ready.catch(() => { if (options.keepNewest) db.keepNewest(0); });
+  }
+
+  /**
+   * Once the engine has started: per chat or group, its newest rows (`keepNewest`) as `messagePage` reads them, from the
+   * whole history the start read. A history written since that read is not in it; one changed since the engine was made
+   * may be (`historyChanged` says). Keeping stops: a second call gets none.
+   */
+  takeStartNewest(): Map<string, MessagePage> {
+    return db.takeNewest();
   }
 
   /** A point in the engine's history changes: a history read after it can be handed to `attach` as read. */
@@ -135,6 +162,7 @@ export class EngineServer implements PeerServer {
       this.node.appsCloseAll();
     }
     if (this.onCall.delete(client)) this.node.setCallOn({ on: this.onCall.size > 0 });
+    if (this.present.delete(client) && this.present.size === 0) this.node.setPresence({ presence: "idle" });
   }
 
   async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
@@ -149,6 +177,16 @@ export class EngineServer implements PeerServer {
       else this.onCall.delete(client);
       params = { on: this.onCall.size > 0 };
     }
+    // One page's presence: `active` is told as it comes (it keeps the engine from going idle by itself); another word
+    // only once no page is active, else it is answered and not told.
+    let tell = true;
+    if (request.method === "setPresence") {
+      if ((request.params as { presence?: unknown } | undefined)?.presence === "active") this.present.add(client);
+      else {
+        this.present.delete(client);
+        tell = this.present.size === 0;
+      }
+    }
     try {
       // A group's newest page and its history are reads of the store: they answer once the groups are loaded, not after
       // every chat's whole history is read and every link started. A group shown at start stayed empty until then.
@@ -157,7 +195,7 @@ export class EngineServer implements PeerServer {
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
       // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
-      response.result = await method.call(this.node, params);
+      if (tell) response.result = await method.call(this.node, params);
     } catch (error) {
       response.error = errorLine(error);
     }

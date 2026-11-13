@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildAppBundle, seedSigner, signAppStore, toZ32, utf8Encode, type AppStoreIndex, type Signer } from "@ghostly/core";
+import { buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppStoreIndex, type Signer } from "@ghostly/core";
 // covers: apps.store
 
 /*
@@ -46,7 +46,9 @@ async function writeSnapshot(expiresInS: number) {
     removed: [], revoked: [],
   };
   const { indexBytes, sigBytes } = await signAppStore(index, store);
+  delete snapshot.revocations;
   Object.assign(snapshot, { source: "store", readAt: new Date(START_MS).toISOString(), index: b64(indexBytes), sig: b64(sigBytes), bundles: { [url]: b64(made.bytes) } });
+  return { publisher, ref: index.apps[0]!.ref };
 }
 
 async function fresh() {
@@ -95,5 +97,13 @@ describe("website store, read once", () => {
     vi.setSystemTime(START_MS + HOUR_MS);
     storeView();
     expect(reads.count).toBe(2);
+  });
+
+  it("leaves out a version the publisher's ghostly-revoke.json the build read revokes", async () => {
+    const { publisher, ref } = await writeSnapshot(30 * 24 * 3600);
+    const revocation = await signAppRevocation({ ghostlyRevoke: 1, app: ref, upTo: 1 }, publisher);
+    snapshot.revocations = { "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json": b64(utf8Encode(canonicalJson([revocation] as never))) };
+    const { storeView } = await fresh();
+    expect(storeView()).toMatchObject({ ok: true, apps: [], skipped: [{ ref, reason: "revoked" }] });
   });
 });

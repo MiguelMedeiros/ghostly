@@ -60,11 +60,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let relays: Option<Vec<String>> = serde_json::from_value(init["relays"].clone())?;
     let endpoint = match relays {
         Some(relays) => {
-            let endpoint = wire::endpoint_with_relays(seed, &relays).await?;
+            let endpoint = wire::endpoint_with_relays(seed, &relays, None).await?;
             endpoint.online().await;
             endpoint
         }
-        None => wire::endpoint(seed, true).await?,
+        None => wire::endpoint(seed, true, None).await?,
     };
     let sockets: Sockets = Arc::default();
     let next = Arc::new(AtomicU64::new(1));

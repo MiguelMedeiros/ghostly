@@ -43,6 +43,28 @@ test("color theme and mode apply at once and survive a reload", { tag: ["@featur
   await expect(html).toHaveAttribute("data-theme", "dark");
 });
 
+test("a theme switch fades nothing: no element starts a color transition", { tag: ["@feature:app.theme"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  const html = page.locator("html");
+  // The CSS transitions running a frame after the click: each one restyles its element every frame until it ends, and
+  // the chat list's rows, buttons and list items (transition-colors) each started one, from the old theme's colors.
+  const transitionsAfter = async (click: () => Promise<void>) => {
+    await click();
+    return page.evaluate(() => new Promise<number>(resolve =>
+      requestAnimationFrame(() => resolve(document.getAnimations().filter(a => a instanceof CSSTransition).length))));
+  };
+  // Before the fix: about 200 on this page.
+  expect(await transitionsAfter(() => page.getByRole("button", { name: "Light", exact: true }).click())).toBe(0);
+  await expect(html).toHaveAttribute("data-theme", "light");
+  expect(await transitionsAfter(() => page.getByTestId("settings-theme-purple").click())).toBe(0);
+  await expect(html).toHaveAttribute("data-color-theme", "purple");
+  expect(await transitionsAfter(() => page.getByRole("button", { name: "Dark", exact: true }).click())).toBe(0);
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  // The transitions are back once the theme has changed: a row still fades its background under the pointer.
+  await expect.poll(() => page.locator("[data-testid=settings-theme-purple]").evaluate(el => getComputedStyle(el).transitionDuration)).not.toBe("0s");
+});
+
 test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");

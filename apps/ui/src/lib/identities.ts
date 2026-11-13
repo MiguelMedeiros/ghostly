@@ -3,6 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { identityProvidersLoaded, loadedIdentityProviders, loadIdentityProviders, onIdentityProvidersLoaded } from "@ghostly/browser/proofs/load";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
 import { setOwnDidSource } from "@ghostly/browser/proofs/ownDid";
+import { setPkarrRelaySource } from "@ghostly/browser/proofs/pkarrRelays";
 import type { IdentityPlatform, IdentityProofProvider } from "@ghostly/browser/proofs/contract";
 import type { IdentityStatus, SharedIdentity } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
@@ -42,12 +43,14 @@ const identityProvider = (id: string) => loadedIdentityProviders().find(p => p.i
 
 // The profile's own Ghostly did:dht is not an external identity: the DID provider refuses it by name.
 setOwnDidSource(() => engine.state?.did?.id);
+// The add dialog reads a did:dht from the profile's Pkarr relays, as the engine does.
+setPkarrRelaySource(() => engine.state?.settings.relays);
 
 /**
  * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so
  * the person sees what they made. Nothing on the first state (what the profile already had).
  */
-export function useNewProof(state: typeof engine.state | undefined, onNew: (id: string) => void) {
+export function useNewProof(state: { identityProofs?: readonly { id: string }[] } | null | undefined, onNew: (id: string) => void) {
   const ids = state ? (state.identityProofs ?? []).map(p => p.id).join(" ") : null;
   const known = useRef<string[] | null>(null);
   const callback = useRef(onNew); callback.current = onNew;

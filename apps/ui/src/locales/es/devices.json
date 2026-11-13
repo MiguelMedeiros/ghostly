@@ -98,7 +98,8 @@
       "older": "Actualiza Ghostly en este dispositivo primero.",
       "password": "Contraseña incorrecta.",
       "payment": "Un pago aún se está procesando. Inténtalo de nuevo en un momento.",
-      "refused": "{{device}} no deja que este dispositivo tome el perfil.",
+      "refused": "{{device}} no dejó que este dispositivo tomara el perfil.",
+      "refusedNext": "Si se escribieron contraseñas incorrectas aquí, desbloquea {{device}} y deja que este dispositivo lo intente de nuevo.",
       "room": "No hay espacio suficiente en este dispositivo.",
       "settle": "No se puede comprobar qué dispositivo está activo. Revisa tu conexión y vuelve a intentarlo.",
       "stalled": "El traslado se detuvo",
@@ -252,8 +253,7 @@
     "doneInfo": "Ya no puede tomar este perfil. Tus otros dispositivos reciben el cambio la próxima vez que abran Ghostly.",
     "fail": {
       "busy": "Otra cosa está cambiando tus dispositivos. Inténtalo de nuevo en un momento.",
-      "failed": "Algo salió mal. No se cambió nada.",
-      "offline": "Conéctate para cambiar tus dispositivos."
+      "failed": "Algo salió mal. No se cambió nada."
     },
     "go": "Quitar",
     "lost": "Perdido o robado",
@@ -268,6 +268,7 @@
     },
     "label": "Nombre del dispositivo",
     "save": "Guardar",
+    "saving": "Guardando…",
     "title": "Cambiar nombre de {{device}}"
   },
   "restore": {
@@ -334,7 +335,6 @@
       "unreadable": "No se inició nada."
     },
     "info": "Solo un dispositivo envía, recibe y paga a la vez, para que tus mensajes y tu dinero nunca estén en dos lugares.",
-    "link": "{{device}}: {{status}}",
     "links": "Tus dispositivos",
     "notice": {
       "hint": "Si esta lista parece incorrecta, no uses este dispositivo.",
@@ -346,6 +346,15 @@
     "reenroll": {
       "hint": "Añade este dispositivo de nuevo desde el dispositivo que usas ahora.",
       "title": "Tus dispositivos cambiaron mientras este estaba apagado"
+    },
+    "removeHere": {
+      "button": "Quitar este perfil de aquí",
+      "confirm": "Escribe {{name}} para confirmar",
+      "first": "Un perfil vacío ocupa su lugar aquí.",
+      "go": "Quitar",
+      "hint": "Sus chats, claves y billeteras se borran de este dispositivo. Tus otros dispositivos conservan el perfil.",
+      "removing": "Quitando…",
+      "title": "¿Quitar {{name}} de este dispositivo?"
     },
     "title": {
       "moving": "Ya casi",

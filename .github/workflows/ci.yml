@@ -40,6 +40,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'ready_for_review' }}
 
 env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
@@ -249,8 +252,8 @@ jobs:
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
-  # package. The CLI's two-peer story (about 3 minutes of designed waits, one test after another) has a shard to
-  # itself and sets the pace.
+  # package. The CLI's two-peer story (about 2 minutes of designed waits, one test after another) runs first on its
+  # shard with nothing beside it; that shard runs other tests after it.
   packages-tests:
     name: Frontend tests (packages ${{ matrix.shard }}/4)
     needs: changes

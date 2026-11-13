@@ -4,7 +4,7 @@ import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types"
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
@@ -18,14 +18,29 @@ import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
+import { localProvider } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
+import { sourceWords } from "../../lib/providerWords";
 
 type Entry =
   | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
   | { id: string; ghostly?: false; proof: IdentityProofView; card: IdCardContent };
 const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}` };
 const REMOVE = '[data-testid="identity-proof-remove"]';
+
+/**
+ * What the section reads of the engine's state: the profile's proofs, its DID and Ghostly card, and each chat's link as
+ * far as where those proofs are shared and when the chat began.
+ */
+function proofsView(state: NonNullable<typeof engine.state>) {
+  return {
+    identityProofs: state.identityProofs ?? [],
+    did: state.did,
+    settings: { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false, online: state.settings.online },
+    links: state.links.map(l => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, createdAt: l.createdAt, identities: l.identities && { shared: l.identities.shared } })),
+  };
+}
 
 /**
  * Identities → Yours: a deck of ID cards (the wallet's deck, with ID cards for faces). The first card is the
@@ -36,7 +51,8 @@ const REMOVE = '[data-testid="identity-proof-remove"]';
  * the person chooses (the chat's Identities). Adding one is the page's New (`onAdd`), not a card in the deck.
  */
 export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
-  const state = useEngineState();
+  // Only what the section shows of the engine's state: the page stays open, and drew it again on every state.
+  const state = useEngineValue(s => s && proofsView(s));
   const { t } = useI18n();
   const nav = useAppNavigation();
   const proofs = state?.identityProofs ?? [];
@@ -75,11 +91,11 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
   const chats = state.links.some(l => l.identities?.shared.length) ? chatsByPeer() : new Map<string, ChatSession>();
-  const nameOf = (link: LinkView) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
+  const nameOf = (link: Pick<LinkView, "peerPubKeyZ32">) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   /** Contacts whose app checked this proof and refused it. */
   const refusedBy = (id: string) => state.links.filter(l => l.identities?.shared.some(s => s.id === id && s.status === "rejected")).map(nameOf);
   // Every chat has a key pair of its own (a legacy one too), so the Ghostly identity is used in every chat.
-  const ghostly = ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false },
+  const ghostly = ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile },
     { chats: state.links.length, since: profileSince(state.links) });
 
   const entries: Entry[] = [
@@ -88,13 +104,15 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
+  /** The proof's provider in the app's language: its removal steps and their lines too. */
+  const localOf = (id: string) => { const provider = providerOf(id); return provider && localProvider(provider, t); };
   const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };  /**
    * Removes a proof: first what its provider published, when it can take that down (an AT Protocol record, after a
    * fresh approval on the person's server), then the proof itself, which withdraws it and publishes the revocation.
    * Called straight from the click: the provider may open a window. `withRecord` false skips the first step.
    */
   const remove = (p: IdentityProofView, withRecord = true) => {
-    const unpublish = withRecord ? providerOf(p.provider)?.unpublish : undefined;
+    const unpublish = withRecord ? localOf(p.provider)?.unpublish : undefined;
     const controller = new AbortController(); removeAbort.current = controller;
     // The card says it is revoking once that starts: while an approval is awaited, nothing is revoked yet.
     if (unpublish) setTakingDown(p.id); else setRevoking(p.id);
@@ -156,7 +174,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
             <Block>
               <code dir="ltr" className="block text-left break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
               <p className="text-xs text-text-muted leading-5">
-                <bdi>{p.verified.source}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
+                <bdi>{sourceWords(p.provider, p.verified.source, t)}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>
               {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: card.refusedBy.join(", ") })}</p>}
               {(card.status === "expired" || card.status === "expiring") && (
@@ -190,7 +208,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
               {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}

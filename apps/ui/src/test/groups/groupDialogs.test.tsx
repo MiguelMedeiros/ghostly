@@ -175,6 +175,17 @@ describe("GroupMembersDialog", () => {
     expect(within(panel).queryByTestId("group-link-disable")).not.toBeInTheDocument();
   });
 
+  it("gives a community member's focus to the list when the admin turns the link off under it, with the panel", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    const group = groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] });
+    members_(group);
+    screen.getByTestId("group-link-copy").focus();
+    act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+    expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
+    // It fell to the page, out of the open dialog.
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
     for (const profile of ["mesh", "community"] as const) {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
@@ -211,6 +222,27 @@ describe("GroupMembersDialog", () => {
     await user.click(within(row(ALICE)).getByTestId("group-member-hub-role"));
     await user.click(screen.getByRole("option", { name: "Hub if always on" }));
     expect(engine.callsTo("setGroupHub")).toEqual([{ groupId: "group-1", key: many[0].key, role: "pin" }, { groupId: "group-1", key: ALICE, role: null }]);
+  });
+
+  it("keeps the keyboard on a hub choice while the engine takes it, and takes no other until it answers", async () => {
+    const many = Array.from({ length: 16 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), online: true }));
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, hubs: { hub: false }, members: [members[0], ...many] }));
+    let answer!: () => void;
+    engine.on("setGroupHub", () => new Promise<void>(resolve => { answer = resolve; }));
+    const choice = within(row(many[0].key)).getByTestId("group-member-hub-role");
+    choice.focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(engine.callsTo("setGroupHub")).toEqual([{ groupId: "group-1", key: many[0].key, role: "pin" }]);
+    // Busy, not disabled: a disabled control drops the focus to the page, and the next Tab starts from the dialog's top.
+    expect(choice).toHaveFocus();
+    expect(choice).toBeEnabled();
+    expect(choice).toHaveAttribute("aria-busy", "true");
+    expect(within(row(many[1].key)).getByTestId("group-member-hub-role")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await act(async () => answer());
+    expect(choice).not.toHaveAttribute("aria-busy");
+    expect(choice).toHaveFocus();
   });
 
   it("offers no hub choice in a group of 16 or fewer", () => {
@@ -393,6 +425,14 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link")).toHaveTextContent("The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.");
     await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
+  });
+
+  it("tells a community member the admin turned the link off, with nothing to turn it on", () => {
+    // The member's Share dialog stays open while the admin turns the link off: turning it on is the admin's alone.
+    renderApp(<GroupLinkPanel group={groupView({ id, status: "active", profile: "community", isAdmin: false, members })} large />);
+    expect(screen.getByTestId("group-link")).toHaveAttribute("data-state", "off");
+    expect(screen.getByTestId("group-link")).toHaveTextContent("The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one.");
+    expect(screen.queryByTestId("group-link-enable")).not.toBeInTheDocument();
   });
 
   it("cannot create a link for a full group", () => {
@@ -743,6 +783,15 @@ describe("NewGroupDialog", () => {
     await user.keyboard("{Enter}");
     expect(engine.callsTo("createGroup")).toEqual([]);
     expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("with Hide my IP on and no transport for group links, says Hide my IP is why", () => {
+    const { engine } = open();
+    act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...engine.state.settings, relayOnly: true } }));
+    const note = screen.getByTestId("new-group-no-webrtc");
+    expect(note).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(note).not.toHaveTextContent("web app");
+    expect(screen.getByTestId("new-group-create")).toBeDisabled();
   });
 
   it("cancels", async () => {

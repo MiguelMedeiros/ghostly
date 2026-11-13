@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/web",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.11.2",
   "type": "module",
   "description": "Ghostly on the web: the same peer and UI as the extension, running in a tab. Nothing to install.",
   "scripts": {
@@ -21,15 +21,15 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.6"
   }
 }

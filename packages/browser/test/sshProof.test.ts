@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { identityStatement, newIdentityBinding, parseSshPublicKey, type IdentityStatement } from "@ghostly/core";
 import type { ExternalToolSigner, IdentityFetch, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -66,6 +67,14 @@ describe("SSH identity proofs", () => {
   it("takes a .pub line or a fingerprint as the subject", () => {
     expect(ssh.subject.normalize(`  ${mine.publicKey} me@laptop \n`)).toBe(fingerprint);
     expect(ssh.subject.normalize(fingerprint)).toBe(fingerprint);
+    // What `ssh-keygen -l -f key.pub` prints, "256 SHA256:… me@laptop (ED25519)", pasted as is.
+    for (const key of [mine, other, rsa]) {
+      const listed = execFileSync("ssh-keygen", ["-l", "-f", "-"], { input: `${key.publicKey} me and my laptop\n` }).toString();
+      expect(listed).toMatch(/^\d+ SHA256:\S{43} me and my laptop \((ED25519|ECDSA|RSA)\)\n$/);
+      expect(ssh.subject.normalize(listed)).toBe(parseSshPublicKey(key.publicKey).fingerprint);
+    }
+    const md5 = execFileSync("ssh-keygen", ["-l", "-E", "md5", "-f", "-"], { input: mine.publicKey }).toString();
+    expect(() => ssh.subject.normalize(md5)).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("-----BEGIN OPENSSH PRIVATE KEY-----")).toThrow(/Paste your public key/);
     expect(() => ssh.subject.normalize("ssh-dss AAAAB3NzaC1kc3MAAAA=")).toThrow(/Unsupported SSH key type "ssh-dss"/);
     expect(ssh.subject.short!(fingerprint)).toMatch(/^SHA256:.{8}….{4}$/);
@@ -83,6 +92,13 @@ describe("SSH identity proofs", () => {
     expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text), s))).subject).toBe(fingerprint);
   }, 20_000);
 
+  it("verifies the file route when the editor ended the statement with a Windows line ending, and nothing else added", async () => {
+    const s = statementFor(ssh, fingerprint);
+    expect((await verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, "\r\n"), s))).subject).toBe(fingerprint);
+    for (const ending of ["\n\n", "\r", " \n", "\r\n\r\n"])
+      await expect(verify(ssh, s, await signer(ssh).parse(mine.signFile(s.text, ending), s)), JSON.stringify(ending)).rejects.toThrow(/not over this statement/);
+  }, 20_000);
+
   it("refuses another namespace, another statement and another key, with a message a person can act on", async () => {
     const s = statementFor(ssh, fingerprint), paste = (text: string) => signer(ssh).parse(text, s);
     await expect(Promise.resolve().then(() => paste(mine.sign(s.text, "git")))).rejects.toThrow(/for "git", not "ghostly"/);
@@ -90,7 +106,7 @@ describe("SSH identity proofs", () => {
     await expect(Promise.resolve().then(() => paste("ssh-ed25519 AAAA"))).rejects.toThrow(/whole signature/);
     const elsewhere = statementFor(ssh, fingerprint);
     await expect(verify(ssh, s, await paste(mine.sign(elsewhere.text)))).rejects.toThrow(/not over this statement/);
-    await expect(verify(ssh, s, { signature: mine.sign(s.text, "file") })).rejects.toThrow(/namespace "file"/);
+    await expect(verify(ssh, s, { signature: mine.sign(s.text, "file") })).rejects.toThrow(/another namespace, not "ghostly"/);
     await expect(verify(ssh, s, { signature: other.sign(s.text) })).rejects.toThrow(/another SSH key/);
     // A pasted signature re-wrapped by a chat app or Windows still verifies.
     const messy = mine.sign(s.text).replace(/\n/g, "\r\n  ");

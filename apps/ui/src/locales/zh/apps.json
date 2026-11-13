@@ -10,6 +10,7 @@
     "storeNewer": "你已经有这个商店了。这个链接里是它的较新副本。",
     "storeOlder": "这是你已有商店的较旧副本。你的那份更新，保持不变。",
     "storeReads": "Ghostly 从 {{host}} 读取它，该主机会知道你的 IP 地址。",
+    "storeRemovedOlder": "你移除这个商店时，它的列表比这份副本更新。要重新添加，请使用指向其最新列表的链接。",
     "title": "添加应用或商店",
     "updateStore": "更新商店"
   },
@@ -18,7 +19,6 @@
     "fetchFiles": "获取文件",
     "keepStopped": "保持停止",
     "needsFiles": "需要它的文件",
-    "remove": "移除",
     "runAnyway": "仍然运行",
     "stopped": "已停止",
     "uninstall": "卸载",
@@ -62,11 +62,14 @@
     "title": "与 {{name}} 一起用的应用"
   },
   "errors": {
+    "damaged": "它在此设备上的文件已损坏。请重新获取文件。",
     "equivocation": "这个链接里是你已有版本的另一个副本。Ghostly 保留了你的版本。",
     "expired": "耗时太久。请重新检查应用。",
+    "filesNotFound": "无法获取它的文件：它来源的链接现在都没有这个版本，或者都没有响应。请稍后再试。",
     "githubLink": "这个 GitHub 页面不是应用。请粘贴仓库链接，或应用文件的链接。",
     "host": "应用只来自 GitHub（raw.githubusercontent.com）或固定到某个提交的 jsDelivr。",
     "hostProblem": "主机出了问题（错误 {{status}}）。请稍后再试。",
+    "locked": "应用打开前个人资料已锁定。请再次打开。",
     "needsFiles": "它的文件还不在此设备上。",
     "network": "无法连接到主机。",
     "notListed": "这个商店不再列出该应用。",
@@ -80,13 +83,17 @@
     "removed": "你添加的商店已移除此应用。",
     "revoked": "发布者已撤销此版本。",
     "rollback": "这个链接里是较旧的版本。",
+    "runner": "此服务器未配置为安全运行应用，因此 Ghostly 不会在这里打开应用。",
     "slow": "此连接耗时太久。请换用更快的网络重试。",
     "status": "该链接下没有内容。",
     "storage": "此浏览器无法在这里保存应用（无痕浏览？）。请试试普通窗口。",
     "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。",
     "storeKey": "该商店由另一把密钥签名。",
     "tooLarge": "太大了。",
-    "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
+    "unlistedVersion": "这个链接里是该商店尚未列出的版本。",
+    "updateFilesGone": "这个更新的文件已不在了。Ghostly 会在下次检查时重新获取。",
+    "updateGone": "这个更新已不再等待。已安装的版本就是上方显示的那个。",
+    "updateUnlisted": "这个商店已不再列出这个更新。Ghostly 会在下次检查时查看它现在列出的版本。"
   },
   "files": {
     "allow": "允许",
@@ -100,7 +107,8 @@
     "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
   },
   "install": {
-    "equivocation": "存在两个不同的版本 {{sequence}}。Ghostly 保留了你已有的那个。",
+    "asksChanged": "此应用请求的权限已变更。安装前请再查看一遍。",
+    "equivocation": "此版本存在两个不同的副本。Ghostly 保留了你已有的那个。",
     "fetching": "正在检查应用…",
     "foundBy": "由 {{name}} 找到",
     "inStore": "在 {{name}} 中",
@@ -130,7 +138,7 @@
     "same": "已安装。",
     "sentBy": "由 {{name}} 发送",
     "unknownPublisher": "未知发布者",
-    "unknownPublisherInfo": "任何人都可以用新密钥签名应用。只有你添加的商店才能担保是谁制作的。请将密钥与作者公布的密钥进行比对。",
+    "unknownPublisherInfo": "任何人都可以用新密钥签名应用。只有你添加的商店才能为其发布者担保。请将密钥与发布者公布的密钥进行比对。",
     "update": "更新",
     "webkit": "在此浏览器中，应用仍可能连接其他服务器。",
     "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
@@ -140,12 +148,13 @@
     "addHint": "通过链接添加应用或商店",
     "details": "{{title}}：详情",
     "installed": "已安装",
-    "intro": "由作者签名、在沙盒中运行的游戏和小应用。",
+    "intro": "由发布者签名、在沙盒中运行的游戏和小应用。",
     "loading": "正在加载…",
     "noStores": "还没有商店。通过链接添加一个。",
     "none": "还没有应用。",
     "open": "打开",
-    "stores": "商店"
+    "stores": "商店",
+    "tryAgain": "重试"
   },
   "pick": {
     "hint": "它在聊天中运行，与你的联系人一起使用。",
@@ -153,17 +162,18 @@
     "title": "在聊天中打开 {{title}}"
   },
   "store": {
+    "clockLate": "该商店列表的日期晚于此设备的时钟。请检查此设备的日期和时间。",
     "count": "{{count}} 个应用",
     "count_one": "{{count}} 个应用",
     "count_other": "{{count}} 个应用",
     "curated": "精选",
     "empty": "这个商店没有列出应用。",
+    "equivocation": "该商店在同一编号下签署了两份不同的列表（发现于 {{date}}）。Ghostly 保留了你的那份。",
     "filter": "搜索此商店",
     "indexed": "索引",
     "installed": "已安装",
     "noMatch": "此商店中没有匹配的应用。",
     "notRead": "尚未读取",
-    "problem": "上次读取失败。",
     "read": "读取",
     "readNamed": "读取 {{name}}",
     "refresh": "刷新",
@@ -174,8 +184,10 @@
     "removeNamed": "移除 {{name}}",
     "removeNone": "要再次添加，你需要它的链接。",
     "removeTitle": "移除 {{name}}？",
+    "rollback": "该商店的链接现在提供的列表比你的更旧。Ghostly 保留了你的那份。",
     "showMore": "显示更多 ({{count}})",
-    "stale": "自 {{date}} 起已过期"
+    "stale": "自 {{date}} 起已过期",
+    "tooLarge": "该商店的列表太大，Ghostly 无法读取。"
   },
   "title": "应用",
   "view": {
@@ -186,10 +198,12 @@
     "resume": "返回 {{title}}",
     "resumeSharing": "正在共享文件",
     "sharingWith": "正在与 {{name}} 共享文件",
-    "stoppedFailed": "{{title}} 已停止运行并被关闭。如果反复出现，请告知其作者。",
+    "stoppedFailed": "{{title}} 已停止运行并被关闭。如果反复出现，请告知其发布者。",
+    "stoppedFocus": "{{title}} 已停止：它不断抢占键盘",
+    "stoppedOffline": "你处于离线状态，{{title}} 无法启动。连接网络后请重新打开。",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
-    "stoppedRevoked": "{{title}} 已停止：其作者撤销了此版本",
-    "stoppedUnresponsive": "{{title}} 已无响应，已将其关闭，以便你的聊天继续正常使用。请重新打开；如果反复出现，请告知其作者。",
+    "stoppedRevoked": "{{title}} 已停止：其发布者撤销了此版本",
+    "stoppedUnresponsive": "{{title}} 已无响应，已将其关闭，以便你的聊天继续正常使用。请重新打开；如果反复出现，请告知其发布者。",
     "with": "与 {{name}} 的 {{title}}",
     "withName": "与 {{name}}",
     "withSharing": "{{title}} · 正在与 {{name}} 共享文件"

@@ -8,6 +8,7 @@ import { ensureSession, listSessions, updateSessionLabel } from "../../lib/stora
 import { groupView, linkView } from "../fakeEngine";
 import { receivedView } from "../identities/views";
 import { renderApp } from "../render";
+import type { Language } from "../../lib/settings";
 
 // covers: chat.cards.invite, chat.cards.group, chat.cards.nostr, chat.cards.identity, invite.own, invite.rejoin
 
@@ -24,11 +25,11 @@ const DID_KEY = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
 
 /** A message from the contact Alice (or from this profile, `mine`), rendered in a chat with her. */
-function bubble(text: string, { mine = false } = {}) {
+function bubble(text: string, { mine = false, language }: { mine?: boolean; language?: Language } = {}) {
   return renderApp(<>
     <MessageBubble message={{ id: "m1", text, sender: mine ? "me" : "peer", timestamp: 1_700_000_000_000 }} peerNick="Alice" peerPubKey="peer" />
     <Where />
-  </>);
+  </>, { language });
 }
 
 describe("invite cards", () => {
@@ -150,6 +151,19 @@ describe("invite cards", () => {
     const { inviteCode } = createChatInvite();
     bubble(`${inviteCode.slice(0, -1)}${inviteCode.endsWith("q") ? "p" : "q"}`);
     expect(screen.queryByTestId("entity-cards")).toBeNull();
+  });
+
+  it("shows no card for an invite or a Nostr code the text holds only inside a spoiler, and one for what shows outside it", () => {
+    const { inviteCode } = createChatInvite();
+    const npub = npubEncode(hex());
+    for (const text of [`guess who: ||${inviteLink(inviteCode)}||`, `||${npub}||`, `> ||here: ${inviteCode}||`, `[||tap||](${inviteLink(inviteCode)})`]) {
+      const view = bubble(text);
+      expect(screen.queryByTestId("entity-cards"), text).toBeNull();
+      view.unmount();
+    }
+    bubble(`${npub} and ||${inviteLink(inviteCode)}||`);
+    expect(screen.getByTestId("entity-nostr")).toBeInTheDocument();
+    expect(screen.queryByTestId("entity-invite")).toBeNull();
   });
 });
 
@@ -325,6 +339,27 @@ describe("Nostr cards", () => {
     await user.click(within(card).getByTestId("entity-nostr-load"));
     expect(engine.callsTo("nostrLookup")).toEqual([{ type: "note", id, author }]);
     expect(await within(card).findByTestId("entity-nostr-muted")).toBeVisible();
+  });
+
+  it("says a note's age and when it was fetched in the app's language", async () => {
+    const id = hex(), author = hex();
+    const now = Math.floor(Date.now() / 1000);
+    for (const [language, from, minutes, hours] of [
+      ["pt", "De relay.one.example", "há 3 min.", "há 2 h · uma resposta"],
+      ["ar", "من relay.one.example", "قبل 3 دقائق", "قبل ساعتين"],
+      ["ja", "relay.one.example から", "3 分前", "2 時間前"],
+    ] as const) {
+      const { user, engine, unmount } = bubble(neventEncode({ id, author }), { language });
+      engine.on("nostrLookup", () => ({ fetchedAt: now - 180, relays: ["wss://relay.one.example"], found: true, note: { id, author, createdAt: now - 7200, reply: true, content: "hi", muted: false } }));
+      const card = screen.getByTestId("entity-nostr");
+      await user.click(within(card).getByTestId("entity-nostr-load"));
+      const source = await within(card).findByTestId("entity-nostr-source");
+      await waitFor(() => expect(source).toHaveTextContent(from));
+      expect(source).toHaveTextContent(minutes);
+      expect(within(card).getByTestId("entity-nostr-age")).toHaveTextContent(hours);
+      expect(card).not.toHaveTextContent(/ago|just now/);
+      unmount();
+    }
   });
 
   it("says when the relays could not be asked", async () => {

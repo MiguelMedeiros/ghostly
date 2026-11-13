@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, RelaysFailedError, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
 import { createSocket, type Socket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -141,6 +141,26 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     }
   });
 
+  it("relays that answered, then fail, with the DHT failing too: a read that asks says so, carrying their last copy", async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const fetchFn = relays(store);
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    // Its DHT is out of reach as well (UDP blocked, say).
+    const unreachable = Object.assign(Object.create(Mainline.prototype) as Mainline, { get: async () => { throw new Error("DHT unreachable"); } });
+    const b = new RelaysAndDht(unreachable, { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    const me = createIdentity();
+    await a.publish(me, [{ label: "_x", value: "last" }]);
+    expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("last");
+    store.down = true;
+    await new Promise((r) => setTimeout(r, FRESH_READ_MS + 100));
+    // A link reads with `keptOnFailure` false: the failure carries the copy, so the link can say it could not read.
+    const failed = await b.resolve(me.pubKeyZ32, {}, false).then(() => null, (error: unknown) => error);
+    expect(failed).toBeInstanceOf(RelaysFailedError);
+    expect((failed as RelaysFailedError).kept.records[0].value).toBe("last");
+    // Any other read still takes that copy as the answer.
+    expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("last");
+  });
+
   // agents#1594: with the relay 2 s to answer (far, loaded, or fetching from the DHT itself), the hedge took whichever
   // packet came first: the DHT's older copy won every read over the relay's newer one (5/5 reads v1).
   it("a relay that takes 2 s with a newer packet than the DHT's: the read is the newer one", async () => {
@@ -262,8 +282,9 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     const reader = await join();
     const store = { down: true, packets: new Map<string, Uint8Array>() };
     const me = createIdentity();
-    const ahead = BigInt(Date.now() + 2 * 3_600_000) * 1000n;
-    // Before the restart: dated two hours ahead. Then that app quits.
+    // Within the skew a reader allows: one dated further ahead is not followed (core relayFarAheadDate.test.ts).
+    const ahead = BigInt(Date.now() + 5 * 60_000) * 1000n;
+    // Before the restart: dated five minutes ahead. Then that app quits.
     const old = await join();
     const before = new RelaysAndDht(old, { relays: RELAYS, fetch: relays(store), log: () => {} });
     before.relays.sawTimestamp(me.pubKeyZ32, ahead);
@@ -521,6 +542,55 @@ describe("the Mainline DHT node starts when it is asked something", { timeout: 6
     expect(received).toBeGreaterThan(0);
     await node.destroy();
     await expect(node.get(createIdentity().pubKeyZ32)).rejects.toThrow("closed");
+  });
+
+  // Hide my IP from contacts: the engine configures `dhtDirect: false`, and the packets go through the relays alone. Before,
+  // the setting was dropped, and every packet was put on and read from the DHT beside them, from this machine's address.
+  it("with Hide my IP from contacts on (dhtDirect false), no packet goes to the DHT, nor a read; off again, they do", async () => {
+    received = 0;
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const node = new Mainline({ bootstrap: [bootstrap()], host: "127.0.0.1", timeoutMs: 1_000 });
+    const transport = new RelaysAndDht(node, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    const me = createIdentity();
+    try {
+      // On from the start (a profile that arrives with it on): the node never starts.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: false });
+      await transport.publish(me, [{ label: "_x", value: "relays only" }]);
+      expect((await transport.resolve(me.pubKeyZ32))?.records[0].value).toBe("relays only");
+      expect(await transport.resolve(createIdentity().pubKeyZ32)).toBeNull();
+      await settle();
+      expect(received).toBe(0);
+      expect(node.running).toBe(false);
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP)");
+      expect(transport.publishHeld(me.pubKeyZ32)).toBeNull();
+
+      // Off: every packet goes to the DHT again.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: true });
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP), and the Mainline DHT (BEP44) directly");
+      await transport.publish(me, [{ label: "_x", value: "both" }]).catch(() => {});
+      await settle();
+      expect(node.running).toBe(true);
+      expect(received).toBeGreaterThan(0);
+
+      // On again with the node running: it is closed, and nothing more goes out.
+      transport.configure({ relays: RELAYS, readRelays: false, dhtDirect: false });
+      await settle();
+      expect(node.running).toBe(false);
+      received = 0;
+      await transport.publish(me, [{ label: "_x", value: "relays only again" }]);
+      expect((await transport.resolve(me.pubKeyZ32))?.records[0].value).toBe("relays only again");
+      // The relays failing do not send a read to the DHT either.
+      store.down = true;
+      await expect(transport.resolve(createIdentity().pubKeyZ32, {}, false)).rejects.toThrow();
+      await settle();
+      expect(node.running).toBe(false);
+      expect(received).toBe(0);
+      // Absent leaves it as it is.
+      transport.configure({ relays: RELAYS, readRelays: false });
+      expect(transport.describe().protocol).toBe("Pkarr relays (HTTP)");
+    } finally {
+      await node.destroy();
+    }
   });
 
   it("chat list, settings get and status, and a profile set offline, send the DHT's routers nothing", async () => {

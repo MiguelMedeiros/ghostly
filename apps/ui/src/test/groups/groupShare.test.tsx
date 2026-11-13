@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
@@ -84,6 +84,52 @@ describe("the group header's Share link", () => {
   });
 });
 
+describe("the group header on the narrowest phone", () => {
+  /** How wide the window is, as matchMedia reads it. */
+  const viewport = (width: number, height = 640) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+  afterEach(() => viewport(1024, 768));
+
+  // At 320px the back button, the picture, the connection, Share link and ⋮ left the name about 70px ("Clube d…").
+  it("has Share link as a row of ⋮, which opens the link, and leaves its room to the name", async () => {
+    viewport(320);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.queryByTestId("group-share")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(within(screen.getByTestId("group-options-menu")).getByTestId("group-share"));
+    expect(await screen.findByTestId("group-share-dialog")).toHaveTextContent("Share Friends");
+  });
+
+  it("keeps Share link in the header on a wider phone, and not in ⋮", async () => {
+    viewport(390);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.getByTestId("group-share")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    expect(within(screen.getByTestId("group-options-menu")).queryByTestId("group-share")).not.toBeInTheDocument();
+  });
+});
+
+describe("a link that lets nobody in", () => {
+  it("tells the admin, and New link asks first, replaces it and shows the new one to share", async () => {
+    const NEW = encodeGroupEntryLink({ g: ID, host: createIdentity().pubKeyZ32 });
+    const { user, engine } = openGroup(admin({ entryLink: LINK, entryJammed: true }));
+    engine.on("enableGroupLink", () => { queueMicrotask(() => engine.update({ groups: [admin({ entryLink: NEW })] })); return { link: NEW }; });
+    expect(screen.getByTestId("group-link-jammed")).toHaveTextContent("Nobody can join with this group's link right now");
+    await user.click(screen.getByTestId("group-link-jammed-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: ID, reset: true }]);
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Group link" })).toHaveValue(`${window.location.origin}/#/join/${NEW}`);
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+  });
+
+  it("is not shown to a member who is not the admin, nor while the link works", () => {
+    openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+  });
+});
+
 describe("a group's long one-word name", () => {
   const name = "Donaudampfschifffahrtsgesellschaftskapitaenswitwenrentenkassen";
 
@@ -137,6 +183,22 @@ describe("GroupShareDialog", () => {
     act(() => { screen.getByTestId("group-share-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
     expect(document.activeElement).toBe(share);
+  });
+
+  it("keeps a community member's focus in the dialog when the admin turns the link off under it, then gives it to the ⋮, Share gone", async () => {
+    const member = admin({ isAdmin: false, profile: "community", entryLink: LINK, members: [{ ...me, role: "member" }] });
+    const { user } = openGroup(member);
+    await user.click(screen.getByTestId("group-share"));
+    const dialog = screen.getByTestId("group-share-dialog");
+    expect(within(dialog).getByTestId("group-link-share")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [{ ...member, entryLink: undefined }] }));
+    expect(within(dialog).getByTestId("group-link")).toHaveAttribute("data-state", "off");
+    expect(screen.queryByTestId("group-share")).not.toBeInTheDocument();
+    // Both fell to the page: Share went with the panel's swap, and the header's Share Done would give it back to.
+    expect(screen.getByTestId("group-share-done")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-options")).toHaveFocus();
   });
 
   it("leaves the focus in the group when a new group's link is put away: on what had it, else on Share", async () => {

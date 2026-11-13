@@ -10,6 +10,7 @@
     "storeNewer": "Hai già questo store. Questo link ne contiene una copia più recente.",
     "storeOlder": "È una copia più vecchia di uno store che hai già. Il tuo è più recente e resta com'è.",
     "storeReads": "Ghostly lo legge da {{host}}, che vede il tuo indirizzo IP.",
+    "storeRemovedOlder": "Hai rimosso questo store quando il suo elenco era più recente di questa copia. Per aggiungerlo di nuovo, usa un link al suo elenco più recente.",
     "title": "Aggiungi un'app o uno store",
     "updateStore": "Aggiorna store"
   },
@@ -18,7 +19,6 @@
     "fetchFiles": "Scarica i suoi file",
     "keepStopped": "Lasciala ferma",
     "needsFiles": "Mancano i suoi file",
-    "remove": "Rimuovi",
     "runAnyway": "Avvia comunque",
     "stopped": "Ferma",
     "uninstall": "Disinstalla",
@@ -62,11 +62,14 @@
     "title": "App con {{name}}"
   },
   "errors": {
+    "damaged": "I suoi file su questo dispositivo sono danneggiati. Scarica di nuovo i suoi file.",
     "equivocation": "Questo link contiene un'altra copia di una versione che hai. Ghostly ha tenuto la tua.",
     "expired": "Ci è voluto troppo. Controlla di nuovo l'app.",
+    "filesNotFound": "Impossibile recuperare i suoi file: nessuno dei link da cui proviene ha ora questa versione, o nessuno ha risposto. Riprova più tardi.",
     "githubLink": "Questa pagina di GitHub non è un'app. Incolla il link del repository o quello del file dell'app.",
     "host": "Le app arrivano solo da GitHub (raw.githubusercontent.com) o da jsDelivr a un commit.",
     "hostProblem": "Il server ha avuto un problema (errore {{status}}). Riprova più tardi.",
+    "locked": "Il profilo si è bloccato prima che l'app si aprisse. Aprila di nuovo.",
     "needsFiles": "I suoi file non sono ancora su questo dispositivo.",
     "network": "Impossibile raggiungere il server.",
     "notListed": "Questo store non elenca più quell'app.",
@@ -80,13 +83,17 @@
     "removed": "Uno store che hai aggiunto ha rimosso questa app.",
     "revoked": "Il suo editore ha revocato questa versione.",
     "rollback": "Il link contiene una versione più vecchia.",
+    "runner": "Questo server non è predisposto per eseguire le app in sicurezza, quindi Ghostly non le apre qui.",
     "slow": "Ci è voluto troppo con questa connessione. Riprova con una più veloce.",
     "status": "Niente a quel link.",
     "storage": "Questo browser non può tenere app qui (navigazione privata?). Prova una finestra normale.",
     "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce.",
     "storeKey": "Quello store è firmato con un'altra chiave.",
     "tooLarge": "Troppo grande.",
-    "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora."
+    "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora.",
+    "updateFilesGone": "I file dell'aggiornamento non ci sono più. Ghostly li scarica di nuovo al prossimo controllo.",
+    "updateGone": "Questo aggiornamento non è più in attesa. La versione installata è quella mostrata sopra.",
+    "updateUnlisted": "Questo store non elenca più questo aggiornamento. Ghostly guarda cosa elenca al prossimo controllo."
   },
   "files": {
     "allow": "Consenti",
@@ -100,7 +107,8 @@
     "note": "Non viene copiato nulla: {{app}} legge ciò che scegli, su questo dispositivo."
   },
   "install": {
-    "equivocation": "Esistono due versioni {{sequence}} diverse. Ghostly ha tenuto quella che hai.",
+    "asksChanged": "Ciò che questa app chiede è cambiato. Controllalo di nuovo prima di installarla.",
+    "equivocation": "Esistono due copie diverse di questa versione. Ghostly ha tenuto quella che hai.",
     "fetching": "Controllo dell'app…",
     "foundBy": "Trovata da {{name}}",
     "inStore": "In {{name}}",
@@ -130,7 +138,7 @@
     "same": "Già installata.",
     "sentBy": "Inviata da {{name}}",
     "unknownPublisher": "Editore sconosciuto",
-    "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire chi l'ha fatta. Confronta la chiave con quella pubblicata dall'autore.",
+    "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire il suo editore. Confronta la chiave con quella pubblicata dall'editore.",
     "update": "Aggiorna",
     "webkit": "In questo browser, un'app può comunque contattare altri server.",
     "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
@@ -140,12 +148,13 @@
     "addHint": "Aggiungi un'app o uno store dal suo link",
     "details": "{{title}}: dettagli",
     "installed": "Installate",
-    "intro": "Giochi e piccole app, firmati dai loro autori ed eseguiti in una sandbox.",
+    "intro": "Giochi e piccole app, firmati dai loro editori ed eseguiti in una sandbox.",
     "loading": "Caricamento…",
     "noStores": "Nessuno store. Aggiungine uno dal suo link.",
     "none": "Ancora nessuna app.",
     "open": "Apri",
-    "stores": "Store"
+    "stores": "Store",
+    "tryAgain": "Riprova"
   },
   "pick": {
     "hint": "Funziona in una chat, con il tuo contatto.",
@@ -153,17 +162,18 @@
     "title": "Apri {{title}} in una chat"
   },
   "store": {
+    "clockLate": "L'elenco di questo store ha una data successiva all'orologio di questo dispositivo. Controlla la data e l'ora di questo dispositivo.",
     "count": "{{count}} app",
     "count_one": "{{count}} app",
     "count_other": "{{count}} app",
     "curated": "Curato",
     "empty": "Questo store non elenca app.",
+    "equivocation": "Questo store ha firmato due elenchi diversi con lo stesso numero (visto il {{date}}). Ghostly ha tenuto il tuo.",
     "filter": "Cerca in questo store",
     "indexed": "Indicizzato",
     "installed": "Installata",
     "noMatch": "Nessuna app di questo store corrisponde.",
     "notRead": "Non ancora letto",
-    "problem": "L'ultima lettura non è riuscita.",
     "read": "Leggi",
     "readNamed": "Leggi {{name}}",
     "refresh": "Aggiorna",
@@ -174,8 +184,10 @@
     "removeNamed": "Rimuovi {{name}}",
     "removeNone": "Per aggiungerlo di nuovo ti servirà il suo link.",
     "removeTitle": "Rimuovere {{name}}?",
+    "rollback": "Il link di questo store ora contiene un elenco più vecchio del tuo. Ghostly ha tenuto il tuo.",
     "showMore": "Mostra altre ({{count}})",
-    "stale": "Non aggiornato dal {{date}}"
+    "stale": "Non aggiornato dal {{date}}",
+    "tooLarge": "L'elenco di questo store è troppo grande perché Ghostly lo legga."
   },
   "title": "App",
   "view": {
@@ -186,10 +198,12 @@
     "resume": "Torna a {{title}}",
     "resumeSharing": "condivide un file",
     "sharingWith": "condivide un file con {{name}}",
-    "stoppedFailed": "{{title}} ha smesso di funzionare ed è stata chiusa. Se succede ancora, avvisa il suo autore.",
+    "stoppedFailed": "{{title}} ha smesso di funzionare ed è stata chiusa. Se succede ancora, avvisa il suo editore.",
+    "stoppedFocus": "{{title}} è stata fermata: continuava a prendere la tastiera",
+    "stoppedOffline": "{{title}} non è partita: sei offline. Riaprila quando sei connesso.",
     "stoppedRemoved": "{{title}} è stata fermata: {{store}} ha rimosso questa versione",
-    "stoppedRevoked": "{{title}} è stata fermata: il suo autore ha revocato questa versione",
-    "stoppedUnresponsive": "{{title}} non rispondeva più ed è stata chiusa, così le tue chat continuano a funzionare. Riaprila o, se succede ancora, avvisa il suo autore.",
+    "stoppedRevoked": "{{title}} è stata fermata: il suo editore ha revocato questa versione",
+    "stoppedUnresponsive": "{{title}} non rispondeva più ed è stata chiusa, così le tue chat continuano a funzionare. Riaprila o, se succede ancora, avvisa il suo editore.",
     "with": "{{title}} con {{name}}",
     "withName": "con {{name}}",
     "withSharing": "{{title}} · condivide un file con {{name}}"

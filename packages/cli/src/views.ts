@@ -1,4 +1,5 @@
-import type { GroupView, LinkView, MessageFile, PinView, StoredMessage } from "@ghostly/browser/shared/types";
+import { groupMemberOfLink, groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import type { GroupPayNote, GroupView, LinkView, MessageFile, PaymentView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
 
 /**
@@ -15,15 +16,21 @@ export interface ChatJson {
   /** The contact's key for this chat (z-base-32). */
   peer: string;
   createdAt: number;
-  lastMessageAt: number;
+  /** When its latest message came, or null before the first (the engine keeps 0). */
+  lastMessageAt: number | null;
   /** A live session carries the chat now, in this run (text, files, payments go at once). */
   live: boolean;
   /** The transport of the live session, or null. */
   transport: string | null;
   /** How text goes now: `stream` (live), `dht` (the DHT floor, 256 bytes), `hold`, or `unavailable`. */
   text: string;
-  /** The pairing's state: connecting, waiting, ready, failed. */
+  /** The pairing's state: connecting, negotiating, confirm, waiting, ready, or error (`connectionError` says why). */
   pairing: string | null;
+  /**
+   * Why the chat cannot connect, or its texts cannot go, as the app's connection panel says it: the pairing's failure,
+   * or on a chat whose text goes by the DHT the DHT delivery's (its relays refusing the publish). Null when none.
+   */
+  connectionError: string | null;
   /** How far the first pairing got (publishing, waiting, resolving, on-dht, live, …), while it is under way. */
   stage: string | null;
   verified: boolean;
@@ -49,6 +56,24 @@ export function isLive(link: LinkView): boolean {
   return !link.profile || (link.pairing?.status === "ready" && !!link.pairing.transport);
 }
 
+/**
+ * The app's connection failure (ChatConnection's `connectionFailure`), with the relays' words made plain: the engine's
+ * "Publish failed on every relay: Error: http://… responded 503" reads as the CLI failing, a class name per relay.
+ */
+function connectionError(link: LinkView): string | null {
+  const pair = link.pairing;
+  const dht = link.deliveryMode === "dht" || link.textDelivery === "dht";
+  const detail = pair?.transitionError || (pair?.status === "error" ? pair.error : "") || (dht ? link.dhtDelivery?.error : "");
+  if (!detail) return null;
+  const at = detail.indexOf("Publish failed on every relay:");
+  if (at < 0) return detail;
+  const tail = detail.slice(at);
+  const hosts = [...new Set([...tail.matchAll(/\bhttps?:\/\/[^\s;,]+/g)].map(([url]) => URL.canParse(url) ? new URL(url).host : url))];
+  // A relay that answered with an error status took the request: "did not answer" would not be true of it.
+  const said = / responded \d{3}\b/.test(tail) ? `${at ? "n" : "N"}o relay took it` : `${at ? "n" : "N"}o relay answered`;
+  return `${detail.slice(0, at)}${said}${hosts.length ? ` (${hosts.join(", ")})` : ""}`;
+}
+
 export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
   const label = link.label?.trim() || null;
   const peerName = link.peerNick?.trim() || null;
@@ -60,11 +85,12 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     peerName,
     peer: link.peerPubKeyZ32,
     createdAt: link.createdAt,
-    lastMessageAt: link.lastMessageAt,
+    lastMessageAt: link.lastMessageAt || null,
     live,
     transport: live ? (link.pairing?.transport ?? link.pairingProgress?.transport ?? null) : null,
     text: link.textDelivery ?? (link.profile ? "unavailable" : "dht"),
     pairing: link.pairing?.status ?? null,
+    connectionError: connectionError(link),
     stage: link.pairingProgress?.stage ?? null,
     verified: !!link.peerVerified,
     invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
@@ -149,6 +175,42 @@ export interface MessageJson {
    * `messageId` the question here, `button` its id, `label`, `inferred` when only the text named it.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
+  /** A group's payment note (`gpay:<id>`, WISP 902 § Payments): who pays whom, how much, over what, and how it stands now. */
+  groupPay?: GroupPayJson;
+  /**
+   * A payment of this profile in a group (`paymentId`) that a payment note of the group is about: the id of that
+   * note's line. The same payment, said twice; the app draws only this one, with the note under it.
+   */
+  twinOf?: string;
+}
+
+/**
+ * A group payment note as `group history` says it. `from` is the payer's member key, or `*` for a request any member
+ * may pay once; `to` the payee's. `amount` in the unit's smallest denomination (`decimals` of them make one), as a
+ * string. `state`: `open`, `sent` (a payer says it paid, the payee has not confirmed), `paid`, or `closed` (failed,
+ * refused or taken back). `by`: who paid it, null when nobody can tell; `claims`: the members who said they paid it.
+ */
+export interface GroupPayJson {
+  id: string;
+  kind: GroupPayNote["kind"];
+  from: string;
+  to: string;
+  by: string | null;
+  claims: string[];
+  amount: string;
+  decimals: number;
+  unit: string;
+  rail: GroupPayNote["rail"];
+  state: GroupPayNote["state"];
+  test: boolean;
+}
+
+export function groupPayJson(note: GroupPayNote): GroupPayJson {
+  // A request to the group paid through an invoice names nobody: its payee cannot tell who paid, and the app says
+  // no name (a note an older app kept may still carry one).
+  const by = note.from === "*" && note.rail === "lightning" ? null : note.by ?? null;
+  return { id: note.id, kind: note.kind, from: note.from, to: note.to, by, claims: [...(note.claims ?? [])], amount: note.amount,
+    decimals: note.decimals, unit: note.unit, rail: note.rail, state: note.state, test: !!note.test };
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -179,6 +241,7 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.forwarded ? { forwarded: message.forwarded } : {}),
     ...(message.card ? { card: message.card } : {}),
     ...(message.press ? { press: { messageId: message.press.messageId, button: message.press.button, label: message.press.label, ...(message.press.inferred ? { inferred: true as const } : {}) } } : {}),
+    ...(message.groupPay ? { groupPay: groupPayJson(message.groupPay) } : {}),
   };
 }
 
@@ -216,9 +279,10 @@ export function chatMessageJson(message: StoredMessage, link: Pick<LinkView, "pe
  * name rides on the edge or the roster), so the roster fills `nick` when the message has none, and for an author no
  * longer in it (removed, or back with a new member key) the name the group knew them by. A group's own line written
  * before that name came ("Member a4w9nb5y joined") says it, as the app draws it; before, it kept the key for good.
+ * `twinOf`: the line of the payment note this message is the twin of (`groupPayTwins`).
  */
-export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members" | "formerNames"> | undefined): MessageJson {
-  const json = messageJson(message);
+export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members" | "formerNames"> | undefined, twinOf?: string): MessageJson {
+  const json = twinOf ? { ...messageJson(message), twinOf } : messageJson(message);
   if (!message.member) return json;
   const nick = json.nick ?? group?.members.find((m) => m.key === message.member)?.nick ?? group?.formerNames?.[message.member];
   if (!nick) return json;
@@ -226,6 +290,22 @@ export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, 
   const placeholder = `Member ${message.member.slice(0, 8)}`;
   const text = message.event && json.text.startsWith(`${placeholder} `) ? `${nick}${json.text.slice(placeholder.length)}` : json.text;
   return { ...json, nick, text };
+}
+
+/**
+ * Which payment lines of a group's history are twins of a payment note's line, by message id, as the app's group page
+ * tells them (`groupPayTwin`): the requester's own request, the request as it came over the edge, a payment answering
+ * it. Only for a note whose line is in `notes` (the group's, by note id): a twin of nothing is no twin.
+ */
+export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId" | "linkId"> | undefined>>,
+  group: Pick<GroupView, "members" | "myKey"> | undefined): Map<string, string> {
+  const twins = new Map<string, string>();
+  for (const m of messages) {
+    if (!m.paymentId || m.groupPay) continue;
+    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), group?.myKey, (linkId) => groupMemberOfLink(group, linkId));
+    if (note && notes.has(note)) twins.set(m.id, groupPayLineId(note));
+  }
+  return twins;
 }
 
 /**
@@ -243,12 +323,15 @@ export function groupJson(group: GroupView, showSecret = false) {
     me: group.myKey ?? null,
     canSend: group.canSend,
     link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
-    lastMessageAt: group.lastMessageAt,
+    lastMessageAt: group.lastMessageAt || null,
     // Past 16 members with hubs (WISP 902 · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
+    // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
+    // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
+    ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),
     community: group.community ?? null,
     picture: !!group.picture,
     pin: pinJson(group.pin),
