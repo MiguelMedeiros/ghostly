@@ -5,7 +5,7 @@ import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits
 import { CliError } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
 import { checkTextSize } from "./textSize";
-import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
+import { reachesNobody, waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
  * Message buttons (WISP 406 · Message Buttons), the bot's side: a message whose text is the question, with up to six
@@ -127,7 +127,7 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return {
     [target.group ? "group" : "chat"]: target.id, buttons: card.id, messageId: message.id, card, edits: edited?.edit?.seq ?? 0,
-    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: !!edited && !edited.edit?.pending }),
+    ...(target.group ? { ...(edges !== undefined && { edges }), ...reachesNobody(ctx, target.id, "this update") } : { confirmed: !!edited && !edited.edit?.pending }),
   };
 }
 
@@ -158,7 +158,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   if (!replyId) return answer;
   if (target.group) {
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, replyId, undefined, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: replyId });
-    return { ...answer, edges };
+    return { ...answer, edges, ...reachesNobody(ctx, target.id, "this press") };
   }
   const reply = wait === "none" ? await node(ctx).getMessage(target.linkId, replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
   return { ...answer, delivery: reply?.delivery ?? null };

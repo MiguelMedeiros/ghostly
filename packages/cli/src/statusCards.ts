@@ -4,7 +4,7 @@ import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, keptForJoin, node, num, oneOf, oneShotWaits, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, asCliError } from "./errors";
 import { checkTextSize } from "./textSize";
-import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
+import { reachesNobody, waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
  * Status cards (WISP 405 · Status Cards): a bot's task or routine, sent as a message with a card and kept current by
@@ -230,7 +230,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
     if (result.error || !result.messageId) throw new CliError(result.refused ? "refused" : "unavailable", result.error ?? "Nothing to send");
     carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, result.messageId, undefined, ms) : undefined;
-    return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }) });
+    return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }), ...reachesNobody(ctx, target.id, "this card") });
   }
   const result = await node(ctx).sendMessage({ linkId: target.linkId, text, card });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
@@ -323,7 +323,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   return answer(target, kind, id, message.id, {
     card, queued, edits: edited?.edit?.seq ?? 0,
     // An update still waiting for its time went nowhere yet: it is not confirmed, whatever the message's last edit says.
-    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: (!queued || wait !== "none") && !!edited && !edited.edit?.pending, ...keptForJoin(ctx, target.linkId, "the update") }),
+    ...(target.group ? { ...(edges !== undefined && { edges }), ...reachesNobody(ctx, target.id, "this update") } : { confirmed: (!queued || wait !== "none") && !!edited && !edited.edit?.pending, ...keptForJoin(ctx, target.linkId, "the update") }),
   });
 }
 

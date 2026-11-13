@@ -218,6 +218,21 @@ describe("button update", () => {
     expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
   });
 
+  // It answered `edges: 0` at once and said nothing more, as `group send` no longer does there.
+  it("says nobody gets an update or a press in a private group with nobody else in it", async () => {
+    const { ctx, node, theirs } = fake();
+    const crew = node.getState();
+    node.groupTaken.mockReturnValue(0);
+    await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
+    theirs("group:g1", "q1", "Ship?", { kind: "buttons", id: "q", buttons: [{ id: "yes", label: "Yes" }] });
+    node.getState = () => ({ ...crew, groups: [group({ members: [crew.groups[0]!.members[0]!] })] });
+    const nobody = (what: string) => `Nobody else is in this group: nobody gets ${what}, not even someone who joins later`;
+    expect(await callApi(ctx, "button.update", { chat: "Sala", message: "me_1", chosen: "go", wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this update") });
+    expect(await callApi(ctx, "button.press", { chat: "Sala", message: "q1", button: "yes", wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this press") });
+    node.getState = () => crew;
+    expect(await callApi(ctx, "button.update", { chat: "Sala", message: "me_1", chosen: "go" })).not.toHaveProperty("note");
+  });
+
   it("refuses a message not mine or not there, one without buttons, a button it lacks, and nothing to do", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "chat.send", { chat: "Alice", text: "plain" });

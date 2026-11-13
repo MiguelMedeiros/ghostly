@@ -583,6 +583,39 @@ describe("chats", () => {
     expect(await callApi(ctx, "group.send", { group: "Crew", text: "hi" })).not.toHaveProperty("note");
   });
 
+  // The same group's other writes answered `sent: false, edges: 0` at once and said nothing more.
+  it("a reaction, edit, pin, removal or forward in a private group with nobody else in it says nobody gets it too", async () => {
+    const alone = { ...group, profile: "mesh", members: [group.members[0]] } as GroupView;
+    let seq = 0;
+    const node = {
+      getState: () => ({ links: [], groups: [alone] }), groupTaken: () => 0, setGroupTyping: vi.fn(),
+      getMessage: async (linkId: string, id: string) => ({ ...msg(id, 5, { sender: "me" }), linkId, ...(seq ? { edit: { seq, at: 1, history: [] } } : {}) }),
+      react: vi.fn(async () => ({ error: null, n: 1 })),
+      editMessage: vi.fn(async () => { seq++; return { error: null, messageId: "mekey:0:0" }; }),
+      pinMessage: vi.fn(async () => ({ error: null, n: 1 })),
+      removeMessage: vi.fn(async () => ({ error: null, e: 1 })),
+      forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["mekey:0:1"], sent: [], error: null }] })),
+    };
+    const ctx = { runtime: { server: { node } }, mode: "one-shot" } as unknown as ApiContext;
+    const nobody = (what: string) => `Nobody else is in this group: nobody gets ${what}, not even someone who joins later`;
+    const calls: [string, Record<string, unknown>, string][] = [
+      ["group.react", { group: "Crew", message: "mekey:0:0", emoji: "👍" }, "this reaction"],
+      ["group.edit", { group: "Crew", message: "mekey:0:0", text: "new", wait: "sent" }, "this edit"],
+      ["chat.pin", { chat: "Crew", message: "mekey:0:0" }, "this pin"],
+      ["chat.pin", { chat: "Crew", remove: true }, "this unpin"],
+      ["chat.delete", { chat: "Crew", message: "mekey:0:0", everyone: true }, "this removal"],
+    ];
+    for (const [method, params, what] of calls) {
+      await expect(callApi(ctx, method, { ...params, timeout: 1 })).resolves.toMatchObject({ sent: false, edges: 0, note: nobody(what) });
+    }
+    expect(await callApi(ctx, "chat.forward", { chat: "Crew", messages: ["mekey:0:0"], to: ["Crew"], wait: "sent", timeout: 1 }))
+      .toMatchObject({ results: [{ kind: "group", edges: 0, note: nobody("this message") }] });
+    // Another member: no note.
+    Object.assign(node, { getState: () => ({ links: [], groups: [{ ...alone, members: group.members }] }) });
+    for (const [method, params] of calls) expect(await callApi(ctx, method, { ...params, wait: "none" })).not.toHaveProperty("note");
+    expect((await callApi(ctx, "chat.forward", { chat: "Crew", messages: ["mekey:0:0"], to: ["Crew"], wait: "none" }) as { results: object[] }).results[0]).not.toHaveProperty("note");
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
