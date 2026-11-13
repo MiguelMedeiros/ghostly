@@ -108,7 +108,8 @@ export function pairs(values: unknown): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const item of values as string[]) {
     const eq = item.indexOf("=");
-    if (eq < 1) throw new CliError("usage", `--value takes name=value, not ${JSON.stringify(item)}`);
+    // Never the item itself: a --value is a wallet's seed phrase or macaroon as often as not (as `--field`'s, secretInput).
+    if (eq < 1) throw new CliError("usage", "--value takes name=value, and one has no name or no =");
     out[item.slice(0, eq)] = item.slice(eq + 1);
   }
   return out;
