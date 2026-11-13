@@ -72,7 +72,7 @@ export class DhtQueryLimit {
   }
 }
 
-type Query = { q?: Buffer | string; a?: { k?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
+type Query = { q?: Buffer | string; a?: { k?: unknown; v?: unknown; seq?: unknown; sig?: unknown; salt?: unknown; target?: unknown; info_hash?: unknown } };
 type QueryPeer = { address: string; port: number };
 /** The parts of bittorrent-dht's node (no API for them) through which it answers queries. */
 interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { error(peer: QueryPeer, query: Query, error: [number, string]): void } }
@@ -84,14 +84,18 @@ interface DhtInternals { _onquery(query: Query, peer: QueryPeer): void; _rpc: { 
  */
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
 const bytes = (value: unknown, length: number): boolean => Buffer.isBuffer(value) && value.length === length;
+/** BEP44's bound on an item's value, which bittorrent-dht checks only on what has a `length` (not a dictionary). */
+const VALUE_MAX = 1_000;
 
 /**
  * What the node answers strangers: queries at `DhtQueryLimit`'s rate, ping, find_node and get/get_peers as BEP5/BEP44
  * say, and puts of signed mutable items only, which is what Pkarr packets are (the testnet's nodes and the public DHT
  * keep each other's that way). It refuses what the app has no use for and bittorrent-dht kept for anyone and served to
- * anyone: immutable items and peers announced for torrents. A query whose hash, key, signature or salt is not the
- * string BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error
- * nobody caught, one per datagram. It is refused before bittorrent-dht reads it.
+ * anyone: immutable items and peers announced for torrents. A put's value is a string of at most 1000 bytes and its seq
+ * a non-negative integer, as every Pkarr packet's: bittorrent-dht bounds only a value with a `length`, so a dictionary
+ * of 60 KB was kept and served whole to every get. A query whose hash, key, signature or salt is not the string
+ * BEP5/BEP44 say (a put signed without a key, a number for a target) threw out of the socket handler: an error nobody
+ * caught, one per datagram. It is refused before bittorrent-dht reads it.
  */
 function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
   const node = dht as unknown as DhtInternals;
@@ -101,7 +105,9 @@ function answerBounded(dht: DHT, limit = new DhtQueryLimit()): void {
     const q = query.q?.toString(), a = query.a ?? {};
     if (q === "announce_peer") return node._rpc.error(peer, query, [204, "announce_peer is not served here"]);
     if (q === "put" && (!bytes(a.k, 32) || !bytes(a.sig, SIGNATURE))) return node._rpc.error(peer, query, [203, "only signed mutable items are stored here"]);
+    if (q === "put" && !(Buffer.isBuffer(a.v) && a.v.length <= VALUE_MAX)) return node._rpc.error(peer, query, [205, "only values of at most 1000 bytes are stored here"]);
     const malformed = ((q === "get" || q === "find_node") && !bytes(a.target, 20)) || (q === "get_peers" && !bytes(a.info_hash, 20))
+      || (q === "put" && !(Number.isSafeInteger(a.seq) && (a.seq as number) >= 0))
       || (q === "put" && a.salt !== undefined && !(Buffer.isBuffer(a.salt) && a.salt.length <= 64));
     if (malformed) return node._rpc.error(peer, query, [203, "malformed query"]);
     try { answer(query, peer); } catch { /* a query bittorrent-dht could not read goes unanswered */ }
