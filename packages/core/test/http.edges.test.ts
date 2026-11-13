@@ -673,6 +673,7 @@ describe("HttpClient", () => {
   });
 
   it("resets a response its reader leaves unread past the bound, and lets go of what it held", async () => {
+    vi.useFakeTimers();
     const c = client();
     const pending = c.client.request("atlas", { method: "GET", path: "/" });
     c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
@@ -680,11 +681,13 @@ describe("HttpClient", () => {
     const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
     const fits = LIMITS.maxUnreadResponseBytes / chunk.length;
     for (let i = 0; i < fits; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: chunk });
-    await flush();
+    await vi.advanceTimersByTimeAsync(0);
     expect(c.controls().some((f) => f.t === "rst")).toBe(false);
 
     c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: Uint8Array.of(1) });
-    await flush();
+    await vi.advanceTimersByTimeAsync(LIMITS.unreadStallMs - 1);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     expect(c.controls().at(-1)).toEqual({ t: "rst", id: 1, d: "q", e: "Response body not read in time" });
     const iterator = response.body[Symbol.asyncIterator]();
     await expect(iterator.next()).rejects.toMatchObject({ code: "unread" });
@@ -695,6 +698,7 @@ describe("HttpClient", () => {
   });
 
   it("lets go of an ended response its reader never reads", async () => {
+    vi.useFakeTimers();
     const c = client();
     const pending = c.client.request("atlas", { method: "GET", path: "/" });
     c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
@@ -702,7 +706,7 @@ describe("HttpClient", () => {
     const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
     const count = LIMITS.maxUnreadResponseBytes / chunk.length + 1;
     for (let i = 0; i < count; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i === count - 1, payload: chunk });
-    await flush();
+    await vi.advanceTimersByTimeAsync(LIMITS.unreadStallMs);
     await expect(response.bytes()).rejects.toMatchObject({ code: "unread" });
   });
 
@@ -716,6 +720,28 @@ describe("HttpClient", () => {
     const count = (2 * LIMITS.maxUnreadResponseBytes) / chunk.length;
     for (let i = 0; i < count; i++) c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i === count - 1, payload: chunk });
     expect((await reading).length).toBe(2 * LIMITS.maxUnreadResponseBytes);
+    expect(c.controls().some((f) => f.t === "rst")).toBe(false);
+  });
+
+  it("lets a reader that keeps reading, slower than the link, take a body far past the unread bound", async () => {
+    vi.useFakeTimers();
+    const c = client();
+    const pending = c.client.request("atlas", { method: "GET", path: "/" });
+    c.client.handleResponse({ t: "res", id: 1, st: 200, h: [], b: true });
+    const response = await pending;
+    const iterator = response.body[Symbol.asyncIterator]();
+    const chunk = new Uint8Array(LIMITS.maxChunkMessageBytes);
+    // A video playing as it arrives: the link brings two chunks for each one the reader takes.
+    const count = (3 * LIMITS.maxUnreadResponseBytes) / chunk.length;
+    let read = 0;
+    for (let i = 0; i < count; i += 2) {
+      c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: false, payload: chunk });
+      c.client.handleChunk({ kind: CHUNK_KIND.responseBody, id: 1, end: i + 2 >= count, payload: chunk });
+      read += ((await iterator.next()).value as Uint8Array).length;
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    for (let next = await iterator.next(); !next.done; next = await iterator.next()) read += next.value.length;
+    expect(read).toBe(3 * LIMITS.maxUnreadResponseBytes);
     expect(c.controls().some((f) => f.t === "rst")).toBe(false);
   });
 });
