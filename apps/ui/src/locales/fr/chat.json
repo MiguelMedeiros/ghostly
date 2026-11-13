@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
     "notSent": "Votre message « {{text}} » n’a pas été envoyé",
     "notSentCount": "{{count}} messages non envoyés",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
     "rowMoved": "Maintenant à la place {{place}} sur {{count}}",
     "waiting": "Votre message « {{text}} » attend que votre contact soit en ligne",
