@@ -137,7 +137,7 @@ A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typin
 | Code | Meaning |
 |---|---|
 | 0 | Done |
-| 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` |
+| 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` (stderr for `call pipe`, whose stdout is the call's audio) |
 | 2 | Usage: unknown command or bad arguments |
 | 3 | Not found (profile, chat, message) |
 | 4 | Timed out waiting (`--wait`, `chat wait`, `file wait`) |
