@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findOwnNamedChat, node, num, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -246,6 +246,22 @@ function serviceOf(ctx: ApiContext, params: Params): string {
  * A port the person chose that could not be taken, in words that name it. Before, one in use was Node's EADDRINUSE as
  * `engine`, and one not allowed read as a file (`localFileError`): "Not allowed to write or read the path".
  */
+/** As long as the engine keeps a service's name (node.ts addService) and the Desktop's form takes it (Services.tsx). */
+const MAX_SERVICE_NAME_LENGTH = 48;
+
+/**
+ * The `name` of `service add`, refused as a chat's or the profile's name is (`shownName`), before anything is made.
+ * Before, one of spaces was the engine's plain error as `engine` (exit 1), and a longer one was cut with exit 0.
+ */
+function serviceNameOf(params: Params): string {
+  const name = shownName(str(params, "name", true), MAX_SERVICE_NAME_LENGTH, "A service's name");
+  // The engine cuts at 48 UTF-16 units, where a character of two units (most emoji) counts as 2.
+  if (name.length > MAX_SERVICE_NAME_LENGTH) {
+    throw new CliError("bad_request", `A service's name is up to ${MAX_SERVICE_NAME_LENGTH} characters as stored, an emoji counting as 2 (this one is ${name.length})`, { length: name.length, max: MAX_SERVICE_NAME_LENGTH });
+  }
+  return name;
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -258,6 +274,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
+    const name = serviceNameOf(params);
     const target = str(params, "target", true);
     let url: URL;
     try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
@@ -273,7 +290,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
       throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
     }
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
-    const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
+    const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };
   },
   async "service.remove"(ctx, params) {
