@@ -613,6 +613,25 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answer that fails tells the caller it could not connect: the caller's call ends as failed, not declined", async () => {
+    // A callee whose connections cannot be made (its early answer's either): its answer throws.
+    const broken = async (): Promise<CallStack | string> => {
+      const real = await loadCallStack();
+      if (typeof real === "string") return real;
+      const PeerConnection = function () { throw new Error("no connection here"); };
+      return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+    };
+    const { a, b } = pairOfManagers({ b: broken });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.answer(undefined, {})).rejects.toThrow("no connection here");
+    // What an app sends when its answer could not use the microphone (useWebRTC, WISP 601 "Couldn't connect").
+    expect(signalsOf(b, "h").map((s) => JSON.parse(s!))).toEqual([expect.objectContaining({ t: "h", r: "u" })]);
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("an unanswered call is missed on one side, declined on the other, and busy chats refuse a second", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
