@@ -104,15 +104,12 @@ async function osv(url, body) {
   }
 }
 
-async function main() {
-  const asJson = process.argv.includes("--json");
-  const warnUnused = process.argv.includes("--warn-unused");
-  const packages = LOCKFILES.flatMap(({ ecosystem, file }) => (ecosystem === "npm" ? npmPackages(file) : cargoPackages(file)));
-
+/** One finding per advisory per package version and lockfile, from OSV's answers (`ask` is how the scan reaches OSV). */
+export async function findingsFor(packages, ask = osv) {
   const hits = [];
   for (let i = 0; i < packages.length; i += 500) {
     const chunk = packages.slice(i, i + 500);
-    const { results } = await osv("https://api.osv.dev/v1/querybatch", {
+    const { results } = await ask("https://api.osv.dev/v1/querybatch", {
       queries: chunk.map(({ ecosystem, name, version }) => ({ package: { ecosystem, name }, version })),
     });
     results.forEach((result, j) => {
@@ -122,7 +119,7 @@ async function main() {
 
   const findings = [];
   for (const hit of hits) {
-    const detail = await osv(`https://api.osv.dev/v1/vulns/${hit.id}`);
+    const detail = await ask(`https://api.osv.dev/v1/vulns/${hit.id}`);
     if (detail.withdrawn) continue;
     const fixed = (detail.affected ?? [])
       .flatMap((a) => a.ranges ?? [])
@@ -133,6 +130,46 @@ async function main() {
       detail.database_specific?.severity ?? (detail.id.startsWith("RUSTSEC") ? (detail.affected?.[0]?.database_specific?.informational ?? "RUSTSEC") : "UNKNOWN");
     findings.push({ ...hit, severity, summary: detail.summary ?? "", fixed });
   }
+  return findings;
+}
+
+/**
+ * The log of a run without --json: a count, a line per finding, and the annotations GitHub shows on the run's page.
+ * Advisories are counted by id: one advisory on three versions in five lockfiles is one advisory, in seven findings.
+ */
+export function textReport({ scanned, lockfiles, findings, unused, expired, warnUnused }) {
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const byId = (list) => Map.groupBy(list, (f) => f.id);
+  const open = byId(findings.filter((f) => !f.accepted));
+  const lines = [
+    `Scanned ${scanned} packages in ${lockfiles} lockfiles: ${plural(byId(findings).size, "advisory", "advisories")} in ${plural(findings.length, "package/lockfile pair", "package/lockfile pairs")}, ${open.size} not accepted; allowlist: ${unused.length} unused, ${expired.length} expired.`,
+  ];
+  for (const f of findings) {
+    const mark = f.accepted ? "accepted" : "OPEN";
+    lines.push(`  [${mark}] ${f.name} ${f.version} (${f.lockfile}${f.dev ? ", dev" : ""}) ${f.id} ${f.severity}: ${f.summary}${f.fixed.length ? ` → fixed in ${f.fixed.join(", ")}` : ""}`);
+  }
+  // Annotations, so what fails the run shows on its page, not only in its log: one per open advisory, then the entries to remove.
+  const escape = (text) => text.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+  for (const [id, hits] of open) {
+    const places = [...Map.groupBy(hits, (f) => `${f.name} ${f.version}`)].map(([version, at]) => `${version} (${at.map((f) => f.lockfile).join(", ")})`);
+    const fixed = [...new Set(hits.flatMap((f) => f.fixed))];
+    const next = fixed.length ? `update past the fix (${fixed.join(", ")})` : "no version fixes it yet: replace the package";
+    lines.push(escape(`::error::Open advisory ${id} (${hits[0].severity}): ${hits[0].summary}. In ${places.join(", ")}; ${next} or accept it in .github/security-allowlist.json.`));
+  }
+  const level = warnUnused ? "warning" : "error";
+  for (const a of unused) lines.push(`::${level} file=.github/security-allowlist.json::Unused allowlist entry: ${a.package} ${a.id} matched no advisory in any lockfile; remove it.`);
+  for (const a of expired) {
+    const when = isDay(a.until) ? `until ${a.until}` : `"until" ${a.until === undefined ? "missing" : `${JSON.stringify(a.until)}, not a YYYY-MM-DD day`}`;
+    lines.push(`::error file=.github/security-allowlist.json::Expired allowlist entry: ${a.package} ${a.id} (${when}); re-check it, then remove it or move its date.`);
+  }
+  return lines;
+}
+
+async function main() {
+  const asJson = process.argv.includes("--json");
+  const warnUnused = process.argv.includes("--warn-unused");
+  const packages = LOCKFILES.flatMap(({ ecosystem, file }) => (ecosystem === "npm" ? npmPackages(file) : cargoPackages(file)));
+  const findings = await findingsFor(packages);
 
   const allowlist = JSON.parse(readFileSync(join(root, ".github/security-allowlist.json"), "utf8")).accepted;
   const { accepted, unused, expired } = allowlistReport(allowlist, findings, new Date().toISOString().slice(0, 10));
@@ -143,18 +180,7 @@ async function main() {
   if (asJson) {
     console.log(JSON.stringify({ scanned: packages.length, lockfiles: LOCKFILES.map((l) => l.file), findings, unusedEntries: unused, expiredEntries: expired }, null, 2));
   } else {
-    console.log(`Scanned ${packages.length} packages in ${LOCKFILES.length} lockfiles: ${findings.length} advisories, ${open.length} not accepted; allowlist: ${unused.length} unused, ${expired.length} expired.`);
-    for (const f of findings) {
-      const mark = f.accepted ? "accepted" : "OPEN";
-      console.log(`  [${mark}] ${f.name} ${f.version} (${f.lockfile}${f.dev ? ", dev" : ""}) ${f.id} ${f.severity}: ${f.summary}${f.fixed.length ? ` → fixed in ${f.fixed.join(", ")}` : ""}`);
-    }
-    // Annotations, so the entries to remove show on the run's page, not only in its log.
-    const level = warnUnused ? "warning" : "error";
-    for (const a of unused) console.log(`::${level} file=.github/security-allowlist.json::Unused allowlist entry: ${a.package} ${a.id} matched no advisory in any lockfile; remove it.`);
-    for (const a of expired) {
-      const when = isDay(a.until) ? `until ${a.until}` : `"until" ${a.until === undefined ? "missing" : `${JSON.stringify(a.until)}, not a YYYY-MM-DD day`}`;
-      console.log(`::error file=.github/security-allowlist.json::Expired allowlist entry: ${a.package} ${a.id} (${when}); re-check it, then remove it or move its date.`);
-    }
+    for (const line of textReport({ scanned: packages.length, lockfiles: LOCKFILES.length, findings, unused, expired, warnUnused })) console.log(line);
   }
   process.exit(failing ? 1 : 0);
 }
