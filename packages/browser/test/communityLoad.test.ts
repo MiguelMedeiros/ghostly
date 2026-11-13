@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMMUNITY_TOPOLOGY } from "@ghostly/core";
+import { COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.protocol.community-topology, groups.protocol.community-pair
 
@@ -19,6 +19,18 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 const N = Number(process.env.GROUP_LOAD ?? 0);
 const WAVE = 16;
 
+/** `add` commits signed by others than the admin since the admin's last one, on `peer`'s chain (as `membersAtBound` counts them). */
+function memberAdmissionsSinceAdmin(peer: Peer, id: string): number {
+  const s = peer.groups.communities.session(id)!, chain = s.state.chain;
+  let n = 0;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const c = chain[i];
+    if (c.k === "create" || c.k === "role" || (c.by === s.admin && c.k !== "remove" && c.k !== "leave")) break;
+    if (c.k === "add") n++;
+  }
+  return n;
+}
+
 describe.runIf(N > 0)(`community group load: ${N} members`, () => {
   it("admits, elects hubs, delivers to everyone, catches up and re-keys at this size", async () => {
     const report: Record<string, unknown> = { members: N };
@@ -32,17 +44,22 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
     const link = await admin.groups.enableLink(id);
     const peers: Peer[] = [admin];
 
-    // Admission through the link, in waves; the admin closes its app after the first wave.
+    // Admission through the link, in waves; the admin closes its app after the first wave and opens it again only for
+    // a wave the members could not let in on their own (`memberAdmissions` in a row, WISP 903 § Admissions while the
+    // admin is away).
     let t = wall(), simStart = world.now;
     for (let i = 1; i < N; i += WAVE) {
       const wave = Array.from({ length: Math.min(WAVE, N - i) }, (_, j) => add(`p${i + j}`));
+      if (i > 1) admin.online = memberAdmissionsSinceAdmin(peers[peers.length - 1], id) + wave.length > COMMUNITY_LIMITS.memberAdmissions;
       for (const p of wave) await p.groups.joinByLink(link);
       await world.until(() => wave.every(p => world.member(p, id)), 15 * 60_000, 1000, () => `wave ${i}: ${wave.filter(p => !world.member(p, id)).map(p => p.name).join(",")}`);
       peers.push(...wave);
-      if (i === 1) admin.online = false;
     }
     report.joinSimulatedSeconds = (world.now - simStart) / 1000;
     report.joinWallSeconds = Math.round(wall() - t) / 1000;
+    // The admin away for the rest, as before the bound: its hub's members move to the hubs left before anything is measured.
+    admin.online = false;
+    await world.run(5 * 60_000);
     const online = peers.filter(p => p.online);
     // Everyone ends on one roster of N: races while admitting are settled and their losers let in again.
     simStart = world.now;
