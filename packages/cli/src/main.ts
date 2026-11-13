@@ -199,6 +199,19 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
   return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
+/** What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. */
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing"]);
+
+/**
+ * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
+ * chats unstarted (`deferChats`); the groups start, and their edges are never deferred. Started, each saved chat put its
+ * records and its leave packet on the relays: with 12 invites saved, one `group send` asked the relay 32 times (3 with
+ * none), its whole minute, and a text to an away contact, or the next one-shot, waited behind them.
+ */
+export function oneGroupOnly(method: string): boolean {
+  return GROUP_EDGES_ONLY.has(method);
+}
+
 /**
  * Reads that need nothing of a chat's history: a one-shot for one leaves every saved chat unstarted too (`deferChats`),
  * so its start reads each chat's newest row (its place in `chat list`) and no history. It read every 1:1 chat whole:
@@ -1444,7 +1457,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
     if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     return s.call(spec.method, params);
-  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" }));
+  }, { deferGroups: spec.target === "chat", deferChats: spec.target === "chat" || oneGroupOnly(spec.method) }));
 }
 
 /**
@@ -1553,7 +1566,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: oneChatOnly(command.method, params) || oneGroupOnly(command.method) || readsNoHistory(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
