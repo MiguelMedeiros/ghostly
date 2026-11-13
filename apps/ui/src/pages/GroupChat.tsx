@@ -469,6 +469,9 @@ export function GroupChat() {
   const [shareShown, setShareShown] = useState(false);
   if (sharing && rosterGroup?.entryLink && !shareShown) setShareShown(true);
   const closeShare = () => { setSharing(""); setShareShown(false); };
+  // Out of the group under it (removed, forked, lost): no link of mine to hand out, while the link is still on for the others.
+  // It closes, as the members panel drops its link, and the page's notice says why; not "the admin turned the link off".
+  if (sharing && rosterGroup?.status && rosterGroup.status !== "active") closeShare();
   useEffect(() => {
     if ((location.state as { share?: string } | null)?.share !== "created") return;
     setSharing("created");
