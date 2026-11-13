@@ -84,7 +84,7 @@ export function fileWaitsNote(chat: DhtOnly, ref: string): string | undefined {
 /**
  * The wait a one-shot does when no `--wait` is given (`ctx.mode === "one-shot"` defaults in api.ts, files.ts, buttons.ts
  * and statusCards.ts): what is not out yet leaves with the process, so it stays. A daemon answers those at once. A ref
- * written `group:<id>` is a group's, whose file, card or button press does not wait; a group named otherwise is told
+ * written `group:<id>` is a group's, whose card or button press does not wait; a group named otherwise is told
  * only by the engine, and its notice comes only if the call is still going after WAIT_NOTICE_MS.
  */
 function oneShotWait(method: string, params: Record<string, unknown>): string | undefined {
@@ -94,7 +94,9 @@ function oneShotWait(method: string, params: Record<string, unknown>): string | 
     // going after WAIT_NOTICE_MS.
     case "chat.send": return "sent";
     case "chat.edit": return "confirmed";
-    case "file.send": case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
+    // A group's file waits until a member's edge took its message.
+    case "file.send": return "sent";
+    case "task.send": case "routine.send": case "button.press": return group ? undefined : "sent";
     // `--all` reports to each 1:1 chat in turn, each waiting as one named would.
     case "usage.send": return group ? undefined : "sent";
     case "task.update": case "routine.update": return group ? undefined : "confirmed";
@@ -170,8 +172,10 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
     const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
     const chatRef = word(params.chat), chat = chatRef ?? "the contact";
     const list = chatRef ? ` (ghostly file list ${shellWord(chatRef, "<chat>")} says which)` : "";
+    // A group's file waits until a member's edge took its message.
+    const to = chatRef?.startsWith("group:") ? `a member's edge in group ${chatRef.slice("group:".length)} to take it` : `it to go out to ${chat}`;
     return {
-      waiting: `copying ${file} into the profile, then waiting for it to go out to ${chat} (up to ${seconds} s; Ctrl-C stops the send while it is copied in, then only the waiting)`,
+      waiting: `copying ${file} into the profile, then waiting for ${to} (up to ${seconds} s; Ctrl-C stops the send while it is copied in, then only the waiting)`,
       stopped: `${file} was not sent to ${chat} if it was still being copied in; if it was in the chat, it is kept here and ${goesOn(mode)}${list}`,
     };
   }

@@ -18,7 +18,7 @@ import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 import { fileWaitsNote } from "./waitNotice";
-import { goesOn } from "./waits";
+import { goesOn, nobodyElseIn, waitForGroupFrame } from "./waits";
 
 /**
  * Files and voice notes in a chat (WISP 1100, phase 3), as the app's composer sends them (packages/browser
@@ -230,9 +230,11 @@ async function stageWhileAsked(bytes: FileBytes, id: string, path: string, sourc
 
 /**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
- * the announcement. This device is its first holder and serves the members who ask.
+ * the announcement. This device is its first holder and serves the members who ask. A group has no receipts: `waitMs`
+ * (`wait: sent`) waits until a member's edge took the announcement, and `edges` and `sent` say how many did, as for
+ * `group send`.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number, gone: AbortSignal | undefined) {
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number, gone: AbortSignal | undefined, waitMs?: number) {
   // Said as `help file send` says the cap, with the file and its size: a 1:1 chat has no cap, which is the way out.
   if (picked > GROUP_FILE_LIMITS.maxBytes) {
     throw new CliError("refused", `Too large for a group: ${name} is ${megabytes(picked)}, a group takes up to ${GROUP_FILE_LIMITS.maxBytes / 1_048_576} MiB (send it in a 1:1 chat)`, { reason: "too_large", size: picked, max: GROUP_FILE_LIMITS.maxBytes });
@@ -268,7 +270,14 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
     await removeStored(fileId).catch(() => {});
     throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
   }
-  return { group: group.id, messageId: result.messageId ?? null, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+  const messageId = result.messageId ?? null;
+  const edges = !messageId ? 0 : waitMs !== undefined ? await waitForGroupFrame(ctx, group.id, messageId, undefined, waitMs) : node(ctx).groupTaken({ groupId: group.id, messageId });
+  return {
+    group: group.id, messageId, sent: edges > 0, edges, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
+    // A one-shot leaves now, and what no edge took leaves with it: the members hear of the file, and fetch it from here,
+    // once this profile is online again.
+    ...(messageId && !edges && ctx.mode === "one-shot" && !nobodyElseIn(ctx, group.id) ? { note: `No member's edge took it yet: it ${goesOn(ctx)}` } : {}),
+  };
 }
 
 /** Bytes a file system takes in one name: 255 on ext4, btrfs, APFS (NTFS counts 255 UTF-16 units, within this too). */
@@ -440,11 +449,12 @@ export const FILE_METHODS: Record<string, Method> = {
     await access(path, constants.R_OK);
     // A one-shot leaves once its command is done, and the transfer with it: in a chat it stays until the contact has the
     // whole file, as `send` stays until its message went out. Before, it left in under a second with nothing sent, and
-    // the contact saw the file only with a later command that stayed online long enough. A group's file, or one to a chat
-    // nobody joined yet: none.
-    const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
+    // the contact saw the file only with a later command that stayed online long enough. A group's stays until a member's
+    // edge took its message, as `group send --wait sent` does (it left with no word that nothing went). A chat nobody
+    // joined yet: none.
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, "group" in target ? (ctx.mode === "one-shot" ? "sent" : "none") : oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
-    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size, call?.gone);
+    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size, call?.gone, wait === "sent" ? seconds * 1000 : undefined);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
     // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
