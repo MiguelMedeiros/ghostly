@@ -568,6 +568,26 @@ describe("chats", () => {
     for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
   });
 
+  // A copy's wait that timed out threw alone, with that copy's id: the other targets' results and a refusal were lost
+  // (exit 4, not 1), and a bot that sent again sent twice to the targets that had theirs.
+  it("forward: a copy's wait that times out still answers every target's result, and a refusal comes first", async () => {
+    const { ctx, node } = fake([msg("m1", 5), msg("me:1:0", 6, { linkId: "chat-one", sender: "me", delivery: "sending" })]);
+    Object.assign(ctx, { mode: "one-shot" });
+    const forwardMessages = vi.fn(async () => ({ results: [{ messageIds: [], sent: [], error: "You are offline" }, { messageIds: ["me:1:0"], sent: [], error: null }] }));
+    Object.assign(node, { forwardMessages, groupTaken: () => 0 });
+    // A group's copy no edge took (a one-shot waits for one by default), next to a chat that refused.
+    const refused = await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m1"], to: ["Bob", "group:g1"], timeout: 1 }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: "engine", message: "chat-two: You are offline", details: { from: "chat-one", results: [{ to: "chat-two", error: "You are offline" }, { to: "g1", kind: "group", messageIds: ["me:1:0"], edges: 0 }] } });
+    // No refusal: the timeout, with every target's result next to the copy it waited for.
+    forwardMessages.mockResolvedValue({ results: [{ messageIds: [], sent: [], error: null }, { messageIds: ["me:1:0"], sent: [], error: null }] });
+    const late = await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m1"], to: ["Bob", "group:g1"], timeout: 1 }).catch((e: unknown) => e);
+    expect(late).toMatchObject({ code: "timeout", details: { messageId: "me:1:0", from: "chat-one", results: [{ to: "chat-two", error: null }, { to: "g1", edges: 0 }] } });
+    // A chat's copy left waiting with --wait sent, next to a group that refused.
+    forwardMessages.mockResolvedValue({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }, { messageIds: [], sent: [], error: "Not a member" }] });
+    const chat = await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m1"], to: ["Alice", "group:g1"], wait: "sent", timeout: 1 }).catch((e: unknown) => e);
+    expect(chat).toMatchObject({ code: "engine", message: "g1: Not a member", details: { from: "chat-one", results: [{ to: "chat-one", messageIds: ["me:1:0"] }, { to: "g1", error: "Not a member" }] } });
+  });
+
   // A message to a private group with nobody else in it reaches nobody, not even who joins later: `--wait sent` waited its
   // whole time and said it goes when an edge opens.
   it("group send in a private group with nobody else in it answers at once and says nobody gets it", async () => {
