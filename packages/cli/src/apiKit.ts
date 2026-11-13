@@ -1,6 +1,6 @@
 import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
-import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
@@ -37,6 +37,8 @@ export type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
+/** The engine's settings, without building `state` (a view of every chat). */
+export const settingsOf = (ctx: ApiContext): Settings => node(ctx).getSettings();
 
 /**
  * The time of a send the engine names its row after (`me_<timestamp>`: a file, a payment, a request), its own even

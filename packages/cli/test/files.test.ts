@@ -109,7 +109,7 @@ describe("group administration", () => {
 
   it("group admin, hub and remove say that this profile's own name is you", async () => {
     const own = { id: "g1", name: "Dev room", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
-    const node = { getState: () => ({ links: [], groups: [own], settings: { nick: "Bia" }, transport: {} }) as unknown as EngineState, makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const node = { getState: () => ({ links: [], groups: [own], settings: { nick: "Bia" }, transport: {} }) as unknown as EngineState, getSettings: () => ({ nick: "Bia" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
     for (const method of ["group.admin", "group.hub", "group.remove"]) {
       await expect(callApi(ctx, method, { group: "Dev room", member: "Bia" })).rejects.toMatchObject({ code: "bad_request", message: '"Bia" is you: name another member of Dev room' });
@@ -122,7 +122,7 @@ describe("group administration", () => {
   it("group admin and hub --pin take a member by key, never by the name it gave itself", async () => {
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     const crew = { id: "g1", name: "Crew", members: [{ key: "595m389h77", me: true }, { key: KEY, nick: "Bob", me: false }] } as unknown as GroupView;
-    const node = { getState: () => ({ links: [], groups: [crew], settings: {}, transport: {} }) as unknown as EngineState, makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const node = { getState: () => ({ links: [], groups: [crew], settings: {}, transport: {} }) as unknown as EngineState, getSettings: () => ({}), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
     for (const [method, extra] of [["group.admin", {}], ["group.hub", { role: "pin" }]] as const) {
       await expect(callApi(ctx, method, { group: "Crew", member: "bob", ...extra })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/only by the name it gave itself/), details: { member: KEY, name: "Bob" } });

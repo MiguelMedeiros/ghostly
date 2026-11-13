@@ -15,10 +15,11 @@ function fake() {
   const payment = { id: "pay1", linkId: "chat0", kind: "payment", direction: "out", amount: 5, createdAt: 1, status: "done" } as unknown as PaymentView;
   const s = {
     links, groups: [{ id: "crew", name: "Crew", members: [] } as unknown as GroupView],
-    settings: {}, transport: {}, transfers: {}, payments: { pay1: payment },
+    settings: { nick: "Bot" }, transport: {}, transfers: {}, payments: { pay1: payment },
   } as unknown as EngineState;
   const node = {
     getState: vi.fn(() => s),
+    getSettings: vi.fn(() => s.settings),
     sendMessage: vi.fn(async () => ({ messageId: "me_1" })),
     getMessage: vi.fn(async (linkId: string, id: string) => ({ linkId, id, text: "hi", sender: "me", timestamp: 1, delivery: "sent" })),
     forwardMessages: vi.fn(async () => ({})),
@@ -41,5 +42,14 @@ describe("a command naming a chat", () => {
     expect(await builds("payment.list", { chat: "Friend 0" })).toBe(1);
     expect(await builds("chat.forward", { chat: "Friend 0", messages: ["me_1"], to: ["Friend 1", "Friend 2", "Crew"] })).toBe(1);
     expect(node.getMessage).toHaveBeenCalled();
+  });
+});
+
+describe("a command reading a setting", () => {
+  it("builds no engine state", async () => {
+    const { ctx, node } = fake();
+    for (const method of ["settings.get", "profile.get"]) await callApi(ctx, method, {});
+    expect(node.getSettings).toHaveBeenCalledTimes(2);
+    expect(node.getState).not.toHaveBeenCalled();
   });
 });
