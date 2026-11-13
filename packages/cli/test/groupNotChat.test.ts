@@ -143,8 +143,25 @@ describe("listen --from a group, --group a chat", () => {
       code: "not_found", message: '"Crew" is a group, not a chat: ghostly listen --group Crew', details: { group: "g1crew" },
     });
     await expect(allowlist([], ["Alice"], call, async () => null)).rejects.toMatchObject({
-      code: "not_found", message: '"Alice" is a chat, not a group: ghostly listen --from Alice', details: { chat: "chat-one" },
+      code: "not_found", message: '"Alice" is a chat, not a group: ghostly listen --from chat-one', details: { chat: "chat-one" },
     });
     await expect(allowlist(["Nobody"], [], call, async () => null)).rejects.toMatchObject(noChat("Nobody"));
+  });
+
+  it("--group a chat names it by its id, which --from takes, never by the name its contact chose or a prefix", async () => {
+    // Bob chose his own name; this side gave his chat no label. `--from Bob` or `--from chat-b` is refused.
+    const bob = { ...alice, id: "chat-bob", label: undefined, peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
+    const withBob = (method: string, params: Record<string, unknown>) => {
+      const ctx = fake();
+      (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node.getState = () => ({ ...state(), links: [alice, bob] }) as unknown as EngineState;
+      return callApi(ctx, method, params);
+    };
+    for (const ref of ["Bob", "chat-b"]) {
+      await expect(allowlist([], [ref], withBob, async () => null)).rejects.toMatchObject({
+        code: "not_found", message: `"${ref}" is a chat, not a group: ghostly listen --from chat-bob`, details: { chat: "chat-bob" },
+      });
+      await expect(allowlist([ref], [], withBob, async () => null)).rejects.toMatchObject({ details: { chat: "chat-bob" } });
+    }
+    expect(await allowlist(["chat-bob"], [], withBob, async () => null)).toBeDefined();
   });
 });

@@ -99,13 +99,15 @@ export async function allowlist(from: readonly string[], groups: readonly string
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing.
+ * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
+ * or the name its contact chose, which `--group`'s lookup took.
  */
 async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    const named = other === "chat" ? error.details.chat as string : ref;
+    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
