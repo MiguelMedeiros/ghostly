@@ -1407,7 +1407,9 @@ export class Communities {
     }
     for (const [key, since] of live.members) {
       const id = edges.get(key);
-      if (this.gone(live, key)) live.members.delete(key);
+      // A key no commit names is no member of mine, its edge up or not: one let in on a branch that lost (my door
+      // answered the old link before I heard the new one) kept a member's edge for hours (2026-11-12).
+      if (this.gone(live, key) || !rosterHas(live.session.roster, key)) live.members.delete(key);
       else if (id && this.host.linkReady(id, 2)) live.members.set(key, now);
       else if (live.session.wasRemoved(key)) live.members.delete(key);
       else if (now - since > this.timings.memberGoneMs) { live.members.delete(key); live.memberBackUntil = now + MEMBER_BACK_MS; }
