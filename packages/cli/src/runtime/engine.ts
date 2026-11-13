@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
@@ -216,11 +216,17 @@ async function installEventSource(): Promise<void> {
 /**
  * Arkade's descriptor library is CommonJS and `require`s `@scure/bip32`, which is ESM. When the engine's own imports
  * are still evaluating that module, Node's require(esm) hands the library a namespace without `HDKey` yet ("reading
- * 'fromMasterSeed'"). Loading it whole first avoids the race.
+ * 'fromMasterSeed'"). Loading it whole first avoids the race. The library is the copy Arkade resolves: Arkade pins an
+ * exact version, and any other copy would be a second library loaded for nothing.
  */
-async function preloadWalletModules(): Promise<void> {
+export async function preloadWalletModules(): Promise<void> {
   await import("@scure/bip32").catch(() => {});
-  await import("@bitcoinerlab/descriptors-scure").catch(() => {});
+  try {
+    const arkade = createRequire(createRequire(import.meta.url).resolve("@arkade-os/sdk"));
+    await import(pathToFileURL(arkade.resolve("@bitcoinerlab/descriptors-scure")).href);
+  } catch {
+    // Only a head start: an Ark wallet's own import of the SDK says what is wrong.
+  }
 }
 
 /** Iroh's wasm, from next to the bundle (a package) or from the workspace (development and tests). */
