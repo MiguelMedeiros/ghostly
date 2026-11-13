@@ -45,9 +45,10 @@ const PREVIEW_CHARS = 80;
  * as a card (`appCards`: `appCardsShown`), its text elsewhere, as the bubble shows it. A group's payment note as its
  * timeline shows it (`noteLine`), not the engine's English line.
  */
-function spoken(message: Announceable, t: Translate, appCards: boolean, noteLine?: (note: GroupPayNote) => string): string {
+function spoken(message: Announceable, t: Translate, appCards: boolean, noteLine?: (note: GroupPayNote) => string | null): string {
   if (showsCard(message.card)) return cardLine(message.card);
-  if (message.groupPay && noteLine) return noteLine(message.groupPay);
+  const note = message.groupPay && noteLine?.(message.groupPay);
+  if (note) return note;
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
   if (payment) return paymentLine(t, payment, wallet!.getState());
@@ -131,8 +132,11 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
   linkId?: string;
   messages: readonly Announceable[];
   nameOf(message: Announceable): string;
-  /** A group's payment note as its timeline shows it (who pays whom, how much, where it stands): said when it changes. */
-  noteLine?(note: GroupPayNote): string;
+  /**
+   * A group's payment note as its timeline shows it (who pays whom, how much, where it stands): said when it changes.
+   * Nothing for a note the timeline does not draw (one said by a payment's own bubble).
+   */
+  noteLine?(note: GroupPayNote): string | null;
   /** The chat is on screen. A chat kept open behind another one reads nothing out. */
   active?: boolean;
   /**
@@ -233,7 +237,8 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
       const key = noteKey(note), was = before.get(m.id);
       if (noteOpen(note)) after.set(m.id, { at, key });
       else after.delete(m.id);
-      if (was && was.key !== key && active && noteLine) sayRef.current(noteLine(note));
+      const line = was && was.key !== key && active && noteLine?.(note);
+      if (line) sayRef.current(line);
     };
     if (whole) messages.forEach(look);
     else {
@@ -346,7 +351,9 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
     checkDeliveries.current(messages, fresh, from, reread);
     if (messages.length) known.last = messages[messages.length - 1].id;
     known.at = messages.length - 1;
-    const incoming = fresh.filter(m => m.sender === "peer" && !m.systemEvent && !m.callEvent && !m.event);
+    // A note the timeline does not draw (no `noteLine`) is not news either: the payment's own bubble says it.
+    const unsaid = (m: Announceable) => !!m.groupPay && words.current.noteLine?.(m.groupPay) === null;
+    const incoming = fresh.filter(m => m.sender === "peer" && !m.systemEvent && !m.callEvent && !m.event && !unsaid(m));
     if (!incoming.length || !active) return;
     pending.current.push(...incoming);
     if (timers.current.flush) return;
