@@ -153,6 +153,23 @@ describe("the chat list", () => {
     await user.type(screen.getByPlaceholderText(/search/i), "liddell");
     expect(screen.getAllByTestId("chat-row").map(r => within(r).getByTestId("chat-row-name").textContent)).toEqual(["Alice Liddell"]);
   });
+
+  it("looks each row's contact up without a pass over every chat, on every engine state", () => {
+    // 40 contacts, each shown as their chosen identity: a pass over the chats for each row made N rows cost N x N a state.
+    const peers = Array.from({ length: 40 }, (_, i) => `${i}`.padStart(2, "0").padEnd(52, "k"));
+    peers.forEach((peer, i) => { saveSession(chat({ id: `c${i}`, peerPubKeyB64: peer })); setFaceChoice(peer, { provider: "pubky", subject: PUBKY_KEY }); });
+    const links = () => peers.map(peer => linkView({ id: `l-${peer}`, peerPubKeyZ32: peer, identities: identitiesView({ received: [pubky()] }) }));
+    fakeEngine.on("loadPublicProfile", () => undefined);
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    act(() => fakeEngine.update({ links: links() }));
+    expect(screen.getAllByTestId("chat-row-name").map(n => n.textContent)).toEqual(Array(40).fill("Alice Liddell"));
+    const find = vi.spyOn(Array.prototype, "find");
+    try {
+      for (let i = 0; i < 10; i++) act(() => fakeEngine.update({ links: links() }));
+      const passes = find.mock.contexts.filter(list => Array.isArray(list) && list.length === peers.length && (list as { peerPubKeyZ32?: string }[])[0]?.peerPubKeyZ32 === peers[0]).length;
+      expect(passes, "passes over the chats in 10 states").toBeLessThan(40);
+    } finally { find.mockRestore(); }
+  });
 });
 
 describe("the marks' card in the chat list", () => {
