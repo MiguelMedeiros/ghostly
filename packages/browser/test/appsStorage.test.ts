@@ -436,6 +436,39 @@ describe("uninstall", () => {
     }
   });
 
+  it("a chat deleted while its app deletes a key keeps no count of its rows: the same chat joined again starts empty", async () => {
+    const chats = new Set(["chat-1"]);
+    const app = await bundle();
+    net.put(BUNDLE_URL, app.bytes);
+    const store = apps(net, { isChat: (scope) => chats.has(scope) });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: app.digest, grant: ["chat"] });
+    const { ref } = app;
+    const big = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+    // As the engine's `removeLink`, done between the delete's read of its row and its write: the chat is no longer one,
+    // its rows go, then its counts.
+    let removed: Promise<void> | undefined;
+    const get = IDBObjectStore.prototype.get;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, query: IDBValidKey | IDBKeyRange) {
+      const request = get.call(this, query);
+      if (removed || !Array.isArray(query) || query[2] !== "k0") return request;
+      chats.delete("chat-1");
+      removed = db.deleteLink("chat-1").finally(() => store.forgetScope("chat-1"));
+      const read = new Promise<void>((resolve) => { request.onsuccess = () => resolve(); });
+      const held = { get result() { return request.result; }, set onsuccess(on: () => void) { void Promise.all([read, removed]).then(on); }, onerror: null };
+      return held as unknown as IDBRequest;
+    });
+    const deleted = await store.storageDelete({ ref, scope: "chat-1", key: "k0" }).then(() => "ok", (e: Error) => e.message.split(":")[0]);
+    spy.mockRestore();
+    expect(deleted).toBe("bad-scope");
+    expect(await storageRows()).toEqual([]);
+    // The same invite joined again: as many full values fit as before.
+    chats.add("chat-1");
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual([]);
+    for (let i = 0; i < 75; i++) await store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: big });
+  });
+
   it("a deleted chat's messages and app rows go by range, one delete per app, not one per row", async () => {
     const refs = ["ana/chess", "ana/go", "bo/notes"];
     const tx = (await openDb()).transaction([STORES.messages, STORES.appStorage], "readwrite");
