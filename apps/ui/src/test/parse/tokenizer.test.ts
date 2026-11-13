@@ -135,6 +135,19 @@ describe("links", () => {
     ["https://ja.wikipedia.org/wiki/東京", "[link:https://ja.wikipedia.org/wiki/東京]"],
   ])("ends a link before the sentence's punctuation in any language: %s", (text, shown) => expect(inline(text)).toBe(shown));
 
+  // An emoji typed right after a link went into it: the bubble showed "…/a%F0%9F%94%A5" and opened that address.
+  it.each([
+    ["olha https://x.example/a🔥", "olha [link:https://x.example/a]🔥"],
+    ["olha https://x.example/a!🔥", "olha [link:https://x.example/a]!🔥"],
+    ["https://x.example/a,🔥", "[link:https://x.example/a],🔥"],
+    ["https://x.example/a👍🏽👍🏽", "[link:https://x.example/a]👍🏽👍🏽"],
+    ["https://x.example/a❤️.", "[link:https://x.example/a]❤️."],
+    ["https://x.example/a👨‍👩‍👧 https://x.example/b🇧🇷", "[link:https://x.example/a]👨‍👩‍👧 [link:https://x.example/b]🇧🇷"],
+    ["(https://x.example/a)😂", "([link:https://x.example/a])😂"],
+    ["https://x.example/a\u200b", "[link:https://x.example/a]\u200b"],
+    ["https://x.example/🔥/a", "[link:https://x.example/🔥/a]"],
+  ])("ends a link before an emoji or invisible character typed after it: %s", (text, shown) => expect(inline(text)).toBe(shown));
+
   it("never links anything but http(s)", () => {
     expect(inline("javascript:alert(1) data:text/html,x ftp://x.example")).toBe("javascript:alert(1) data:text/html,x ftp://x.example");
     expect(inline("https://")).toBe("https://");
