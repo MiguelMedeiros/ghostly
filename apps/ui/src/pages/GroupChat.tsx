@@ -719,6 +719,10 @@ export function GroupChat() {
   // A private group knows my lines by the member key I wrote them under: removed and invited back, I hold a new one,
   // and the group refuses an edit or a deletion of what I wrote before.
   const underMyKey = (m: StoredMessage) => group.profile !== "mesh" || !group.myKey || m.id.startsWith(`${group.myKey}:`);
+  // So does a reaction of mine from before (it stays under the old key): one row with it takes no other of mine.
+  let rejoinedAt = 0;
+  if (group.profile === "mesh") for (const m of messages) if (m.event === "joined" && !m.member) rejoinedAt = Math.max(rejoinedAt, m.timestamp);
+  const reactedBefore = (m: StoredMessage) => !!m.reactions?.me?.e && m.reactions.me.at < rejoinedAt;
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
@@ -762,7 +766,7 @@ export function GroupChat() {
       onEdit={canEditInGroup(m) && !m.card && underMyKey(m) && group.canSend ? () => editRow(m) : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
       onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && underMyKey(m) && group.canSend ? () => removeRow(m) : undefined}
-      onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
+      onReact={replyTarget(m, true) && !reactedBefore(m) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinRow(m) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => saveRow(m.id)} saved={savedHere.has(m.id)} />;
   // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
