@@ -70,21 +70,17 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
-  // The seen set read and the baseline taken after the start (`EventHub.know`), when they are.
-  let baselining: Promise<void> | undefined;
   try {
-    // An offline one-shot: nothing reaches it while it runs, so the seen set is read only if a history or a transfer
-    // changes here (`EventHub.know`).
-    const later = mode === "one-shot" && !!options.offline;
     const { server, store } = runtime, node = server.node;
     // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
     // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
     // Those newest messages come from the whole histories the engine's start read, where it kept them unwritten since.
     const closed = !store.recovered;
-    // An online one-shot hears a few chats at most: each one's notes are read, and it is caught up, when its history's
-    // first event comes (`EventHub.perChat`). Not after a crash, which reads every history whole.
-    const oneByOne = mode === "one-shot" && !later && closed;
-    await hub.open({ seen: !later && !oneByOne });
+    // A one-shot hears a few chats at most (an offline one, only the ones it changes itself): each one's notes are read,
+    // and it is caught up, when its history's first event comes (`EventHub.perChat`). Not after a crash, which reads
+    // every history whole.
+    const oneByOne = mode === "one-shot" && closed;
+    await hub.open({ seen: !oneByOne });
     const perChat = oneByOne && await hub.loadOwnNotes();
     if (oneByOne && !perChat) await hub.loadSeen();
     const kept = server.takeStartNewest();
@@ -107,15 +103,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       return { mark, ids: [...histories.keys(), ...newest.keys()] };
     };
     let read: { mark: number; ids: string[] };
-    if (later) {
-      const now = node.getState();
-      read = { mark: server.historyMark, ids: [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)] };
-      // Attached again once taken: what changed while it was taken comes then.
-      hub.know(now, () => {
-        baselining = hub.loadSeen().then(baseline).then((read) => server.attach(hub.sink, read))
-          .catch((error: unknown) => { process.stderr.write(`ghostly: event error: ${error instanceof Error ? error.stack : String(error)}\n`); });
-      });
-    } else if (perChat) {
+    if (perChat) {
       const now = node.getState();
       const ids = [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)];
       // Each history read when it is caught up, from the attach on: one changed before it is read whole then.
@@ -165,8 +153,6 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
       // before that, and its event was never said (nor by the next start, which takes the chats as they are).
       // Before presence stops: it reads every state, and one after its stop said `active` again with a new timer.
       hub.sink.post({ kind: "state", state: runtime.server.node.getState() });
-      // A baseline taken after the start (`EventHub.know`) reads the histories: before the engine closes.
-      await baselining;
       presence?.stop();
       runtime.server.detach(hub.sink);
       // The chats still being caught up (`EventHub.perChat`) read their histories: before the engine closes.
