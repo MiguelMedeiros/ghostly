@@ -9,6 +9,7 @@ import { idSlot, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.edit, groups.edit
 
 /** `ghostly edit`, and what the stream and the history say about an edited message (WISP 400 § Edits). */
@@ -17,7 +18,7 @@ const row = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "
 
 function fake(result: { error: string | null; refused?: boolean; messageId?: string } = { error: null, messageId: "me_w" }, messages: StoredMessage[] = [row({ text: "Done", edit: { seq: 1, at: 5, history: [{ at: 1, text: "Working" }] } })]) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
     editMessage: vi.fn(async () => result),
@@ -117,7 +118,7 @@ describe("ghostly group edit", () => {
   const groupRow = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "group:g1", id: "mekey:1:0", text: "Deploy: done", sender: "me", member: "mekey", timestamp: 1, via: "datalink", ...fields });
   function groupFake(result: { error: string | null; refused?: boolean } = { error: null }, messages = [groupRow({ edit: { seq: 2, at: 5, history: [] } })]) {
     const node = {
-      getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+      chatView: chatViewOf, getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
       groupMessages: vi.fn(async () => messages),
       getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
       editMessage: vi.fn(async () => result),

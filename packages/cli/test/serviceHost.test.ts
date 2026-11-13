@@ -6,6 +6,7 @@ import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } fro
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
 import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.services
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
@@ -65,7 +66,7 @@ describe("closing an opened service", () => {
       return { status: 200, headers: [["content-type", "text/event-stream"]], body, bytes: async () => { throw new Error("gathered, not streamed"); } };
     };
     const link = { id: "closechat", peerPubKeyZ32: "closepeer", peerServices: [{ id: "app", name: "App" }] };
-    const ctx = { mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [] }), getSettings: () => ({}), request } } } } as unknown as ApiContext;
+    const ctx = { mode: "daemon", runtime: { server: { node: { chatView: chatViewOf, getState: () => ({ links: [link], groups: [] }), getSettings: () => ({}), request } } } } as unknown as ApiContext;
     const params = { chat: link.id, service: "app" };
     const { url } = (await SERVICE_METHODS["service.open"](ctx, params)) as { url: string };
     const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
@@ -85,7 +86,7 @@ describe("closing an opened service", () => {
 /** `service open --port`: the port asked for, or a refusal that names it. */
 describe("opening a service on a given port", () => {
   const link = { id: "portchat", peerPubKeyZ32: "portpeer", peerServices: [{ id: "app", name: "App" }] };
-  const ctx = { mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [] }), getSettings: () => ({}) } } } } as unknown as ApiContext;
+  const ctx = { mode: "daemon", runtime: { server: { node: { chatView: chatViewOf, getState: () => ({ links: [link], groups: [] }), getSettings: () => ({}) } } } } as unknown as ApiContext;
   const openOn = (port?: number) => SERVICE_METHODS["service.open"](ctx, { chat: link.id, service: "app", port }) as Promise<{ url: string }>;
   const portOf = (url: string) => Number(new URL(url).port);
   afterEach(async () => { await SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" }).catch(() => {}); });
@@ -253,7 +254,7 @@ describe("an opened service's host and link", () => {
     let asked = 0;
     const request = async (): Promise<ClientResponse> => { asked++; return answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]); };
     const params = { chat: link.id, service: "app" };
-    const context = (relayOnly: boolean | undefined) => ({ mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [], settings: { relayOnly } }), getSettings: () => ({ relayOnly }), request } } } }) as unknown as ApiContext;
+    const context = (relayOnly: boolean | undefined) => ({ mode: "daemon", runtime: { server: { node: { chatView: chatViewOf, getState: () => ({ links: [link], groups: [], settings: { relayOnly } }), getSettings: () => ({ relayOnly }), request } } } }) as unknown as ApiContext;
     await expect(SERVICE_METHODS["service.open"](context(true), params)).rejects.toMatchObject({ code: "unavailable", message: SERVICE_OPEN_OFF_RELAY_ONLY });
     // Nothing listens and the contact is not asked: closing finds none open.
     await expect(SERVICE_METHODS["service.close"](context(true), params)).rejects.toMatchObject({ code: "not_found" });

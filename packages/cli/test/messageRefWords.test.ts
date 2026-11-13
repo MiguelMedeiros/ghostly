@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.chat, headless.groups, headless.files
 
 /**
@@ -14,7 +15,7 @@ const mine: StoredMessage = { linkId: "chat-one", id: "me_1", text: "hi", sender
 function fake() {
   const where = (linkId: string) => (linkId.startsWith("group:") ? "group" : "chat");
   const node = {
-    getState: () => ({ links: [alice], groups: [team], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [alice], groups: [team], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessage: vi.fn(async (linkId: string, id: string) => (linkId === mine.linkId && id === mine.id ? mine : undefined)),
     getMessages: vi.fn(async (linkId: string) => (linkId === mine.linkId ? [mine] : [])),
     groupMessages: vi.fn(async () => []),

@@ -8,6 +8,7 @@ import type { GhostlyEvent } from "../src/events";
 import type { CliError } from "../src/errors";
 import { holdOf, resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, headless.typing, headless.chat, headless.api
 
 /**
@@ -30,7 +31,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     groups: [], settings: {}, transport: {}, transfers: {} as Record<string, FileTransferView>,
   } as unknown as EngineState;
   const node = {
-    getState: () => s,
+    chatView: chatViewOf, getState: () => s,
     setTyping: vi.fn(),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     getMessages: vi.fn(async () => []),

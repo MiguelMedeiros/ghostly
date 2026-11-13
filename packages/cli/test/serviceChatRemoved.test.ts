@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { callApi, type ApiContext } from "../src/api";
 import { SERVICE_METHODS } from "../src/services";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.services
 
 /** Whether anything still answers on the port (a refused connection is `false`). */
@@ -16,7 +17,7 @@ const answers = (port: number) => new Promise<boolean>((resolve) => {
 
 /** A daemon whose engine holds these chats; `removeLink` takes one out. */
 function daemonWith(links: { id: string; peerPubKeyZ32: string }[]): ApiContext {
-  const node = { getState: () => ({ links, groups: [], settings: {} }), getSettings: () => ({}), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); }, removalsPending: () => [] };
+  const node = { chatView: chatViewOf, getState: () => ({ links, groups: [], settings: {} }), getSettings: () => ({}), removeLink: async ({ linkId }: { linkId: string }) => { links.splice(links.findIndex((l) => l.id === linkId), 1); }, removalsPending: () => [] };
   return {
     mode: "daemon", version: "test", runtime: { server: { node }, paths: { name: "default", dir: mkdtempSync(join(tmpdir(), "ghostly-service-chat-removed-")) } },
     calls: { list: () => [], forgetChat: () => {} }, groupAuto: { forgetChat: () => {} },
