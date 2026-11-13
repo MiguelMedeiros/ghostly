@@ -766,7 +766,7 @@ describe("with the apps flag on", () => {
   it("refuses to install a version a store removed or its publisher revoked", async () => {
     fakeEngine.on("appPreview", () => preview({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } }));
     renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
-    expect(await screen.findByTestId("app-install-blocked")).toHaveTextContent("Removed by Ghostly: Malware");
+    expect(await screen.findByTestId("app-install-blocked")).toHaveTextContent("Removed by \u2068Ghostly\u2069: \u2068Malware\u2069");
     expect(screen.queryByTestId("app-install-confirm")).not.toBeInTheDocument();
   });
 
@@ -776,8 +776,8 @@ describe("with the apps flag on", () => {
     const by = [{ store: "k", name: "Ghostly", reason, at: 1 }, { store: "a", name: "متجر", reason: "برمجية خبيثة", at: 2 }];
     const lines = (line: HTMLElement) => {
       expect(line.className).toContain("[overflow-wrap:anywhere]");
-      const spans = line.querySelectorAll("span[dir=auto]");
-      expect([...spans].map((s) => s.textContent)).toEqual([`Removed by Ghostly: ${reason}`, "Removed by متجر: برمجية خبيثة"]);
+      const spans = line.querySelectorAll("span");
+      expect([...spans].map((s) => s.textContent)).toEqual([`Removed by \u2068Ghostly\u2069: \u2068${reason}\u2069`, "Removed by \u2068متجر\u2069: \u2068برمجية خبيثة\u2069"]);
     };
     fakeEngine.on("appPreview", () => preview({ run: { status: "removed", by } }));
     const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
@@ -785,6 +785,34 @@ describe("with the apps flag on", () => {
     install.unmount();
     renderApp(<InstalledAppDialog app={installed({ run: { status: "removed", by } })} onClose={() => {}} onOpen={() => {}} />);
     lines(await screen.findByTestId("app-run-line"));
+  });
+
+  it("a store's lines keep the page's direction whatever the store is called: a Hebrew store starts a Japanese line", async () => {
+    // The store's name and reason, isolated: with `dir="auto"` a Hebrew store's name turned the whole Japanese line
+    // right to left, and in any language a Hebrew name and reason drew the reason first.
+    const own = (text: string) => `\u2068${text}\u2069`;
+    const [store, reason] = ["חנות הדגמה", "גרסה שבורה"];
+    const by = [{ store: "s", name: store, reason, at: 1 }];
+    const said = `${own(store)} が削除：${own(reason)}`;
+    fakeEngine.on("appList", () => [installed({ run: { status: "removed", by } })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: store, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+        apps: [{ ref: REF, sequence: 7, digest: DIGEST, urls: [URL_], title: "Chess", tagline: "Play chess with a contact" }],
+        removed: [{ ref: REF, digest: DIGEST, reason, at: 1 }] }]);
+    const page = renderApp(<Apps />, { route: "/apps", language: "ja" });
+    const listed = await screen.findByTestId("app-listing-removed");
+    expect(listed).not.toHaveAttribute("dir");
+    expect(listed.textContent).toBe(said);
+    await page.user.click(screen.getByTestId("app-store-remove"));
+    const question = screen.getByTestId("app-store-remove-question").querySelector("p")!;
+    // The question's own `dir="auto"` skips the name, in a <bdi> of its own (withName): its direction is Japanese's.
+    expect(question.textContent).toBe(`${store} を削除しますか?`);
+    expect(question.querySelector("bdi")).toHaveTextContent(store);
+    page.unmount();
+    renderApp(<InstalledAppDialog app={installed({ run: { status: "removed", by } })} onClose={() => {}} onOpen={() => {}} />, { language: "ja" });
+    const line = (await screen.findByTestId("app-run-line")).querySelector("span")!;
+    expect(line).not.toHaveAttribute("dir");
+    expect(line.textContent).toBe(said);
   });
 
   it("a github.com page that is not an app says so, and asks for a repository or file link, never that GitHub is off the list", async () => {
@@ -925,7 +953,7 @@ describe("with the apps flag on", () => {
     const onOpen = vi.fn();
     const removed = installed({ run: { status: "removed", by: [{ store: "k", name: "Ghostly", reason: "Malware", at: 1 }] } });
     const { user } = renderApp(<InstalledAppDialog app={removed} onClose={() => {}} onOpen={onOpen} />);
-    expect(await screen.findByTestId("app-run-line")).toHaveTextContent("Removed by Ghostly: Malware");
+    expect(await screen.findByTestId("app-run-line")).toHaveTextContent("Removed by \u2068Ghostly\u2069: \u2068Malware\u2069");
     expect(screen.queryByTestId("app-open")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("app-keep-stopped"));
     expect(onOpen).not.toHaveBeenCalled();
