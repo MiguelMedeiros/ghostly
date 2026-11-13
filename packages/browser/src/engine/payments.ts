@@ -672,6 +672,12 @@ export class PaymentDesk {
     return request.linkId === linkId || (!!request.group && this.host.groupOf?.(linkId) === request.group);
   }
 
+  /** The request a contact's payment names, kept only when this link may pay it: ecash naming one of our requests from elsewhere is a plain payment. */
+  private paysRequest(requestId: string | undefined, linkId: string): string | undefined {
+    const request = requestId ? this.payments.get(requestId) : undefined;
+    return request?.kind === "request" && request.direction === "out" && !this.owns(request, linkId) ? undefined : requestId;
+  }
+
   /**
    * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, another member's
    * ecash for it still being redeemed (the mint has not answered), or it would not settle it (too little, a mint the
@@ -1155,7 +1161,7 @@ export class PaymentDesk {
         state: "settled",
         createdAt: payment.timestamp,
         mint,
-        requestId: payment.requestId,
+        requestId: this.paysRequest(payment.requestId, linkId),
       });
       // Ecash from the public test mint is worthless and is taken in; a real mint the user did not pick is refused.
       const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo, { addTestMint: true, payment: record });
@@ -1855,7 +1861,7 @@ export class PaymentDesk {
     // Before anything is written down or the federation asked (reading the notes asks no one): not redeemed, the contact takes them back.
     if (!this.roomForPayment(linkId)) { link.sendPaymentResult({ id: payment.id, ok: false, error: PAYMENTS_BUSY }); return; }
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: this.paysRequest(payment.requestId, linkId), federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 
