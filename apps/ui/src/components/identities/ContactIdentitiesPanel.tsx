@@ -3,7 +3,7 @@ import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useDialogFocus } from "../../hooks/useDismiss";
-import { dateTime, providerOf, useEngineValue } from "../../lib/identities";
+import { dateTime, providerOf, receivedRefusal, useEngineValue } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -264,7 +264,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t, "proof") }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
