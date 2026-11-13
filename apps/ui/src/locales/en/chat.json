@@ -14,6 +14,7 @@
     "messagesFrom": "{{count}} new messages from {{name}}",
     "notSent": "Your message “{{text}}” was not sent",
     "notSentCount": "{{count}} messages not sent",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
     "rowMoved": "Moved to place {{place}} of {{count}}",
     "waiting": "Your message “{{text}}” is waiting for your contact to be online",
