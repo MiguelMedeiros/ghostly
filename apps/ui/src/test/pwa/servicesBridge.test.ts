@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } from "@ghostly/core";
-import { BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
+import { BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_REFUSED } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 
@@ -126,6 +126,61 @@ describe("the bridge's frame of the contact's app", () => {
       expect(asked).toEqual(["https://docs.example/a", "https://docs.example/b", "https://docs.example/c", new URL("/relative", document.baseURI).href]);
     } finally {
       window.open = realOpen;
+    }
+  });
+
+  it("hands on a link only while the person uses the app: not on the tap on Ghostly's Open, nor one in Ghostly's page", async () => {
+    // A tap or a key in the app's frame activates this page too, its parent; one in the app's page around it (another
+    // origin) does not. The tap on Open does: the browser hands its activation to the frames it makes right after.
+    let active = false;
+    class FakeActivation { get isActive() { return active; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    // The app's page in the frame, as the bridge reads it once it loaded (by a browser's `Document.prototype` getters,
+    // which happy-dom has not): an empty one, which it may show.
+    const page = document.implementation.createHTMLDocument();
+    for (const [name, value] of [["URL", "about:blank"], ["contentType", "text/html"]]) Object.defineProperty(Document.prototype, name, { get: () => value, configurable: true });
+    const win = Object.assign(new EventTarget(), { open: () => null, document: page }) as unknown as Window;
+    const framed = [vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(win), vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page)];
+    // An input of the person's (the browser's), or one the app's page makes up.
+    const input = (type: string, trusted: boolean) => win.dispatchEvent(Object.defineProperty(new Event(type), "isTrusted", { value: trusted }));
+    // The bridge reads the clock it had before the app's frame was made.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const frame = await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      frame.dispatchEvent(new Event("load"));
+      const handed = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_OPEN_LINK).map(([data]) => (data as { url: string }).url);
+      // The app's page opens one as it loads, or from a timer: the person did nothing in it.
+      expect(win.open("https://tracker.example/a")).toBeNull();
+      // Activated by the tap on Open, still no input in the app.
+      active = true;
+      win.open("https://tracker.example/b");
+      // Nor does the app's page get one by making up an input, or by saying it is in use.
+      input("pointerdown", false);
+      win.open("https://tracker.example/c");
+      active = false;
+      input("pointerdown", true);
+      Object.defineProperty(navigator, "userActivation", { value: { isActive: true }, configurable: true });
+      win.open("https://tracker.example/d");
+      expect(handed()).toEqual([]);
+      // A tap in the app.
+      active = true;
+      win.open("https://docs.example/guide");
+      // A key in it, past the seconds a tap counts.
+      vi.setSystemTime(Date.now() + 6_000);
+      win.open("https://tracker.example/e");
+      input("keydown", true);
+      win.open("https://docs.example/next");
+      expect(handed()).toEqual(["https://docs.example/guide", "https://docs.example/next"]);
+    } finally {
+      vi.useRealTimers();
+      for (const spy of framed) spy.mockRestore();
+      delete (Document.prototype as { URL?: unknown }).URL;
+      delete (Document.prototype as { contentType?: unknown }).contentType;
+      delete (navigator as { userActivation?: unknown }).userActivation;
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
     }
   });
 });
