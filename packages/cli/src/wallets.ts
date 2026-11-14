@@ -485,7 +485,8 @@ const WALLETS: Record<string, Method> = {
       return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
     }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
-    const on = bool(params, "on");
+    // On unless `on` says otherwise, as `chat accept <chat> <method>` does; an `on` that is no boolean is refused.
+    const on = params.on === undefined || bool(params, "on");
     const nets = params.networks === undefined ? undefined : (() => {
       const value = params.networks;
       if (!Array.isArray(value) || !value.every((v) => v === "mainnet" || v === "testnet")) throw new CliError("bad_request", "networks must list mainnet and/or testnet");
