@@ -85,7 +85,10 @@ function dragNamesAddress(data: DataTransfer | null): boolean {
  */
 let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]>; choose?: () => Promise<number>; target: Window } | null = null;
 
-/** The file input the platform picks a drop's files on (`choose`), and what it accepts: no file type, a mark the platform knows. */
+/**
+ * The file input the platform picks a drop's files on (`choose`), and what it accepts at first: no file type, a mark
+ * that gets no files. The platform sets a type of each call's own on it as it clicks, and picks only for that one.
+ */
 const DROP_INPUT_ID = "ghostly-dropped-files";
 const DROP_INPUT_ACCEPT = "application/x-ghostly-dropped-files";
 /** What `choose` fails with when the drop's files are to be read (`read`) instead. */
