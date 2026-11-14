@@ -218,8 +218,13 @@ const rankHash = (subject: string, hubKey: string): Uint8Array => sha256(concatB
 export function hubRank(subject: string, hubKey: string): string {
   return toBase64Url(rankHash(subject, hubKey));
 }
+/**
+ * `hubs` by `hubRank` for `subject`, highest first. Each key's rank is worked out once: in the sort's comparator it
+ * was two hashes a comparison, ~16 a key for a community's roster, which members rank on each tick of a hub's step-in.
+ */
 export function rankHubs(subject: string, hubs: string[]): string[] {
-  return [...hubs].sort((a, b) => { const ra = hubRank(subject, a), rb = hubRank(subject, b); return ra < rb ? 1 : ra > rb ? -1 : 0; });
+  const rank = new Map(hubs.map(key => [key, hubRank(subject, key)]));
+  return [...hubs].sort((a, b) => { const ra = rank.get(a)!, rb = rank.get(b)!; return ra < rb ? 1 : ra > rb ? -1 : 0; });
 }
 
 /**
