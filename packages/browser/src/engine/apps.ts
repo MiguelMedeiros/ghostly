@@ -635,7 +635,8 @@ function installDecision(installed: InstalledApp | undefined, version: AppVersio
 
 /**
  * Whether `now` is still the record `was`: the same install, version, waiting update, files and mark. A store pinned or
- * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`).
+ * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`), and keeps a pin made
+ * meanwhile (`putAppIfUnchanged`'s `pinned`).
  */
 function sameRecord(now: InstalledApp | undefined, was: InstalledApp | undefined): boolean {
   if (!was) return !now;
@@ -1087,8 +1088,11 @@ export class Apps {
    * the record `keepStoreRevocations` read. A store removed since keeps no index: what it revoked of this app is among
    * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too. Every revocation of this app the stores hold
    * is kept there at the write.
+   * `pinned` is for the update check, which does not set the record's store: one changed since `was` (pinned, moved or
+   * unpinned meanwhile) is the one written. "version": the write brings a version found under the store as it was, so
+   * the record pinned or moved meanwhile is not written at all.
    */
-  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
+  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined, pinned?: "kept" | "version"): Promise<boolean> {
     const stores = await this.records();
     const tx = (await openDb()).transaction([STORES.apps, STORES.settings], "readwrite");
     let put = false;
@@ -1097,6 +1101,11 @@ export class Apps {
     read.onsuccess = () => {
       const now = read.result as InstalledApp | undefined;
       if (!sameRecord(now, was)) return;
+      if (pinned && now && now.store !== was?.store) {
+        if (pinned === "version" && now.store !== undefined) return;
+        const { store: _s, ...rest } = app;
+        app = { ...rest, ...(now.store !== undefined && { store: now.store }) };
+      }
       const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
@@ -2300,8 +2309,8 @@ export class Apps {
         const next = this.versionRecord(app, bundle, kind, url, app.store);
         const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
         if (passed) delete next.pending;
-        // Uninstalled while it downloaded, or changed by the person: not put back.
-        if (!(await this.putAppIfUnchanged(next, stored))) break;
+        // Uninstalled while it downloaded, or changed by the person (pinned to a store too): not put back.
+        if (!(await this.putAppIfUnchanged(next, stored, "version"))) break;
         app = stored = next;
         if (passed) await this.removeBundle(passed.bytes, passed.digest);
         await this.removeBundle(old.bytes, old.digest);
@@ -2324,9 +2333,10 @@ export class Apps {
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
     const carried = stopping(versions, stores.flatMap((s) => s.index?.revoked ?? []));
     const merged = new Map([...stays, ...(revocations ?? []), ...carried].map((r) => [canonicalJson(r), r]));
-    // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
+    // Removed meanwhile: not put back, and the files this check fetched go too. Pinned, moved or unpinned meanwhile: the
+    // record keeps the store it has at the write.
     const current = await this.app(app.ref);
-    if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
+    if (current?.store !== stored.store) { const { store: _s, ...rest } = app; app = { ...rest, ...(current?.store !== undefined && { store: current.store }) }; }
     // None of its publisher's files answered (no network on the device, the host's own trouble): not marked checked, so
     // the check at start does not take it as fresh and the scheduled one tries again soon. One not there is an answer.
     const unreached = reach.failed && !reach.answered;
@@ -2335,7 +2345,7 @@ export class Apps {
     // checks, and a write drops the record held for the app's calls). The mark is kept fresh enough for a reload to skip
     // the check at start.
     const idle = sameExceptChecked(app, stored) && (unreached || this.checkedWithin(stored.checkedAt, APP_CHECK_TIMINGS.freshMs / 2));
-    const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
+    const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored, "kept");
     for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
     if (!put) return null;
     return { app, outcome, ...(unreached && { unreached: true as const }) };
