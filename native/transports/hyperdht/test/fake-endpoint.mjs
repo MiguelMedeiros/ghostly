@@ -5,9 +5,12 @@
 // long in the sender's buffer before it reaches the other end, as a slow link.
 // FAKE_ENDPOINT_DIAL_MS makes a dial to a peer that is not there fail only after
 // that long, as one to a contact whose app died while the DHT still holds its record.
+// FAKE_ENDPOINT_CONNECT_MS makes a dial to a peer that is there connect only after
+// that long, as one made again after it stalled on a slow path.
 const registry = new Map()
 const delay = Number(process.env.FAKE_ENDPOINT_DELAY_MS ?? 0)
 const dialDelay = Number(process.env.FAKE_ENDPOINT_DIAL_MS ?? 0)
+const connectDelay = Number(process.env.FAKE_ENDPOINT_CONNECT_MS ?? 0)
 
 function pair(bindingContext) {
   const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [] }))
@@ -55,6 +58,7 @@ export async function createHyperEndpoint(seed) {
     async connect(address) {
       const target = registry.get(address?.publicKey)
       if (!target && dialDelay) await new Promise(resolve => setTimeout(resolve, dialDelay))
+      if (target && connectDelay) await new Promise(resolve => setTimeout(resolve, connectDelay))
       if (!target || closed) throw new Error('peer not found')
       const [local, remote] = pair(`${publicKey}:${address.publicKey}`)
       target.onConnection?.(remote)
