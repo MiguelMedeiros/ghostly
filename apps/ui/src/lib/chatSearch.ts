@@ -116,6 +116,21 @@ export function searchMessages(items: readonly Searchable[], query: string): str
   return found;
 }
 
+const ASCII_RUN = /[\0-\x7f]+/y;
+
+/** One character folded (`foldText`), remembered: `matchRanges` folds what is not ASCII a character at a time. */
+function foldedCharacter(character: string): string {
+  let folded = characterFolds.get(character);
+  if (folded === undefined) {
+    if (characterFolds.size >= CHARACTER_FOLDS_MAX) characterFolds.clear();
+    folded = foldText(character);
+    characterFolds.set(character, folded);
+  }
+  return folded;
+}
+const CHARACTER_FOLDS_MAX = 10_000;
+const characterFolds = new Map<string, string>();
+
 /** Where `query` is in `text` as written, `[from, to)` each: for marking the matches in a bubble. */
 export function matchRanges(text: string, query: string): [number, number][] {
   const needle = foldText(query.trim());
@@ -124,8 +139,18 @@ export function matchRanges(text: string, query: string): [number, number][] {
   let folded = "";
   const from: number[] = [];
   for (let i = 0; i < text.length;) {
+    // A run of ASCII folds to its lower case, a unit for each: folded whole. Folding each of its characters took 1.8 ms
+    // for a 16 KB message, 180 ms for each new word with 100 such found on screen.
+    ASCII_RUN.lastIndex = i;
+    const run = ASCII_RUN.exec(text)?.[0];
+    if (run) {
+      folded += run.toLowerCase();
+      for (let j = 0; j < run.length; j++) from.push(i + j);
+      i += run.length;
+      continue;
+    }
     const size = (text.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
-    const part = foldText(text.slice(i, i + size));
+    const part = foldedCharacter(text.slice(i, i + size));
     folded += part;
     for (let j = 0; j < part.length; j++) from.push(i);
     i += size;
@@ -135,7 +160,7 @@ export function matchRanges(text: string, query: string): [number, number][] {
     const last = from[at + needle.length - 1];
     let end = last + ((text.codePointAt(last) ?? 0) > 0xffff ? 2 : 1);
     // A combining accent after the last letter goes with it.
-    while (end < text.length && foldText(text[end]) === "") end++;
+    while (end < text.length && foldedCharacter(text[end]) === "") end++;
     ranges.push([from[at], end]);
   }
   return ranges;
