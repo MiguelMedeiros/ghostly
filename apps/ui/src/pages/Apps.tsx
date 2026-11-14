@@ -220,11 +220,13 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
   const problem = appStoreProblemText(store, t);
   // A read never fails the call: one that failed again says so, else the same line under the store showed nothing new.
-  // One that worked says what it read: its count changing and its red line going were seen, never heard.
+  // One that worked says what it read: its count changing and its red line going were seen, never heard. A list past
+  // its date reads fine, and is not up to date: said as the line under the store says it.
   const refresh = async () => {
     const [now] = await engine.call("appStoreRefresh", { key: store.key });
     const failed = now?.problem ? appStoreProblemText(now, t) : null;
     if (failed) onProblem(failed);
+    else if (now?.expired) onProblem(t("apps.store.stale", { date: date(now.expires ?? 0, t.language) }));
     else if (now) onRead(t("apps.store.readDone", { name: now.name ?? now.url, apps: t("apps.store.count", { count: now.apps.length }) }));
   };
   const toggle = () => {
