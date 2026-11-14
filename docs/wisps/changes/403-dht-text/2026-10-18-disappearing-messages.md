@@ -1,0 +1,1 @@
+A design note for disappearing messages, planned for 1.5 and not built: the timer's frames never ride the floor, a text there carries no `ttl` (the body is full at sixteen elements for older readers), and the reader gives a floor text its own current setting.
