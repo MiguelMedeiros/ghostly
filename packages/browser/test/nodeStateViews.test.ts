@@ -105,6 +105,22 @@ describe("the state a change of one chat pushes", () => {
     expect(built).toBe(0);
   });
 
+  it("builds no chat and no group for a group file's progress", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["emitState"]();
+    const first = await next();
+    built = 0;
+    // A file a member sent coming in: its progress, 4 states a second for as long as it moves.
+    node["groups"]["files"]!["show"]({ id: "gf1" } as never, { state: "transferring", transferred: 500, size: 1_000, direction: "in" }, 250);
+    const second = await next();
+    expect(second.transfers.gf1?.transferred).toBe(500);
+    expect(view(second, a.id)).toBe(view(first, a.id));
+    expect(built).toBe(0);
+  });
+
   it("keeps every group's view for a change of a 1:1 chat's own, and builds them again for a contact's name or a group's change", async () => {
     const { node, next } = engine();
     const a = await addChat(node, "Alice");
