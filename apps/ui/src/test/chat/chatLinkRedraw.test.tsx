@@ -54,10 +54,16 @@ async function openChat() {
   link();
   engine.messages(LINK, Array.from({ length: N }, (_, i) => row(i)));
   await tick();
-  await screen.findAllByText(`message ${N - 1}`);
+  await screen.findAllByText(`message ${N - 1}`, undefined, { timeout: 5_000 });
   await tick();
   return { engine, link };
 }
+
+/**
+ * Drawing the 100-odd rows takes most of a second here and several on a loaded 4-core host, where 5 s per test ran
+ * out in `openChat` and the test after it began inside the timed-out one's act().
+ */
+const OPEN_CHAT_TEST_MS = 30_000;
 
 describe("the open chat on a change of its link that it does not show", () => {
   it("draws neither the page nor its message rows for the link's polls", async () => {
@@ -78,7 +84,7 @@ describe("the open chat on a change of its link that it does not show", () => {
     await tick();
     expect(counts.page).toBeGreaterThan(0);
     expect(counts.rows).toBe(0);
-  });
+  }, OPEN_CHAT_TEST_MS);
 
   it("shows the contact typing in the header without drawing the page or its rows, nor them for the contact's presence", async () => {
     const { link } = await openChat();
@@ -100,7 +106,7 @@ describe("the open chat on a change of its link that it does not show", () => {
     }
     await tick();
     expect(counts.rows).toBe(0);
-  });
+  }, OPEN_CHAT_TEST_MS);
 
   it("shows the contact's presence and status in the header without drawing the page or its rows", async () => {
     const { link } = await openChat();
@@ -117,7 +123,7 @@ describe("the open chat on a change of its link that it does not show", () => {
     expect(screen.queryByTestId("chat-presence")).toBeNull();
     await tick();
     expect(counts).toEqual({ page: 0, rows: 0 });
-  });
+  }, OPEN_CHAT_TEST_MS);
 
   it("draws a message arriving as its own row only, none of the rows already there", async () => {
     const { engine, link } = await openChat();
@@ -129,5 +135,5 @@ describe("the open chat on a change of its link that it does not show", () => {
     await tick();
     await screen.findAllByText(`message ${N}`);
     expect(counts.rows).toBe(1);
-  });
+  }, OPEN_CHAT_TEST_MS);
 });
