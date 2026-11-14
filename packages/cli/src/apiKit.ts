@@ -212,8 +212,8 @@ function noChat(ref: string, groups: readonly GroupView[]): CliError {
   return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
-/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word. */
-const shownRef = shellWord;
+/** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word (see `shellWord`). */
+const shownRef = (place: RefPlace) => shellWord(place.ref, place.group ? "<group>" : "<chat>");
 
 /** The chat or the group a message or a file was looked for in, as the command was given it (`ref`). */
 export type RefPlace = { group: boolean; ref: string };
@@ -224,14 +224,14 @@ export type RefPlace = { group: boolean; ref: string };
  * else it may have failed for (", or it takes no reaction", ": only your own messages are sent again").
  */
 export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
-  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place.ref)}`;
+  const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place)}`;
   return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
 }
 
 /** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
 export function noFile(id: string, place?: RefPlace): CliError {
   const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
-  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place.ref) : "<chat|group>"})`);
+  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
 }
 
 /** The one group `ref` names, if any (none, or more than one: undefined). */
@@ -489,7 +489,7 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
     if (!(error instanceof CliError) || error.code !== "not_found" || groupPrefixed(ref) !== null) throw error;
     let chat: LinkView;
     try { chat = findChat(links, ref); } catch { throw error; }
-    const shown = shellWord(ref);
+    const shown = shellWord(ref, chat.id);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
 }

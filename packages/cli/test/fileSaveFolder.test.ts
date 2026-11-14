@@ -171,19 +171,28 @@ describe("file save to a folder", () => {
     });
   });
 
-  it("the paths its hints suggest paste into a shell as one word: quoted, a ' in them escaped, raw in details", async () => {
+  it("the paths its hints suggest paste into a shell as one word: quoted, raw in details; one with a ' only there", async () => {
     // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
+    const quoted = (path: string) => `'${path}'`;
+    const spaced = join(dir, "here and there");
+    mkdirSync(spaced);
+    writeFileSync(join(spaced, "report.txt"), "first");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: spaced })).rejects.toMatchObject({
+      code: "confirm",
+      message: `${join(spaced, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${quoted(join(spaced, "report (2).txt"))} (path over the socket) to keep both`,
+      details: { path: join(spaced, "report (2).txt") },
+    });
+    // A ' quoted as '\'' read '\\'' in the JSON answer: pasted, the quote ended there and the rest of the path ran.
     const folder = join(dir, "it's here");
     mkdirSync(folder);
     writeFileSync(join(folder, "report.txt"), "first");
-    const quoted = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).rejects.toMatchObject({
       code: "confirm",
-      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path ${quoted(join(folder, "report (2).txt"))} (path over the socket) to keep both`,
+      message: `${join(folder, "report.txt")} exists: pass --force (force: true over the socket) to replace it, or --path <the one in details.path> (path over the socket) to keep both`,
       details: { path: join(folder, "report (2).txt") },
     });
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
-      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir ${quoted(folder)} (dir over the socket)`, details: { dir: folder },
+      code: "bad_request", message: `${folder} is a folder: name a file, or use --dir <the one in details.dir> (dir over the socket)`, details: { dir: folder },
     });
     const missing = join(dir, "new folder");
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: `${missing}/` })).rejects.toMatchObject({
