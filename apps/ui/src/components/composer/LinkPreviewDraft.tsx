@@ -18,7 +18,10 @@ export function LinkPreviewDraftCard({ draft, onRemove }: { draft: LinkPreviewDr
             {/* The page's words in their own direction, as on the card the message shows. */}
             <p dir="auto" className="text-[13px] font-semibold text-text-primary truncate" data-testid="composer-link-preview-title">{preview?.t ?? host}</p>
             {preview?.d && <p dir="auto" className="text-[12px] text-text-secondary line-clamp-2 leading-snug" data-testid="composer-link-preview-description">{preview.d}</p>}
-            <p className="text-[11px] text-text-muted truncate">{preview?.s ? `${preview.s} · ` : ""}{host}</p>
+            {/* The site's name and the host each in their own direction on the app's line, the host left to right. */}
+            <p className="text-[11px] text-text-muted truncate" data-testid="composer-link-preview-site">
+              {preview?.s && <><bdi>{preview.s}</bdi>{" · "}</>}<bdi dir="ltr">{host}</bdi>
+            </p>
           </>
         )}
       </div>
