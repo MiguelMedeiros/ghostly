@@ -8,7 +8,7 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
-import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
+import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
@@ -17,7 +17,7 @@ import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
 import { completeWithPipedEvidence, credentialFromStdin, evidenceFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
@@ -211,8 +211,12 @@ export function oneChatOnly(method: string, params: Record<string, unknown>): bo
   return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
-/** What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. */
-const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing"]);
+/**
+ * What a member says in one group, over that group's own edges: no 1:1 chat carries any of it. The admin's name,
+ * picture, hubs and fresh secret too (the group's metadata or a commit). Not `group.remove` (the one removed hears it
+ * over the chat that invited them) nor `group.admin` (the new admin takes back the invitations still out).
+ */
+const GROUP_EDGES_ONLY: ReadonlySet<string> = new Set(["group.send", "group.edit", "group.react", "group.typing", "group.rename", "group.picture", "group.hub", "group.rotate"]);
 
 /**
  * A command about one group that goes over its edges only (`GROUP_EDGES_ONLY`): a one-shot for it leaves the saved 1:1
@@ -242,10 +246,21 @@ const NO_HISTORY_READS: ReadonlySet<string> = new Set([
   "payment.list", "identity.providers",
 ]);
 
-/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`). */
+/**
+ * Changes kept outside any chat (this profile's status, which each chat says on its next session; x401 keys and
+ * credentials; a service; a draft; a served app), and `call answer` and `call flush`, which a one-shot refuses whatever
+ * the chats say: a one-shot for one leaves every saved chat unstarted too. Each read every 1:1 chat whole first: with
+ * 30,000 messages in the profile, about 0.95 s and 200 MB instead of 0.45 s and 140 MB.
+ */
+const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
+  "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
+  "app.serve", "app.unserve", "call.answer", "call.flush",
+]);
+
+/** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
   if (method === "call.auto" || method === "group.auto") return params.on === undefined;
-  return NO_HISTORY_READS.has(method);
+  return NO_HISTORY_READS.has(method) || NO_HISTORY_WRITES.has(method);
 }
 
 /**
@@ -543,8 +558,12 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   const stage = (view.chat as { stage?: unknown } | null)?.stage ?? null;
   const answer = { ...result, paired: view.paired, stage };
   if (view.paired) return { answer };
-  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat.
-  const ref = label?.trim() && shellWord(label.trim()) === label.trim() ? label.trim() : String(result.chat);
+  // The label only when a shell reads it as typed: `O'Brien` waited for a closing quote, `$work` named no chat. And only
+  // when it names this chat alone: a second join with the same `--label` was told a name that names two chats.
+  const typed = label?.trim();
+  const named = !!typed && shellWord(typed, "") === typed
+    && await s.call("chat.get", { chat: typed }).then((chat) => (chat as { id?: unknown } | null)?.id === result.chat, () => false);
+  const ref = named ? typed : String(result.chat);
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
@@ -577,14 +596,14 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
-  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
+  ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out; any other space or line break at an end is refused"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
-    since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
+    since: o("number", "Replay events after this seq first (with --cursor: only while its file holds no seq yet)"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event); its seq wins over --since"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
     from: o("list", "Only this chat's events (id, a label given here or the contact's key; again for more)"),
@@ -898,7 +917,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
       // The folder it goes in, as the backup checks it (backup.ts): a missing one is named before the profile opens.
       if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${dirname(path)}`);
-      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: await backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
@@ -949,10 +968,13 @@ const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or
 /** Restore takes no --no-passphrase: a backup made without one says so itself. */
 const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
 const PASSPHRASE_ON_LINE = "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line";
-/** `--passphrase` or `--passphrase=<value>` before any `--` (after it, words are positionals). */
+/**
+ * `--passphrase` or `--passphrase=<value>` before any `--` (after it, words are positionals), or a typo of it
+ * (`--pasphrase=<value>`): before, that was "did you mean --passphrase?", the one form refused here.
+ */
 const passphraseOnLine = (argv: readonly string[]): boolean => {
   const end = argv.indexOf("--");
-  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg === "--passphrase" || arg.startsWith("--passphrase="));
+  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg.startsWith("--") && nearest(arg.slice(2).split("=")[0], ["passphrase"]) === "passphrase");
 };
 
 /**
@@ -973,6 +995,25 @@ async function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): Pro
   else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
   if (!value) throw new CliError("bad_request", `${file === "-" ? "Stdin" : file} is empty: it holds the backup's passphrase`);
   return value;
+}
+
+const END_NAMES: Record<string, string> = { " ": "a space", "\t": "a tab", "\r": "a carriage return", "\n": "a line break", "\uFEFF": "a byte order mark" };
+const endName = (char: string) => END_NAMES[char] ?? `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")} (a space)`;
+
+/**
+ * A new backup's passphrase, refused when it starts or ends with whitespace or a byte order mark, or holds a NUL (a
+ * file saved as UTF-16): only the one line break at a file's end is left out, so the same passphrase typed, pasted or
+ * held by a password manager would open nothing ("Wrong passphrase"). Restore takes any passphrase: old backups open.
+ */
+function cleanEnds(passphrase: string, file: unknown): string {
+  const source = typeof file !== "string" ? "GHOSTLY_BACKUP_PASSPHRASE" : file === "-" ? "stdin" : file;
+  if (passphrase.includes("\0")) throw new CliError("bad_request", `${source} holds a NUL: a file saved as UTF-16? Save the passphrase as UTF-8 text`);
+  const trimmed = passphrase.trim();
+  if (trimmed === passphrase) return passphrase;
+  const at = trimmed && passphrase.startsWith(trimmed) ? "ends" : "starts";
+  const char = at === "ends" ? passphrase.at(-1)! : passphrase[0]!;
+  const fileRule = typeof file === "string" ? " (one line break at its end is left out already)" : "";
+  throw new CliError("bad_request", `The passphrase in ${source} ${at} with ${endName(char)}${fileRule}: the same passphrase typed or pasted would not open the backup. Take it out`);
 }
 
 /** Set on `startDetached`'s child: its parent waits for the profile and starts it again, so the child does not wait too. */
@@ -1344,7 +1385,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  const since = sinceOf(parsed.options) ?? readCursor(cursor);
+  const since = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n"));
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
@@ -1476,7 +1517,7 @@ async function engineCommand(argv: string[]): Promise<void> {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
-  print(result);
+  print(hideSecretFields(method, result, showSecret));
 }
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {

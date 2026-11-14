@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, isJsonValue, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -600,7 +600,7 @@ describe("chat", () => {
     expect(JSON.stringify(stored.get("flat"))).toBe(JSON.stringify(flat));
     expect(JSON.stringify(host.sent[host.sent.length - 1]!.data)).toBe(JSON.stringify(nested));
     // Plain JSON still, with no prototype of the app's anywhere in it.
-    expect(isJsonValue(stored.get("dict"))).toBe(true);
+    expect(jsonValueOf(stored.get("dict"))).toEqual(stored.get("dict"));
     expect(Object.getPrototypeOf((stored.get("dict") as { words: object }).words)).toBe(Object.prototype);
   });
 
@@ -650,15 +650,8 @@ describe("chat", () => {
   });
 });
 
-it("isJsonValue takes plain JSON only", () => {
-  expect(isJsonValue({ a: [1, "x", null, true, { b: 2 }] })).toBe(true);
-  for (const bad of [undefined, Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n]) expect(isJsonValue(bad)).toBe(false);
-  let deep: unknown = 1;
-  for (let i = 0; i < 100; i++) deep = [deep];
-  expect(isJsonValue(deep)).toBe(false);
-});
-
 it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
+  expect(jsonValueOf({ a: [1, "x", null, true, { b: 2 }] })).toEqual({ a: [1, "x", null, true, { b: 2 }] });
   expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
   const proto = JSON.parse('{"__proto__":{"x":1},"y":[{"__proto__":2}]}') as unknown;
   expect(JSON.stringify(jsonValueOf(proto))).toBe(JSON.stringify(proto));
@@ -1224,8 +1217,8 @@ describe("a lone surrogate (half an emoji)", () => {
     for (const fine of ["\u{1F600}", `${half}${low}`, { "\u{1F600}": ["\u{1F600}"] }, 1, null, new Uint8Array([0xd8, 0x3d])]) expect(hasLoneSurrogate(fine)).toBe(false);
     expect(typeof jsonValueOf({ a: half })).toBe("symbol");
     expect(typeof jsonValueOf({ [half]: 1 })).toBe("symbol");
-    expect(isJsonValue([low])).toBe(false);
-    expect(isJsonValue({ [low]: 1 })).toBe(false);
+    expect(typeof jsonValueOf([low])).toBe("symbol");
+    expect(typeof jsonValueOf({ [low]: 1 })).toBe("symbol");
     expect(jsonValueOf({ a: "\u{1F600}" })).toEqual({ a: "\u{1F600}" });
     // Nothing to replace: the very same value, its bytes and transfer list untouched.
     const bytes = new ArrayBuffer(4);

@@ -10,13 +10,13 @@ import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../
 import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
-/** Every disk sync the store asks for. */
-const syncs = vi.hoisted(() => ({ count: 0 }));
+/** Every disk sync the store asks for, and those of them that held the thread. */
+const syncs = vi.hoisted(() => ({ count: 0, onThread: 0 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
   return {
     ...fs,
-    fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); disk.synced++; },
+    fsyncSync: (fd: number) => { syncs.count++; syncs.onThread++; fs.fsyncSync(fd); disk.synced++; },
     fsync: (fd: number, done: (error: NodeJS.ErrnoException | null) => void) => {
       syncs.count++;
       if (faults.sync) return void setTimeout(() => done(Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" })), disk.syncMs);
@@ -73,8 +73,8 @@ function db(factory: IDBFactory, name = "ghostly", version = 1): Promise<IDBData
   });
 }
 
-function tx(d: IDBDatabase, stores: string[], work: (s: Record<string, IDBObjectStore>) => void): Promise<void> {
-  const t = d.transaction(stores, "readwrite");
+function tx(d: IDBDatabase, stores: string[], work: (s: Record<string, IDBObjectStore>) => void, options?: IDBTransactionOptions): Promise<void> {
+  const t = d.transaction(stores, "readwrite", options);
   work(Object.fromEntries(stores.map((n) => [n, t.objectStore(n)])));
   return new Promise((resolve, reject) => { t.oncomplete = () => resolve(); t.onabort = t.onerror = () => reject(t.error); });
 }
@@ -123,17 +123,29 @@ describe("persistent IndexedDB", () => {
     await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: "m1", text: "hello" }); });
     expect(syncs.count - before).toBe(1);
 
-    // With no transaction after it, a relaxed one is synced within a second, once.
+    // With no transaction after it, a relaxed one is synced within a second, once, and off the thread: a sync in place
+    // held the whole daemon as long as a busy disk took (1 to 2 s while a file came in).
+    before = syncs.count;
+    const onThread = syncs.onThread, synced = disk.synced;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      before = syncs.count;
       await relaxed("delivered", "seen:m1");
       await relaxed("yes", "seen:m2");
       expect(syncs.count - before).toBe(0);
       vi.advanceTimersByTime(1_000);
       expect(syncs.count - before).toBe(1);
+      expect(syncs.onThread - onThread).toBe(0);
       vi.advanceTimersByTime(5_000);
       expect(syncs.count - before).toBe(1);
+    } finally { vi.useRealTimers(); }
+    // Once that sync is done, a later relaxed entry gets one of its own a second after it.
+    await vi.waitFor(() => expect(disk.synced - synced).toBe(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await relaxed("later", "seen:m3");
+      vi.advanceTimersByTime(1_000);
+      expect(syncs.count - before).toBe(2);
+      expect(syncs.onThread - onThread).toBe(0);
     } finally { vi.useRealTimers(); }
 
     // Crash: all of it is there.
@@ -1437,20 +1449,23 @@ describe("messages kept in rows.db", () => {
     await tx(d, ["messages", "settings"], (s) => { for (let i = 0; i < 3000; i++) s.messages.put(message(i)); s.settings.put("before", "mark"); });
     const before = await all(store.factory);
     // The export's first read of rows.db: from then on, each turn of the event loop is one the export left to others,
-    // and the first of them writes both kinds of store (one kept in rows.db, one in memory).
+    // and the first of them writes both kinds of store (one kept in rows.db, one in memory). Relaxed: its `complete`
+    // says it is in the store, not that a disk sync is done; a slow runner's sync outlasted the export (CI on ARM64).
     const range = vi.spyOn(TreeFile.prototype, "range");
     let turns = 0, done = false, landed = false, wrote: Promise<void> | undefined;
     const spin = () => {
       if (done) return;
       if (range.mock.calls.length > 0) {
         turns++;
-        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }).then(() => { landed = true; });
+        wrote ??= tx(d, ["messages", "settings"], (s) => { s.messages.put(message(3000)); s.messages.delete(["chat-0", "m000"]); s.settings.put("after", "mark"); }, { durability: "relaxed" }).then(() => { landed = true; });
       }
       setImmediate(spin);
     };
     setImmediate(spin);
     const exported = join(folder(), "store.bin");
-    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); }
+    // A disk that takes 100 ms to sync, as a slow runner's.
+    disk.syncMs = 100;
+    try { await store.exportSnapshot(exported); } finally { done = true; range.mockRestore(); disk.syncMs = 0; }
     const landedDuring = landed;
     await wrote;
     expect(turns).toBeGreaterThan(5);

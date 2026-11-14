@@ -28,9 +28,10 @@ const MARKER = Buffer.from("canary-marker-");
 
 /**
  * A client (non-custodial as a browser is, unless `custodial`: it hands the relay its key, which runs its handshake)
- * dials a far server that names `names` as its address, and writes to it.
+ * dials a far server that names `names` as its address (and the canary as its relays, if `relays`), and writes to it,
+ * `dials` times.
  */
-async function dial(names: (canary: number) => { host: string; port: number } | null, { custodial = false } = {}) {
+async function dial(names: (canary: number) => { host: string; port: number } | null, { custodial = false, relays = false, dials = 1 } = {}) {
   const relay = await startRelay({ testnet: 3 });
   // With no address of its own to name, the relay's node waits for the far server to answer it: a far server that is
   // open connects back to a dialler that names its address, and that packet would decide where the stream goes.
@@ -55,17 +56,23 @@ async function dial(names: (canary: number) => { host: string; port: number } | 
     });
     const keyPair = DHT.keyPair();
     await server.listen(keyPair);
+    if (relays) Object.defineProperty(server, "relayAddresses", { get: () => [{ host: "127.0.0.1", port: canary.address().port }] });
     const ws = socket = new WebSocket(relay.url);
     await new Promise((resolve, reject) => { ws.addEventListener("open", resolve, { once: true }); ws.addEventListener("error", reject, { once: true }); });
     const client = new RelayedDHT(new WebSocketStream(true, ws), { custodial }) as { connect(publicKey: Buffer): Stream };
-    const stream = client.connect(keyPair.publicKey).on("error", () => {});
-    await new Promise(resolve => stream.once("open", resolve));
-    for (let i = 0; i < 20; i++) stream.write(Buffer.concat([MARKER, Buffer.alloc(1016, i)]));
-    for (const end = Date.now() + 5000; received === 0 && Date.now() < end;) await new Promise(resolve => setTimeout(resolve, 50));
-    // Whatever was on its way to the canary has come by now.
-    await new Promise(resolve => setTimeout(resolve, 500));
-    stream.destroy();
-    return { packets, received };
+    let reached = 0;
+    for (let n = 0; n < dials; n++) {
+      received = 0;
+      const stream = client.connect(keyPair.publicKey).on("error", () => {});
+      await new Promise(resolve => stream.once("open", resolve));
+      for (let i = 0; i < 20; i++) stream.write(Buffer.concat([MARKER, Buffer.alloc(1016, i)]));
+      for (const end = Date.now() + 5000; received === 0 && Date.now() < end;) await new Promise(resolve => setTimeout(resolve, 50));
+      // Whatever was on its way to the canary has come by now.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      stream.destroy();
+      if (received > 0) reached++;
+    }
+    return { packets, received: reached };
   } finally {
     socket?.close();
     await node.destroy();
@@ -90,4 +97,10 @@ it("still connects a far server that names its own address", async () => {
   const { packets, received } = await dial(() => null);
   expect(packets).toBe(0);
   expect(received).toBeGreaterThan(0);
+}, 30_000);
+
+it("does not dial again through relays a far server names", async () => {
+  const { packets, received } = await dial(() => null, { relays: true, dials: 2 });
+  expect(packets).toBe(0);
+  expect(received).toBe(2);
 }, 30_000);

@@ -57,6 +57,68 @@ describe("group join", () => {
   });
 });
 
+describe("a one-shot group join", () => {
+  // Found in a bug hunt: with no daemon it left at once with {"group": id} and exit 0; the knock ends with the
+  // command, so nobody let it in, even with the community's admin online, and nothing said so.
+  const knocking = (stage: string) => ({ id: "g9", name: "", createdAt: 1, profile: "community", isAdmin: false, canSend: false, lastMessageAt: 0, invited: [], memberLinks: {}, members: [],
+    invitation: { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage } }) as unknown as GroupView;
+  function oneShot(mode: "one-shot" | "daemon" = "one-shot") {
+    let groups: GroupView[] = [];
+    const listeners = new Set<(s: EngineState) => void>();
+    const getState = () => ({ links: [], groups, settings: {}, transport: {} }) as unknown as EngineState;
+    const node = { getState, joinGroupByLink: vi.fn(async () => { groups = [knocking("knocking")]; return { groupId: "g9" }; }) };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+    const set = (g: GroupView[]) => { groups = g; for (const l of listeners) l(getState()); };
+    return { ctx, set };
+  }
+
+  it("waits until a member's app lets it in, and says it is in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("admitted")]), 5);
+    setTimeout(() => set([{ ...knocking("admitted"), status: "active", invitation: undefined } as GroupView]), 10);
+    expect(await answer).toEqual({ group: "g9", joined: true, stage: null });
+  });
+
+  it("after 60 s not in, says so and the next step; the knock is kept for a daemon", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
+        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops at a replaced link, with no daemon's note: knocking again does not get in", async () => {
+    const { ctx, set } = oneShot();
+    const answer = callApi(ctx, "group.join", { link: LINK });
+    setTimeout(() => set([knocking("replaced")]), 5);
+    expect(await answer).toEqual({ group: "g9", joined: false, stage: "replaced" });
+  });
+
+  // Found in a bug hunt: at "full" or "blocked" it left at once with no note, as if the join were over, though the
+  // engine goes on knocking (the room comes back) and the knock ends with the one-shot.
+  it("at a group with no room yet, answers at once and says the knock goes on only while the profile runs", async () => {
+    const said = {
+      full: "No room yet: the group is full",
+      blocked: "No room yet: the group waits for every member's app to take more than eight members",
+    };
+    for (const stage of ["full", "blocked"] as const) {
+      const { ctx, set } = oneShot();
+      const answer = callApi(ctx, "group.join", { link: LINK });
+      setTimeout(() => set([knocking(stage)]), 5);
+      expect(await answer).toEqual({ group: "g9", joined: false, stage,
+        warning: `${said[stage]}. Your app goes on knocking only while this profile is running, and gets in when there is room: keep it running (ghostly daemon --detach), then ghostly group show g9` });
+    }
+  });
+
+  it("through a daemon, answers at once as before", async () => {
+    expect(await callApi(oneShot("daemon").ctx, "group.join", { link: LINK })).toEqual({ group: "g9" });
+  });
+});
+
 describe("a group message names its author", () => {
   it("from the roster when the message came with the member's key only", () => {
     expect(groupMessageJson(message("a", { member: "anakey" }), group)).toMatchObject({ nick: "Ana", member: "anakey" });
@@ -192,6 +254,62 @@ describe("group link", () => {
     expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
     expect(await callApi(ctx, "group.link", { group: "Crew", on: true, reset: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
     expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1" }], [{ groupId: "g1", reset: true }]]);
+  });
+
+  it("is refused to a member removed from the group, as group send is, never the link it held when it was removed", async () => {
+    // Before: the old link with exit 0, while `group show` said removed and link null; it may have been reset since.
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK })), disableGroupLink = vi.fn(async () => undefined);
+    Object.assign(node, { enableGroupLink, disableGroupLink });
+    const out = (status: string, statusReason?: string) => {
+      node.getState = () => ({ links: [], groups: [{ ...group, profile: "community", isAdmin: false, canSend: false, status, statusReason }], settings: {}, transport: {} }) as unknown as EngineState;
+    };
+    out("removed", "You were removed from this group");
+    for (const params of [{}, { reset: true }, { on: false }])
+      await expect(callApi(ctx, "group.link", { group: "Crew", ...params }), JSON.stringify(params)).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    out("left");
+    await expect(callApi(ctx, "group.link", { group: "Crew" })).rejects.toMatchObject({ code: "refused", message: "You are not in this group" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    expect(disableGroupLink).not.toHaveBeenCalled();
+    // A community member who lost its hubs is still in it: it asks to be let in again by itself.
+    out("lost");
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+  });
+});
+
+describe("group accept", () => {
+  // Found in a bug hunt: a community with nothing to accept (one this profile is in, or was removed from) answered
+  // {"group": id}, exit 0, as if accepted: the engine's knock again does nothing there. A private group said "No
+  // invitation to accept", without why.
+  const as = (node: ReturnType<typeof fake>["node"], view: Partial<GroupView>) => {
+    node.getState = () => ({ links: [], groups: [{ ...group, ...view }], settings: {}, transport: {} }) as unknown as EngineState;
+  };
+  const knock = { linkId: "c1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocking" } as unknown as GroupView["invitation"];
+
+  it("is refused for a group with no invitation, saying why, and never reaches the engine", async () => {
+    const { ctx, node } = fake();
+    const acceptGroupInvitation = vi.fn(async () => undefined);
+    Object.assign(node, { acceptGroupInvitation });
+    for (const profile of ["community", "mesh"] as const) {
+      as(node, { profile, status: "active" });
+      await expect(callApi(ctx, "group.accept", { group: "Crew" }), profile).rejects.toMatchObject({ code: "refused", message: "You are in Crew already: there is no invitation to accept" });
+      as(node, { profile, status: "removed", statusReason: "You were removed from this group", isAdmin: false, canSend: false });
+      await expect(callApi(ctx, "group.accept", { group: "Crew" }), profile).rejects.toMatchObject({ code: "refused", message: "You were removed from this group: there is no invitation to accept" });
+    }
+    as(node, { profile: "community", status: "left", isAdmin: false, canSend: false });
+    await expect(callApi(ctx, "group.accept", { group: "Crew" })).rejects.toMatchObject({ code: "refused", message: "You are not in this group: there is no invitation to accept" });
+    expect(acceptGroupInvitation).not.toHaveBeenCalled();
+  });
+
+  it("goes to the engine for an invitation or a knock, a removed member's knock to get back in too", async () => {
+    const { ctx, node } = fake();
+    const acceptGroupInvitation = vi.fn(async () => undefined);
+    Object.assign(node, { acceptGroupInvitation });
+    for (const view of [{ profile: "community", invitation: knock }, { profile: "community", status: "removed", invitation: knock }, { profile: "mesh", members: [], invitation: { linkId: "c1", contact: "Ana", admin: "anakey", members: 2 } }] as Partial<GroupView>[]) {
+      as(node, view);
+      expect(await callApi(ctx, "group.accept", { group: "Crew" })).toEqual({ group: "g1" });
+    }
+    expect(acceptGroupInvitation).toHaveBeenCalledTimes(3);
   });
 });
 

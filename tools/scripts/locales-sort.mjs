@@ -28,6 +28,11 @@ const escaped = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")
 export const formatLocale = (text) => `${JSON.stringify(sortKeys(JSON.parse(text)), null, 2).replace(DIRECTION_MARKS, escaped)}\n`;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // No check mode: it writes. An argument it does not take (--check) must not sort the files instead.
+  if (process.argv.length > 2) {
+    console.error("usage: npm run locales:sort (no arguments: it sorts the files in place)");
+    process.exit(2);
+  }
   let changed = 0;
   for (const language of readdirSync(LOCALES, { withFileTypes: true }).filter((d) => d.isDirectory())) {
     for (const file of readdirSync(join(LOCALES, language.name)).filter((f) => f.endsWith(".json"))) {

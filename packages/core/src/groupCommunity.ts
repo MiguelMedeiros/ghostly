@@ -657,6 +657,19 @@ export function communityHasFrame(state: Pick<CommunityState, "seen" | "seedB64"
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
 }
+const COMMIT_HASH = /^[0-9a-f]{64}$/;
+/**
+ * A `group-secret` or `group-entry` frame a hub routes for another member, rebuilt from its known fields when each has
+ * its real shape: what a hub remembers and hands on is no bigger than a real one. Null for anything else.
+ */
+export function routedCommunityFrame(raw: Record<string, unknown>): CommunitySecretFrame | CommunityEntryFrame | null {
+  const { t, v, g, to, s } = raw;
+  if (v !== 2 || typeof g !== "string" || !GROUP_ID.test(g) || !MEMBER_KEY.test(to) || !isSealed(s)) return null;
+  const sealed = { e: s.e, n: s.n, c: s.c };
+  if (t === "group-secret" && typeof raw.h === "string" && COMMIT_HASH.test(raw.h)) return { t, v, g, to, h: raw.h, s: sealed };
+  if (t === "group-entry" && isZ32Key(raw.x)) return { t, v, g, to, x: raw.x, s: sealed };
+  return null;
+}
 /** A welcome's shape and the whole chain it and the pieces before it carry, not yet checked (`CommunitySession.join`). */
 function readWelcome(link: { g: string }, pieces: unknown[], welcome: unknown): { welcome: Record<string, unknown>; commits: unknown[] } | { error: string } {
   if (!welcome || typeof welcome !== "object") return { error: "Malformed welcome" };

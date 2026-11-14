@@ -183,6 +183,7 @@
     "noMatch": "لا يوجد تطبيق في هذا المتجر يطابق البحث.",
     "notRead": "لم يُقرأ بعد",
     "read": "قراءة",
+    "readDone": "{{name}} محدّث: {{apps}}",
     "readNamed": "قراءة {{name}}",
     "refresh": "تحديث",
     "refreshNamed": "تحديث {{name}}",

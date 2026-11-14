@@ -54,6 +54,14 @@ export function protocolLinkCode(pathname: string): string | null {
 }
 
 /**
+ * A route with a doubled `#` before it, as the route it doubles: `#ghostly1…` or `/#/join/…` (the address `##ghostly1…`,
+ * or the app's own `#/` with a `#/join/…` typed or pasted after it) reads as `/ghostly1…`, `/join/…`. Anything else as it is.
+ */
+export function undoubledRoute(route: string): string {
+  return route.replace(/^\/?#+\/?/, "/");
+}
+
+/**
  * The invite a route carries, if it carries one: `/ghostly1…` (the hash of a shared link), `/chat/<code>`, or a
  * `web+ghostly:` link. Whatever a `web+ghostly:` link holds is read as an invite, so what is not one is refused
  * and leaves the address like a bad invite does. A `/` a link ends with (typed, or added by a linkifier) is not the

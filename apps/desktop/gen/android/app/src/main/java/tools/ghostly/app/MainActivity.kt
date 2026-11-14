@@ -108,6 +108,7 @@ class MainActivity : TauriActivity() {
   override fun onSaveInstanceState(outState: Bundle) {
     super.onSaveInstanceState(outState)
     cameraPhoto?.let { outState.putString(CAMERA_PHOTO, it) }
+    SavePicker.keep(outState)
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -146,6 +147,8 @@ class MainActivity : TauriActivity() {
     // After wry's and Tauri's own, in the same order at every create: Android hands an answer to the launcher
     // registered in the same place, in an activity made again too.
     cameraLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult(), ::cameraAnswered)
+    // Save a copy's picker: its answer reaches this activity even when Android ended the process meanwhile.
+    SavePicker.register(this, savedInstanceState)
     // Edge to edge is enforced from Android 15 (target SDK 35 and up), so the page would draw under the status bar,
     // the gesture bar and the keyboard. The page sits between them instead: the content view is padded by the system
     // bars, the display cutout and the keyboard, and the WebView inside it sees no insets of its own.

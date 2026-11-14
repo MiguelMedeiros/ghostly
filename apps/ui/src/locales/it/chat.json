@@ -114,6 +114,7 @@
     "lookupLocal": "Verificato su questo dispositivo: la chiave è l'identificatore.",
     "lookupPubky": "La ricerca interroga i relay Pkarr di Pubky ({{relays}}), che vengono a sapere il tuo indirizzo IP e questa chiave.",
     "lookupWeb": "La ricerca chiede al tuo resolver DNS-over-HTTPS di {{host}} e scarica il suo did.json da lì: quel server viene a sapere il tuo indirizzo IP.",
+    "lookupWebHiddenIp": "Nascondi il mio IP è attivo, quindi {{host}}, un server scelto dal tuo contatto, non viene contattato.",
     "muted": "Nascosto dalla tua lista di silenziati Nostr.",
     "nip05": "(NIP-05, come l'ha scritto, non verificato)",
     "noDids": "Questa app non può risolvere i DID",
@@ -504,6 +505,7 @@
     "tooLarge": "Troppo grande per riprodurlo qui. Scaricalo per guardarlo."
   },
   "voice": {
+    "callPaused": "Messaggio vocale in pausa per la chiamata",
     "cancelled": "Messaggio vocale annullato",
     "cantPlay": "Questo dispositivo non riproduce registrazioni {{format}}. Salvala per ascoltarla altrove.",
     "couldNotPlay": "Impossibile riprodurre questa registrazione.",
@@ -529,6 +531,7 @@
     "recordHint": "Tieni premuto per registrare, o clicca per le mani libere",
     "recorded": "Registrato {{time}}",
     "recording": "Registrazione in corso",
+    "resumeAfterCall": "Riprendi dopo la chiamata",
     "sent": "Messaggio vocale inviato",
     "slideCancel": "Scorri per annullare",
     "speed": "Velocità {{speed}}",

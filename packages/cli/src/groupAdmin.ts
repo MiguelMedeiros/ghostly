@@ -7,6 +7,7 @@ import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
+import { outOf } from "./waits";
 
 /**
  * Group administration and pictures (WISP 1100, phase 3): what the app's group menu and profile screen do. The
@@ -91,7 +92,7 @@ async function picture(params: Params): Promise<string | null> {
 function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   const group = groupOf(ctx, params, twin);
   if (group.status || !group.invitation) return group;
-  const shown = shellWord(str(params, "group", true));
+  const shown = shellWord(str(params, "group", true), group.id);
   throw new CliError("refused", group.invitation.accepted
     ? `You are not in ${group.name} yet: you accepted its invitation, and its admin has not let you in`
     : `You are not in ${group.name} yet: ghostly group accept ${shown} joins it`);
@@ -156,6 +157,10 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.link"(ctx, params) {
     const group = joined(ctx, params);
+    // A member removed (or gone) is refused as `group send` is: before, it got the link it held when it was removed,
+    // exit 0, though `group show` said link null and the admin may have reset it or turned it off since.
+    const out = outOf(group);
+    if (out) throw new CliError("refused", out);
     // On unless `on` says otherwise; an `on` that is no boolean ("false", 0) is refused, never read as on.
     const on = params.on === undefined || bool(params, "on"), reset = bool(params, "reset");
     if (!on && reset) throw new CliError("bad_request", "on: false turns the link off: not with reset");
