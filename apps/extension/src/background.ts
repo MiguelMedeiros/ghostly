@@ -1,5 +1,5 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
-import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
+import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
@@ -523,10 +523,11 @@ void closeLeftoverViewers();
  */
 async function closeViewers(): Promise<void> {
   await closeLeftoverViewers();
-  const tabs = await chrome.tabs.query({});
+  // The bindings, read at once: not one read per tab the browser has open (hundreds, at each lock and switch).
+  const kept = await chrome.storage.session.get(null);
+  const viewers = Object.keys(kept).map(boundTab).filter((id): id is number => id !== null);
   await Promise.all(
-    tabs.map(async ({ id }) => {
-      if (id === undefined || !(await bindingOf(id))) return;
+    viewers.map(async (id) => {
       await forget(id);
       await chrome.debugger.detach({ tabId: id }).catch(() => {});
       await chrome.tabs.remove(id).catch(() => {});
@@ -534,10 +535,14 @@ async function closeViewers(): Promise<void> {
   );
 }
 
-/** Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. */
-export async function devtools(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
+/**
+ * Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. `bound`: the
+ * binding the caller read for this tab, not read again. A close since then (`closeViewers`, the tab leaving the origin)
+ * let go of the tab's debugger after forgetting it, and only `openViewer` attaches it to a tab: the command fails.
+ */
+export async function devtools(tabId: number, method: string, params?: Record<string, unknown>, bound?: ViewerBinding): Promise<void> {
   if (!VIEWER_COMMANDS.has(method)) throw new Error(`DevTools command not allowed: ${method}`);
-  if (!(await bindingOf(tabId))) throw new Error("Not a viewer tab");
+  if (!(bound ?? (await bindingOf(tabId)))) throw new Error("Not a viewer tab");
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
@@ -627,7 +632,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   }
   const parsed = parseViewerUrl(paused.request.url);
   if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId || parsed.tag !== binding.tag) {
-    await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
+    await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" }, binding);
     return;
   }
 
@@ -637,7 +642,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   // the file does go (a page of an older build has no such line: its plain failure).
   if (paused.request.postDataEntries?.some((e) => typeof e.bytes !== "string")) {
     const { page } = binding;
-    await answerFailed(tabId, paused.requestId, { ...page, failed: page.upload ?? page.failed }, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
+    await answerFailed(tabId, paused.requestId, { ...binding, page: { ...page, failed: page.upload ?? page.failed } }, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
     return;
   }
   let bodyB64: string | null = null;
@@ -646,9 +651,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   else if (entries && entries.length > 1) bodyB64 = toBase64(concatBytes(...entries.map((e) => fromBase64(e.bytes!))));
   else if (paused.request.postData !== undefined) bodyB64 = toBase64(utf8Encode(paused.request.postData));
 
-  const message: RuntimeMessage = {
-    target: "engine",
-    type: "http-request",
+  const request: HttpRequest = {
     peerPubKeyZ32: parsed.peerPubKeyZ32,
     serviceId: parsed.serviceId,
     method: paused.request.method,
@@ -660,11 +663,15 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
 
   let reply: HttpRequestReply;
   try {
-    await ensureEngine();
-    // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
-    if (!(await bindingOf(tabId))) return;
-    reply = await chrome.runtime.sendMessage(message);
-    if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
+    // Straight to the peer that served the tab so far; only when no peer takes it is one started (or replaced) and asked.
+    let answer = await askPeer(request);
+    if (!answer) {
+      await ensureEngine();
+      // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
+      if (!(await bindingOf(tabId))) return;
+      answer = await askPeer(request);
+    }
+    reply = answer ?? { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
   }
@@ -679,14 +686,15 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       // Ghostly's policy is the header's last one, after the contact's.
       responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
       body: reply.bodyB64,
-    });
+    }, binding);
     return;
   }
-  await answerFailed(tabId, paused.requestId, binding.page, reply);
+  await answerFailed(tabId, paused.requestId, binding, reply);
 }
 
 /** A request that got no answer from the app: its error page, in the words of the page that opened the tab. */
-async function answerFailed(tabId: number, requestId: string, page: ViewerPage, reply: Extract<HttpRequestReply, { ok: false }>): Promise<void> {
+async function answerFailed(tabId: number, requestId: string, binding: ViewerBinding, reply: Extract<HttpRequestReply, { ok: false }>): Promise<void> {
+  const { page } = binding;
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
   if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
@@ -702,6 +710,48 @@ async function answerFailed(tabId: number, requestId: string, page: ViewerPage, 
       { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
     ],
     body: toBase64(utf8Encode(html)),
+  }, binding);
+}
+
+/**
+ * The port the requests go to the peer on, opened once per document (`VIEWER_PORT`): a `runtime.sendMessage` reaches
+ * every page of the extension too, and each app tab read every request, its body included, only to drop it.
+ */
+let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, (reply: HttpRequestReply | null) => void> } | null = null;
+let nextAsk = 0;
+
+/**
+ * The peer's answer, or null when no peer took the request: no document, one whose script does not listen yet, one that
+ * went away meanwhile (a switch closes it), or one whose peer stopped for good. The next ask opens the port again.
+ */
+function askPeer(request: HttpRequest): Promise<HttpRequestReply | null> {
+  if (!viewerPort) {
+    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, (reply: HttpRequestReply | null) => void>() };
+    viewerPort = opened;
+    opened.port.onMessage.addListener(({ id, reply }: ViewerReply) => {
+      opened.waiting.get(id)?.(reply);
+      opened.waiting.delete(id);
+    });
+    opened.port.onDisconnect.addListener(() => {
+      // "Receiving end does not exist" when no document listens: what the null below says.
+      void chrome.runtime.lastError;
+      if (viewerPort === opened) viewerPort = null;
+      for (const answer of opened.waiting.values()) answer(null);
+      opened.waiting.clear();
+    });
+  }
+  const { port, waiting } = viewerPort;
+  const id = nextAsk++;
+  return new Promise((resolve) => {
+    waiting.set(id, resolve);
+    try {
+      port.postMessage({ id, request } satisfies ViewerAsk);
+    } catch {
+      // Disconnected before its `onDisconnect` ran: the next ask opens another.
+      if (viewerPort?.port === port) viewerPort = null;
+      waiting.delete(id);
+      resolve(null);
+    }
   });
 }
 

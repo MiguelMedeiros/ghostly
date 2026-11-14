@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
+import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 // covers: extension.engine, services.open, payments.external
@@ -814,8 +814,8 @@ describe("the offscreen peer hears only the extension", () => {
   it.each(strangers)("answers no message from %s", async (_, sender) => {
     await send({ target: "background", type: "ensure-engine" });
     const before = engine().shutdowns;
+    expect(await askPeer(world, {}, sender)).toBeUndefined();
     for (const message of [
-      { target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null },
       { target: "engine", type: "ping" },
       { target: "engine", type: "stop" },
     ]) {
@@ -944,17 +944,7 @@ describe("the offscreen peer", () => {
     engineControl().respond = async () => {
       throw tooLarge;
     };
-    const reply = await send({
-      target: "engine",
-      type: "http-request",
-      peerPubKeyZ32: PEER,
-      serviceId: SERVICE,
-      method: "GET",
-      path: "/",
-      headers: [],
-      bodyB64: null,
-    });
-    expect(reply).toEqual({ ok: false, code: "too-large", message: "Response too large" });
+    expect(await askPeer(world)).toEqual({ ok: false, code: "too-large", message: "Response too large" });
     expect(engine().requests[0].init.body).toBeNull();
   });
 });
