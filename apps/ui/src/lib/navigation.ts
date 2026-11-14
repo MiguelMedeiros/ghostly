@@ -123,10 +123,12 @@ export const openUnderTarget = (parent: string, path: string): NavEntry[] => [{ 
 
 /**
  * What goes under an entry the app opened on with nothing known under it (a deep link, a reload): home, and for a
- * section of Settings (`/settings/appearance`) Settings too, so its Back still leads to the menu.
+ * section of Settings (`/settings/appearance`) Settings too, so its Back still leads to the menu. A path that starts
+ * with `//` or `/\` is no page's, and the router reads it as another site's address and refuses to go there: home alone.
  */
 export const anchorTarget = (path: string): NavEntry[] =>
-  /^\/settings\/[^/]+$/.test(path) ? [{ path: HOME }, { path: "/settings" }, { path, up: true }] : [{ path: HOME }, { path }];
+  /^[\\/]{2}/.test(path) ? homeTarget()
+  : /^\/settings\/[^/]+$/.test(path) ? [{ path: HOME }, { path: "/settings" }, { path, up: true }] : [{ path: HOME }, { path }];
 
 /** A page's Back: up to the parent of a sub-page, home from anything else. */
 export function upTarget(stack: NavStack): NavEntry[] {
