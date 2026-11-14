@@ -47,6 +47,9 @@ export function groupPayStatus(note: GroupPayNote, group: GroupView, t: Translat
   const claims = note.claims ?? [];
   if (note.kind === "request" && claims.length) {
     if (claims.length === 1 && mine(claims[0])) return { state: "sent", text: t("payments.group.status.claimedPaidByMe", { to: who(group, note.to, t, false) }) };
+    // I am among several who say they paid: "You and Bob paid", where my name in the list gave "Bob, ti pagó".
+    const others = claims.filter(k => !mine(k));
+    if (others.length && others.length < claims.length && !mine(note.to)) return { state: "sent", text: t("payments.group.status.claimedPaidWithMe", { names: others.map(k => who(group, k, t, false)).join(t("payments.group.listSeparator")), to: who(group, note.to, t, false) }) };
     const names = claims.map((k, i) => who(group, k, t, i === 0)).join(t("payments.group.listSeparator"));
     const key = claims.length === 1 ? "saysPaid" : "claimedPaid";
     return { state: "sent", text: mine(note.to) ? t(`payments.group.status.${key}ToMe`, { names }) : t(`payments.group.status.${key}`, { names, to: who(group, note.to, t, false) }) };
