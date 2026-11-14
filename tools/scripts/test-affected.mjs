@@ -135,9 +135,10 @@ for (const u of p.unit) {
   else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
 }
 console.log("lint (eslint)");
-console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
+if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
+else console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
 console.log("typecheck (tsc)");
-for (const t of p.typecheck) console.log(`  ${t.mode.padEnd(7)} ${t.name.padEnd(18)} ${t.reason}`);
+for (const t of p.typecheck) console.log(`  ${(noTypecheck && t.mode !== "skip" ? "off" : t.mode).padEnd(7)} ${t.name.padEnd(18)} ${noTypecheck && t.mode !== "skip" ? "--no-typecheck" : t.reason}`);
 console.log("rust (cargo)");
 for (const r of p.rust) console.log(`  ${(noRust && r.mode === "run" ? "off" : r.mode).padEnd(7)} ${r.name.padEnd(9)} ${noRust && r.mode === "run" ? "--no-rust" : r.reason}`);
 console.log("e2e (playwright)");
