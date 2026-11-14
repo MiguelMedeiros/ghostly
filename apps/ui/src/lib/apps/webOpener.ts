@@ -115,7 +115,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
         },
         onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
-      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running, runAnyway });
+      // The same app opened again where it stopped (Open again) keeps the place the person gave it: over the chat's
+      // whole width stays there.
+      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: there?.ref === ref && there.wide, view: entry.view ?? "chat", running, runAnyway });
       return;
     }
 

@@ -233,6 +233,20 @@ describe("an app the watchdog stopped", () => {
     await waitFor(() => expect(app.contains(document.activeElement)).toBe(true));
   });
 
+  it("in a chat: one the person put over the chat's whole width opens again there, not back beside the chat", async () => {
+    setAppOpener(open);
+    const { user } = chatPanel();
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    await user.click(within(app).getByRole("button", { name: "Full width" }));
+    expect(app).toHaveAttribute("data-place", "wide");
+    act(() => started[0]!.stop("unresponsive"));
+    await user.click(within(app).getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(app).toHaveAttribute("data-place", "wide");
+    expect(chatApp("link-1")?.wide).toBe(true);
+  });
+
   it("in a chat: one a store removed, run anyway, opens again as it was run, and a removed check leaves it running", async () => {
     setAppOpener(open);
     const { user } = chatPanel();
