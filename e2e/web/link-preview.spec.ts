@@ -126,15 +126,13 @@ test("a preview's title and description show two lines at most, a long word brok
       const card = bubble(side, "look").getByTestId("link-preview-card");
       await expect(card).toBeVisible();
       for (const testId of ["link-preview-title", "link-preview-description"]) {
-        const box = await card.getByTestId(testId).evaluate((element) => ({
-          lines: element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight),
+        // Before, both drew every line they had (the headline 7 lines) and the long word ran past the card's edge, cut with no
+        // "…". Polled: the row is drawn again as the message is delivered, and a node read meanwhile has no style (NaN lines).
+        await expect.poll(() => card.getByTestId(testId).evaluate((element) => ({
+          lines: Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight)),
           cut: element.scrollHeight > element.clientHeight,
           wide: element.scrollWidth > element.clientWidth,
-        }));
-        // Before, both drew every line they had (the headline 7 lines) and the long word ran past the card's edge, cut with no "…".
-        expect(Math.round(box.lines), testId).toBe(2);
-        expect(box.cut, testId).toBe(true);
-        expect(box.wide, testId).toBe(false);
+        })), testId).toEqual({ lines: 2, cut: true, wide: false });
       }
     }
   } finally {
@@ -147,15 +145,18 @@ test("a preview's words read in their own direction, in English and in Arabic", 
   try {
     const [alice, bob] = await Promise.all([peer("bidi-alice"), peer("bidi-bob")]);
     await pair(alice, bob);
+    await alice.page.getByPlaceholder("Message…").fill(`${news.origin}/both`);
+    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+    // Bob turns to Arabic once the card is his: sent while his reload left the chat not live, the message went by the
+    // DHT, which carries no preview (WISP 401), and his side never drew one.
+    await expect(chat(bob).getByTestId("link-preview-card")).toBeVisible();
     await bob.page.evaluate(() => {
       const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
       localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
     });
     await bob.page.reload();
     await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
-    await alice.page.getByPlaceholder("Message…").fill(`${news.origin}/both`);
-    await expect(alice.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
-    await alice.page.getByPlaceholder("Message…").press("Enter");
 
     for (const [side, app] of [[alice, "ltr"], [bob, "rtl"]] as const) {
       const card = chat(side).getByTestId("link-preview-card").last();
