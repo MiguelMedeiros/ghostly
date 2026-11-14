@@ -55,6 +55,26 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
   });
 });
 
+it("stays held while the window or tab is away: its blur then is not the focus leaving it", async () => {
+  // Chromium (real, measured) blurs the focused button when another tab or window comes to the front and focuses it
+  // again on the way back, with `document.hasFocus()` false at that blur. Disabled then, it dropped the focus to the page.
+  let fail: (() => void) | undefined;
+  const work = vi.fn(() => new Promise<void>((_, refuse) => { fail = () => refuse(new Error("no")); }));
+  const { user } = renderApp(<Work as="raw" work={work} />);
+  const go = screen.getByTestId("go");
+  go.focus();
+  await user.keyboard("{Enter}");
+  const away = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  try {
+    act(() => { go.dispatchEvent(new FocusEvent("blur")); go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(go, "away while it works").toBeEnabled();
+    expect(go).toHaveAttribute("aria-disabled", "true");
+  } finally { away.mockRestore(); }
+  await act(async () => fail!());
+  expect(go).toBeEnabled();
+  expect(go).not.toHaveAttribute("aria-disabled");
+});
+
 it("a held submit button sends no form on Enter", async () => {
   const submit = vi.fn((e: React.FormEvent) => e.preventDefault());
   function Form() {
