@@ -46,13 +46,29 @@ async function keepingApp(): Promise<{ server: Server; port: number }> {
 
 type Kept = { cookies: string[]; ls: string[]; idb: string[]; caches: string[]; opfs: string[] };
 
+/**
+ * Takes `page` to `url` and waits for its document, without `page.goto`: should the extension close the tab as the
+ * navigation ends, Playwright answers the goto with a response it already let go of (with tracing on, as in CI) and
+ * fails the test from outside any promise of it ("Object with guid response@… was not bound"). Here a close is an
+ * error the caller sees.
+ */
+async function open(page: Page, url: string): Promise<void> {
+  await page.evaluate((to) => { location.href = to; }, url).catch(() => {});
+  for (const end = Date.now() + 30_000; ;) {
+    const at = await page.evaluate(() => (document.readyState === "complete" ? location.href : "")).catch(() => "");
+    if (at === url) return;
+    if (page.isClosed() || Date.now() > end) throw new Error(`The probe did not open ${url}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 /** What Chrome keeps for `origin`, read from a plain tab on it (answered here, not by the extension). */
 async function kept(context: BrowserContext, origin: string): Promise<Kept> {
   const probe = `${origin}/__probe`;
-  await context.route(probe, (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>probe</title>" }));
+  await context.route(probe, (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>probe</title>" }).catch(() => {}));
   const page = await context.newPage();
   try {
-    await page.goto(probe);
+    await open(page, probe);
     const inPage = await page.evaluate(async () => ({
       ls: Object.keys(localStorage),
       idb: (await indexedDB.databases()).map((d) => d.name ?? ""),
