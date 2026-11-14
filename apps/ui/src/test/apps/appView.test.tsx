@@ -357,7 +357,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     panel();
     await act(() => open(REF, "link-1"));
     const app = screen.getByTestId("mini-app");
-    expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-11", "w-11");
+    expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-[44px]", "w-[44px]");
     expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
     // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
     // still 44 × 44 px there (`.tap-target`).
