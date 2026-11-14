@@ -6,7 +6,7 @@ import { FAREWELL_OPEN_MS, type Groups, type GroupsHost } from "../src/engine/gr
 import { MeshHubs, removalEpoch } from "../src/engine/meshHubs";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
-import type { StoredLink } from "../src/shared/types";
+import type { StoredLink, StoredMessage } from "../src/shared/types";
 // covers: groups.remove-member, groups.payments.group-request, groups.payments.notes, groups.protocol.reactions, groups.protocol.pins, groups.connection.auto-reconnect
 
 /**
@@ -455,6 +455,37 @@ describe("a member's pins in a private group are paced, and one that changes not
     expect(checks).toHaveBeenCalledTimes(PIN_LIMITS.receive);
     expect(shown()?.id).toBe(absent);
   });
+});
+
+/**
+ * A pin that came before its message (pinned while I was away: the pin goes as an edge opens, the catch-up brings the
+ * line a moment later) names the row once the row is here, as a 1:1 chat's does. It kept `messageId` null for good.
+ */
+describe("a private group's pin that came before its message", () => {
+  it("names the row once it comes, and no other row names it", async () => {
+    const { node, inner, groupId, session, members: [bob] } = await adminOf(["bob"]);
+    const chat = `group:${groupId}`;
+    const store = (inner as unknown as { storeNewMessage(message: StoredMessage): Promise<boolean> }).storeNewMessage.bind(inner);
+    const row = (id: string, text: string): StoredMessage => ({ linkId: chat, id, text, sender: "peer", member: bob.key, timestamp: Date.now() } as StoredMessage);
+    const shown = () => node.getState().groups.find(g => g.id === groupId)?.pin;
+    const late = `${bob.key}:1:3`;
+    await bob.events.onGroupFrame(session.pinFrame({ id: late, n: Date.now() }));
+    await vi.waitFor(() => expect(shown()?.id).toBe(late));
+    expect(shown()?.messageId).toBeUndefined();
+    expect(await store(row(late, "pinned before it came"))).toBe(true);
+    await vi.waitFor(() => expect(shown()).toMatchObject({ id: late, messageId: late }));
+    expect(inner.groups.pinOf(groupId)?.messageId).toBe(late);
+
+    // A newer pin of a message not here yet, then another member's row: the pin stays without a row.
+    const later = `${bob.key}:1:5`;
+    await bob.events.onGroupFrame(session.pinFrame({ id: later, n: Date.now() + 1000 }));
+    await vi.waitFor(() => expect(shown()?.id).toBe(later));
+    expect(await store(row(`${bob.key}:1:4`, "not the pinned one"))).toBe(true);
+    await settle();
+    expect(shown()?.messageId).toBeUndefined();
+    expect(await store(row(later, "pinned too"))).toBe(true);
+    await vi.waitFor(() => expect(shown()).toMatchObject({ id: later, messageId: later }));
+  }, 30_000);
 });
 
 /**
