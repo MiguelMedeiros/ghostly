@@ -50,6 +50,36 @@ describe("a command naming a chat", () => {
   });
 });
 
+describe("a write in a chat named by its id", () => {
+  it("asks whether someone joined it without building every chat", async () => {
+    const { ctx, node } = fake();
+    const card = { kind: "task", id: "t1", status: "running", title: "Build", startedAt: 1, updatedAt: 1 };
+    const sent = { linkId: "chat1", id: "me_1", text: "", sender: "me", timestamp: 1, delivery: "sent", card };
+    Object.assign(node, {
+      getMessage: vi.fn(async () => sent),
+      getMessages: vi.fn(async () => [sent]),
+      editMessage: vi.fn(async () => ({})),
+      reactToMessage: vi.fn(async () => ({})),
+    });
+    (ctx as unknown as { hub: unknown }).hub = { onEvent: () => () => {} };
+    const builds: Record<string, number> = {};
+    for (const mode of ["daemon", "one-shot"] as const) {
+      (ctx as { mode: string }).mode = mode;
+      for (const [method, params] of [
+        ["task.send", { chat: "chat1", card: { title: "Build" }, wait: "none" }],
+        ["task.update", { chat: "chat1", task: "t1", card: { step: "Tests" }, wait: "none" }],
+        ["usage.send", { chat: "chat1", card: { label: "Tokens", left: 10 }, wait: "none" }],
+        ["chat.edit", { chat: "chat1", message: "me_1", text: "hi again", wait: "none" }],
+      ] as const) {
+        node.getState.mockClear();
+        await callApi(ctx, method, params);
+        builds[`${mode} ${method}`] = node.getState.mock.calls.length;
+      }
+    }
+    expect(Object.entries(builds).filter(([, n]) => n > 0)).toEqual([]);
+  });
+});
+
 describe("a command reading a setting", () => {
   it("builds no engine state", async () => {
     const { ctx, node } = fake();

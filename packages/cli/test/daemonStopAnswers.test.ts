@@ -9,6 +9,7 @@ import { greeting, HELLO, newDaemonSecret, proof } from "../src/daemonProof";
 import type { CliError } from "../src/errors";
 import { serve, type Host } from "../src/host";
 import { lockPath } from "../src/profiles";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.daemon
 
 /** The daemon's `chat.send --wait delivered` to a contact who is away: the message is stored and waits for them. */
@@ -46,7 +47,7 @@ function profileDir(name: string): { dir: string; socket: string } {
 describe.skipIf(process.platform === "win32")("a daemon that stops while a call waits", () => {
   it("answers a send --wait still waiting before it ends the connection: timeout, with messageId, delivery and reason daemon-stopped", async () => {
     const address = profileDir("send-wait");
-    const node = { getMessage: async (_chat: string, id: string) => ({ id, delivery: "waiting" }), getState: () => ({ links: [] }) };
+    const node = { getMessage: async (_chat: string, id: string) => ({ id, delivery: "waiting" }), chatView: chatViewOf, getState: () => ({ links: [] }) };
     const ctx = { runtime: { paths: address, server: { node } }, hub: { onEvent: () => () => {} }, mode: "daemon" };
     const served = await serve({ ctx } as unknown as Host);
     const client = (await connectDaemon(address))!;

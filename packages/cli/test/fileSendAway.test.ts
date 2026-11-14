@@ -9,6 +9,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -34,6 +35,7 @@ beforeAll(async () => {
 function contextFor(link: Partial<LinkView>) {
   const view = { id: "chat-one", label: "Alice", peerPubKeyZ32: "palice", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", pairing: { status: "ready" }, ...link } as unknown as LinkView;
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [view], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
