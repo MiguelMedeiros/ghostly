@@ -452,6 +452,8 @@ const WALLETS: Record<string, Method> = {
     const paymentId = str(params, "payment", true);
     const request = s.payments[paymentId];
     if (!request || request.linkId !== link.id || request.kind !== "request") throw new CliError("not_found", `No request ${paymentId} in this chat`);
+    // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
+    if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
     const n = paymentNetwork(request);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
