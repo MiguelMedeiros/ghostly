@@ -9,6 +9,7 @@ import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
+import { localProvider } from "../../lib/providerWords";
 
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
@@ -69,7 +70,9 @@ export function IdentityEntityCard({ provider, subject, peerPubKey, othersChoice
         const { homeserver, endpoint } = await pubkyHomeserver(subject, fetchForCard, current.signal);
         facts = [{ label: t("chat.entity.homeserver"), value: shortSubject("pubky", homeserver) }, { label: t("chat.entity.address"), value: endpoint.host }];
       } else {
-        const preview = providerOf("did")?.subject.preview;
+        // In the app's language, as the Identities page says it: the provider's own words are English.
+        const did = providerOf("did");
+        const preview = did && localProvider(did, t).subject.preview;
         if (!preview) throw new Error(t("chat.entity.noDids"));
         facts = (await preview(subject, { signal: current.signal })).facts;
       }
