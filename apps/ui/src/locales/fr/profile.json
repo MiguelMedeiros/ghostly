@@ -10,19 +10,19 @@
     "connected": "Connecté · {{store}}",
     "content": {
       "everything": "Tout",
-      "everythingSize": "Fichiers : {{size}}",
-      "info": "La légère laisse de côté les fichiers de plus de 1 Mo ; les messages vocaux jusqu'à 4 Mo restent. Après une restauration, chaque fichier manquant s'affiche comme Pas dans cette sauvegarde.",
+      "everythingSize": "Fichiers : {{size}}",
+      "info": "La légère laisse de côté les fichiers de plus de 1 Mo ; les messages vocaux jusqu'à 4 Mo restent. Après une restauration, chaque fichier manquant s'affiche comme Pas dans cette sauvegarde.",
       "label": "Contenu",
       "leftOut": "Les fichiers de plus de 1 Mo ont été laissés de côté ({{size}}).",
       "light": "Légère",
-      "lightSize": "Fichiers : {{size}}. Laisse de côté {{left}}."
+      "lightSize": "Fichiers : {{size}}. Laisse de côté {{left}}."
     },
     "download": "Télécharger",
     "downloaded": "Téléchargé {{name}} · {{size}}",
     "emptyFile": "Ce fichier est vide. Choisissez un fichier de sauvegarde.",
     "fromFile": "Fichier",
     "holds": "Tout sauf les clés S3, l'abonnement aux notifications de cet appareil et les fichiers en cours d'arrivée. Les portefeuilles Bark, Spark et Fedimint reviennent avec leur phrase de récupération, qui y est.",
-    "keepOne": "L’original est toujours là ? N’en utilisez qu’un : ils partagent les portefeuilles.",
+    "keepOne": "L’original est toujours là ? N’en utilisez qu’un : ils partagent les portefeuilles.",
     "list": "Lister",
     "noneYet": "Aucune pour l’instant.",
     "off": "Désactivé",
@@ -60,7 +60,7 @@
     "restoreFrom": "Restaurer depuis",
     "restoreHint": "Devient un nouveau profil",
     "restoreOpen": "Restaurer…",
-    "restored": "Restauré sous « {{name}} ».",
+    "restored": "Restauré sous « {{name}} ».",
     "restoring": "Restauration…",
     "s3": {
       "accessKey": "Clé d’accès",
@@ -118,7 +118,7 @@
     "reading": "Lecture…",
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
-    "title": "Supprimer « {{name}} » ?",
+    "title": "Supprimer « {{name}} » ?",
     "wallet": "Portefeuille {{name}}",
     "warning": "C’est irréversible. Ses portefeuilles partent avec lui."
   },
@@ -135,7 +135,7 @@
     "placeholder": "Votre nom",
     "save": "Continuer",
     "skip": "Passer",
-    "title": "Comment doit-on vous appeler ?"
+    "title": "Comment doit-on vous appeler ?"
   },
   "newProfile": "+ Nouveau profil",
   "oneOnly": "Un seul profil dans cette app, pour l’instant.",
