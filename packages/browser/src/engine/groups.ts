@@ -933,6 +933,15 @@ export class Groups {
     return true;
   }
 
+  /** A pin kept before its message came names the row now, while it is still the group's pin (none taken meanwhile). */
+  async pinRowCame(groupId: string, pin: StoredPin, messageId: string): Promise<void> {
+    const group = this.record(groupId);
+    if (!group || group.pin !== pin || pin.messageId) return;
+    group.pin = { ...pin, messageId };
+    await this.store.putGroup(group);
+    this.host.emit();
+  }
+
   private record(groupId: string): StoredGroup | undefined { return this.isCommunity(groupId) ? this.communities.record(groupId) : this.stored.get(groupId); }
 
   views(): GroupView[] {
