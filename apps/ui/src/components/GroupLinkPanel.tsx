@@ -85,12 +85,14 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const field = <input readOnly dir="ltr" value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
   // Copy and Share are drawn by their fill: a border in forced colors only, where the fill is gone (as devices/DeviceDialog's primaryButton).
+  // Large, they share a row from their own width up (flex-auto), so at a larger text size the second goes under the
+  // first rather than past the dialog's edge.
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "shrink-0 bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
     <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto px-4 text-sm" : "shrink-0 px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
     <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
@@ -115,7 +117,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (large) return <div className="flex flex-col gap-3" data-testid="group-link" data-state="on">
     {qr}
     <div className="flex">{field}</div>
-    <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
+    <div className="flex flex-wrap gap-2">{shareButtonEl}{copyButton}</div>
     <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
