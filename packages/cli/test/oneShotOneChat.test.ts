@@ -118,6 +118,15 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
     for (const method of ["chat.history", "file.list", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
   });
+
+  it("leaves every chat unstarted, its history unread, for a change kept here and a call only a daemon answers", () => {
+    // What the profile keeps outside any chat (its status, x401 keys and credentials, a service, a draft, a served
+    // app), and `call answer` and `call flush`, which a one-shot refuses whatever the chats say.
+    for (const method of ["status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add",
+      "identity.cancel", "app.serve", "app.unserve", "call.answer", "call.flush"]) expect(readsNoHistory(method), method).toBe(true);
+    // A change about a message reads the chat it names (`startNamedChats`).
+    for (const method of ["saved.add", "saved.remove", "chat.rename"]) expect(readsNoHistory(method), method).toBe(false);
+  });
 });
 
 /**
