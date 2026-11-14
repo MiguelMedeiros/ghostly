@@ -1,0 +1,1 @@
+every push the woken app's push worker takes shows a notification: one with no notice of its own (not a wake-up, a token it does not know, a muted chat, inside the notice gap after a dismiss, the app on screen) shows the app's name alone, silently, one per profile replaced in place, closed at once while the app is on screen.

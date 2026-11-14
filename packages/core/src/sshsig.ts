@@ -103,7 +103,8 @@ function parseKeyBlob(blob: Uint8Array): ParsedKey {
   if (blob.length > 1100) fail('SSH public key too large');
   const r = new Reader(blob);
   const type = r.text(64) as SshKeyType;
-  if (!SSH_KEY_TYPES.includes(type)) fail(`Unsupported SSH key type ${JSON.stringify(type)}`);
+  // Named only when it is DSA, a type older OpenSSH made: any other type is words the key's owner chose.
+  if (!SSH_KEY_TYPES.includes(type)) fail(`Unsupported SSH key type${(type as string) === 'ssh-dss' ? ' "ssh-dss"' : ''}`);
   const key: ParsedKey = { type, blob, fingerprint: sshFingerprint(blob), line: `${type} ${toBase64(blob)}` };
   if (type === 'ssh-ed25519' || type === 'sk-ssh-ed25519@openssh.com') {
     key.point = r.string(32);
@@ -188,7 +189,8 @@ function ecdsaSignature(blob: Uint8Array, size: number): Uint8Array {
 export async function verifySshSignature(armored: string, message: Uint8Array | string, options: { namespace?: string; allowNoTouch?: boolean } = {}): Promise<SshSignatureCheck> {
   const parsed = parseSshSignature(armored);
   const namespace = options.namespace ?? SSHSIG_NAMESPACE;
-  if (parsed.namespace !== namespace) fail(`Signed for namespace ${JSON.stringify(parsed.namespace)}, not ${JSON.stringify(namespace)}. Use -n ${namespace}.`);
+  // Never the signature's own namespace: the reason is shown on the checking side, and the signer chose those words.
+  if (parsed.namespace !== namespace) fail(`Signed for another namespace, not ${JSON.stringify(namespace)}. Use -n ${namespace}.`);
   const bytes = typeof message === 'string' ? utf8Encode(message) : message;
   const digest = parsed.hashAlgorithm === 'sha512' ? sha512(bytes) : sha256(bytes);
   const signed = concatBytes(utf8Encode('SSHSIG'), sshString(utf8Encode(parsed.namespace)), sshString(new Uint8Array()),

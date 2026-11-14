@@ -1,9 +1,11 @@
 // covers: apps.chess
 import { describe, expect, it } from "vitest";
 import type { Square } from "chess.js";
-import { ChessController, type Notice, type SavedGame } from "../src/game.ts";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { ChessController, type ControllerOptions, type Notice, type SavedGame } from "../src/game.ts";
 import { encodeMessage, MAX_MESSAGE_BYTES } from "../src/protocol.ts";
-import { commitment, newSalt } from "../src/toss.ts";
+import { commitment, newSalt, type Random } from "../src/toss.ts";
 import { chatPair, MockBroker } from "./mockBroker.ts";
 
 /** A side of the chat: its broker, its app, and what the app reported. */
@@ -13,9 +15,9 @@ interface Side {
   notices: Notice[];
 }
 
-async function open(broker: MockBroker): Promise<Side> {
+async function open(broker: MockBroker, options?: ControllerOptions): Promise<Side> {
   broker.launch();
-  const game = new ChessController(broker);
+  const game = new ChessController(broker, options);
   const notices: Notice[] = [];
   game.onNotice((n) => notices.push(n));
   await game.start();
@@ -31,10 +33,10 @@ async function settle(...sides: Side[]): Promise<void> {
   }
 }
 
-async function start(): Promise<{ ana: Side; bob: Side; white: Side; black: Side }> {
+async function start(salts: { ana?: Random; bob?: Random } = {}): Promise<{ ana: Side; bob: Side; white: Side; black: Side }> {
   const [a, b] = chatPair();
-  const ana = await open(a);
-  const bob = await open(b);
+  const ana = await open(a, { random: salts.ana });
+  const bob = await open(b, { random: salts.bob });
   await settle(ana, bob);
   const white = ana.game.view().me === "w" ? ana : bob;
   const black = white === ana ? bob : ana;
@@ -52,6 +54,11 @@ async function play(sides: { white: Side; black: Side }, ...plies: string[]): Pr
 }
 
 const saved = (side: Side) => JSON.parse(side.broker.stored.get("game")!) as SavedGame;
+/** Salts drawn from a seed: the same tosses on every run. */
+const seeded = (seed: string): Random => {
+  let drawn = 0;
+  return (bytes) => sha256(utf8ToBytes(`${seed}/${drawn++}`)).slice(0, bytes);
+};
 const SCHOLARS_MATE = ["e2e4", "e7e5", "f1c4", "b8c6", "d1h5", "g8f6", "h5f7"];
 
 describe("the colour toss", () => {
@@ -91,10 +98,16 @@ describe("the colour toss", () => {
     expect(bob.notices).toEqual([]);
   });
 
-  it("decides colours from both salts, so either colour comes up", async () => {
-    const colours = new Set<string>();
-    for (let i = 0; i < 12 && colours.size < 2; i++) colours.add((await start()).ana.game.view().me!);
-    expect(colours).toEqual(new Set(["w", "b"]));
+  it("decides colours from both salts, so either side's salt alone turns them", async () => {
+    // Seeded, not drawn: twelve real tosses came up one colour once in 2,048 runs.
+    const anaIs = async (ana: string, bob: string) => (await start({ ana: seeded(ana), bob: seeded(bob) })).ana.game.view().me;
+    const bobsSaltTurns = new Set<string | undefined>(), anasSaltTurns = new Set<string | undefined>();
+    for (let i = 0; i < 6; i++) {
+      bobsSaltTurns.add(await anaIs("ana", `bob ${i}`));
+      anasSaltTurns.add(await anaIs(`ana ${i}`, "bob"));
+    }
+    expect(bobsSaltTurns).toEqual(new Set(["w", "b"]));
+    expect(anasSaltTurns).toEqual(new Set(["w", "b"]));
   });
 
   it("refuses a reveal that does not match the commitment", async () => {

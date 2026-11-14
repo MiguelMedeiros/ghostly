@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MESH_HUBS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
+import { MESH_HUBS, REACTION_LIMITS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.hubs.budget, groups.send, groups.catch-up, groups.remove-member, groups.leave
 
@@ -90,6 +90,33 @@ describe("hubs in a private group past 16 members", () => {
     const forged = { ...frame, t: "group-reacted", k: keyOf(b, others[6]) };
     await others[7].groups.handleEdgeFrame(id, keyOf(b, hub), structuredClone(forged));
     expect(reactions.get(others[7])?.some(r => r.member === keyOf(b, others[6])) ?? false).toBe(false);
+  }, 180_000);
+
+  it("a hub passes on a member's reactions at the pace a member takes them, whatever numbers or messages they name", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, peers } = b;
+    const hubs = [peers[2], peers[5]], others = peers.filter(p => !hubs.includes(p));
+    await world.until(() => onHubs(b, others) && others.every(p => edgesOf(b, p).length <= MESH_HUBS.hubsPerMember + (p === b.admin ? 1 : 0)), 10 * 60_000, 1000);
+    const reactor = others[3], reactorKey = keyOf(b, reactor), target = keyOf(b, others[4]);
+    const hub = hubs.find(h => edgesOf(b, reactor).some(e => e.peer === keyOf(b, h)))!;
+    const sentBefore = peers.reduce((s, p) => s + p.sent.frames, 0);
+    // A burst at once: one message with rising numbers, then messages that are not there.
+    for (let n = 1; n <= 100; n++) {
+      const wire = { id: `${target}:0:0`, e: "👍", n };
+      await hub.groups.handleEdgeFrame(id, reactorKey, { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) });
+    }
+    for (let i = 1; i <= 100; i++) {
+      const wire = { id: `${target}:9:${i}`, e: "👍", n: 100 + i };
+      await hub.groups.handleEdgeFrame(id, reactorKey, { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) });
+    }
+    await world.run(1_000);
+    // Every other member hears at most a window's worth from that member (once per hub), not every frame.
+    for (const p of peers.filter(p => p !== reactor && p !== hub)) {
+      const heard = new Set((reactions.get(p) ?? []).filter(r => r.member === reactorKey).map(r => r.n));
+      expect(heard.size).toBeGreaterThan(0);
+      expect(heard.size).toBeLessThanOrEqual(REACTION_LIMITS.receive);
+    }
+    expect(peers.reduce((s, p) => s + p.sent.frames, 0) - sentBefore).toBeLessThanOrEqual(REACTION_LIMITS.receive * 2 * peers.length);
   }, 180_000);
 
   it("a group of 16 stays a full mesh, whatever hubs there could be", async () => {
@@ -346,6 +373,38 @@ describe("a Mac's budget of connections", () => {
     // The other group gone: room again, and a hub again.
     mac.heldElsewhere = 0;
     await world.until(() => isHub(b, mac), 5 * 60_000, 1000);
+  }, 300_000);
+
+  it("a hub that stepped down and is one again says a member back the reaction as it was taken back meanwhile, not as it was", async () => {
+    const b = await build(20, { hubs: [2, 5], budgets: { 2: onMac(0) } });
+    const { world, id, peers } = b;
+    const mac = peers[2], other = peers[5];
+    await world.until(() => isHub(b, mac) && isHub(b, other) && onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const away = peers[11], reactor = peers[7], reactorKey = keyOf(b, reactor), message = `${keyOf(b, peers[4])}:0:0`;
+    away.online = false;
+    const say = async (hubs: Peer[], wire: { id: string; e: string; n: number }) => {
+      const frame = { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) };
+      for (const h of hubs) await h.groups.handleEdgeFrame(id, reactorKey, structuredClone(frame));
+      await world.run(2_000);
+    };
+    // Both hubs keep the 👍 for members back.
+    await say([mac, other], { id: message, e: "👍", n: 1 });
+    // The Mac steps down; the reactor takes it back, and the Mac, a member now, takes that from the other hub.
+    mac.heldElsewhere = 31;
+    await world.until(() => !isHub(b, mac), 60_000, 1000);
+    await say([other], { id: message, e: "", n: 2 });
+    expect(reactions.get(mac)?.filter(r => r.member === reactorKey).map(r => r.n)).toEqual([1, 2]);
+    mac.heldElsewhere = 0;
+    await world.until(() => isHub(b, mac), 5 * 60_000, 1000);
+    // The other hub no longer has it to say (64 newer reactions pushed it out of what it keeps).
+    world.drop = (from, to, frame) => from === other && to === away && frame.t === "group-reacted";
+    world.reopen(away);
+    await world.until(() => view(b, away).members.some(m => m.key === keyOf(b, mac) && m.online && !m.viaHub), 5 * 60_000, 1000);
+    await world.run(30_000);
+    // Before: the Mac said the 👍 it kept from before it stepped down, and the member showed a reaction taken back.
+    const took = (reactions.get(away) ?? []).filter(r => r.member === reactorKey && r.id === message);
+    expect(took.map(r => `${r.e}#${r.n}`)).toEqual(["#2"]);
   }, 300_000);
 
   it("over its budget, the only member that could be a hub is none: the group is a full mesh, the Mac keeps the edges it has room for, and messages still reach it", async () => {

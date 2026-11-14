@@ -2,7 +2,7 @@ import { ONCHAIN_PROVIDER, PaymentPreflightError, assertWholeSats, validatePayme
 import type { WalletMode } from "../../../shared/mints";
 import type { OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainTx } from "./onchain";
 import { intentRepository } from "../persistence";
-import { awayFrom } from "../away";
+import { awayFrom, refuseAway } from "../away";
 import { ProviderSources, type SourceView } from "./sources";
 import { isNothingSpentError, redact, type ProviderHost } from "./types";
 
@@ -47,8 +47,17 @@ export class BitcoinService {
   stop() { return this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }
 
+  /**
+   * The connected source, connecting it if it is not. One at home on another device is refused: a contact's ask, an
+   * address or a send would otherwise open it here (`sources.use` connects whatever is saved).
+   */
+  private use() {
+    refuseAway(`bitcoin:${this.network}`, "Bitcoin");
+    return this.sources.use();
+  }
+
   async receiveAddress(): Promise<string> {
-    const { provider } = await this.sources.use();
+    const { provider } = await this.use();
     const { network } = await provider.info();
     const address = await provider.receiveAddress();
     // Checked like an address a contact would pay: a wrong-network address is never shown.
@@ -59,7 +68,7 @@ export class BitcoinService {
 
   /** Where to be paid on-chain, as a chat request would carry it. */
   async requestTarget(): Promise<PaymentTarget> {
-    const { provider } = await this.sources.use();
+    const { provider } = await this.use();
     return this.target(await provider.receiveAddress(), (await provider.info()).network);
   }
 
@@ -85,7 +94,7 @@ export class BitcoinService {
     method: "bitcoin",
     prepare: async (target, amount, feeCap) => {
       assertWholeSats(amount);
-      const { provider, descriptor } = await this.sources.use();
+      const { provider, descriptor } = await this.use();
       const { network } = await provider.info();
       if (target.method !== "bitcoin" || target.network !== network) throw new Error(`Your Bitcoin source is on ${network}, not ${target.network}`);
       const prepared = await provider.prepareSend({ address: target.address, amount, feeCap });

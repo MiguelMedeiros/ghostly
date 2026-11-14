@@ -5,10 +5,10 @@ import { useFocusBack } from "../hooks/useFocusBack";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { useEffect, useId, useRef, useState, type FocusEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
+import { connectionSummary, lasting, liveAttemptText, namedReason, ownTransports, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingDetail } from "./pairing/PairingDetail";
@@ -28,7 +28,9 @@ import { problemText, problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
 import { useOnline } from "../hooks/useOnline";
-import { useEngineValue } from "../lib/engineState";
+import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
+import { focusLost } from "../lib/focus";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 const name = transportName;
 /**
@@ -48,8 +50,15 @@ function liveClosedAt(history: LinkView["transportHistory"]): number | undefined
   return undefined;
 }
 
+/**
+ * How long a chat back on Automatic over a relay, with a direct transport both apps run, keeps that unsaid. Automatic
+ * moves off it then (WISP 100: Iroh's relay first, then the direct path): 0.25 s between two browsers, about 1 s in the
+ * core's restart harness. Still there after this, it is said.
+ */
+export const MOVE_QUIET_MS = 3_000;
+
 /** What the connection's label says, before it is put in words: the icon's kind is read from it, not from the words. */
-type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" | "dhtByYou" | "dhtByContact" | "held" | "switching" | "dhtWaiting"
+type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" | "dhtByYou" | "dhtByContact" | "held" | "heldPlain" | "switching" | "dhtWaiting"
   | "waiting" | "onDht" | "dhtPlain" | "connected" | "confirm" | "pairing" | "noContact" | "waitingContact" | "connecting";
 /** Labels said aloud even while the pairing scene speaks for the connection: troubles of its own the scene does not tell. */
 const SAID_BESIDE_SCENE = new Set<LabelState>(["offline", "issue", "publication", "discovery"]);
@@ -92,9 +101,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   callOn?: boolean;
 }) {
   // What it shows of the engine's state, compared by content: the whole state drew the chat's header on every change.
-  const { link, ghostlyOnline, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
+  const { link, ghostlyOnline, relayOnly, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
     link: paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined,
     ghostlyOnline: state?.settings.online ?? true,
+    relayOnly: state?.settings.relayOnly === true,
     directBlocked: state?.transport?.directBlocked,
     clockOffMs: state?.transport?.clockOffMs,
     discovery: state?.transport?.discovery,
@@ -111,15 +121,18 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // Offline either way: Ghostly's own switch, or a device with no network. The banner says the second; what the relays
   // answer meanwhile (nothing reachable, cooling down) is that and nothing more, so it is no connection issue.
   const id = useId(), deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
-  const dht = link?.deliveryMode === "dht", textDht = link?.textDelivery === "dht", ready = online && pair?.status === "ready" && link?.dataLink === "open" && !!pair.transport;
+  // An extension tab that lost its peer (the Reconnecting notice): the link it was last told of is stale, live or
+  // failed. The chat is said to be on its way until the peer is back, and its connection says what it is then.
+  const peerLost = useEngineReconnecting();
+  const dht = link?.deliveryMode === "dht", textDht = link?.textDelivery === "dht", ready = online && !peerLost && pair?.status === "ready" && link?.dataLink === "open" && !!pair.transport;
   // Messages held for the contact (WISP 404): they take the DHT's place for text while nothing is live.
-  const holding = !ready && link?.textDelivery === "hold";
+  const holding = !ready && !peerLost && link?.textDelivery === "hold";
   // A failed Reconnect (the contact's app was down) is over once the chat is live again by itself. One that failed
   // while live (a transport choice) stays: it is about that choice.
   const [wasReady, setWasReady] = useState(ready);
   if (ready !== wasReady) { setWasReady(ready); if (ready) setError(""); }
-  const connectionFailure = error || (online ? pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "") : "");
-  const discoveryFailure = !ready && online ? link?.discoveryError : "";
+  const connectionFailure = error || (online && !peerLost ? pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "") : "");
+  const discoveryFailure = !ready && online && !peerLost ? link?.discoveryError : "";
   const failure = connectionFailure || discoveryFailure;
   const { t, language } = useI18n();
   // The failure in a few words (lib/problemText.ts): the engine's English, relay addresses and codes go behind an ⓘ.
@@ -163,8 +176,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const step = pairingOn ? progress.view.step + 1 : 0;
   const pairingLabel = t("pairing.indicator", { stage: stageWords });
   // A live link that closed just now: the contact may have chosen DHT only, and its envelope says so in a few seconds.
-  // Until then the chat is on the DHT, plainly; "retrying live" once the bound is past.
-  const closedAt = textDht ? liveClosedAt(link?.transportHistory) : undefined;
+  // Until then the chat is on the DHT, plainly; "retrying live" once the bound is past. With messages held, they are
+  // held, plainly, and no Reconnect: "Away" once the bound is past, as the contact may well be online.
+  const closedAt = textDht || holding ? liveClosedAt(link?.transportHistory) : undefined;
   const quietUntil = closedAt === undefined ? 0 : closedAt + CLOSED_QUIET_MS;
   const [, redraw] = useState(0);
   useEffect(() => {
@@ -174,14 +188,17 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     return () => window.clearTimeout(timer);
   }, [quietUntil]);
   const justClosed = Date.now() < quietUntil;
+  // Hide my IP on, and no transport this app can run (the Linux Desktop with no HyperDHT relay: no WebRTC, its own Iroh
+  // and HyperDHT left out for contacts): nothing goes live until that changes. On the DHT plainly, no Reconnect, and why.
+  const liveOff = paired && relayOnly && link?.runnableTransports?.length === 0;
   // While the scene is on, the icon tells the same pairing, whatever carries texts meanwhile (the DHT, from the moment the
   // contact is pinned): the two never disagree. Only a failure says more (the relays, the connection). Once the scene
   // has given the chat back, the connection speaks for itself.
-  const labelState: LabelState = !paired ? "status" : !online ? "offline" : connectionFailure ? "issue"
+  const labelState: LabelState = !paired ? "status" : !online ? "offline" : peerLost ? "connecting" : connectionFailure ? "issue"
     : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "publication" : "discovery")
     : pairingOn || pairingFailed ? "pairing"
-    : dht ? "dhtByYou" : (textDht || holding) && link?.dhtDelivery?.peerMode === "dht" ? "dhtByContact" : holding ? "held"
-    : waitOff && pair?.transitionTarget ? "switching" : waitOff ? (textDht ? "dhtWaiting" : "waiting") : textDht ? (justClosed ? "dhtPlain" : "onDht")
+    : dht ? "dhtByYou" : (textDht || holding) && link?.dhtDelivery?.peerMode === "dht" ? "dhtByContact" : holding ? (justClosed ? "heldPlain" : "held")
+    : waitOff && pair?.transitionTarget ? "switching" : waitOff ? (textDht ? "dhtWaiting" : "waiting") : textDht ? (justClosed || liveOff ? "dhtPlain" : "onDht")
     : pair?.transitionTarget ? "switching" : ready ? "connected" : pair?.status === "confirm" ? "confirm"
     : stage === "on-dht" ? "onDht" : awaitingJoin ? "noContact"
     : !link?.peerOnline && link?.dataLink === "idle" ? "waitingContact" : "connecting";
@@ -197,6 +214,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       case "dhtByYou": return t("connection.state.dhtByYou");
       case "dhtByContact": return t("connection.state.dhtByContact");
       case "held": return t("connection.state.held");
+      case "heldPlain": return t("connection.state.heldPlain");
       case "switching": return t("connection.state.switching", { transport: name(pair?.transitionTarget) });
       case "dhtWaiting": return t("connection.state.dhtWaitingFor", { transport: name(wait?.transport) });
       case "waiting": return t("connection.waitingFor", { transport: name(wait?.transport) });
@@ -210,8 +228,23 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       case "connecting": return t("connection.state.connectingDots");
     }
   })();
+  // Back on Automatic over a relay, with a direct transport both apps run: the chat moves there in a moment. Said
+  // aloud, every reload and every return of the contact's app read "Connected · Iroh (relayed)" and then "Connected ·
+  // WebRTC"; it says where it lands, and the relay only if the chat is still on it after MOVE_QUIET_MS. Not on a network
+  // that blocks direct connections (`directBlocked`): the relay is where it lands there.
+  const moving = labelState === "connected" && !directBlocked && !!link?.transportRelayed && !!pair?.transport && link.transportFallback !== false
+    && (link.transportAutomatic ?? link.preferredTransport === undefined) && link.transportLive?.cause !== "contact"
+    && ownTransports(link).some(t => t !== pair.transport && !!link.peerTransports?.includes(t) && !link.relayedTransports?.includes(t));
+  const [spoken, setSpoken] = useState(label), [movingSince, setMovingSince] = useState<number>();
+  if (!moving) { if (movingSince !== undefined) setMovingSince(undefined); if (spoken !== label) setSpoken(label); }
+  else if (movingSince === undefined) setMovingSince(Date.now());
+  useEffect(() => {
+    if (movingSince === undefined) return;
+    const timer = window.setTimeout(() => setSpoken(label), Math.max(0, movingSince + MOVE_QUIET_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [movingSince, label]);
   const kind: ConnectionKind = !paired ? (/^Connected/.test(rawStatus) ? "connected" : /issue|unavailable|mismatch/.test(rawStatus) ? "failure" : rawStatus === "Offline" ? "offline" : "waiting")
-    : !online ? "offline" : failing ? "failure" : failure ? "waiting" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" || labelState === "dhtByContact" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+    : !online ? "offline" : peerLost ? "waiting" : failing ? "failure" : failure ? "waiting" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" || labelState === "dhtByContact" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (labelState === "connecting" || !!pair?.transitionTarget);
   // On the DHT while a live link is tried underneath: the DHT mark, with a dot that breathes.
   const retrying = kind === "dht" && labelState === "onDht" && !(stage === "on-dht" && progress?.reason === "chosen");
@@ -238,11 +271,38 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   };
   // The choice or button pressed is disabled while its work runs, which drops the focus to the page: it gets it back.
   const focusBack = useFocusBack(busy);
+  // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
+  const said = (e: unknown) => e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed");
+  // A Reconnect waits for the contact's app, up to the engine's 90 s: it is not the panel's `busy`, which held every
+  // choice, Fallback and Reconnect itself off for that long, the focus dropped to the page. A choice made meanwhile
+  // takes over (`dial` moves on), and the dial it ended is not said as a connection issue.
+  const [dialing, setDialing] = useState(false);
+  const dial = useRef(0);
+  async function reconnect(linkId: string) {
+    if (dialing) return;
+    const round = ++dial.current;
+    setDialing(true); setError("");
+    try { await engine.call("connect", { linkId }); } catch (e) { if (dial.current === round) setError(said(e)); }
+    finally { if (dial.current === round) setDialing(false); }
+  }
+  // Reconnect is there only while the chat is not live: when the contact comes back with the focus on it (pressed or
+  // tabbed to), it goes from under the focus, which fell to the page. The state line, which then says the chat is
+  // live, takes it. Its ref is let go before it leaves the page, the focus still on it then; a focus elsewhere stays.
+  const stateLine = useRef<HTMLDivElement>(null), reconnectButton = useRef<HTMLButtonElement | null>(null), reconnectLeft = useRef(false);
+  const reconnectRef = useCallback((el: HTMLButtonElement | null) => {
+    if (!el && reconnectButton.current && reconnectButton.current === document.activeElement) reconnectLeft.current = true;
+    reconnectButton.current = el;
+  }, []);
+  useLayoutEffect(() => {
+    if (!reconnectLeft.current) return;
+    reconnectLeft.current = false;
+    if (root.current?.open && focusLost()) stateLine.current?.focus({ preventScroll: true });
+  });
   async function run(action: () => Promise<unknown>, fail = setError) {
     focusBack();
+    dial.current++; setDialing(false);
     setBusy(true); fail("");
-    // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
-    try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
+    try { await action(); } catch (e) { fail(said(e)); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.
@@ -256,15 +316,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full transition-colors ${phone ? "h-11 w-11" : "p-2 max-md:px-2 max-md:py-2.5"} hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full transition-colors ${phone ? "h-[44px] w-[44px]" :"p-2 max-md:px-2 max-md:py-2.5"} hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
       {glyph ? <PairingGlyph stage={stage!} direction={direction} size={phone ? 20 : 18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={phone ? 20 : 18} weight={2} />}
       {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header ${phone ? "end-2 top-2" : "max-md:end-1.5 max-md:top-1.5"} ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
     <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
-      <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
+      <div ref={stateLine} tabIndex={-1} className={`flex items-center gap-2 rounded-md px-1 font-medium text-text-primary ${focus}`} data-testid="connection-state">
         {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
         <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · <bdi data-testid="connection-rtt">{t("connection.ms", { ms: rtt })}</bdi></span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
+      {liveOff && <p data-testid="connection-live-off" className="mt-1 px-1">{t("connection.option.relayOnlyHyperdht")}</p>}
       {progress && (pairingOn || pairingFailed || onDhtWhy) && <div data-testid="connection-pairing" data-stage={stage} className="mt-1 space-y-0.5 px-1">
         {step > 0 && <p data-testid="connection-pairing-step">{t("pairing.stepOf", { n: step, total: steps.length })}{progress.attempt > 1 && ` · ${t("pairing.attempt", { n: progress.attempt })}`}</p>}
         {slow && <p className="text-text-secondary">{slow}</p>}
@@ -278,7 +339,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
-        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined}
+        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}
@@ -287,9 +348,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       </fieldset>}
       <div className="mt-1 border-t border-border pt-1">
         {/* Its own row: beside Details it took a column down the whole open Details, and host names broke mid-word.
-            Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
-        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
-          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
+            Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
+            Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet.
+            Nor with no transport this app can run: no dial can connect. Nor while the tab lost its peer: nothing dials. */}
+        {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <FocusSafeButton className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
+          ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
+          onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</FocusSafeButton>}
         <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
@@ -297,9 +361,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
               <p className="font-medium text-text-primary">{waitText.label}</p>
               <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{waitText.why}</p>
               <p className="mt-0.5">{waitText.meanwhile}</p>
-              {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
+              {waitText.automatic && link && <FocusSafeButton type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
-                onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</button>}
+                onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</FocusSafeButton>}
             </div>}
             {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <div className="font-medium text-text-primary">{stageWords}<PairingDetail detail={pairingDetail(progress)} testId="connection-pairing-detail" className="mt-0.5 font-normal text-text-secondary" /></div>
@@ -327,7 +391,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             <DiscoveryHealth status={discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([transport, reason]) => {
               const said = problemText(reason, t, "connect");
-              return <Notice key={transport} testId="connection-transport-error" className="" title={t("connection.line.withReason", { text: name(transport as PairedTransport), reason: said.title })} next={said.next} details={said.detail} />;
+              return <Notice key={transport} testId="connection-transport-error" className="" title={namedReason(name(transport as PairedTransport), said.title, t)} next={said.next} details={said.detail} />;
             })}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
@@ -341,8 +405,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
-                  <button data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</button>
+                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
                   {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
@@ -379,7 +443,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   </span>
   {/* Off, not emptied, while the scene speaks: the scene going away then says nothing new. A failure the scene does not
       tell (the relays, the connection, offline) is still said here. */}
-  <span className="sr-only" aria-live={scene && !SAID_BESIDE_SCENE.has(labelState) ? "off" : "polite"}>{label}</span>
+  <span className="sr-only" aria-live={scene && !SAID_BESIDE_SCENE.has(labelState) ? "off" : "polite"}>{spoken}</span>
   </div>;
 }
 

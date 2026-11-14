@@ -6,7 +6,7 @@ export function Unshowable({ text, fromMe }: { text: unknown; fromMe: boolean })
   const { t } = useI18n();
   return (
     <div data-testid="message-unshowable" data-message-row className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-3.5 message-row-x`}>
-      <div className={`max-w-[85%] rounded-[7.5px] px-[9px] pt-[6px] pb-[8px] text-text-primary text-[14.2px] leading-[19px] ${fromMe ? "bg-sent-bg" : "bg-received-bg"}`}>
+      <div className={`max-w-[85%] rounded-[7.5px] px-[9px] pt-[6px] pb-[8px] text-text-primary chat-text-message ${fromMe ? "bg-sent-bg" : "bg-received-bg"}`}>
         <p className="italic text-text-secondary">{t("chat.rich.unshowable")}</p>
         {typeof text === "string" && text && <p dir="auto" className="mt-1 whitespace-pre-wrap wrap-break-word">{text}</p>}
       </div>

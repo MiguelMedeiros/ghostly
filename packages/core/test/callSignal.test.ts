@@ -398,6 +398,30 @@ describe("call candidates on the chat session", () => {
     expect(buildSdpFromSignal(parsed!).match(/^a=candidate:/gm)?.length).toBe(16);
   });
 
+  it("leaves out the component 2 copy webrtc-rs lists of every candidate (the Linux Desktop's calls): with rtcp-mux it is no path, and it took another one's slot", () => {
+    /** A description as the Linux Desktop's native engine gives it: each candidate as component 1, then 2. */
+    const linux = (candidates: string[]) => [
+      ...CHROME_OFFER.split("\r\n").filter((l) => !l.startsWith("a=candidate:")),
+      ...candidates.flatMap((c) => [`a=candidate:${c}`, `a=candidate:${c.replace(/^(\S+) 1 /, "$1 2 ")}`]),
+    ].join("\r\n");
+    const addresses = (c: string[] | undefined) => c?.map((line) => line.split(" ").slice(1, 2).concat(line.split(" ").slice(4, 6)).join(" "));
+    // Hide my IP: both relays, not one relay twice.
+    const relays = linux(["4 1 udp 16777215 198.51.100.9 60000 typ relay raddr 0.0.0.0 rport 0", "5 1 udp 16777215 198.51.100.9 60002 typ relay raddr 0.0.0.0 rport 0"]);
+    expect(addresses(extractParamsFromSdp(relays, { maxCandidates: PAIRED_CALL_CANDIDATES, relayOnly: true }).c)).toEqual(["1 198.51.100.9 60000", "1 198.51.100.9 60002"]);
+    expect(addresses(extractParamsFromSdp(relays, { relayOnly: true }).c)).toEqual(["1 198.51.100.9 60000", "1 198.51.100.9 60002"]);
+    // A machine with Docker and Tailscale: its three interfaces, not two with their copies.
+    const hosts = linux([
+      "1 1 udp 2130706431 192.168.1.20 50000 typ host",
+      "2 1 udp 2130706431 172.17.0.1 50001 typ host",
+      "3 1 udp 2130706431 100.72.38.95 50002 typ host",
+      "6 1 udp 1694498815 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000",
+    ]);
+    expect(addresses(extractParamsFromSdp(hosts, { maxCandidates: PAIRED_CALL_CANDIDATES }).c)).toEqual([
+      "1 192.168.1.20 50000", "1 172.17.0.1 50001", "1 100.72.38.95 50002", "1 203.0.113.7 50000",
+    ]);
+    expect(addresses(extractParamsFromSdp(hosts).c)).toEqual(["1 192.168.1.20 50000", "1 203.0.113.7 50000"]);
+  });
+
   it("a call uses the profile's ICE servers after the apps' STUN servers", () => {
     expect(callRtcConfig()).toEqual(RTC_CONFIG);
     const config = callRtcConfig([{ urls: "turn:turn.example.org:3478, turns:turn.example.org:5349", username: "u", credential: "p" }, { urls: " " }]);

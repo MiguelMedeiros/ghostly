@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -49,6 +49,8 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), --close closed the buttons with no answer shown: a button not there is exit 3.
+      if (options.chosen === "") throw new CliError("usage", "--chosen needs a button id");
       if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
       return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
@@ -71,10 +73,11 @@ export const commands: Record<string, Command> = {
   },
   "chat list": { method: "chat.list", usage: "chat list [--show-secret]", summary: "Chats, newest first (a pending invite code only with --show-secret)", options: showInvite, params: ({ options }) => secret(options) },
   "chat remove": {
-    method: "chat.remove", usage: "chat remove <chat> --yes", summary: "Delete a chat, its keys and history on this device", args: ["chat"],
-    options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { chat }) => ({ chat, yes: options.yes === true }),
+    method: "chat.remove", usage: "chat remove <chat> --yes [--force]", summary: "Delete a chat, its keys and history on this device; refused while a message you deleted for everyone has not reached the contact, unless --force", args: ["chat"],
+    options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
+    params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
-  "chat rename": { method: "chat.rename", usage: "chat rename <chat> <name...>", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
+  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
@@ -96,7 +99,7 @@ export const commands: Record<string, Command> = {
     options: {
       to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group; a dash-leading id as it is); up to 5" },
       force: { type: "boolean", description: "Forward even if a text looks like a seed, a key or ecash" },
-      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
+      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none; without a daemon a group's waits for an edge)" },
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
@@ -116,27 +119,34 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed] [--timeout s]]",
-    summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]",
+    summary: "Forget a message on this device (the contact keeps theirs; a waiting text of yours is cancelled, or deleted for everyone if a relay may have it); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"],
     options: {
       everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
-      wait: { type: "string", choices: ["none", "confirmed"], description: "With --everyone in a chat: none or confirmed, until the contact has it (default: none with a daemon, confirmed without)" },
+      wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "With --everyone: in a chat none or confirmed, until the contact has it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
       timeout: wait.timeout,
+      purge: { type: "boolean", description: "Take what it said out of the profile's folder now (the store folds at once), not within the hour: for a secret pasted into a chat" },
     },
     params: ({ options }, a) => {
       for (const flag of ["wait", "timeout"]) if (options[flag] !== undefined && options.everyone !== true) throw new CliError("usage", `--${flag} goes with --everyone`);
-      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options) };
+      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options), ...(options.purge === true && { purge: true }) };
     },
   },
   "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
-    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
-    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" }, ...confirmWait },
+    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed|sent] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message...?"],
+    options: {
+      remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" },
+      wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "In a 1:1 chat none or confirmed, until the contact confirmed it; in a group none or sent, until a member's edge took it (default: none with a daemon, confirmed or sent without)" },
+      timeout: groupWait.timeout,
+    },
     params: ({ options }, a) => {
-      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
-      if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
+      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read. One given
+      // as "" (an unset variable in a script) is missing too, as for `react`: before, a one-shot went online to refuse it.
+      if (!a.message && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
       return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },
@@ -144,7 +154,7 @@ export const commands: Record<string, Command> = {
   "react": {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove] [--wait none|confirmed] [--timeout s]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" }, ...confirmWait },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: reaction(options, a.emoji), remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

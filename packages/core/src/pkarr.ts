@@ -66,6 +66,8 @@ export function createRelayPayload(
  */
 export function signRelayPayload(identity: Identity, dnsPacket: Uint8Array, seq: bigint): Uint8Array {
   if (dnsPacket.length > MAX_DNS_PACKET_BYTES) throw new PacketTooLargeError(dnsPacket.length);
+  // Written in 64 bits: a larger one would wrap (to 0 past the last), and be signed as one date and sent as another.
+  if (seq < 0n || seq >= 1n << 64n) throw new RangeError(`Sequence number ${seq} does not fit in 64 bits`);
 
   const signature = sign(signable(seq, dnsPacket), identity.seed);
   const timestamp = new Uint8Array(TIMESTAMP_LENGTH);

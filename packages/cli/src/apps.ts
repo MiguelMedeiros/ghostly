@@ -1,14 +1,17 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
-  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
-  readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
+  readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
+import { APP_FETCH_HOSTS, isAppFetchUrl } from "@ghostly/browser/engine/appFetch";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { jsonOut } from "./jsonOut";
+import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
 
@@ -33,7 +36,7 @@ export const STORE_SIG_FILE = "ghostly-store.sig";
 // Every signature the publisher tools check (bundles, revocation lists, store indexes) goes through Node's Ed25519 first.
 setAppSignatureFastPath(nativeEd25519);
 
-/** How long `app verify` waits for a URL, and how many redirects it follows (each checked as the first). */
+/** How long `app verify` waits for a URL, its redirects included, and how many redirects it follows (each checked as the first). */
 const FETCH_TIMEOUT_MS = 60_000;
 const MAX_REDIRECTS = 5;
 
@@ -47,7 +50,8 @@ const KEY_HEADER: Record<KeyKind, string> = {
 };
 const PEM = /-----BEGIN PRIVATE KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)-----END PRIVATE KEY-----/;
 
-export interface LoadedKey { signer: Signer; key: string; created: boolean }
+/** `pem`: a key made by this run, written to its file by `saveKey` only once every check passed. */
+export interface LoadedKey { signer: Signer; key: string; created: boolean; pem?: string }
 
 /** Refuses a key file that is not a plain file of this user's, or that anyone else may read or write. */
 function checkKeyFile(path: string): void {
@@ -66,7 +70,7 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   const text = readFileSync(path, "utf8");
   const other: KeyKind = kind === "publisher" ? "store" : "publisher";
   if (text.startsWith(`Ghostly ${other} key`)) {
-    throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
+    throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app or its revocations" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
   }
   const block = PEM.exec(text);
   let seed: Uint8Array | undefined;
@@ -82,14 +86,35 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   return { signer, key: toZ32(signer.publicKey), created: false };
 }
 
-/** Makes a key file: owner-only from the start, never over a file that is there. */
-function makeKey(path: string, kind: KeyKind): LoadedKey {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+/**
+ * Makes a key in memory: its file is written by `saveKey`, right before the bundle or index it signs. A run refused
+ * after this step leaves no key file, which the next run would read as an existing key and never say to back up.
+ */
+function makeKey(kind: KeyKind): LoadedKey {
   const { privateKey } = generateKeyPairSync("ed25519");
-  const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+  const signer = seedSigner(fromBase64Url(privateKey.export({ format: "jwk" }).d!));
+  return { signer, key: toZ32(signer.publicKey), created: true, pem: `${KEY_HEADER[kind]}\n${privateKey.export({ type: "pkcs8", format: "pem" }) as string}` };
+}
+
+/** Writes a key this run made: owner-only from the start, never over a file that is there. */
+function saveKey(path: string, key: LoadedKey): void {
+  if (!key.pem) return;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = openSync(path, "wx", 0o600);
-  try { writeSync(fd, `${KEY_HEADER[kind]}\n${pem}`); } finally { closeSync(fd); }
-  return { ...readKey(path, kind), created: true };
+  try { writeSync(fd, key.pem); } finally { closeSync(fd); }
+}
+
+/**
+ * Saves the key, then writes what it signs: the key first, so nothing it signed is ever on disk without it. A write
+ * that fails (a folder it may not write) takes back the key this run made, which nothing signed by it needs: kept,
+ * the next run read it as an existing key and never said to back it up.
+ */
+function saveKeyThen(path: string, key: LoadedKey, write: () => void): void {
+  saveKey(path, key);
+  try { write(); } catch (error) {
+    if (key.pem) rmSync(path, { force: true });
+    throw error;
+  }
 }
 
 /** What the person is told on stderr when a key was made: where, which, and to back it up. Never the key. */
@@ -104,6 +129,15 @@ function madeKeyNote(path: string, kind: KeyKind, key: string): string {
 const refused = (what: string, reading: { reason: string; detail?: string }, extra: Record<string, unknown> = {}) =>
   new CliError("refused", `${what} (${reading.reason}${reading.detail ? `: ${reading.detail}` : ""})`, { reason: reading.reason, ...(reading.detail ? { detail: reading.detail } : {}), ...extra });
 
+/**
+ * Refuses JSON that writes a key twice in one object, as `readAppListing` does: JSON.parse keeps the last value, where a
+ * person reading the file sees the first, so what is signed is not what was read. `text` is JSON that JSON.parse took.
+ */
+function refuseRepeatedKey(path: string, text: string): void {
+  const twice = repeatedJsonKey(text);
+  if (twice !== null) throw refused(`${path} writes a key twice`, { reason: "not-json", detail: `${JSON.stringify(twice)} is written twice` });
+}
+
 /** A bundle file's bytes: its size is checked before it is read, so a huge file is refused unread. */
 function readBundleFile(path: string): Uint8Array {
   const info = statSync(path);
@@ -115,9 +149,13 @@ function readBundleFile(path: string): Uint8Array {
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
- * 16 MiB.
+ * 16 MiB. A redirect stays on the URL's own host and port or goes to a host a client reads from (isAppFetchUrl): never
+ * a host or port of the server's choosing on this machine's network.
  */
 async function fetchBundle(url: string): Promise<Uint8Array> {
+  // One wait for the URL, its redirects and its body together: a host that redirects just before a wait runs out
+  // never earns another.
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   let at = url;
   for (let hop = 0; ; hop++) {
     if (!isAppUrl(at)) {
@@ -125,9 +163,12 @@ async function fetchBundle(url: string): Promise<Uint8Array> {
         ? `${url} redirects to ${at}, which a client does not read (https only, no user or password, jsDelivr only at a full commit)`
         : `Not a URL a client reads: https only, at most ${APP_BUNDLE_LIMITS.url} characters, no user or password, and jsDelivr only as https://cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/<path>`);
     }
+    if (hop && new URL(at).host !== new URL(url).host && !isAppFetchUrl(at)) {
+      throw new CliError("refused", `${url} redirects to ${at}, on another host: a redirect stays on ${new URL(url).host} or goes to ${APP_FETCH_HOSTS.join(" or ")}`);
+    }
     let response: Response;
     try {
-      response = await fetch(at, { redirect: "manual", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      response = await fetch(at, { redirect: "manual", signal });
     } catch (error) {
       if (error instanceof Error && error.name === "TimeoutError") throw new CliError("timeout", `${at} did not answer in ${FETCH_TIMEOUT_MS / 1000} s`);
       throw new CliError("unavailable", `Could not read ${at}: ${error instanceof Error ? error.message : String(error)}`);
@@ -184,32 +225,35 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
 }
 
 /**
- * The `ghostly-revoke.json` beside a bundle, as a client reads it beside each bundle URL: beside the URL (without its
- * query), or beside the file. None there, one that does not answer, or one a client would not read, revokes nothing.
+ * The revocations of a `ghostly-revoke.json`, a URL or a file, as a client reads it. None there, one that does not
+ * answer, or one a client would not read, revokes nothing.
  */
-async function revocationsBeside(source: string, isUrl: boolean): Promise<{ file: string; revocations: SignedAppRevocation[] }> {
-  let file: string;
+async function revocationsIn(file: string, isUrl: boolean): Promise<SignedAppRevocation[]> {
   let bytes: Uint8Array;
   try {
-    if (isUrl) {
-      const at = new URL(source);
-      at.search = "";
-      at.hash = "";
-      file = new URL(APP_REVOKE_FILE, at).href;
-      bytes = await fetchBundle(file);
-    } else {
-      file = join(dirname(userPath(source)), APP_REVOKE_FILE);
-      if (!existsSync(file)) return { file, revocations: [] };
-      bytes = readBundleFile(file);
-    }
-  } catch { return { file: source, revocations: [] }; }
+    if (isUrl) bytes = await fetchBundle(file);
+    else if (!existsSync(file)) return [];
+    else bytes = readBundleFile(file);
+  } catch { return []; }
   const read = readAppRevocations(bytes);
-  return { file, revocations: read.ok ? read.revocations : [] };
+  return read.ok ? read.revocations : [];
+}
+
+/** The `ghostly-revoke.json` beside a bundle URL, its query and fragment left out; none for what is not a URL. */
+function besideUrl(url: string): string[] {
+  try {
+    const at = new URL(url);
+    at.search = "";
+    at.hash = "";
+    return [new URL(APP_REVOKE_FILE, at).href];
+  } catch { return []; }
 }
 
 /**
  * A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. A version its
- * publisher revoked in the `ghostly-revoke.json` beside it is refused: a client stops it, with no "Run anyway".
+ * publisher revoked is refused, as a client stops it, with no "Run anyway": in the `ghostly-revoke.json` beside it and,
+ * for a URL, beside each of the manifest's `sources` too (WISP 1200 · Revocation: a client reads them there, where a
+ * publisher revokes a version a store's pinned URL still holds). A file is checked offline: beside it only.
  */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
@@ -217,10 +261,19 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
   const m = read.bundle.manifest;
-  const { file, revocations } = await revocationsBeside(source, isUrl);
-  const revocation = appRevocationFor({ ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest }, revocations);
-  if (revocation) {
-    throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+  const version = { ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest };
+  // The `sources` are the publisher's words: beside them only on the hosts a client reads from (isAppFetchUrl), never a
+  // host or port of the publisher's choosing on this machine's network.
+  const files = isUrl
+    ? new Set([source, ...(m.sources ?? []).filter(isAppFetchUrl)].flatMap(besideUrl))
+    : [join(dirname(userPath(source)), APP_REVOKE_FILE)];
+  // Read together: one host that does not answer holds the check for one wait, not one per file after it.
+  const lists = await Promise.all([...files].map((file) => revocationsIn(file, isUrl)));
+  for (const [i, file] of [...files].entries()) {
+    const revocation = appRevocationFor(version, lists[i]!);
+    if (revocation) {
+      throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+    }
   }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
@@ -231,6 +284,12 @@ export async function checkedBundle(source: string): Promise<{ bundle: AppBundle
 const nameFrom = (folder: string) => folder.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 /** An app's name as a title: `my-app` is `My app`. */
 const titleFrom = (name: string) => (name[0]!.toUpperCase() + name.slice(1)).replace(/-/g, " ");
+/**
+ * A path as one word of a POSIX shell line: as typed when it is plain, else single-quoted (`My App` is `'My App'`).
+ * None for a path the JSON answer would print other than it is (a `"`, a backslash, a control) or holding a `'`, whose
+ * quoting takes a backslash: a line copied from the answer would be another command.
+ */
+const shellWord = (word: string) => /^[\w@%+=:,./~-]+$/.test(word) ? word : word.includes("'") || jsonOut(word) !== `"${word}"` ? null : `'${word}'`;
 
 /**
  * `app init <dir> [--name <name>] [--title <title>] [--force]`: a small working app in `<dir>` (made when missing),
@@ -272,9 +331,12 @@ export async function initApp(dirArg: string, what: { name?: string; title?: str
   }
   mkdirSync(dir, { recursive: true });
   for (const [path, text] of files) writeWhole(join(dir, path), new TextEncoder().encode(text));
+  // A line to paste: a folder with a space or a `$` stays one word, the folder given; one the answer cannot print as it
+  // is (a quote, a backslash) is left to the person, named in `dir`.
+  const typed = shellWord(dirArg);
   return {
     dir, name, title, files: files.map(([path]) => path), ...(held.length ? { replaced: held } : {}),
-    next: `ghostly app publish ${dirArg} --key <a key file outside ${dirArg}>`,
+    next: typed === null ? "ghostly app publish <the folder> --key <a key file outside it>" : `ghostly app publish ${typed} --key <a key file outside ${typed}>`,
   };
 }
 
@@ -286,11 +348,14 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   const skipped: string[] = [];
   let bytes = 0;
   const walk = (folder: string) => {
-    for (const name of readdirSync(folder).sort()) {
+    // Read as bytes: a name that is not UTF-8 comes back from a string read with U+FFFD in it, a path no file has.
+    const names = readdirSync(folder, { encoding: "buffer" }).map((raw) => ({ raw, name: raw.toString("utf8") }));
+    for (const { raw, name } of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const full = join(folder, name);
       const path = relative(dir, full).split(sep).join("/");
       if (leaveOut.has(full)) continue;
       if (name.startsWith(".")) { skipped.push(path); continue; }
+      if (!Buffer.from(name, "utf8").equals(raw)) throw refused(`${dir} holds a name that is not UTF-8, which no bundle path may be: rename it`, { reason: "bad-path", detail: path });
       const info = lstatSync(full);
       if (info.isSymbolicLink()) throw new CliError("bad_request", `${path} is a link: a bundle holds the folder's own files (copy it in, or remove it)`);
       if (info.isDirectory()) { walk(full); continue; }
@@ -312,20 +377,31 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
  * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
  * v2.4.5" headers included), or a Ghostly key file's first line. A library that only names the block's header in its
- * code does not match.
+ * code does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per
+ * header to the end of the file.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n[A-Za-z0-9+/=\r\n :,.-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
-const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+/** `path` with its symlinks followed, as far as it exists (the rest, not made yet, kept as written). */
+function realPath(path: string): string {
+  try { return realpathSync(path); } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realPath(parent), basename(path));
+  }
+}
+/** {@link isUnder} as written or through a symlink: another name for the folder (or for the file) is the same place. */
+const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(realPath(dir), realPath(path));
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
 
 function readSource(path: string): Record<string, unknown> {
   if (!existsSync(path)) throw new CliError("not_found", `No ${APP_SOURCE} in ${dirname(path)}: it holds the manifest's fields (name, version, title, tagline, entry, permissions, runtime, license, ...) but publisher, sequence and files, which publish writes`);
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(path, "utf8")); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  let text: string, value: unknown;
+  try { text = readFileSync(path, "utf8"); value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  refuseRepeatedKey(path, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${path} is not a JSON object`);
   const draft = value as Record<string, unknown>;
   const written = WRITTEN.filter((k) => k in draft);
@@ -337,10 +413,14 @@ function readSource(path: string): Record<string, unknown> {
   return draft;
 }
 
-/** Writes a file whole or not at all: a reader never sees half a bundle (and a dot file left by a crash is never bundled). */
-function writeWhole(path: string, bytes: Uint8Array): void {
+/**
+ * Writes a file whole or not at all: a reader never sees half a bundle (and a dot file left by a crash is never bundled).
+ * The temporary file is always a new one ("wx"): a file or link already at its name is removed, never written through.
+ */
+export function writeWhole(path: string, bytes: Uint8Array): void {
   const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tmp, bytes);
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, bytes, { mode: 0o644, flag: "wx" });
   renameSync(tmp, path);
 }
 
@@ -376,7 +456,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   if (existsSync(keyPath)) key = readKey(keyPath, "publisher");
   else if (previous) {
     throw new CliError("not_found", `No key file ${keyPath}: ${out} is signed by ${appFingerprint(previous.publisher)}, and only that key publishes its next version`);
-  } else key = makeKey(keyPath, "publisher");
+  } else key = makeKey("publisher");
 
   if (previous && previous.publisher !== key.key) {
     throw refused(`${out} is ${appRef(previous.publisher, previous.name)}, signed by another key (${appFingerprint(previous.publisher)}): a version of an app is signed by its own key`, { reason: "other-app" }, { publisher: previous.publisher });
@@ -391,7 +471,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
   // The bundle at the folder's default name is this command's own output too: published into another --out, the
   // version an earlier publish left there went into the new bundle as one of its files.
-  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), join(dir, APP_REVOKE_FILE)]));
+  // The folder's revocations and those beside the output (where `app revoke --bundle` writes them), one list when the same.
+  const lists = [...new Set([join(dir, APP_REVOKE_FILE), join(dirname(out), APP_REVOKE_FILE)])];
+  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
   const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
@@ -404,23 +486,34 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     files: contents.map((f) => ({ path: f.path, size: f.bytes.length, sha256: toBase64Url(createHash("sha256").update(f.bytes).digest()) })),
   };
   const checked = checkAppManifest(JSON.parse(JSON.stringify(manifest)), { strict: true });
-  if (!checked.ok) throw refused(`${sourcePath} and the folder's files make no valid manifest`, checked);
+  if (!checked.ok) {
+    // A field missing from the source, said where it goes ("kind in ghostly-app.json"), not as a missing --key; the
+    // JSON detail stays the field's name.
+    const said = checked.reason === "missing-key" ? { ...checked, detail: `${checked.detail} in ${APP_SOURCE}` } : checked;
+    throw refused(`${sourcePath} and the folder's files make no valid manifest`, said, checked.detail ? { detail: checked.detail } : {});
+  }
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
   const bundle = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), contents.map((f) => f.bytes));
   // Read back as a client would (the icon's header, the bundle's size): what is written is never a bundle it refuses.
   const read = readAppBundle(bundle);
   if (!read.ok) throw refused("The bundle made is not valid", read);
-  // Nor one the folder's own revocations already stop: every client that reads them would refuse it, for good.
+  // Nor one those revocations already stop: every client that reads them would refuse it, for good.
   const ref = appRef(key.key, checked.manifest.name);
-  const revocations = existsSync(join(dir, APP_REVOKE_FILE)) ? readAppRevocations(new Uint8Array(readFileSync(join(dir, APP_REVOKE_FILE)))) : null;
-  const held = revocations?.ok ? revocations.revocations : [];
-  if (appRevocationFor({ ref, sequence, digest: read.bundle.digest }, held)) {
-    const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
-    throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
+  const held = lists.flatMap((path) => {
+    if (!existsSync(path)) return [];
+    const revocations = readAppRevocations(new Uint8Array(readFileSync(path)));
+    return revocations.ok ? revocations.revocations.map((r) => ({ path, r })) : [];
+  });
+  const stopping = held.find(({ r }) => appRevocationFor({ ref, sequence, digest: read.bundle.digest }, [r]));
+  if (stopping) {
+    const clear = Math.max(sequence, ...held.map(({ r }) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
+    throw refused(`${stopping.path} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
   }
-  mkdirSync(dirname(out), { recursive: true });
-  writeWhole(out, bundle);
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(dirname(out), { recursive: true });
+    writeWhole(out, bundle);
+  });
 
   return {
     ...described(read.bundle, bundle),
@@ -438,17 +531,34 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
 /**
  * `app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>]`: a
  * `ghostly-revoke/1` statement (WISP 1200 · Publisher keys, Revocation) for the app whose bundle is `<dir>/app.ghostlyapp`
- * (or `--bundle`), signed by that app's publisher key and added to `<dir>/ghostly-revoke.json`, which stays canonical.
+ * (or `--bundle`), signed by that app's publisher key and added to the `ghostly-revoke.json` beside that bundle, which
+ * stays canonical.
  * The key is never made here: only the key that signed the app may revoke its versions.
  */
 export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string; force?: boolean }): Promise<Record<string, unknown>> {
   const dir = userPath(dirArg);
   const bundlePath = userPath(what.bundle ?? join(dir, APP_BUNDLE_FILE));
-  const listPath = join(dir, APP_REVOKE_FILE);
+  // Beside the bundle, where clients, app verify and app serve read it: a list left in <dir> beside a bundle published
+  // from elsewhere stops nothing.
+  const listPath = join(dirname(bundlePath), APP_REVOKE_FILE);
   const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
-  const digests = what.digests ?? [];
+  // Sorted, so the same digests in another order are the same statement, signed and compared once.
+  const digests = [...(what.digests ?? [])].sort();
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
+  // Checked here as the statement's checker checks them, so a bad value is a usage error naming its option.
+  for (const [i, digest] of digests.entries()) {
+    if (!isAppHash(digest)) throw new CliError("usage", `--digest ${JSON.stringify(digest)} is not a bundle digest (43 base64url characters, as app verify prints it)`);
+    if (digests.indexOf(digest) !== i) throw new CliError("usage", `--digest ${digest} is given twice`);
+  }
+  if (digests.length > APP_STATEMENT_LIMITS.revokeDigests) throw new CliError("usage", `--digest is given at most ${APP_STATEMENT_LIMITS.revokeDigests} times in one revocation, not ${digests.length}`);
+  // An empty reason is refused as an empty --title is: every client shows it, and it would say nothing.
+  if (what.reason !== undefined && !isAppLine(what.reason, APP_STATEMENT_LIMITS.reason, 1)) {
+    const length = [...what.reason].length;
+    throw new CliError("usage", `--reason is one line of 1 to ${APP_STATEMENT_LIMITS.reason} characters, not ${length > APP_STATEMENT_LIMITS.reason ? `${length} characters` : JSON.stringify(what.reason)}`);
+  }
+  // The list is published beside the bundle and every client shows the reason (docs/CLI.md § Safety).
+  guardText(what.reason, what.force === true, "reason", "revoke");
 
   if (!existsSync(bundlePath)) throw new CliError("not_found", `No bundle ${bundlePath}: a revocation names the app of the bundle in <dir> (or --bundle)`);
   const read = readAppBundle(readBundleFile(bundlePath));
@@ -456,8 +566,9 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const manifest = read.bundle.manifest;
   const ref = appRef(manifest.publisher, manifest.name);
   // Clients keep a revocation for good: past the newest version (a typo, 30 for 3), it stops versions not made yet.
+  // --force lifts it, so it asks for a confirmation, as every refusal --force lifts does.
   if (what.upTo !== undefined && what.upTo > manifest.sequence && !what.force) {
-    throw new CliError("usage", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
+    throw new CliError("confirm", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
   }
 
   const keyPath = userPath(keyArg);
@@ -483,7 +594,9 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
     list = held.revocations;
   }
   const signed = await signAppRevocation(statement, key.signer);
-  const same = list.some((r) => canonicalJson(r.statement) === canonicalJson(signed.statement));
+  // A held list made before the digests were sorted may hold them in another order: compared sorted too.
+  const sorted = (s: AppRevokeStatement) => canonicalJson("digests" in s ? { ...s, digests: [...s.digests].sort() } : s);
+  const same = list.some((r) => sorted(r.statement) === sorted(signed.statement));
   if (!same) {
     if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
     list = [...list, signed];
@@ -505,35 +618,50 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * out and is then the signing key's) becomes `ghostly-store.json`, canonical, and `ghostly-store.sig`, in `--out` or
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
  * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
- * store is another `--out`). The key is made only when no signed index is there.
+ * store is another `--out`), or when a `ghostly-store.json` or `.sig` there does not read as a signed index. The key is
+ * made only when neither is there, and never read or made inside the output folder, which is published.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = userPath(indexArg);
   const keyPath = userPath(keyArg);
   const outDir = userPath(outArg ?? dirname(indexPath));
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(indexPath, "utf8")); } catch (error) {
+  let text: string, value: unknown;
+  try { text = readFileSync(indexPath, "utf8"); value = JSON.parse(text); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
     throw localFileError(error, indexPath) ?? error;
   }
+  refuseRepeatedKey(indexPath, text);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
+  // The folder is published (a repository served raw): a store key there signs any index for every client of the store.
+  if (isInside(outDir, keyPath)) {
+    throw refused(`${keyPath} is inside ${outDir}, which is published: keep the store key outside the store's folder (and its repository)`, { reason: "private-key" });
+  }
 
   // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
   const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
   // Each revocation's signature is checked once, though the held index, the new one and its read-back all carry it.
   const checked = new Set<string>();
   let held: AppStoreReading | null = null;
-  if (existsSync(indexOut) && existsSync(sigOut)) {
-    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
+  // A pair there that does not read as a signed index (one of the two missing, or damaged) is not written over, as
+  // `app publish` does not write over a bundle it cannot read: its sequence and key are not known, so neither is a rollback.
+  let unread: CliError | null = null;
+  const heldIndex = existsSync(indexOut) ? new Uint8Array(readFileSync(indexOut)) : null;
+  const heldSig = existsSync(sigOut) ? new Uint8Array(readFileSync(sigOut)) : null;
+  if (heldIndex || heldSig) {
+    const read = !heldIndex ? { ok: false as const, reason: "missing-file", detail: `no ${STORE_INDEX_FILE}` }
+      : !heldSig ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
+      : readAppStore(heldIndex, heldSig, now, undefined, checked);
     if (read.ok) held = read.store;
+    else unread = refused(`${heldIndex ? indexOut : sigOut} is there and is not a signed store index: move ${STORE_INDEX_FILE} and ${STORE_SIG_FILE} away, or name another --out`, read);
   }
 
   let key: LoadedKey;
   if (existsSync(keyPath)) key = readKey(keyPath, "store");
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
+  else if (unread) throw unread;
   else if (held) throw new CliError("not_found", `No key file ${keyPath}: ${indexOut} is signed by ${appFingerprint(held.index.key)}, and only that key signs its next index`);
-  else key = makeKey(keyPath, "store");
+  else key = makeKey("store");
   if (index.key !== undefined && index.key !== key.key) {
     throw refused(`${indexPath} names another store key than ${keyPath}'s (${appFingerprint(key.key)})`, { reason: "store-key" });
   }
@@ -548,6 +676,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
+  // Unless the signature there is this one's bytes (Ed25519 is deterministic): a run stopped between the signature's
+  // rename and the index's, signed again. Not the index's bytes: a held index edited in place is this one's bytes too,
+  // and its own signature is the only trace of the sequence it held.
+  if (unread && !(heldSig && Buffer.from(heldSig).equals(sigBytes))) throw unread;
 
   let previous: number | null = null;
   if (held) {
@@ -561,9 +693,13 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
     }
   }
 
-  mkdirSync(outDir, { recursive: true });
+  // The signature first, so a run stopped before the index leaves what a run again tells apart (above); once it is
+  // written the key stays: the signature names it, and a run again signs with it.
+  saveKeyThen(keyPath, key, () => {
+    mkdirSync(outDir, { recursive: true });
+    writeWhole(sigOut, sigBytes);
+  });
   writeWhole(indexOut, indexBytes);
-  writeWhole(sigOut, sigBytes);
   const notes = [
     ...(key.created ? [madeKeyNote(keyPath, "store", key.key)] : []),
     ...(store.expired ? [`expires (${new Date(store.index.expires * 1000).toISOString()}) is past: clients still install from it and say the store was not updated since then`] : []),

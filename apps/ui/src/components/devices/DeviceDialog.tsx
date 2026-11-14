@@ -38,10 +38,11 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
   );
 }
 
-export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
+// A border in forced colors only (as wallet/ui.tsx's Button): there the fill is gone, and a filled button would read as bare text.
+export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 export const quietButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40";
 /** An action that cannot be undone from here (Remove): the danger color, never the accent. */
-export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
+export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
 export const field = "w-full min-w-0 px-3 py-2 min-h-11 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 /** The six digits as people read them: "482 913", large and spaced. */
@@ -50,7 +51,7 @@ export function Digits({ digits, testId }: { digits: string; testId: string }) {
 }
 
 /** The full-screen notices' buttons (standby, limited start): full width on a phone, side by side from a small tablet up, 44 px tall to touch. */
-export const SCREEN_BUTTON = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
+export const SCREEN_BUTTON = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
 export const SCREEN_QUIET = "inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm text-text-secondary border border-border hover:bg-surface-hover hover:text-text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed max-sm:w-full";
 
 /** A small spinner beside a status line: something is going on, and nothing is asked of the person yet. */

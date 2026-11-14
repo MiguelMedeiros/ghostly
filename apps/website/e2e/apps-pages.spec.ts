@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { LAST_UPDATED_APPS } from "../app/privacy/updated";
-import { PERMISSIONS, clientLabel } from "../content/apps";
+import { PERMISSIONS, apps, clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
 
@@ -329,6 +329,46 @@ test.describe("once the released Ghostly has Apps", () => {
       const box = (await value.boundingBox())!;
       expect.soft(box.x + box.width, (await value.textContent())!).toBeLessThanOrEqual(320);
     }
+  });
+
+  test("at 320 px a description line, a license and release notes of one long word, as long as the store takes, wrap inside the page", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits (lib/store-core/appBundle.ts): a description of 2000 characters, whose one line may be a
+    // payment address or a link; 128 for a license, 500 for release notes. They ran past the screen's edge, where the
+    // page clips them (overflow-x: clip): a person read a cut-off address.
+    const description = "lnurl1".padEnd(2000, "dp68gurn8ghj7"), license = "LicenseRef-".padEnd(128, "Custom"), notes = "Fixed".padEnd(500, "Synchronizer");
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    await page.locator(".ap-description p").first().evaluate((el, text) => { el.textContent = text; }, description);
+    // Every fact as long as release notes; the license as long as a license.
+    await page.locator(".ap-facts dd").evaluateAll((values, [license, notes]) => {
+      values.forEach((value, i) => { value.textContent = i === 0 ? license : notes; });
+    }, [license, notes]);
+    for (const part of [".ap-description p", ".ap-facts dd"]) {
+      for (const value of await page.locator(part).all()) {
+        const box = (await value.boundingBox())!;
+        expect.soft(box.x + box.width, part).toBeLessThanOrEqual(320);
+      }
+    }
+  });
+
+  test("at 320 px an install step naming a title of one long word, as long as the store takes, wraps inside the page", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // Step 3 names the app by its title (40 characters, lib/store-core/appBundle.ts). One word that long grew the
+    // steps' grid to the word, and every step ran past the screen's edge, where the page clips it.
+    const title = "W".repeat(40);
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    const step = apps.app.install.steps(title, "jmbf dj6x dr6m p3op", APPS_RELEASE)[2];
+    await page.locator(".ap-steps li").nth(2).evaluate((el, text) => { el.textContent = text; }, step);
+    // The text's own edge: a block keeps its box while the words in it run past.
+    const rights = await page.locator(".ap-steps li").evaluateAll((items) =>
+      items.map((item) => {
+        const range = document.createRange();
+        range.selectNodeContents(item);
+        return Math.max(range.getBoundingClientRect().right, item.getBoundingClientRect().right);
+      }),
+    );
+    expect(rights).toHaveLength(4);
+    for (const right of rights) expect.soft(right).toBeLessThanOrEqual(320);
   });
 
   test("axe finds nothing serious on either page", async ({ page }) => {

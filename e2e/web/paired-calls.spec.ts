@@ -224,6 +224,13 @@ test("calls need a live connection: on the DHT the buttons are off and say so", 
     await expect(p.page.getByTestId(id)).toHaveAttribute("title", "Calls need a live connection");
   }
   await alice.page.screenshot({ path: testInfo.outputPath("dht-only.png") });
+  // A press says why on screen, near the header's button: the card never sits over the message field's + and emoji
+  // buttons, which it did at the bottom of the window on a desktop.
+  await alice.page.getByTestId("call-audio").click({ force: true });
+  await expect(alice.page.getByTestId("call-blocked-text")).toHaveText("Calls need a live connection");
+  for (const button of [alice.page.getByRole("button", { name: "Attach", exact: true }), alice.page.getByTestId("composer-expressions")]) {
+    await button.click({ trial: true, timeout: 3_000 });
+  }
 
   // Back to live: calls come back by themselves.
   await dhtOnly(alice, false);

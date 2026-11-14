@@ -1,20 +1,22 @@
 import {
-  DidError, DID_DOCUMENT_MAX_BYTES, IdentityCheckUnavailable, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
+  DidDhtError, DidError, DID_DOCUMENT_MAX_BYTES, IdentityCheckUnavailable, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
   type DidDocumentView, type DidMethod,
 } from "@ghostly/core";
 import type { IdentityFetch } from "./contract";
 import { assertPublicHost, chosenResolver, DomainCheckError, type DohResolverId } from "./domain";
+import { pkarrRelays } from "./pkarrRelays";
 
 /**
  * Network side of DID proofs: resolving a DID to the keys its document lists, under the same limits as the
  * other providers. did:key and did:jwk need no network. did:web is one HTTPS GET of its did.json (bounded,
  * no redirect, after checking that the domain's addresses are public, like the domain proof). did:dht is a
- * signed Pkarr record read from a relay (`resolveDidDht`, WISP 310-did-dht).
+ * signed Pkarr record read from one of the profile's Pkarr relays (`resolveDidDht`, WISP 310-did-dht).
  *
  * What a check reveals, and to whom:
  *  - did:web: the DNS-over-HTTPS resolver learns the domain; the domain's web server, run by the person
  *    being checked, sees this device's IP address and when.
- *  - did:dht: the Pkarr relay learns which DID was looked up, from which IP address.
+ *  - did:dht: the Pkarr relay asked (one of the profile's, Network settings) learns which DID was looked up, from
+ *    which IP address.
  */
 
 export interface DidResolution {
@@ -79,7 +81,9 @@ async function resolve(did: string, method: DidMethod, options: DidResolveOption
     try { raw = JSON.parse(text); } catch { throw new DidError(`${documentUrl} is not JSON`); }
     return { method, document: parseDidDocument(did, raw), host: didWebHost(did), documentUrl };
   }
-  const found = await (options.dht ?? resolveDidDht)(did, { fetch: options.fetch, signal: options.signal });
+  // No relay answered (not reached, or an error status): this side's network, which says nothing of the DID.
+  const found = await (options.dht ?? resolveDidDht)(did, { fetch: options.fetch, signal: options.signal, relays: pkarrRelays() })
+    .catch((e: unknown) => { throw e instanceof DidDhtError && e.code === "unreachable" ? new IdentityCheckUnavailable(e.message) : e; });
   if (found.metadata.deactivated) throw new DidError("This DID is deactivated: its owner retired it");
   return { method, document: parseDidDocument(did, found.document), relay: found.relay };
 }

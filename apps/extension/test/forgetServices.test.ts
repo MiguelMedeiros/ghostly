@@ -38,9 +38,9 @@ const removed = () => world.callsTo("browsingData.remove");
 describe("what a contact's app kept in its viewer tab", () => {
   it("goes with its chat (Delete chat): that chat's origins only, and their tabs close first", async () => {
     const { extensionHost, forgetServicesOf } = await page();
-    await extensionHost.openService(PEER, SERVICE, TAG);
-    await extensionHost.openService(PEER, "notes", TAG);
-    await extensionHost.openService(OTHER_PEER, SERVICE, OTHER_TAG);
+    await extensionHost.openService(PEER, SERVICE, TAG, false);
+    await extensionHost.openService(PEER, "notes", TAG, false);
+    await extensionHost.openService(OTHER_PEER, SERVICE, OTHER_TAG, false);
     const [viewer] = [...world.tabs.values()].filter((tab) => tab.url === `${origin(PEER, TAG)}/`);
 
     await forgetServicesOf({ tag: TAG });
@@ -54,12 +54,12 @@ describe("what a contact's app kept in its viewer tab", () => {
   });
 
   it("goes with its profile (Clear all data, Delete profile), and another profile's stays", async () => {
-    await (await page()).extensionHost.openService(PEER, SERVICE, TAG);
+    await (await page()).extensionHost.openService(PEER, SERVICE, TAG, false);
     // Another page, started once WORK is the profile in use, opens one as that profile.
     useProfile(world, WORK);
     vi.resetModules();
     const { extensionHost, forgetServicesOf } = await page();
-    await extensionHost.openService(OTHER_PEER, SERVICE, OTHER_TAG);
+    await extensionHost.openService(OTHER_PEER, SERVICE, OTHER_TAG, false);
 
     await forgetServicesOf({ profile: "" });
     expect(removed()).toEqual([[{ origins: [origin(PEER, TAG)] }, KEPT]]);
@@ -69,7 +69,7 @@ describe("what a contact's app kept in its viewer tab", () => {
 
   it("stays listed when Chrome did not clear it, and goes at the profile's next clear", async () => {
     const { extensionHost, forgetServicesOf } = await page();
-    await extensionHost.openService(PEER, SERVICE, TAG);
+    await extensionHost.openService(PEER, SERVICE, TAG, false);
     world.failBrowsingData = "Chrome said no";
     await forgetServicesOf({ profile: "" });
     expect(removed()).toHaveLength(1);

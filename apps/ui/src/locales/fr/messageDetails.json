@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Remis (accusé reçu)",
-    "failed": "Échec",
+    "failed": "Non envoyé",
     "held": "Gardé pour le contact",
     "queued": "Pas encore confirmé, repart tout seul",
     "sending": "Envoi en cours",
@@ -161,6 +161,12 @@
     "timing": "Horaires",
     "voice": "Voix",
     "wire": "Réseau"
+  },
+  "send": {
+    "failed": "échec",
+    "failedBecause": "échec : {{error}}",
+    "sending": "envoi en cours",
+    "sent": "envoyé"
   },
   "storage": {
     "blob": "le fichier entier dans IndexedDB",

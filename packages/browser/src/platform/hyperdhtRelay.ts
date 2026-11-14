@@ -88,8 +88,6 @@ interface RelayClient {
   node: RelayedNode;
   endpoints: Set<{ unavailable(): void }>;
   gone: boolean;
-  /** Settles when the relay connection closes. */
-  closed: Promise<void>;
 }
 const clients = new Map<string, Promise<RelayClient>>();
 
@@ -118,10 +116,9 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
     // Non-custodial: the relay is told public keys only, never a secret key (dht-relay's default sends them).
     // The node's own key is never used to listen or dial: a random one says nothing about this app.
     const node = new RelayedDHT(new WebSocketStream(true, socket), { ...NON_CUSTODIAL, keyPair: hyperKeyPair(crypto.getRandomValues(new Uint8Array(32))) }) as RelayedNode;
-    let closed!: () => void;
-    const client: RelayClient = { node, endpoints: new Set(), gone: false, closed: new Promise(resolve => { closed = resolve; }) };
+    const client: RelayClient = { node, endpoints: new Set(), gone: false };
     socket.addEventListener("close", () => {
-      client.gone = true; closed();
+      client.gone = true;
       if (clients.get(url) === opening) clients.delete(url);
       for (const endpoint of [...client.endpoints]) endpoint.unavailable();
     });
@@ -130,6 +127,16 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
   clients.set(url, opening);
   opening.catch(() => { if (clients.get(url) === opening) clients.delete(url); });
   return opening;
+}
+
+/**
+ * dht-relay 0.4.3's server waits for the relay connection to close (to close itself) and never stops waiting once it has
+ * closed, so every listener ever opened on the connection, closed or refused, stayed in memory with its chat's endpoint
+ * until the connection went. The relay forgets its own side the same way (infra/services/hyperdht-relay `Servers`).
+ */
+function forgetServer(server: RelayedServer): void {
+  const internal = server as unknown as { _protocol?: { _stream?: { off(event: string, listener: () => void): unknown } }; _onStreamClose?: () => void };
+  if (internal._onStreamClose) internal._protocol?._stream?.off("close", internal._onStreamClose);
 }
 
 function release(url: string, client: RelayClient, endpoint: { unavailable(): void }): void {
@@ -292,8 +299,11 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
   let handler: NativeEndpoint["onConnection"] = null;
   const waiting: BoundChannel[] = [];
   let endpoint: NativeEndpoint | null = null;
+  // Fails the listen below when the relay connection closes while it waits.
+  let relayClosed: (() => void) | null = null;
   const member = {
     unavailable() {
+      if (client.gone) relayClosed?.();
       if (stopped) return;
       stopped = true;
       for (const channel of channels) channel.close();
@@ -310,12 +320,18 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     }).catch(() => {});
   });
   let serverClosed = false;
-  server.once("close", () => { serverClosed = true; member.unavailable(); });
+  server.once("close", () => { serverClosed = true; forgetServer(server); member.unavailable(); });
+  // Neither wait outlasts the listen: one on `client.closed` stayed there, holding this endpoint, closed or refused, for as
+  // long as the relay connection stayed open.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       server.listen(keyPair),
-      client.closed.then(() => { throw new Error("The HyperDHT relay closed the connection"); }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS)),
+      new Promise((_, reject) => {
+        relayClosed = () => reject(new Error("The HyperDHT relay closed the connection"));
+        if (client.gone) relayClosed();
+        timer = setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS);
+      }),
     ]);
     if (client.gone) throw new Error("The HyperDHT relay closed the connection");
     if (serverClosed || !server.address()?.port) throw new Error("The HyperDHT relay did not let this chat listen");
@@ -324,6 +340,9 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     void server.close().catch(() => {});
     release(url, client, member);
     throw error;
+  } finally {
+    clearTimeout(timer);
+    relayClosed = null;
   }
   const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: url };
   endpoint = {

@@ -100,7 +100,8 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await connect(desktop, contact);
   await enrollDevice(desktop, phone);
 
-  // A wrong password: refused on the standby, noted on the active device with a way to let it try again.
+  // A wrong password: refused on the standby, noted on the active device. Let <device> try again waits until that device
+  // is refused (15, WISP 06): after one, it is not offered.
   await phone.page.getByTestId("handoff-use-here").click();
   await phone.page.getByTestId("handoff-password").fill("not the password");
   await phone.page.getByTestId("handoff-start").click();
@@ -108,6 +109,7 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await expect(phone.page.getByTestId("handoff-line")).toHaveText("Wrong password.");
   await desktop.page.goto("/#/profile");
   await expect(desktop.page.getByTestId("handoff-wrong-password")).toContainText("tried to move this profile with a wrong password");
+  await expect(desktop.page.getByTestId("handoff-allow")).toHaveCount(0);
   // Nothing moved: the desktop is still the active device.
   await expect(desktop.page.getByTitle("New Chat")).toBeVisible();
 
@@ -269,4 +271,39 @@ test("a call on the active device keeps the profile there: Use here and Move to 
   // The call's end line moved with the history.
   await openTheChat(phone);
   await expect(chat(phone).getByText("Audio call ended")).toBeVisible();
+});
+
+test("a move leaves each device's own microphone, camera and speaker: the new device uses its own, and the old one finds its choice again on the way back", { tag: ["@feature:devices.handoff", "@feature:settings.media"] }, async ({ peer }) => {
+  test.setTimeout(12 * 60_000);
+  const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone")]);
+  await enrollDevice(desktop, phone);
+  // The desktop's headset, chosen while it was plugged in (Chromium's fake devices are the same on every page).
+  const headset = JSON.stringify({ audioinput: { id: "usb-headset", label: "USB Headset" }, audiooutput: { id: "usb-headset-out", label: "USB Headset" } });
+  const choices = (on: Peer) => on.page.evaluate(() => Object.keys(localStorage).filter((key) => key.endsWith("media_devices")).map((key) => localStorage.getItem(key)));
+  await desktop.page.evaluate((headset) => {
+    const settings = Object.keys(localStorage).find((key) => key.endsWith("app_settings"))!;
+    localStorage.setItem(settings.replace(/app_settings$/, "media_devices"), headset);
+  }, headset);
+  const move = async (from: Peer, to: Peer) => {
+    await from.page.goto("/#/profile");
+    const row = from.page.getByTestId("device-row").filter({ hasNotText: "This device" });
+    await expect(row.getByTestId("device-link-status")).toHaveAttribute("data-status", "live", { timeout: 120_000 });
+    await row.getByTestId("device-move").click();
+    await expect(to.page.getByTestId("handoff-offer")).toBeVisible({ timeout: 60_000 });
+    await to.page.getByTestId("handoff-accept").click();
+    await untilShown(to.page, to.page.getByTitle("New Chat"), { timeout: 400_000 });
+    await untilShown(from.page, from.page.getByTestId("device-standby").and(from.page.locator("[data-state=standby]")));
+  };
+
+  // On the phone: its own default devices. Before, it took the desktop's headset, and said it was missing on every call.
+  await move(desktop, phone);
+  expect(await choices(phone)).toEqual([]);
+  await phone.page.goto("/#/settings/media");
+  await expect(phone.page.getByTestId("settings-microphone")).toHaveAttribute("data-value", "");
+  await expect(phone.page.getByTestId("settings-microphone-missing")).toHaveCount(0);
+
+  // Back on the desktop: its headset again (unplugged now, so Settings names it).
+  await move(phone, desktop);
+  await desktop.page.goto("/#/settings/media");
+  await expect(desktop.page.getByTestId("settings-microphone-missing")).toContainText("USB Headset");
 });

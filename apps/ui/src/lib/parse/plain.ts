@@ -34,6 +34,41 @@ function listText(list: ListBlock, detectors: readonly Detector[], indent: strin
   ].join("\n")).join("\n");
 }
 
+/** What the segments show as written (atoms as their text), with what a spoiler covers left out. */
+function unspoiledSegments(segments: Segment[]): string {
+  let out = "";
+  for (const segment of segments) {
+    if (segment.type === "span") out += segment.style === "spoiler" ? " " : unspoiledSegments(segment.children);
+    // A link whose words hold a spoiler hides where it goes, as the bubble keeps it covered.
+    else if (segment.type === "atom" && segment.kind === "md-link" && hasSpoiler((segment.data as { label?: Segment[] }).label ?? [])) out += " ";
+    else out += segment.text;
+  }
+  return out;
+}
+
+const hasSpoiler = (segments: Segment[]): boolean =>
+  segments.some((s) => s.type === "span" && (s.style === "spoiler" || hasSpoiler(s.children)));
+
+function unspoiledBlock(block: Block): string {
+  switch (block.type) {
+    case "codeblock": return block.code;
+    case "paragraph":
+    case "heading": return unspoiledSegments(block.segments);
+    case "quote": return block.blocks.map(unspoiledBlock).join("\n");
+    case "list": return block.items.map((item) => [unspoiledSegments(item.segments), ...item.children.map(unspoiledBlock)].join("\n")).join("\n");
+  }
+}
+
+/**
+ * The message's text without what its spoilers hide (markers stripped, the rest as written): what the cards under a
+ * bubble (a place, an invite, a Nostr code…) are read from, so none says what a spoiler covers. A text with no spoiler
+ * marker is returned as it is.
+ */
+export function unspoiledText(text: string): string {
+  if (!text.includes("||") || prettyJson(text) !== null) return text;
+  return parseMessage(text).map(unspoiledBlock).join("\n");
+}
+
 /** The message as plain text, markers stripped and spoilers hidden: the chat list's one-line preview. */
 export function plainText(text: string, ctx: ParseContext = {}, detectors: readonly Detector[] = DETECTORS): string {
   // JSON reads best on one line as it was written, not as the bubble's indented block.

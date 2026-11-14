@@ -133,3 +133,6 @@
 }
 /* Arabic is joined writing: Safari pulls its letters apart under wide letter-spacing, so the issuer line keeps none there. */
 :lang(ar) .id-card-issuer{letter-spacing:0}
+/* And a monospace font draws them apart in fixed cells ("م ح ا د ث ة"): the subject's words ("One key per chat") keep the
+   app's font there, as the wallet cards' words do; a key or a handle stays in the monospace font. */
+:lang(ar) .id-card-subject[data-words]{font-family:inherit;letter-spacing:0}

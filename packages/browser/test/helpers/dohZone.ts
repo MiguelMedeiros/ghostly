@@ -41,12 +41,15 @@ export function answerDoh(query: Uint8Array, zone: Zone): Uint8Array {
     // Owner name as a pointer to the question name at offset 12.
     answers.push(0xc0, 12, 0, q.type, 0, 1, ttl >>> 24, (ttl >> 16) & 0xff, (ttl >> 8) & 0xff, ttl & 0xff, rdata.length >> 8, rdata.length & 0xff, ...rdata);
   }
-  const out = new Uint8Array(q.end + answers.length);
+  // Header and question, the answers, then the query's additional section (its OPT record) echoed, as resolvers do.
+  const additional = query.subarray(q.end);
+  const out = new Uint8Array(q.end + answers.length + additional.length);
   out.set(query.subarray(0, q.end));
   const flags = 0x8180 | (zone.dnssec ? 0x20 : 0) | (exists ? 0 : 3);
   out[2] = flags >> 8; out[3] = flags & 0xff;
   out[6] = values.length >> 8; out[7] = values.length & 0xff;
   out.set(answers, q.end);
+  out.set(additional, q.end + answers.length);
   return out;
 }
 

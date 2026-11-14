@@ -1,8 +1,9 @@
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
+import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
-import type { OptionSpec, Parsed } from "../args";
+import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
 
@@ -52,6 +53,28 @@ export function here(path: unknown): string | undefined {
   return typeof path === "string" ? userPath(path) : undefined;
 }
 
+/**
+ * A path on this machine a command reads (`file send`, a picture, `profile backup --out`'s folder), looked at before the
+ * profile opens: one not there is not_found (`missing`, or "No such file or folder"), one not allowed refused. Before, a
+ * one-shot opened the profile and went online first (~1 s on a big profile) to say so. The API keeps its check for
+ * socket callers; through a daemon it reads the same path.
+ */
+export function localStat(path: string, missing?: string): Stats {
+  try { return statSync(path); } catch (error) {
+    const known = localFileError(error, path);
+    throw known?.code === "not_found" && missing ? new CliError("not_found", missing) : known ?? error;
+  }
+}
+
+/**
+ * A picture's file (`profile picture`, `group picture`), in the API's words (groupAdmin.ts) when it is not there or a
+ * folder. Only a folder is refused here: a pipe (`<(…)`) is read as a file.
+ */
+export function picture(path: string | undefined): string | undefined {
+  if (path !== undefined && localStat(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a file`);
+  return path;
+}
+
 /** The most a command reads of stdin or of a file it sends: the longest request line a daemon reads (client.ts `MAX_LINE`). */
 export const INPUT_BYTES = 16 * 1024 * 1024;
 export const STDIN_TOO_BIG = "More than 16 MiB came on stdin, more than any command takes (a long text goes as a file: ghostly file send <chat|group> <path>)";
@@ -88,10 +111,16 @@ export function refs(values: unknown, flag: string, what: string): void {
   }
 }
 
-/** A whole number of sats from the command line. */
+/**
+ * A whole number of sats from the command line (`<sats>`), refused in a number flag's words: `<sats> takes a whole
+ * number from 1 up, not -5`, a number as typed, other words quoted. Before: "Not an amount in sats: \"-5\"".
+ */
 export function sats(value: string | undefined): number {
-  const n = Number(value);
-  if (!value || !Number.isSafeInteger(n) || n <= 0) throw new CliError("usage", `Not an amount in sats: ${JSON.stringify(value)}`);
+  const n = decimalNumber(value ?? "");
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    const shown = Number.isNaN(n) ? JSON.stringify(value) : value;
+    throw new CliError("usage", `<sats> takes a whole number from 1 up, not ${shown}`);
+  }
   return n;
 }
 
@@ -101,7 +130,8 @@ export function pairs(values: unknown): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const item of values as string[]) {
     const eq = item.indexOf("=");
-    if (eq < 1) throw new CliError("usage", `--value takes name=value, not ${JSON.stringify(item)}`);
+    // Never the item itself: a --value is a wallet's seed phrase or macaroon as often as not (as `--field`'s, secretInput).
+    if (eq < 1) throw new CliError("usage", "--value takes name=value, and one has no name or no =");
     out[item.slice(0, eq)] = item.slice(eq + 1);
   }
   return out;
@@ -139,6 +169,19 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * The `<emoji>` of `react` and `group react`: one emoji (core's `reactionEmoji`), or none with `--remove`. Anything else
+ * is a usage error (exit 2) before the profile opens, as `status set --emoji` is. Before, a one-shot opened the profile
+ * and went online first, then the engine answered "A reaction is one emoji" (`bad_request`, exit 1), and a missing one
+ * "Give one emoji" (exit 2) only from there. The API keeps its checks for socket callers.
+ */
+export function reaction(options: Parsed["options"], emoji: string | undefined): string | undefined {
+  if (options.remove === true) return emoji;
+  if (!emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
+  if (!reactionEmoji(emoji)) throw new CliError("usage", `<emoji> takes one emoji, not ${JSON.stringify(emoji)}`);
+  return emoji;
 }
 
 /**
@@ -289,6 +332,14 @@ function cardBytes(fields: Record<string, unknown>, flags: string): Record<strin
   return fields;
 }
 
+/**
+ * A card's `--id` given as "" (an unset variable in a script: `--id "$ID"`) is a usage error. Taken as not given, a new
+ * id was made, and a script meant to update its card posted a second one.
+ */
+function cardId(options: Parsed["options"]): void {
+  if (options.id === "") throw new CliError("usage", "--id needs a card id");
+}
+
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
 function percent(options: Parsed["options"], flag: string): void {
   const value = options[flag];
@@ -317,6 +368,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   cardText("--step", options.step, STATUS_CARD_LIMITS.line);
   cardText("--branch", options.branch, STATUS_CARD_LIMITS.branch);
   for (const [flag, words] of [["status", TASK_STATUSES], ["pr-state", PR_STATES], ["pr-checks", PR_CHECKS]] as const) oneWord(options, flag, words);
+  cardId(options);
   set("id", options.id);
   set("title", options.title);
   set("status", options.status);
@@ -389,7 +441,7 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
 }
 
 /** How the time flags say the dates they take (`--next`, `--resets`, `--also`'s `@`). */
-const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
+export const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
 
 /** An ISO date with no time, which `Date.parse` alone reads as UTC midnight: `2026-09-30`, `2026-09`. */
 const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
@@ -397,18 +449,21 @@ const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 /** What `Date.parse` takes between a month's name and a number: `Apr 31`, `Apr-31`, `31/Apr`, `Apr.31`, `31 Apr,`. */
 const NAME_SEP = "[\\s,./-]*";
+/** What `Date.parse` takes between two numbers of a date: `2026-4-31`, `2026/4/31`, `2026.4.31`, `2026, 4, 31`. */
+const NUMBER_SEP = "[\\s,./-]+";
 const MONTH_DAY = new RegExp(`\\b(${MONTHS.join("|")})[a-z]*${NAME_SEP}(\\d{1,2})(?!\\d)`, "i");
 const DAY_MONTH = new RegExp(`(?<!\\d)(\\d{1,2})${NAME_SEP}(${MONTHS.join("|")})`, "i");
 
 /**
- * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `4/31/2026` (month first, as
- * `Date.parse` reads it, also with dashes or dots and a two-digit year), `Apr 31 2026`, `31-Apr-2026`. `Date.parse`
- * takes any day up to 31 and moves it past the month's end, so the day is checked here.
+ * The year, month (1 to 12) and day a date is written with: `2026-04-31`, `2026/4/31`, `2026.4.31`, `4/31/2026`
+ * (month first, as `Date.parse` reads it, also with a two-digit year), `Apr 31 2026`, `31-Apr-2026`. Between the numbers
+ * `Date.parse` takes dashes, slashes, dots, commas and spaces alike (`2026 4 31`), so these do too. `Date.parse` takes
+ * any day up to 31 and moves it past the month's end, so the day is checked here.
  */
 function writtenDay(text: string): [number, number, number] | undefined {
-  const numeric = /^([+-]\d{6}|\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)/.exec(text);
+  const numeric = new RegExp(`^([+-]\\d{6}|\\d{4})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{1,2})(?!\\d)`).exec(text);
   if (numeric) return [Number(numeric[1]), Number(numeric[2]), Number(numeric[3])];
-  const monthFirst = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)/.exec(text);
+  const monthFirst = new RegExp(`^(\\d{1,2})${NUMBER_SEP}(\\d{1,2})${NUMBER_SEP}(\\d{4}|\\d{2})(?!\\d)`).exec(text);
   // A two-digit year is 1950 to 2049, as `Date.parse` takes it.
   const yy = (y: string) => (y.length === 2 ? Number(y) + (Number(y) < 50 ? 2000 : 1900) : Number(y));
   if (monthFirst) return [yy(monthFirst[3]!), Number(monthFirst[1]), Number(monthFirst[2])];
@@ -424,13 +479,14 @@ function writtenDay(text: string): [number, number, number] | undefined {
  * A day the month does not have (`2026-04-31`) is refused, where `Date.parse` made it May 1. A time more than a year
  * ahead is a usage error that names the flag and the last time it takes: before, it reached the card's check and failed
  * as `bad_request` (exit 1), "Status card: resetsAt is a time in milliseconds, within a year". A time past is taken.
+ * `forms` is what a time it cannot read is told to be, for a flag that takes more (`status set --until 2h`).
  */
-export function cardTime(value: unknown, flag: string): number | undefined {
+export function cardTime(value: unknown, flag: string, forms = `a time in milliseconds or a date: ${CARD_TIME_FORMS}`): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
   const day = ISO_DAY.exec(text);
   const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes ${forms}, not ${JSON.stringify(value)}`);
   const written = writtenDay(text);
   if (written) {
     const [year, month, date] = written, days = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -466,6 +522,7 @@ export function routineFields(options: Parsed["options"]): Record<string, unknow
       : `--cron takes a cron line of 0-9 A-Z a-z * , / ? # - and spaces, not ${JSON.stringify(options.cron)}`);
   }
   oneWord(options, "state", ROUTINE_STATES);
+  cardId(options);
   for (const key of ["id", "name", "schedule", "cron", "state"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const next = cardTime(options.next, "next");
   if (next !== undefined) fields.nextRunAt = next;
@@ -528,6 +585,7 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   if (used !== undefined && limit !== undefined && used > limit) throw new CliError("usage", `--used takes at most --limit (${limit}), not ${used}`);
   for (const [flag, max] of [["label", STATUS_CARD_LIMITS.usageLabel], ["account", STATUS_CARD_LIMITS.usageLabel], ["window", STATUS_CARD_LIMITS.usageWindow]] as const) cardText(`--${flag}`, options[flag], max);
   given("also", options.also, STATUS_CARD_LIMITS.usageWindows);
+  cardId(options);
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;

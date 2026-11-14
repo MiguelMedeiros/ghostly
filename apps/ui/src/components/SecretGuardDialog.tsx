@@ -6,7 +6,8 @@ import type { SecretFinding } from "../lib/parse/secrets";
 import { formatAmount } from "../lib/amount";
 
 /**
- * Asked before the composer sends text that looks like a secret (`findSecret`): a seed or a private key, or a Cashu
+ * Asked before the composer sends text that looks like a secret (`findSecret`): a seed, a private key or a login to a
+ * node, or a Cashu
  * token, which is money handed to whoever reads the chat. Cancel has the focus, so Enter and Escape keep the draft.
  * It says what kind of secret it is and, for ecash, how much: never the text itself.
  */
@@ -33,7 +34,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
     title = worth === null ? t("secretGuard.cashuUnknownTitle", { contact }) : t("secretGuard.cashuTitle", { amount: worth, contact });
     body = t("secretGuard.cashu");
   } else {
-    const key = ({ mnemonic: "mnemonic", nsec: "nsec", "bitcoin-key": "bitcoinKey", "hex-key": "hexKey" } as const)[finding.kind];
+    const key = ({ mnemonic: "mnemonic", nsec: "nsec", "bitcoin-key": "bitcoinKey", "hex-key": "hexKey", "node-login": "nodeLogin" } as const)[finding.kind];
     title = t(`secretGuard.${key}Title`);
     body = t(`secretGuard.${key}`);
   }

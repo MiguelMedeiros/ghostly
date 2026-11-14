@@ -38,6 +38,24 @@ class CameraFilesTest {
   }
 
   @Test
+  fun anActivityMadeAgainKeepsThePhotoTheCameraIsTaking() {
+    // Android ended the process while the camera app was in front: the activity made again gets the camera's answer,
+    // and the photo the camera wrote is still to be offered.
+    val cache = temp.newFolder("cache")
+    val old = CameraFiles.create(cache).apply { writeBytes(ByteArray(16)) }
+    val taking = CameraFiles.create(cache).apply { writeBytes(ByteArray(16)) }
+    CameraFiles.sweep(cache, taking.name)
+    assertTrue(taking.exists())
+    assertFalse(old.exists())
+    // A name that is no file of the folder keeps nothing.
+    for (name in listOf("", "..", "../camera", "../${taking.name}")) {
+      val again = CameraFiles.create(cache)
+      CameraFiles.sweep(cache, name)
+      assertFalse(name, again.exists())
+    }
+  }
+
+  @Test
   fun takesOnlyAPhotoFromTheCamera() {
     assertTrue(CameraFiles.takesPhoto(true, arrayOf("image/*")))
     assertFalse(CameraFiles.takesPhoto(false, arrayOf("image/*")))

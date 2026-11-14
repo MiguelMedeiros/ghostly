@@ -10,7 +10,7 @@ import type { IdentityProofProvider } from "../src/proofs/contract";
 // covers: proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry, proofs.binding, proofs.contract
 
 /** Two engines' identity modules joined by an in-memory channel, the way two paired chats are. */
-function pair() {
+function pair(providersOf: (me: "a" | "b") => IdentityProofProvider[] = () => [fakeKey, fakeRecord]) {
   const keys = { a: createIdentity().pubKeyZ32, b: createIdentity().pubKeyZ32 };
   const ledgers: Record<string, IdentityLedger> = { a: emptyIdentityLedger(), b: emptyIdentityLedger() };
   const connected = { value: true };
@@ -32,9 +32,8 @@ function pair() {
       resolve: async key => pkarr.get(key) ?? null,
     };
   };
-  const providers = () => [fakeKey, fakeRecord] as IdentityProofProvider[];
-  engines.a = new IdentityProofs(host("a"), providers);
-  engines.b = new IdentityProofs(host("b"), providers);
+  engines.a = new IdentityProofs(host("a"), () => providersOf("a"));
+  engines.b = new IdentityProofs(host("b"), () => providersOf("b"));
   return { engines, ledgers, connected, pkarr };
 }
 
@@ -79,6 +78,34 @@ describe("identity proofs in the engine", () => {
     await vi.waitFor(() => expect(ledgers.a.shared[0].status).toBe("withdrawn"));
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     expect(engines.a.views()).toEqual([]);
+  });
+
+  it("checks a presentation off the chat's frame queue: a slow provider holds neither later frames nor the result", async () => {
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const checking = vi.fn();
+    const slowKey: IdentityProofProvider = { ...fakeKey, verify: async (...args) => { checking(); await held; return fakeKey.verify(...args); } };
+    const { engines, ledgers } = pair(me => me === "b" ? [slowKey, fakeRecord] : [fakeKey, fakeRecord]);
+    const handled: { t: unknown; done: boolean }[] = [];
+    const frame = engines.b.frame.bind(engines.b);
+    engines.b.frame = (linkId, f) => {
+      const entry = { t: f.t, done: false };
+      handled.push(entry);
+      return frame(linkId, f).finally(() => { entry.done = true; });
+    };
+    await engines.a.load();
+    for (const p of engines.a.views()) await engines.a.remove({ id: p.id });
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const { id } = await engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) });
+    await engines.a.share({ linkId: "chat", id });
+    await vi.waitFor(() => expect(checking).toHaveBeenCalled());
+    // The provider's check is still running, and the frame that asked for it is handled: the session's queue goes on.
+    await vi.waitFor(() => expect(handled.find(h => h.t === "idp-present")?.done).toBe(true));
+    expect(ledgers.b.received).toEqual([]);
+    expect(ledgers.a.shared[0]?.status).toBe("pending");
+    release();
+    await vi.waitFor(() => expect(ledgers.a.shared[0]?.status).toBe("accepted"));
+    expect(ledgers.b.received[0]).toMatchObject({ id, status: "verified" });
   });
 
   it("refuses to share an expired proof", async () => {

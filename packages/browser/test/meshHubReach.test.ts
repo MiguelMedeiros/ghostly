@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GroupSession, createIdentity, identityFromSeedB64 } from "@ghostly/core";
 import type { GroupsHost } from "../src/engine/groups";
-import { MeshHubs } from "../src/engine/meshHubs";
+import { MeshHubs, STAND_INS, STAND_IN_MAX, UNREACHED_SAID, standInDuty } from "../src/engine/meshHubs";
 import type { StoredGroup } from "../src/shared/types";
 
 /**
@@ -86,5 +86,55 @@ describe("a private group's `group-reach` is taken from its hubs, and only about
     expect(mesh.hubs(session.groupId, session, NOW + 1)).toEqual([hub]);
     reach(mallory, session.others, members, NOW + 5_000);
     expect(mesh.hubs(session.groupId, session, NOW + 5_000)).toEqual([hub]);
+  });
+});
+
+describe("stand-ins for the members no hub reaches (`u`, WISP 902 · Group Mesh § Hubs, Stand-ins)", () => {
+  const keys = (n: number) => Array.from({ length: n }, () => identityFromSeedB64(createIdentity().seedB64).pubKeyZ32);
+
+  it("each lost member gets its stand-ins by rank, and no member stands in for more than four", () => {
+    const [lost, standing] = [keys(6), keys(4)];
+    const duty = standInDuty(lost, standing);
+    for (const mine of duty.values()) expect(mine.length).toBeLessThanOrEqual(STAND_IN_MAX);
+    // Room for all: 6 lost by 2 stand-ins, 4 members by 4 (the last lost one still finds two members with room).
+    for (const key of lost) expect([...duty.values()].filter(mine => mine.includes(key))).toHaveLength(STAND_INS);
+    // More lost than the members' room: what is left goes unanswered, nobody takes more.
+    const more = keys(10), crowded = standInDuty(more, standing);
+    for (const mine of crowded.values()) expect(mine.length).toBe(STAND_IN_MAX);
+    // Every member works out the same, whatever order it holds them in.
+    expect(standInDuty([...more].reverse(), [...standing].reverse())).toEqual(crowded);
+  });
+
+  it("a member ranked for six lost members keeps an edge for four of them only", async () => {
+    const { session, group, hub, mallory, members, wanted, mesh } = await adminOf20();
+    // Six members nobody reaches; besides the admin, only `other` can stand in (the rest are apps without hubs).
+    const lost = members.slice(0, 6), other = members[6], old = [mallory, ...members.slice(7)];
+    group.legacy = old;
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey, other, ...old], u: lost }, NOW);
+    const standing = wanted().filter(key => lost.includes(key));
+    expect(standing).toHaveLength(STAND_IN_MAX);
+    expect(standing).toEqual([...standInDuty(lost, [session.myKey, other]).get(session.myKey)!].sort());
+    // Nothing else moved: its hub and the apps without hubs, as before.
+    expect(wanted().filter(key => !lost.includes(key))).toEqual([hub, ...old].sort());
+  });
+
+  it("`u` is taken from a hub of the beacon only, about members it does not reach, and not when longer than a hub says", async () => {
+    const { session, hub, mallory, members, wanted, mesh } = await adminOf20();
+    const say = (from: string, k: string[], u: string[], now: number) => mesh.reached(session.groupId, session, from, { t: "group-reach", g: session.groupId, k, u }, now);
+    const lost = members.slice(0, 3);
+    // Mallory is no hub in the beacon: her word moves no edge.
+    say(mallory, [session.myKey], members, NOW);
+    expect(wanted()).toEqual([hub]);
+    // The hub says it reaches them itself: nobody is lost.
+    say(hub, [session.myKey, ...members], members, NOW);
+    expect(wanted()).toEqual([hub]);
+    // Longer than a hub ever says: not taken.
+    say(hub, [session.myKey], [...lost, ...Array.from({ length: UNREACHED_SAID }, () => lost[0])], NOW + 10_000);
+    expect(wanted(NOW + 10_000)).toEqual([hub]);
+    // Said right, the admin stands in for those it is ranked for.
+    say(hub, [session.myKey], lost, NOW + 20_000);
+    const standing = session.roster.map(([key]) => key).filter(key => key !== hub && !lost.includes(key));
+    const mine = standInDuty(lost, standing).get(session.myKey) ?? [];
+    expect(wanted(NOW + 20_000)).toEqual([hub, ...mine].sort());
   });
 });

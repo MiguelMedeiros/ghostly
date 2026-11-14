@@ -1,5 +1,6 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { connect, expect, link, test, type Peer } from "../support/fixtures";
+import { smallTargets } from "../support/touchTargets";
 
 /**
  * A call's buttons stay round and off the edges on a narrow screen. With Share screen (a browser that can capture one,
@@ -67,6 +68,30 @@ for (const width of [320, 375]) {
     await bob.page.getByTitle("Decline").click();
   });
 }
+
+test("a video call ringing on a 320 px phone: a long name with no space in it wraps inside the screen", { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 640 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  // The longest name a contact can be given, one word: it was drawn in one line past both of the screen's edges, the
+  // ringing card's text widened with it.
+  const name = "W".repeat(30);
+  await bob.page.getByTitle("Click to set a name").click();
+  await bob.page.getByPlaceholder("Set a name...").fill(name);
+  await bob.page.getByPlaceholder("Set a name...").press("Enter");
+  await expect(bob.page.getByTestId("chat-name")).toHaveText(name);
+  await alice.page.getByTestId("call-video").click();
+  const ringing = bob.page.getByTestId("incoming-call");
+  await expect(ringing.getByText(name, { exact: true })).toBeVisible();
+  const outside = () => ringing.evaluate((card) => {
+    const width = document.documentElement.clientWidth;
+    return [...card.querySelectorAll("p")].map((p) => p.getBoundingClientRect())
+      .filter((r) => r.left < 0 || r.right > width).map((r) => `${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
+  });
+  await expect.poll(outside).toEqual([]);
+  await bob.page.getByTitle("Decline").click();
+});
 
 /** Plays an iPhone 17's safe area (Chromium's DevTools protocol): the status bar and Dynamic Island, the home indicator. */
 async function safeArea(page: Page, insets: { top: number; right: number; bottom: number; left: number }) {
@@ -138,6 +163,45 @@ for (const { name, viewport, narrowest } of smallRows) {
 }
 
 /**
+ * A phone's small call window: its corner button took taps on 30 × 30 px and its five buttons on 32 × 32, 5 px apart,
+ * Hang up beside Share screen, where a thumb aimed at Share screen could end the call. Each takes a tap on 44 px now,
+ * and Hang up stands apart from the others.
+ */
+test("on a phone the small call window's buttons are 44 px targets, Hang up apart from Share screen", { tag: ["@feature:calls.mini-window", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await bob.page.getByTestId("call-minimize").click();
+  const small = bob.page.getByTestId("call-window");
+  await expect(small).toHaveAttribute("data-mini", "true");
+  await expect(bob.page.getByTestId("share-screen")).toBeVisible();
+  await bob.page.screenshot({ path: testInfo.outputPath("small-call-window-375.png") });
+
+  // Every one of them is there to tap (none under a corner grip or out of the window), on 44 × 44 px.
+  const ids = ["call-minimize", "call-mute", "call-camera", "call-devices", "share-screen", "call-hang-up"];
+  const reached = await small.evaluate((el, ids) => ids.filter((id) => {
+    const b = el.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect();
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return !!hit?.closest(`[data-testid=${id}]`);
+  }), ids);
+  expect(reached).toEqual(ids);
+  const tiny = (await smallTargets(bob.page, 44, "[data-testid=call-window] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
+  expect(tiny, "the small window's buttons under 44 × 44 px").toEqual([]);
+  // Hang up is kept apart: a tap that misses Share screen by a few px lands on neither.
+  const share = (await bob.page.getByTestId("share-screen").boundingBox())!, hangUp = (await bob.page.getByTestId("call-hang-up").boundingBox())!;
+  expect(hangUp.x - (share.x + share.width), "room between Share screen and Hang up").toBeGreaterThanOrEqual(12);
+
+  await bob.page.getByTestId("call-mute").click();
+  await expect(bob.page.getByTestId("call-mute")).toHaveAttribute("title", "Unmute");
+  await bob.page.getByTestId("call-hang-up").click();
+  await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+});
+
+/**
  * The small call window's state line ("Audio call" and the clock), measured against the window's corner button, the
  * own camera's preview of a video call and its edges: what of it lies under one of them or is cut, and whether the
  * words are shown beside the clock.
@@ -184,8 +248,8 @@ for (const language of ["pt", "ar"]) {
     await bob.page.getByTestId("call-minimize").click();
     const small = bob.page.getByTestId("call-window");
     await expect(small).toHaveAttribute("data-mini", "true");
-    // A phone-wide window opens it at its narrowest.
-    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    // A phone opens it at its narrowest (264 px on a touch screen; the line was measured at 190 before then).
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(264);
     // "Chamada de áudio 00:05" was centred over the whole 190 px and started at 27: behind the button, which ends at 38.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();
@@ -205,7 +269,7 @@ for (const width of [320, 414]) {
     await bob.page.getByTestId("call-minimize").click();
     const small = bob.page.getByTestId("call-window");
     await expect(small).toHaveAttribute("data-mini", "true");
-    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(264);
     await expect(bob.page.getByTestId("call-self-view")).toBeVisible();
     // The clock was centred between the corner button and the right edge, and its last 11 px ran under the preview.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
@@ -214,7 +278,122 @@ for (const width of [320, 414]) {
   });
 }
 
-test("on a phone the notice that the contact shares their screen is clear of your own picture", { tag: ["@feature:calls.video", "@feature:calls.screen-share", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+/** The page stops (or, with null, starts again) listing this device, and hears that the devices changed (media-devices.spec.ts). */
+const unplug = (peer: Peer, deviceId: string | null) => peer.page.evaluate((deviceId) => {
+  const media = navigator.mediaDevices as MediaDevices & { real?: MediaDevices["enumerateDevices"]; hidden?: string | null };
+  media.real ??= media.enumerateDevices.bind(media);
+  media.hidden = deviceId;
+  media.enumerateDevices = async () => (await media.real!()).filter((d) => d.deviceId !== media.hidden);
+  media.dispatchEvent(new Event("devicechange"));
+}, deviceId);
+
+/**
+ * The notice that the chosen microphone is back: its Switch back took taps on 84 × 24 px and its × on 20 × 20, the only
+ * controls of the call window under 44 px, 12 px apart. Each takes a tap on 44 px now, and neither on the other's box.
+ */
+test("on a phone the device notice's Switch back and close are 44 px targets", { tag: ["@feature:calls.devices", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 740 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await bob.page.getByTestId("call-audio").click();
+  await alice.page.getByTitle("Accept audio call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  // A microphone of its own chosen in the call, then gone and back (Chromium's fake ones cannot be unplugged).
+  const first = await bob.page.evaluate(async () => (await navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === "audioinput" && d.label === "Fake Audio Input 1")!.deviceId);
+  await bob.page.getByTestId("call-devices").click();
+  await bob.page.locator(`[data-testid=call-device-audioinput][data-device-id="${first}"]`).click();
+  await expect(bob.page.getByTestId("call-devices-menu")).toHaveCount(0);
+  const notice = bob.page.getByTestId("call-device-notice");
+  await unplug(bob, first);
+  await expect(notice).toHaveAttribute("data-type", "lost");
+  await unplug(bob, null);
+  await expect(notice).toHaveAttribute("data-type", "back");
+  await bob.page.screenshot({ path: testInfo.outputPath("device-notice-375.png") });
+
+  const small = (await smallTargets(bob.page, 44, "[data-testid=call-device-notice] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
+  expect(small, "the notice's buttons under 44 × 44 px").toEqual([]);
+  // Drawn as before, and a tap just inside the edge of one that faces the other still lands on it.
+  const sw = bob.page.getByTestId("call-device-switch-back"), close = notice.getByRole("button", { name: "Close" });
+  expect((await sw.boundingBox())!.height, "Switch back drawn as before").toBeLessThan(30);
+  const own = await notice.evaluate((el) => {
+    const [a, b] = [...el.querySelectorAll("button")].map((x) => x.getBoundingClientRect());
+    const at = (x: number, y: number) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label") ?? document.elementFromPoint(x, y)?.closest("button")?.dataset.testid;
+    return [at(a.right - 1, a.top + a.height / 2), at(b.left + 1, b.top + b.height / 2)];
+  });
+  expect(own).toEqual(["call-device-switch-back", "Close"]);
+  await close.click();
+  await expect(notice).toHaveCount(0);
+  await bob.page.getByTestId("call-hang-up").click();
+});
+
+/** A notice's words: how much of them is cut, and whether the notice stays on the screen. */
+const wholeText = (notice: Locator) => notice.evaluate((el) => {
+  const words = el.querySelector("span")!, box = el.getBoundingClientRect();
+  return { cut: words.scrollWidth - words.clientWidth, inside: box.left >= 0 && box.right <= document.documentElement.clientWidth };
+});
+
+/**
+ * Both pages' link traces (packages/core/src/linkTrace.ts), from their start and across a reload: with them, why each
+ * side's call ended (`call-end`). Kept with the report of a test that fails: a run found the connected call gone before
+ * the notice, and its Playwright trace, wiped by a later run, said nothing of why.
+ */
+const linkLines: string[] = [];
+const traced = { beforeOpen: async (context: BrowserContext) => { await context.addInitScript(() => { (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true; }); } };
+const keepLinkTrace = (peer: Peer) => peer.page.on("console", (message) => {
+  const text = message.text();
+  if (text.startsWith("[ghostly:link] ")) linkLines.push(`${peer.name} ${text.slice(15)}`);
+});
+test.afterEach(async ({}, testInfo) => {
+  if (linkLines.length && testInfo.status !== testInfo.expectedStatus) await testInfo.attach("link trace", { body: linkLines.join("\n"), contentType: "text/plain" });
+  linkLines.length = 0;
+});
+
+/**
+ * On a 320 px phone a call's notices were cut to one line: "Fake Audio Input 1 desconectado. Usand…" lost what the call
+ * uses now (98 px of it), and "Contacto · … está compartiendo su p…" what is shared. They wrap onto another line now.
+ */
+test("on a 320 px phone a call's device and screen-share notices show their whole sentence", { tag: ["@feature:calls.devices", "@feature:calls.screen-share", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  const alice = await peer("alice", traced);
+  keepLinkTrace(alice);
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 568 }, ...traced });
+  keepLinkTrace(bob);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await bob.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "es" }));
+  });
+  await bob.page.reload();
+  await expect(bob.page.locator("html")).toHaveAttribute("lang", /^es/);
+  await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+  await bob.page.getByTestId("call-audio").click();
+  await alice.page.getByTitle("Accept audio call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  const first = await bob.page.evaluate(async () => (await navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === "audioinput" && d.label === "Fake Audio Input 1")!.deviceId);
+  await bob.page.getByTestId("call-devices").click();
+  await bob.page.locator(`[data-testid=call-device-audioinput][data-device-id="${first}"]`).click();
+  await expect(bob.page.getByTestId("call-devices-menu")).toHaveCount(0);
+  const notice = bob.page.getByTestId("call-device-notice");
+  await unplug(bob, first);
+  await expect(notice).toHaveAttribute("data-type", "lost");
+  expect(await wholeText(notice)).toEqual({ cut: 0, inside: true });
+  await unplug(bob, null);
+  await expect(notice).toHaveAttribute("data-type", "back");
+  expect(await wholeText(notice)).toEqual({ cut: 0, inside: true });
+  await notice.getByRole("button", { name: "Cerrar" }).click();
+
+  await alice.page.getByTestId("share-screen").click();
+  const sharing = bob.page.getByTestId("call-sharing");
+  await expect(sharing).toHaveText(/está compartiendo su pantalla$/);
+  expect(await wholeText(sharing)).toEqual({ cut: 0, inside: true });
+  await bob.page.getByTestId("call-hang-up").click();
+  await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+});
+
+test("on a phone the notice that the contact shares their screen is clear of your own picture",{ tag: ["@feature:calls.video", "@feature:calls.screen-share", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const alice = await peer("alice");
   const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
   await link(alice, bob);

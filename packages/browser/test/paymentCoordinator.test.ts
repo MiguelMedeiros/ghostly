@@ -50,6 +50,39 @@ describe('outcomes that must not turn into a second payment',()=>{
   expect(f.records.size).toBe(0);
  });
 });
+describe('a status check that changes nothing',()=>{
+ /** A payment on its way: approved, its first check made (it now reads "not yet confirmed"). */
+ async function onItsWay(){
+  const records=fixture(),changed=vi.fn();
+  vi.mocked(records.adapter.execute).mockResolvedValue({txid:'t',settled:false});
+  vi.mocked(records.adapter.reconcile).mockResolvedValue({txid:'t',settled:false,pending:true});
+  const coordinator=new PaymentCoordinator(records.repo,[records.adapter],changed);
+  const r=await coordinator.prepare(target(),100,2,{payee:'Bob'});
+  await coordinator.approve(r.id);await coordinator.reconcile(r.id);
+  const put=vi.spyOn(records.repo,'put');changed.mockClear();
+  return{...records,coordinator,changed,put,id:r.id};
+ }
+ it('writes nothing and tells nobody, round after round',async()=>{
+  const f=await onItsWay();
+  for(let i=0;i<5;i++)expect(await f.coordinator.reconcile(f.id)).toMatchObject({state:'submitted',error:expect.any(String)});
+  expect(f.adapter.reconcile).toHaveBeenCalledTimes(6);
+  expect(f.put).not.toHaveBeenCalled();
+  expect(f.changed).not.toHaveBeenCalled();
+ });
+ it('a new state, a new error or something the adapter learned is still written and told',async()=>{
+  const f=await onItsWay();
+  // Learned in place, as Cashu keeps a token it recovered: saved with the intent.
+  vi.mocked(f.adapter.reconcile).mockImplementationOnce(async(_review,prepared)=>{(prepared as {token?:string}).token='recovered';return{txid:'t',settled:false,pending:true};});
+  await f.coordinator.reconcile(f.id);
+  expect(f.records.get(f.id)?.prepared).toMatchObject({token:'recovered'});
+  vi.mocked(f.adapter.reconcile).mockRejectedValueOnce(new Error('offline'));
+  expect((await f.coordinator.reconcile(f.id)).state).toBe('unknown');
+  vi.mocked(f.adapter.reconcile).mockResolvedValueOnce({txid:'t',settled:true});
+  expect((await f.coordinator.reconcile(f.id)).state).toBe('settled');
+  expect(f.put).toHaveBeenCalledTimes(3);
+  expect(f.changed.mock.calls.map(([review])=>review.state)).toEqual(['submitted','unknown','settled']);
+ });
+});
 describe('reviews no Approve can send any more',()=>{
  it('an abandoned review past its expiry is cancelled as Cancel does, and stays in the store; a fresh one is not',async()=>{
   const f=fixture();const release=vi.fn(async()=>{});f.adapter.release=release;
@@ -72,5 +105,38 @@ describe('reviews no Approve can send any more',()=>{
   const dropped=await f.coordinator.dropStale(Date.now(),r=>r.requestId==='a'||r.requestId==='b');
   expect(dropped.map(r=>r.requestId)).toEqual(['a']);
   expect(['b','c','d'].map(id=>[...f.records.values()].find(v=>v.review.requestId===id)?.review.state)).toEqual(['submitted','unknown','settled']);
+ });
+});
+describe('news while the payment is being asked about',()=>{
+ /** A gate an adapter call waits on, opened by the test. */
+ const gate=()=>{let open!:()=>void;const opened=new Promise<void>(r=>{open=r;});return{open,opened};};
+ it('the contact taking it while Approve is still asking the mint settles it at once, not at the next poll',async()=>{
+  const f=fixture(),asking=gate(),seen=gate();
+  // Approve sends the token and asks the mint, which reads it not taken yet; the contact takes it meanwhile.
+  vi.mocked(f.adapter.execute).mockImplementationOnce(async()=>{seen.open();await asking.opened;return{txid:'t',settled:false};});
+  vi.mocked(f.adapter.reconcile).mockResolvedValue({txid:'t',settled:true});
+  const r=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  const approved=f.coordinator.approve(r.id);
+  await seen.opened;
+  const news=f.coordinator.reconcile(r.id);
+  asking.open();
+  expect((await approved).state).toBe('submitted');
+  expect((await news).state).toBe('settled');
+  expect(f.records.get(r.id)?.review.state).toBe('settled');
+  expect(f.adapter.reconcile).toHaveBeenCalledOnce();
+ });
+ it('news during a status check asks once more after it, and news from several callers meanwhile shares that one',async()=>{
+  const f=fixture(),asking=gate(),seen=gate();
+  vi.mocked(f.adapter.execute).mockResolvedValue({txid:'t',settled:false});
+  const r=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  await f.coordinator.approve(r.id);
+  vi.mocked(f.adapter.reconcile).mockImplementationOnce(async()=>{seen.open();await asking.opened;return{txid:'t',settled:false,pending:true};}).mockResolvedValue({txid:'t',settled:true});
+  const poll=f.coordinator.reconcile(r.id);
+  await seen.opened;
+  const [a,b]=[f.coordinator.reconcile(r.id),f.coordinator.reconcile(r.id)];
+  asking.open();
+  expect((await poll).state).toBe('submitted');
+  expect([(await a).state,(await b).state]).toEqual(['settled','settled']);
+  expect(f.adapter.reconcile).toHaveBeenCalledTimes(2);
  });
 });

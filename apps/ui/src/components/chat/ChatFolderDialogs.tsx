@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { FOLDER_NAME_MAX, folderName } from "../../lib/chatFolders";
+import { draftDirection } from "../../lib/documentLanguage";
 
 const DIALOG = "m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60";
 const QUIET = "min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent";
@@ -40,7 +41,7 @@ export function FolderNameDialog({ name = "", onClose, onSave, returnFocus }: { 
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="folder-name-dialog" className={DIALOG}>
     <h2 id={`${id}-title`} className="text-base font-semibold">{name ? t("sidebar.folder.rename") : t("sidebar.folder.newTitle")}</h2>
     <form className="mt-4" onSubmit={e => { e.preventDefault(); if (kept) onSave(kept); }}>
-      <input ref={input} value={value} onChange={e => setValue(e.target.value)} maxLength={FOLDER_NAME_MAX} placeholder={t("sidebar.folder.nameLabel")} aria-label={t("sidebar.folder.nameLabel")} data-testid="folder-name"
+      <input ref={input} value={value} dir={draftDirection(value)} onChange={e => setValue(e.target.value)} maxLength={FOLDER_NAME_MAX} placeholder={t("sidebar.folder.nameLabel")} aria-label={t("sidebar.folder.nameLabel")} data-testid="folder-name"
         className="w-full rounded-lg bg-input-bg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent" />
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className={QUIET}>{t("common.cancel")}</button>

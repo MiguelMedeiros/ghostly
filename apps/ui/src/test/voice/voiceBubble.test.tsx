@@ -184,6 +184,10 @@ describe("the voice bubble's layout", () => {
 
     await clickPlay();
     expect(within(meta).getByTestId("voice-speed")).toHaveTextContent("1×");
+    // As tall as its line, drawn; on a phone a tap lands on 44 px of height around it (18 + 2 × 13), and from its start
+    // past its end (its 34 px + 12): not back over the play button's own area. The measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts).
+    expect(within(meta).getByTestId("voice-speed")).toHaveClass("max-md:before:-inset-y-[13px]", "max-md:before:start-0", "max-md:before:-end-3");
     expect(row.children).toHaveLength(2);
   });
 

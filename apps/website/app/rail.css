@@ -168,6 +168,42 @@
   }
 }
 
+/* Forced colors (Windows high contrast) replace every background with the
+ * page's and drop box-shadows: the line, its fill and the dots are backgrounds
+ * alone and a focused dot's ring is a shadow, so the rail vanished there.
+ * System colours draw them instead, the current dot in Highlight, and a
+ * focused dot gets an outline. */
+@media (forced-colors: active) {
+  .rail-track,
+  .rail-fill,
+  .rail-mark {
+    forced-color-adjust: none;
+  }
+  .rail-track,
+  .rail[data-on="true"] .rail-track {
+    background: GrayText;
+  }
+  .rail-fill,
+  .rail-mark[data-past="true"],
+  .rail-mark:hover {
+    background: CanvasText;
+  }
+  .rail-mark {
+    background: GrayText;
+  }
+  .rail-mark[aria-current="true"],
+  .rail-mark:focus-visible {
+    background: Highlight;
+  }
+  .rail-mark:focus-visible {
+    outline: 1px solid Highlight;
+    outline-offset: 2px;
+  }
+  .rail-mark:focus-visible::before {
+    box-shadow: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail,
   .rail[data-on="true"],

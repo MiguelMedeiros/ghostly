@@ -94,6 +94,26 @@ pub fn usable(servers: &[IceServer]) -> Vec<IceServer> {
         .collect()
 }
 
+/// Hide my IP from contacts (WISP 601, Relay only): the servers' TURN URLs alone, a server with none left out, as
+/// the page's `callRtcConfig` keeps them under the relay policy.
+pub fn relays(servers: &[IceServer]) -> Vec<IceServer> {
+    servers
+        .iter()
+        .filter_map(|server| {
+            let urls: Vec<String> = server
+                .urls
+                .iter()
+                .filter(|url| is_turn(url))
+                .cloned()
+                .collect();
+            (!urls.is_empty()).then(|| IceServer {
+                urls,
+                ..server.clone()
+            })
+        })
+        .collect()
+}
+
 /// Whether a TURN server is among them: gathering then waits for a relay candidate, as the page's
 /// `waitForIceGathering` does, rather than leave with the reflexive one.
 pub fn uses_turn(servers: &[IceServer]) -> bool {
@@ -163,6 +183,21 @@ mod tests {
             Some("u"),
             Some("c")
         )]));
+    }
+
+    #[test]
+    fn relay_only_keeps_the_turn_urls_alone() {
+        let kept = relays(&[
+            server(&["stun:a.example.org"], None, None),
+            server(
+                &["stun:b.example.org", "turns:b.example.org:5349"],
+                Some("u"),
+                Some("c"),
+            ),
+        ]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].urls, ["turns:b.example.org:5349"]);
+        assert_eq!(kept[0].credential.as_deref(), Some("c"));
     }
 
     #[test]

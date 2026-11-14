@@ -45,8 +45,8 @@ test("each timeline says when the chat went live, a quick reconnect stays in the
   await expect(panel.getByRole("radio", { name: "WebRTC", exact: true })).toHaveAttribute("data-in-use", "");
   await expect(panel.getByRole("radio", { name: "WebRTC", exact: true })).toHaveText(/^WebRTCIn use( · \d+ ms)?$/);
   await expect(panel.getByRole("radio", { name: "Iroh", exact: true })).toBeDisabled();
-  await expect(panel.getByRole("radio", { name: "Iroh", exact: true })).toHaveAttribute("title", "Iroh: Iroh needs Ghostly Desktop");
-  await expect(panel.getByRole("radio", { name: "HyperDHT", exact: true })).toHaveAttribute("title", "HyperDHT: HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings");
+  await expect(panel.getByRole("radio", { name: "Iroh", exact: true })).toHaveAttribute("title", "Iroh needs Ghostly Desktop");
+  await expect(panel.getByRole("radio", { name: "HyperDHT", exact: true })).toHaveAttribute("title", "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings");
   await expect(panel.getByRole("radio", { name: "DHT only", exact: true })).toHaveAttribute("aria-checked", "false");
   // Why this transport is under Details.
   await panel.getByTestId("connection-details-summary").click();

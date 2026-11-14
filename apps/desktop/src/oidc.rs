@@ -52,8 +52,15 @@ struct LinkWait {
     answer: oneshot::Sender<String>,
 }
 
+/// The listeners by port; the deep-link sign-in waiting; whether this process ever waited for one; and an answer that
+/// came for a sign-in of a process before this one, until the page hears of it ([`OidcState::interrupted`]).
 #[derive(Default)]
-pub struct OidcState(Mutex<HashMap<u16, Pending>>, Mutex<Option<LinkWait>>);
+pub struct OidcState(
+    Mutex<HashMap<u16, Pending>>,
+    Mutex<Option<LinkWait>>,
+    AtomicBool,
+    AtomicBool,
+);
 
 impl OidcState {
     /// Waits for the deep link answering `state`. One sign-in at a time: one waiting before is dropped (its wait
@@ -64,7 +71,29 @@ impl OidcState {
             state: state.to_string(),
             answer,
         });
+        self.2.store(true, Ordering::SeqCst);
+        // A new sign-in is under way: an interrupted one is no longer news.
+        self.3.store(false, Ordering::SeqCst);
         waiting
+    }
+
+    /// A deep link's answer that [`answer`](Self::answer) did not take. When this process never waited for one, the
+    /// sign-in it answers was started by a process Android ended while the browser was in front: it was interrupted,
+    /// and true (the page is told, `oidc-interrupted`, and kept so until it asks: [`oidc_interrupted`]). Any other
+    /// (another state, a second answer) is dropped, and false.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn not_taken(&self, answer: &str) -> bool {
+        let interrupted = !self.2.load(Ordering::SeqCst)
+            && state_of(answer).is_some_and(|state| state.starts_with(APP_STATE));
+        if interrupted {
+            self.3.store(true, Ordering::SeqCst);
+        }
+        interrupted
+    }
+
+    /// Whether a sign-in was interrupted ([`not_taken`](Self::not_taken)), taken: said once.
+    fn interrupted(&self) -> bool {
+        self.3.swap(false, Ordering::SeqCst)
     }
 
     /// A deep link's answer ("?query#fragment"): handed to the sign-in waiting for its state, and true; any other
@@ -559,6 +588,13 @@ async fn wait_for_link(
             Err("Sign-in timed out. Try again.".into())
         }
     }
+}
+
+/// Whether a sign-in's answer came after Android ended the process that started it, taken: the page asks once it
+/// listens for `oidc-interrupted`, as the answer that started the app came before it did. Always false off Android.
+#[tauri::command]
+pub fn oidc_interrupted(state: tauri::State<'_, OidcState>) -> bool {
+    state.interrupted()
 }
 
 /// Stops waiting; the port closes (port 0: the deep link is no longer awaited).
@@ -1235,6 +1271,45 @@ mod command_tests {
         state.link_cancel();
         assert_eq!(waiting.await.unwrap().unwrap_err(), "Sign-in cancelled");
         assert!(!state.answer(&format!("?code=c&state={APP}")));
+    }
+
+    #[tokio::test]
+    async fn an_answer_for_a_sign_in_of_an_ended_process_says_it_was_interrupted_once() {
+        // covers: proofs.oidc.callback.android
+        let app = app();
+        let answer = format!("?code=c&state={APP}");
+        // A new process (Android ended the one that asked): nobody waits, and none was ever asked for here.
+        let state = app.state::<OidcState>();
+        assert!(!state.answer(&answer));
+        assert!(!state.not_taken("?code=c"), "no state");
+        assert!(
+            !state.not_taken(&format!("?code=c&state={STATE}")),
+            "a loopback state"
+        );
+        assert!(!oidc_interrupted(app.state()));
+        assert!(state.not_taken(&answer));
+        assert!(oidc_interrupted(app.state()), "the page hears of it");
+        assert!(!oidc_interrupted(app.state()), "once");
+
+        // Kept until the page asks, unless a new sign-in starts first.
+        assert!(state.not_taken(&answer));
+        let state = Arc::new(OidcState::default());
+        assert!(state.not_taken(&answer));
+        let waiting = {
+            let state = state.clone();
+            tokio::spawn(async move { wait_for_link(&state, AUTHORIZE, APP, |_| Ok(())).await })
+        };
+        while state.1.lock().unwrap().is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(!state.interrupted(), "a new sign-in started");
+        // This process asked: a stray or second answer is only dropped.
+        assert!(!state.not_taken("?code=c&state=a.other"));
+        assert!(state.answer(&answer));
+        assert!(!state.answer(&answer));
+        assert!(!state.not_taken(&answer));
+        assert!(!state.interrupted());
+        assert!(waiting.await.unwrap().is_ok());
     }
 
     #[test]

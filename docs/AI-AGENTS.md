@@ -83,8 +83,9 @@ also named `ghostly`, so install it or the CLI's skill above under that name, no
 | `ghostly task send` / `task update` | a task card: status, progress, the step it is on, how long it has run and its pull request, updated in place ([WISP 405 · Status Cards](wisps/405-status-cards.md)) |
 | `ghostly routine send` / `routine update` | a routine card for a scheduled job: its schedule, last run and next run |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` (`group send --mention <member>`) |
+| `ghostly group auto on --from <chat>` | join the groups its owner invites it to by itself, only over the chats named |
 | `ghostly file send` / `file send --voice` | send a file or a voice note |
-| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech) |
+| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech; set it up with [Talk to an AI by voice](VOICE-AGENT.md)) |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |
 
 Task and routine cards need a `ghostly` newer than 1.0.0 (`ghostly help task` tells).
@@ -119,7 +120,7 @@ The contract:
 
 | Part | What |
 |---|---|
-| In | Each `message.received`, and each `group.message` that mentions the agent, starts one turn: `ghostly listen --turns` makes it one `agent.turn` event. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
+| In | Each `message.received`, and each `group.message` that mentions the agent or presses a button of its question, starts one turn: `ghostly listen --turns` makes it one `agent.turn` event. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
 | Allowlist | Per contact and per group (`listen --from <chat>`, `--group <group>`), checked before the agent wakes. Anyone else's message is kept in the chat and never reaches the agent. |
 | Data, not instructions | The connector hands the agent a contact's text as quoted data, under `untrusted` in the turn, never in a command's arguments. It cannot stop a model from being persuaded, so the agent that answers has no tools ([Safe setup](#safe-setup)); real payments keep `--confirm-real`, given only by the wallet's owner. |
 | Out | `send` (with `--reply`), `typing --kind thinking --status "<text>"` while the agent works, `file send --voice` for a voice note, `file send` for a file, `react`. |

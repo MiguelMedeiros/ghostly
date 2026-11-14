@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.services, headless.identities, headless.chat
 
 /**
@@ -17,7 +18,7 @@ function fake() {
     { linkId: "chat-one", id: "peer_1", text: "their words", sender: "peer", timestamp: 3, via: "datalink" },
   ];
   const node = {
-    getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
+    chatView: chatViewOf, getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }],
       identityProofs: [{ id: "proof-1", provider: "github", subject: "ana", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] }],
       payments: { "pay-1": { id: "pay-1", linkId: "chat-one", kind: "request", direction: "in", state: "pending", amount: 21, createdAt: 1 } },
@@ -79,7 +80,7 @@ describe("an identity proof or a draft that is not there", () => {
 describe("a message that is not there", () => {
   it("is not_found for retry, read as one row; one that is there is retried", async () => {
     const { ctx, node } = fake();
-    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
+    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
     expect(node.retryMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.retry", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1" });
     expect(node.retryMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
@@ -88,7 +89,7 @@ describe("a message that is not there", () => {
   it("a delivered message, or the contact's own, is refused for retry and the engine is not asked", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "refused", message: "Nothing to send again: it was delivered" });
-    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "peer_1" })).rejects.toMatchObject({ code: "not_found", message: "No message peer_1 of yours in this chat: only your own messages are sent again" });
+    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "peer_1" })).rejects.toMatchObject({ code: "not_found", message: 'No message "peer_1" of yours in this chat: only your own messages are sent again (ghostly chat history Alice)' });
     expect(node.retryMessage).not.toHaveBeenCalled();
   });
 });

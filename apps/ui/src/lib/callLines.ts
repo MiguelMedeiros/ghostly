@@ -23,6 +23,15 @@ export function callsBlockedText(t: Translate, reason: string | null | undefined
 }
 
 /**
+ * Whether the contact's app coming live is all a paired chat lacks to call (`callsBlockedText`'s reason): then a
+ * wake-up may ring it (`useWakeCall`). Not when this app cannot call at all (a Linux Desktop without GStreamer's
+ * plugins): the contact would be woken, shown "Incoming call", for a call that never starts.
+ */
+export function callsWaitForLive(reason: string | null | undefined): boolean {
+  return reason === undefined || reason === "Calls need a live connection";
+}
+
+/**
  * A call's line, in the person's language: the history keeps it in English (Chat.tsx `addCallEventMessage`), with its
  * kind beside it, and how many calls it stands for (`callLineCount`). The timeline (MessageBubble) and the chat
  * list's last line say it the same way.

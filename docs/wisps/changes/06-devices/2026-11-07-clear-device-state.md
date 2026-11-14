@@ -1,0 +1,1 @@
+Durable device state says what drops a profile's record and device signing key on a device: removing the profile, and "Clear all data" ([04](../../04-profiles.md#security-and-privacy)), after which the profile starts as `single`. Neither tells the other devices.

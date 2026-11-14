@@ -33,7 +33,7 @@ describe("a message handed on is checked once", { timeout: 120_000 }, () => {
   it("a 256-message catch-up from a helper: one check per message, every message whole", async () => {
     const { mesh, alice, bob, carol } = await three();
     away(mesh, bob, [alice, carol]);
-    for (let i = 1; i <= 256; i++) await carol.sendText(`m${i}`, i * 100);
+    for (let i = 1; i <= 256; i++) { mesh.tick(400); await carol.sendText(`m${i}`, i * 100); }
     await mesh.settle();
     away(mesh, carol, [alice]);
     verifies.length = 0;

@@ -35,9 +35,23 @@ test("on a phone: an English message reads left to right in the Arabic app, an A
   await connect(alice, bob);
   await useLanguage(alice.page, "ar");
 
-  // Alice writes Arabic: right to left in Bob's English app, while his own English stays left to right.
+  // The message field reads a draft in its own direction too, as its bubble will; empty, it keeps the app's.
   const field = alice.page.locator(".composer-row textarea");
+  expect(await direction(field)).toBe("rtl");
+  await field.fill("👍 2");
+  expect(await direction(field)).toBe("rtl");
+  await field.fill("draft kept?");
+  expect(await direction(field)).toBe("ltr");
+  const bobField = bob.page.locator(".composer-row textarea");
+  expect(await direction(bobField)).toBe("ltr");
+  await bobField.fill("مرحبا يا صديقي!");
+  expect(await direction(bobField)).toBe("rtl");
+  await bobField.fill("");
+  expect(await direction(bobField)).toBe("ltr");
+
+  // Alice writes Arabic: right to left in Bob's English app, while his own English stays left to right.
   await field.fill("مرحبا يا صديقي!");
+  expect(await direction(field)).toBe("rtl");
   await field.press("Enter");
   const arabic = chat(bob).getByTestId("message-body").filter({ hasText: "مرحبا يا صديقي!" });
   await expect(arabic).toBeVisible();
@@ -126,4 +140,14 @@ test("in Arabic an invoice card's amount reads ⚡, the number, then its unit, f
   // Apart from the number, by the unit's start margin.
   expect(words.number.left - words.sats.right).toBeGreaterThanOrEqual(2);
   expect(words.test.right).toBeLessThanOrEqual(words.sats.left);
+});
+
+test("in Arabic the Ghostly ID card's One key per chat keeps the app's font, so its letters stay joined", { tag: ["@feature:app.i18n", "@feature:proofs.ghostly-card"] }, async ({ peer }) => {
+  const { page } = await peer("ar-id-card", { mobile: true });
+  await useLanguage(page, "ar");
+  await page.getByTestId("mobile-tab-identities").click();
+  // A monospace font draws Arabic letters apart in fixed cells ("م ح ا د ث ة"); the words take the app's font.
+  const subject = page.locator(".id-card-subject:visible").filter({ hasText: "مفتاح لكل محادثة" }).first();
+  await expect(subject).toBeVisible();
+  expect(await subject.evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
 });

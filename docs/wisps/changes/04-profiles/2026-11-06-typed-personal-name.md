@@ -1,0 +1,1 @@
+Registry version 2: the built-in name is marked on its entry (`builtIn: true`), and only a marked entry is shown in the app's language. A profile the user names `Personal`, the default one renamed so included, is kept as written, and its backup says the name is not the built-in one. A version 1 registry is read as before, every entry named `"Personal"` marked.

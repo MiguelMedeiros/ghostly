@@ -67,6 +67,11 @@ impl Gathering {
         self.changed.notify_waiters();
     }
 
+    #[cfg(test)]
+    pub fn gathered(&self) -> Vec<String> {
+        self.candidates.lock().unwrap().0.clone()
+    }
+
     /// Forgets the candidates gathered so far: the description being made waits for this round's own.
     pub fn anew(&self) {
         *self.candidates.lock().unwrap() = (Vec::new(), false);

@@ -1,4 +1,6 @@
-import { screen } from "@testing-library/react";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { describe, expect, it } from "vitest";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -36,6 +38,24 @@ describe("component test harness", () => {
   it("speaks the language in the settings", () => {
     renderApp(<Probe />, { language: "pt" });
     expect(screen.getByText(/Ajustes/)).toBeInTheDocument();
+  });
+
+  // A link in a message opens in a new tab (target="_blank"), and happy-dom loads that tab's page: a test that clicked
+  // a message's github.com link reached GitHub on every run, CI's included.
+  it("loads nothing for a link a test follows to a new tab", async () => {
+    let asked!: () => void;
+    const reached = new Promise<string>((resolve) => { asked = () => resolve("asked"); });
+    const server = createServer((_, res) => { asked(); res.end("<p>page</p>"); });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      render(<a href={`http://127.0.0.1:${port}/page`} target="_blank" rel="noopener noreferrer">page</a>);
+      fireEvent.click(screen.getByRole("link", { name: "page" }));
+      expect(await Promise.race([reached, new Promise((resolve) => setTimeout(resolve, 500, "nothing asked"))])).toBe("nothing asked");
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
 

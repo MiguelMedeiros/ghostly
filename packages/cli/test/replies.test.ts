@@ -9,6 +9,7 @@ import { TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.replies
 
 /** `--reply` on send and group send, and `replyTo` on what the stream says about a message. */
@@ -19,7 +20,7 @@ const WIRE = "-".concat("A".repeat(21));
 
 function fake(sendResult: { error: string | null; refused?: boolean; messageId?: string } = { error: null, messageId: "me_2" }) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => sendResult),
@@ -46,7 +47,7 @@ describe("--reply", () => {
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "on it", replyTo: "k:0:1" });
     const refused = fake({ error: "That message is not in this chat, or cannot be replied to", refused: true });
     // It was `refused` (exit 1) here and `not_found` (exit 3) from `file send --reply`, with the same sentence.
-    await expect(callApi(refused.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "nope" })).rejects.toMatchObject({ code: "not_found", message: "That message is not in this chat, or cannot be replied to" });
+    await expect(callApi(refused.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat, or it cannot be replied to (ghostly chat history Alice)' });
     const other = fake({ error: "The contact's app takes no replies", refused: true });
     await expect(callApi(other.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "peer_abc" })).rejects.toMatchObject({ code: "refused" });
   });

@@ -1036,6 +1036,30 @@ describe("DataLink says what each attempt showed about direct connections (direc
     expect(onDirect).not.toHaveBeenCalled();
   });
 
+  // agents#1637: a hub's edges answered their members' offers while 12 chats' publishes took the relays' budget. No
+  // answer got out, the attempts ended, and each was taken for a network with no public candidate: the edge went native
+  // for the run, with no listener free, and the member was not reached again (~17 min).
+  it("an answer the relays never took says nothing of the network when the attempt ends", async () => {
+    const onDirect = vi.fn();
+    let out = false;
+    const b = link("bbbb", "aaaa", () => {}, { onDirect, offerStanding: () => true, signalOut: () => out });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    for (let again = 0; again <= REANSWERS; again++) {
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(b.dl.state).toBe("idle");
+    expect(onDirect).not.toHaveBeenCalled();
+    // The same attempt with its answer out says what it always did.
+    out = true;
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: Date.now() + 1 })));
+    for (let again = 0; again <= REANSWERS; again++) {
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+
   it("a connection that gathers no candidate at all, every time, says this device has no public candidate", async () => {
     const onDirect = vi.fn();
     const a = link("aaaa", "bbbb", pc => { pc.stalls = true; pc.iceGatheringState = "gathering"; }, { onDirect });
@@ -1043,5 +1067,39 @@ describe("DataLink says what each attempt showed about direct connections (direc
     await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
     await connecting;
     expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+
+  // A browser on a network that blocks direct connections gathers nothing, and its chat went live over Iroh while its
+  // third connection was still gathering: the attempt said nothing, and the note waited on a later one (e2e, 2026-11-13).
+  it("a gathering that found nothing but on its last connection says no public candidate when another transport takes over", async () => {
+    const stalling = (pc: FakePeerConnection) => { pc.stalls = true; pc.iceGatheringState = "gathering"; };
+    const onDirect = vi.fn();
+    const a = link("aaaa", "bbbb", stalling, { onDirect });
+    void a.dl.connect();
+    await vi.advanceTimersByTimeAsync((GATHER_ATTEMPTS - 1) * GATHER_STALL_MS);
+    expect(a.pcs).toHaveLength(GATHER_ATTEMPTS);
+    a.dl.close();
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+    expect(a.dl.state).toBe("idle");
+
+    // One that has stalled once may be Chromium under load: nothing yet. Nor is anything said later for it.
+    const once = vi.fn();
+    const b = link("aaaa", "bbbb", stalling, { onDirect: once });
+    void b.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS);
+    b.dl.close();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    expect(once).not.toHaveBeenCalled();
+  });
+
+  it("a gathering that found nothing but on its last connection says no public candidate when the contact's offer takes its place", async () => {
+    const onDirect = vi.fn();
+    const b = link("bbbb", "aaaa", pc => { pc.stalls = true; pc.iceGatheringState = "gathering"; }, { onDirect });
+    void b.dl.connect();
+    await vi.advanceTimersByTimeAsync((GATHER_ATTEMPTS - 1) * GATHER_STALL_MS);
+    // The lower key's offer wins the glare: this side answers it, on a gathering of its own.
+    void b.dl.handleSignal(JSON.stringify(offerFrom({ ts: Date.now() })));
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+    expect(b.dl.state).toBe("answering");
   });
 });

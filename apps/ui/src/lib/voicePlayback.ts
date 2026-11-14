@@ -113,22 +113,48 @@ export function formatVoiceRate(rate: number, locale: string): string {
 const MAX_PLAYED = 2000;
 const playedKey = () => `${getPrefix()}voice_played`;
 
-function playedIds(): string[] {
+/**
+ * The stored list, read once for the profile this page runs as: every received voice bubble asks on mount, and the
+ * list is up to 2,000 ids. Read again when another page of the app writes it (or clears the storage), or when the
+ * prefix changes.
+ */
+interface Played { key: string; order: string[]; ids: Set<string> }
+let played: Played | null = null;
+let listening = false;
+
+function playedIds(): Played {
+  const key = playedKey();
+  if (played?.key === key) return played;
+  let order: string[] = [];
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(playedKey()) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    if (Array.isArray(parsed)) order = parsed.filter((id): id is string => typeof id === "string");
+  } catch { /* none played yet, as far as this page knows */ }
+  played = { key, order, ids: new Set(order) };
+  if (!listening && typeof window !== "undefined") {
+    listening = true;
+    window.addEventListener("storage", (event) => { if (!event.key || event.key === played?.key) played = null; });
   }
+  return played;
+}
+
+/** Tests: the next question reads the stored list again (a test clears the storage under it). */
+export function forgetVoicePlayed(): void {
+  played = null;
 }
 
 export function isVoicePlayed(fileId: string): boolean {
-  return playedIds().includes(fileId);
+  return playedIds().ids.has(fileId);
 }
 
 export function markVoicePlayed(fileId: string): void {
-  const ids = playedIds();
-  if (ids.includes(fileId)) return;
-  ids.push(fileId);
-  try { localStorage.setItem(playedKey(), JSON.stringify(ids.slice(-MAX_PLAYED))); } catch { /* shown as played until the page reloads */ }
+  const list = playedIds();
+  if (list.ids.has(fileId)) return;
+  list.order.push(fileId);
+  list.ids.add(fileId);
+  if (list.order.length > MAX_PLAYED) {
+    list.order = list.order.slice(-MAX_PLAYED);
+    list.ids = new Set(list.order);
+  }
+  try { localStorage.setItem(list.key, JSON.stringify(list.order)); } catch { /* shown as played until the page reloads */ }
 }

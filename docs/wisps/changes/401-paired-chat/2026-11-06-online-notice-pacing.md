@@ -1,0 +1,1 @@
+online notices go out ten at a time, the rest a minute later to the contacts still away then, so a push relay's 30 a minute keep room for a call or message wake-up sent right after the app comes online.

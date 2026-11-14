@@ -36,6 +36,8 @@ jobs:
 
       # Every lockfile that ships (LOCKFILES in the script: the root's, the site's, the HyperDHT sidecar's and
       # relay's, Iroh for browsers') against osv.dev.
-      # Accepted advisories live in .github/security-allowlist.json, each with an expiry.
+      # Accepted advisories live in .github/security-allowlist.json, each with an expiry. An entry past it, or one that
+      # no advisory matched, fails the run; the morning run only warns about an unused one (OSV withdrew an advisory,
+      # nothing in the tree changed), and the next pull request fails until it is removed.
       - name: Scan lock files
-        run: node tools/scripts/security-scan.mjs
+        run: node tools/scripts/security-scan.mjs ${{ github.event_name == 'schedule' && '--warn-unused' || '' }}

@@ -8,14 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
-import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
+import { hashPassword, needsRehash } from "../lib/settings";
+import { lockRetryAt, tryLockPassword } from "../lib/lockAttempts";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
 import { onAppInput, stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
 import { pauseForLock } from "../lib/nowPlaying";
+import { lockSecuresWindow } from "../lib/secureWindow";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -59,11 +60,6 @@ export interface LockedCall {
 
 const LockScreenContext = createContext<LockScreenContextValue | null>(null);
 
-// Kept across reloads, or reloading would reset the pacing.
-const ATTEMPTS_KEY = "ghostly_lock_attempts";
-/** Failures allowed before the wait starts; then it doubles from 1 s, up to 5 minutes. */
-const FREE_ATTEMPTS = 3;
-const MAX_DELAY_MS = 5 * 60_000;
 /** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
 const LOCK_CHECK_MS = 30_000;
 /** The channel the app's pages of one origin hear Lock Now on (`lock`). */
@@ -79,40 +75,15 @@ function awayFromSwitcher(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
 }
 
-interface Attempts {
-  failures: number;
-  retryAt: number;
-}
-
-function loadAttempts(): Attempts {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(ATTEMPTS_KEY) ?? "") as Partial<Attempts>;
-    return { failures: Number(parsed.failures) || 0, retryAt: Number(parsed.retryAt) || 0 };
-  } catch {
-    return { failures: 0, retryAt: 0 };
-  }
-}
-
-function saveAttempts(attempts: Attempts | null): void {
-  try {
-    if (attempts) localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
-    else localStorage.removeItem(ATTEMPTS_KEY);
-  } catch {
-    // storage unavailable
-  }
-}
-
 export function LockScreenProvider({ children }: { children: ReactNode }) {
-  const { settings, updateLockScreen } = useSettings();
+  const { settings, updateLockScreen, followStored } = useSettings();
   const lockActive = settings.lockScreen.enabled && !!settings.lockScreen.passwordHash;
   // Locked from the first render: a reload must not skip the password, unless the app handed the lock it passed across.
   const [handed] = useState(() => lockActive && takeUnlockHandover(activeProfileId(), settings.lockScreen.passwordHash));
   const [isLocked, setIsLocked] = useState(lockActive && !handed);
   const [hasUnlocked, setHasUnlocked] = useState(!lockActive || handed);
-  const [retryAt, setRetryAt] = useState<number | null>(() => {
-    const { retryAt } = loadAttempts();
-    return retryAt > Date.now() ? retryAt : null;
-  });
+  // Wrong passwords are paced as everywhere this profile's password is checked (lib/lockAttempts.ts).
+  const [retryAt, setRetryAt] = useState<number | null>(() => lockRetryAt(activeProfileId()));
   const [covered, setCovered] = useState(false);
   const [ringing, setRinging] = useState<readonly LockedCall[]>([]);
   const offerCall = useCallback((call: LockedCall) => {
@@ -136,17 +107,15 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
   // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
   // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
-  useEffect(() => {
-    let host: BrowserHost;
-    try { host = getBrowserHost(); } catch { return; }
-    void host.hideFromSwitcher?.(lockActive).catch(() => {});
-  }, [lockActive]);
+  useEffect(() => lockSecuresWindow(lockActive), [lockActive]);
 
+  // The lock as stored, not as this page last had it: a password set in another tab locks this one too.
   const lockHere = useCallback(() => {
-    if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {
+    const { enabled, passwordHash } = followStored().lockScreen;
+    if (enabled && passwordHash) {
       setIsLocked(true);
     }
-  }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash]);
+  }, [followStored]);
 
   // The extension runs the app in several tabs at once: Lock Now in one locks them all, or the next tab would show
   // the chats to whoever clicks it. Only locking spreads; each tab is unlocked with the password on its own. The time
@@ -175,25 +144,10 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       const storedHash = settings.lockScreen.passwordHash;
       if (!storedHash) return true;
 
-      const attempts = loadAttempts();
-      if (attempts.retryAt > Date.now()) {
-        setRetryAt(attempts.retryAt);
-        return false;
-      }
+      const tried = await tryLockPassword(activeProfileId(), password, storedHash);
+      setRetryAt(tried.retryAt);
+      if (!tried.ok) return false;
 
-      const valid = await verifyPassword(password, storedHash);
-      if (!valid) {
-        const failures = attempts.failures + 1;
-        const delay =
-          failures < FREE_ATTEMPTS ? 0 : Math.min(MAX_DELAY_MS, 1000 * 2 ** (failures - FREE_ATTEMPTS));
-        const next = delay ? Date.now() + delay : 0;
-        saveAttempts({ failures, retryAt: next });
-        setRetryAt(next || null);
-        return false;
-      }
-
-      saveAttempts(null);
-      setRetryAt(null);
       setCovered(false);
       setIsLocked(false);
       setHasUnlocked(true);

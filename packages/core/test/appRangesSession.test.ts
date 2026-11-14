@@ -218,17 +218,35 @@ describe("the read lane on a paired session (app-ranges/1)", () => {
     expect(a.tasks[0].live).toBe(false);
   });
 
-  it("a session that ends takes its serve ids with it", async () => {
+  it("a session change ends the reads in flight, and the same serve id is read again on the next session", async () => {
     const { a, b } = await pair({ hold: true });
     await opened(a, b);
     const served = a.link.serveAppFile(APP, "film") as { serve: string };
     const reading = b.link.readAppRange(APP, served.serve, 0, 1);
     await vi.waitFor(() => expect(a.tasks).toHaveLength(1));
+    // A resume, a re-dial or a transport switch: the apps are held across it, and so are their serves. On dev the
+    // serve died here while the app heard only `open` again and its header still said it shared the film.
     a.channel!.close();
     expect(await settled(reading)).toEqual({ error: "offline" });
     await vi.waitFor(() => expect(a.link.isDataLinkOpen).toBe(false));
-    expect(a.link.appServes(APP)).toEqual([]);
     expect(a.tasks[0].live).toBe(false);
+    expect(a.link.appServes(APP)).toEqual([served.serve]);
+    await a.link.connect(10_000);
+    await vi.waitFor(() => expect(a.link.peerApps.has(APP) && b.link.peerApps.has(APP)).toBe(true));
+    const again = b.link.readAppRange(APP, served.serve, 10, 10);
+    await vi.waitFor(() => expect(a.tasks).toHaveLength(2));
+    expect(a.tasks[1]).toMatchObject({ serve: served.serve, file: "film", offset: 10, length: 10, live: true });
+    void a.link.sendAppRange(a.tasks[1], FILM.subarray(10, 20), FILM.length);
+    expect(await settled(again)).toEqual({ value: { bytes: FILM.subarray(10, 20), size: FILM.length } });
+  });
+
+  it("a contact that does not come back within the grace closes its app, and that ends the serves", async () => {
+    const { a, b } = await pair({ hold: true, a: { appResumeGraceMs: 50 } });
+    await opened(a, b);
+    a.link.serveAppFile(APP, "film");
+    a.channel!.close();
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen).toBe(false));
+    await vi.waitFor(() => expect(a.link.appServes(APP)).toEqual([]));
   });
 
   it("a contact's get and cancel loop meets busy past 4 until this side settles what it was reading", async () => {
@@ -252,6 +270,28 @@ describe("the read lane on a paired session (app-ranges/1)", () => {
     for (const r of [50, 51, 52]) raw({ t: "ar-get", a: APP, s: served.serve, r, o: 0, n: 1 });
     await vi.waitFor(() => expect(busy()).toBe(50 - APP_RANGE_LIMITS.inFlight + 1));
     expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight + 2);
+  });
+
+  it("a contact that closes and opens its app again meets busy past 4 until this side settles what it was reading", async () => {
+    const { a, b } = await pair({ hold: true });
+    await opened(a, b);
+    const raw = (frame: object) => b.channel!.send(JSON.stringify(frame));
+    const busy = () => rangeFrames(a.channel!).filter(data => (data as string).includes('"busy"')).length;
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const served = a.link.serveAppFile(APP, "film") as { serve: string };
+      for (let r = 0; r < 5; r++) raw({ t: "ar-get", a: APP, s: served.serve, r, o: 0, n: APP_RANGE_LIMITS.requestBytes });
+      await vi.waitFor(() => expect(busy()).toBe(cycle * 5 + 5 - APP_RANGE_LIMITS.inFlight));
+      b.link.closeApp(APP);
+      await vi.waitFor(() => expect(a.link.peerApps.has(APP)).toBe(false));
+      b.link.openApp(APP, "1.0.0");
+      await vi.waitFor(() => expect(a.link.peerApps.has(APP)).toBe(true));
+    }
+    expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    // Settled, even no longer live, one place frees.
+    a.link.failAppRange(a.tasks[0], "gone");
+    const served = a.link.serveAppFile(APP, "film") as { serve: string };
+    raw({ t: "ar-get", a: APP, s: served.serve, r: 0, o: 0, n: 1 });
+    await vi.waitFor(() => expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight + 1));
   });
 
   it("is not offered without apps/1, nor by a side that does not ask for it, and its frames are dropped then", async () => {

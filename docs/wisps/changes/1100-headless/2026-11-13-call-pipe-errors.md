@@ -1,0 +1,1 @@
+`call pipe` writes its failure (`{"error": {...}}`, same codes and exit statuses) on stderr: its stdout is the call's audio only, and a failure there was played as audio by the program reading it. Every other command still answers its failures on stdout.

@@ -94,12 +94,12 @@ export function ButtonPress({ label, targetId }: { label: string; targetId?: str
     <span aria-hidden="true" className="inline-block text-text-muted rtl:-scale-x-100">↩</span>{" "}
     <span dir="auto" data-testid="button-press-label">{label}</span>
   </>;
-  if (!targetId) return <span data-testid="button-press" className="text-[14.2px] leading-[19px] wrap-break-word">{body}</span>;
+  if (!targetId) return <span data-testid="button-press" className="chat-text-message wrap-break-word">{body}</span>;
   return (
     <button type="button" data-testid="button-press" data-target={targetId} title={t("cards.buttons.jump")}
       onClick={(e) => { e.stopPropagation(); jumpToQuoted(targetId); }}
       onDoubleClick={(e) => e.stopPropagation()}
-      className="cursor-pointer rounded text-start text-[14.2px] leading-[19px] wrap-break-word hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      className="cursor-pointer rounded text-start chat-text-message wrap-break-word hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
       {body}
     </button>
   );

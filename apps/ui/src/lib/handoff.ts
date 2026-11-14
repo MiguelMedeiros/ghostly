@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/handoff";
 import type { TranslationKey } from "../contexts/I18nContext";
@@ -85,7 +86,14 @@ export const walletNameOf = (type: string | undefined): string => (type && type 
 const HANDOFF_EVERY_MS = 500;
 const readHandoff = () => engine.call("deviceHandoffView");
 
-/** The handoff on this device, read twice a second while `on` and the page shows (`useShownPoll`). */
-export function useHandoffView(on = true): HandoffView | null {
-  return useShownPoll(readHandoff, HANDOFF_EVERY_MS, on);
+/**
+ * The handoff on this device, read twice a second while `on` and the page shows (`useShownPoll`). `noneEveryMs`: how
+ * often while there is none, where none is what is mostly said (Profile's Devices section: a profile on one device, a
+ * move never made); the first answer that has one goes back to twice a second.
+ */
+export function useHandoffView(on = true, noneEveryMs = HANDOFF_EVERY_MS): HandoffView | null {
+  const [none, setNone] = useState(true);
+  const view = useShownPoll(readHandoff, none ? noneEveryMs : HANDOFF_EVERY_MS, on);
+  if ((view === null) !== none) setNone(view === null);
+  return view;
 }

@@ -1,0 +1,1 @@
+§ An invite handed through a group (in the core, no app sends or takes it yet): a request for a 1:1 chat from a group member carries a bare version-1 `ghostly1` code and `k`, the participation key it carries; anything else is refused. Accept joins the code as one pasted in Join, pinning `k`, and does not count among the chats made by links. Decline joins nothing.

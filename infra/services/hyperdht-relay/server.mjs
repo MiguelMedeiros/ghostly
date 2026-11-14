@@ -1,7 +1,7 @@
 import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, startRelay } from './relay.mjs'
 
 // Configuration, all optional:
-//   PORT (49443), HOST (0.0.0.0)
+//   PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies or Cloudflare)
 //   GHOSTLY_HYPERDHT_BOOTSTRAP  "host:port,…" instead of the public bootstrap nodes
 //   GHOSTLY_HYPERDHT_TESTNET    size of an in-process HyperDHT network instead of any other (e2e); not with BOOTSTRAP
 //   GHOSTLY_RELAY_ORIGINS       allowed origins, comma-separated (empty: any): https://app.example, read as a browser
@@ -9,13 +9,15 @@ import { DEFAULT_LIMITS, limitVariable, listenProblem, networkOf, readSettings, 
 //   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP
 //   GHOSTLY_RELAY_PROXIES       reverse proxies in front of it (0): each client counts by the X-Forwarded-For entry
 //                               that many from the end. A client that reaches the port past them could write either
-//                               header itself: publish the port only where the proxy is.
+//                               header itself, so HOST is loopback by default with either set.
 //   GHOSTLY_RELAY_<LIMIT>       any of the limits in relay.mjs, e.g. GHOSTLY_RELAY_CLIENTS=512
 let settings
 try { settings = readSettings(process.env) } catch (error) {
   console.error(new Date().toISOString(), `Ghostly HyperDHT relay not started: ${error.message}`)
   process.exit(1)
 }
+// A misspelt name (GHOSTLY_RELAY_ORIGIN, GHOSTLY_RELAY_PROXY): said, not dropped.
+if (settings.ignored.length) console.log(new Date().toISOString(), `${settings.ignored.join(', ')} ${settings.ignored.length === 1 ? 'is not a setting' : 'are not settings'} of this relay; ignored`)
 // A port in use or below 1024, a HOST that is no address here: one line naming the setting, not Node's stack.
 const start = options => startRelay(options).catch(error => {
   const problem = listenProblem(error, settings)

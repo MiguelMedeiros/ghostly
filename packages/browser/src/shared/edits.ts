@@ -6,7 +6,7 @@ import type { MessageEdit, StoredMessage } from "./types";
  * an edit, with the version it replaces kept in its history.
  */
 
-/** Earlier versions a message keeps: the newest ones, within `EDIT_HISTORY_MAX_BYTES` of text. */
+/** Earlier versions a message keeps: the first and the newest ones, within `EDIT_HISTORY_MAX_BYTES` of text. */
 export const EDIT_HISTORY_KEEP = 20;
 export const EDIT_HISTORY_MAX_BYTES = 64 * 1024;
 
@@ -56,18 +56,27 @@ export function canRemove(message: Pick<StoredMessage, "paymentId" | "event" | "
  * version. A status card's update adds none either (WISP 405 · Status Cards): it replaces the card in place, and its
  * text is only the card's fallback, so a bot's thousands of updates keep one card and no trail of versions. Buttons
  * (WISP 406 · Message Buttons) are the exception: their text is the question people answer, so a new one keeps the
- * version it replaces, and only a change of the buttons alone (the answer marked, closed) adds none.
+ * version it replaces, and only a change of the buttons alone (the answer marked, closed) adds none. A card on a text
+ * that had none (or had buttons) is not an update: the text it replaces is kept. Only the text as it came keeps the
+ * message's own time: an edited one is dated after it, whatever time the edit's author gave.
  */
-export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
+export function withEdit(message: StoredMessage, edit: { seq: number; at: number; heardAt?: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
   const before = message.edit?.history ?? [];
-  const history = edit.text === message.text || (edit.card && edit.card.kind !== "buttons") ? before : trimHistory([...before, { at: message.edit?.at ?? shownTime(message), text: message.text }]);
-  const next: MessageEdit = { seq: edit.seq, at: edit.at, history, ...(edit.pending && { pending: true as const }) };
+  const sent = shownTime(message);
+  const cardUpdate = !!edit.card && edit.card.kind !== "buttons" && !!message.card && message.card.kind !== "buttons";
+  const history = edit.text === message.text || cardUpdate ? before
+    : trimHistory([...before, { at: message.edit ? Math.max(message.edit.at, sent + 1) : sent, text: message.text }]);
+  const next: MessageEdit = { seq: edit.seq, at: edit.at, ...(edit.heardAt !== undefined && { heardAt: edit.heardAt }), history, ...(edit.pending && { pending: true as const }) };
   const { preview: _old, card: _card, ...rest } = message;
   return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }), ...(edit.card && { card: edit.card }) };
 }
 
+/** The first version (the text as it came) always stays; of the rest, the newest that fit. */
 function trimHistory(history: MessageEdit["history"]): MessageEdit["history"] {
-  let kept = history.slice(-EDIT_HISTORY_KEEP);
-  while (kept.length > 1 && kept.reduce((sum, version) => sum + utf8Encode(version.text).length, 0) > EDIT_HISTORY_MAX_BYTES) kept = kept.slice(1);
-  return kept;
+  if (history.length < 2) return history;
+  const [first, ...rest] = history;
+  let kept = rest.slice(-(EDIT_HISTORY_KEEP - 1));
+  const bytes = (versions: MessageEdit["history"]) => versions.reduce((sum, version) => sum + utf8Encode(version.text).length, 0);
+  while (kept.length > 1 && bytes([first, ...kept]) > EDIT_HISTORY_MAX_BYTES) kept = kept.slice(1);
+  return [first, ...kept];
 }

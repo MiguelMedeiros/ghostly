@@ -219,10 +219,46 @@ describe("reacting over the live link", () => {
     await says(dinner, "", 50);
     await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
     expect(reads()).toBe(0);
-    // Past what this run showed, the history says whether an older one is left.
+    // Past what this run showed, none is left: the chat had none at start, and each since was shown here.
     await says(breakfast, "", 60);
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
-    expect(reads()).toBe(1);
+    expect(reads()).toBe(0);
+    whole.mockRestore();
+  });
+
+  it("a contact flipping the chat's only reaction on and off never reads the chat whole: none stood at start or since", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    const texts = Array.from({ length: 10 }, (_, i) => `meal ${i}?`);
+    for (const text of texts) await t.node.sendMessage({ linkId: t.id, text });
+    const rows = await Promise.all(texts.map(text => t.row(text)));
+    let n = 0;
+    const says = async (to: StoredMessage, e: string) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n: ++n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // 28 frames in all: within the 30 a window takes.
+    for (let i = 0; i < 3; i++) {
+      await says(rows[0]!, "👍");
+      await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "meal 0?" }));
+      await says(rows[0]!, "");
+      await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    }
+    expect(reads()).toBe(0);
+    // Past the notes this run keeps, the oldest is known only to the history: read once for it, and once to find none left.
+    for (const row of rows) await says(row, "🙏");
+    for (const row of [...rows].reverse()) {
+      await says(row, "");
+      const left = rows.indexOf(row) - 1;
+      await vi.waitFor(() => expect(t.view().lastReaction?.snippet).toBe(left < 0 ? undefined : `meal ${left}?`));
+    }
+    expect(reads()).toBe(2);
+    await says(rows[3]!, "👍");
+    await says(rows[3]!, "");
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(2);
     whole.mockRestore();
   });
 
@@ -638,6 +674,38 @@ describe("the reactions store", () => {
     expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
     expect(whole.mock.calls).toEqual([["chat"]]);
     expect(numbers.at(-1)).toBe(9_503);
+  });
+
+  it("in a private group I was removed from and invited back to, refuses to change or take back a reaction of mine from before", async () => {
+    // Back with a new member key, the members keep my reaction from before under the old one. Changed here, it went out
+    // under the new key: they showed both, and taken back here it stayed for them.
+    const rows = [
+      row({ id: "event:1:joined:100", event: "joined", text: "You joined.", timestamp: 100 }),
+      row({ id: "a:1:0", member: "a", text: "before", reactions: { me: { e: "👍", n: 200, at: 200 } } }),
+      row({ id: "a:1:1", member: "a", text: "taken back before", reactions: { me: { e: "", n: 250, at: 250 } } }),
+      row({ id: "event:4:joined:300", event: "joined", text: "You joined again", timestamp: 300 }),
+      row({ id: "a:4:0", member: "a", text: "after", reactions: { me: { e: "🎉", n: 400, at: 400 } } }),
+      row({ id: "event:4:joined:500", event: "joined", member: "c", text: "Carol joined", timestamp: 500 }),
+    ];
+    const { reactions, host } = memory(rows);
+    let key = "me-2";
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id), memberKey: () => key });
+    const whole = vi.spyOn(host, "messages");
+    const mine = async (id: string, emoji: string) => { const out = await reactions.mine("group:g", id, emoji); return "error" in out ? out.error : out.reaction.e; };
+    const refusal = "Your reaction to this message went out before you were invited back, and stays as it is";
+    expect(await mine("a:1:0", "❤️")).toBe(refusal);
+    expect(await mine("a:1:0", "")).toBe(refusal);
+    expect(rows[1].reactions?.me).toEqual({ e: "👍", n: 200, at: 200 });
+    // One taken back before goes out anew, and those of this membership change as ever.
+    expect(await mine("a:1:1", "👀")).toBe("👀");
+    expect(await mine("a:4:0", "❤️")).toBe("❤️");
+    expect(await mine("a:4:0", "")).toBe("");
+    expect(whole).toHaveBeenCalledOnce();
+    // Removed and invited back once more: what I did under the last key is from before too.
+    rows.push(row({ id: "event:7:joined:9000", event: "joined", text: "You joined again", timestamp: 9_000 }));
+    key = "me-3";
+    expect(await mine("a:1:1", "")).toBe(refusal);
+    expect(whole).toHaveBeenCalledTimes(2);
   });
 });
 

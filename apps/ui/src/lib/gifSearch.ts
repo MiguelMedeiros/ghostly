@@ -56,6 +56,8 @@ interface State {
 
 let state: State | null = null;
 const onTheirWay = new Map<string, Promise<GifAnswer>>();
+/** Profiles whose searches were forgotten: an answer still on its way for one of them is not kept. */
+const forgotten = new Set<string>();
 
 /** A profile's searches stay its own: another profile of this app does not see them as earlier results. */
 const keyOf = (query: string) => `${getPrefix()}\n${query.trim().toLowerCase()}`;
@@ -91,6 +93,7 @@ function save(): void {
 }
 
 function keep(query: string, gifs: PickerGif[]): void {
+  if (forgotten.has(getPrefix())) return;
   const { kept } = load();
   const key = keyOf(query);
   kept.delete(key);
@@ -222,9 +225,24 @@ export function searchGifs(query: string): Promise<GifAnswer> {
   return pending;
 }
 
+/**
+ * Forgets this profile's searches and their answers, in this page and in the tab's session (Clear all data), with
+ * any answer still on its way. Other profiles' searches and the Archive's wait stay: the wait is this IP's.
+ */
+export function forgetGifSearches(): void {
+  const prefix = keyOf("");
+  forgotten.add(getPrefix());
+  for (const key of onTheirWay.keys()) if (key.startsWith(prefix)) onTheirWay.delete(key);
+  const { kept, until, strikes } = load();
+  for (const key of [...kept.keys()]) if (key.startsWith(prefix)) kept.delete(key);
+  if (kept.size || until || strikes) save();
+  else try { sessionStorage.removeItem(STORE_KEY); } catch { /* nothing kept */ }
+}
+
 /** Forgets the session's waits and answers (tests). */
 export function resetGifSearch(): void {
   state = null;
   onTheirWay.clear();
+  forgotten.clear();
   try { sessionStorage.removeItem(STORE_KEY); } catch { /* nothing kept */ }
 }

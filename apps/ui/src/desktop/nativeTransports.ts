@@ -1,7 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { fromBase64, irohDescriptor, irohRelayUrl, toBase64, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
-/** A frame Rust hands the page: text, or a binary message (HyperDHT only) in base64. */
+/** A frame Rust hands the page: text, or a binary message in base64. */
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
   | { type: "frame"; id: number; text: string } | { type: "frame"; id: number; bytes: string } | { type: "closed"; id: number }
   /**
@@ -35,12 +35,13 @@ class NativeChannel implements FrameChannel {
   private last: string | null = null;
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
-  /** HyperDHT's frames mark a binary message (WISP 103 § Frames), and its sidecar and Rust carry one; Iroh's take text only. */
-  readonly binary: boolean;
+  /**
+   * Both transports' frames mark a binary message (WISP 102 and 103 § Frames), and Rust carries one (HyperDHT's through
+   * its sidecar): a file goes as its bytes where the session agreed `files/4`, not as base64 text a third larger.
+   */
+  readonly binary = true;
   onClose: FrameChannel["onClose"] = null;
-  constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {
-    this.binary = kind === "hyperdht";
-  }
+  constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {}
   get onMessage() { return this.reader; }
   set onMessage(reader: FrameChannel["onMessage"]) {
     this.reader = reader;
@@ -53,7 +54,7 @@ class NativeChannel implements FrameChannel {
     else this.close();
   }
   send(data: string | Uint8Array) {
-    if ((typeof data !== "string" && !this.binary) || this.closed || this.bufferedAmount + data.length > this.sendBudget)
+    if (this.closed || this.bufferedAmount + data.length > this.sendBudget)
       throw new Error("Native channel is closed or its send budget is full");
     this.bufferedAmount += data.length;
     const frame = typeof data === "string" ? { text: data } : { bytes: toBase64(data) };

@@ -85,13 +85,13 @@ describe("a private group catches up a member from whoever is there", { timeout:
     const [alice, , , dave] = peers;
     dave.online = false;
     await world.run(2_000);
-    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice before ${i}`);
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice before ${i}`); await world.run(400); }
     await world.run(2_000);
     // Erin's join starts a new epoch: Alice's last 32 are all of it, so her own answer shows Dave nothing of the one before.
     const erin = world.add("erin");
     await erin.groups.joinByLink(await alice.groups.enableLink(id));
     await world.until(() => world.view(erin, id)?.members.length === 5, 5 * 60_000, 1000);
-    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice after ${i}`);
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice after ${i}`); await world.run(400); }
     await world.run(2_000);
     const back = world.now;
     world.reopen(dave);
@@ -109,7 +109,7 @@ describe("a private group catches up a member from whoever is there", { timeout:
     dave.online = false;
     await world.run(2_000);
     // Bob and Carol hold all 200 (256 kept); a sync names 32 of the missing at a time (`GROUP_LIMITS.miss`).
-    for (let i = 0; i < 200; i++) await alice.groups.send(id, `alice ${i}`);
+    for (let i = 0; i < 200; i++) { await alice.groups.send(id, `alice ${i}`); await world.run(400); }
     await world.run(2_000);
     const syncs: { to: string; at: number }[] = [];
     const has = () => world.texts(dave, id).filter(t => t.startsWith("alice ")).length;
@@ -140,7 +140,7 @@ describe("a private group catches up a member from whoever is there", { timeout:
       dave.online = false;
       await world.run(2_000);
       const mine = (t: string) => t.startsWith(`${author.name} ${round}.`);
-      for (let i = 0; i < 256; i++) await author.groups.send(id, `${author.name} ${round}.${i}`);
+      for (let i = 0; i < 256; i++) { await author.groups.send(id, `${author.name} ${round}.${i}`); await world.run(400); }
       await world.run(2_000);
       const back = world.now;
       syncs.length = 0;

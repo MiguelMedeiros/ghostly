@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
-  APP_BUNDLE_MAGIC, buildAppBundle, canonicalJson, canonicalJsonBytes, checkAppManifest, readAppBundle, readAppRevocation, readAppStore,
+  APP_BUNDLE_MAGIC, buildAppBundle, canonicalJson, canonicalJsonBytes, checkAppManifest, isAppLine, readAppBundle, readAppRevocation, readAppStore,
   readCanonicalJson, signAppStore, utf8Encode, type AppStoreIndex,
 } from "../src/index";
 import { APPS_NOW, DRAFT, ENTRY, appKey, appSigner, file } from "./appVectors";
@@ -135,7 +135,7 @@ describe("valid bundles round trip", () => {
     const path = fc.stringMatching(/^[a-z0-9_-]{1,12}(\/[a-z0-9_.-]{1,12}){0,2}$/).filter((p) => p.split("/").every((s) => s !== "." && s !== "..") && !p.startsWith("screenshots") && p !== "icon.png");
     await fc.assert(fc.asyncProperty(
       fc.uniqueArray(path, { maxLength: 8, selector: (p) => p.toLowerCase() }),
-      fc.string({ minLength: 1, maxLength: 40 }).filter((t) => !/\p{Cc}/u.test(t) && !/[\ud800-\udfff]/.test(t)),
+      fc.string({ minLength: 1, maxLength: 40 }).filter((t) => isAppLine(t, Infinity, 1) && !/[\ud800-\udfff]/.test(t)),
       fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER }),
       async (paths, title, sequence) => {
         const files = [ENTRY, ...paths.filter((p) => p.toLowerCase() !== "index.html").map((p) => file(p, p))];

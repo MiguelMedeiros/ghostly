@@ -94,12 +94,21 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       writeFileSync(paths.lock, String(stuck.pid));
       const ended = new Promise<string | null>((resolve) => stuck.once("exit", (_, signalName) => resolve(signalName)));
       const restarted = await ghostly(["--home", wedged, "daemon", "restart", "--timeout", "1"], { env });
-      expect(ok(restarted)).toMatchObject({ restarted: true, stopped: stuck.pid, before: null, version: packageJson.version, daemon: "started" });
-      expect(restarted.json.pid).not.toBe(stuck.pid);
+      // One second a step, the fresh daemon's start too: on a busy machine it is still starting when that ends, and the
+      // restart says so (`timeout`, its pid) as documented; it is up a moment later. A train batch's runner, 2026-11-07.
+      let fresh: number;
+      if (restarted.code === 0) {
+        expect(ok(restarted)).toMatchObject({ restarted: true, stopped: stuck.pid, before: null, version: packageJson.version, daemon: "started" });
+        fresh = restarted.json.pid as number;
+      } else {
+        expect(error(restarted, "timeout", 4).message).toContain("is still starting");
+        fresh = (restarted.json.error as { details: { pid: number } }).details.pid;
+      }
+      expect(fresh).not.toBe(stuck.pid);
       expect(restarted.stderr).toContain(`process ${stuck.pid}) did not answer daemon.stop in 1 s: stopping it with SIGTERM`);
       expect(restarted.stderr).toContain("did not stop on SIGTERM in 1 s: killing it");
       expect(await ended).toBe("SIGKILL");
-      expect(ok(await ghostly(["--home", wedged, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: restarted.json.pid });
+      await expect.poll(async () => (await ghostly(["--home", wedged, "daemon", "status"], { env })).json, { timeout: 20_000 }).toMatchObject({ running: true, pid: fresh });
     } finally {
       stuck.kill("SIGKILL");
       await ghostly(["--home", wedged, "daemon", "stop"], { env });
@@ -109,7 +118,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
   it("daemon status and daemon stop on a profile that does not exist say so; `default` is not made by asking", async () => {
     const typo = home("no-such-profile");
     createProfile(typo, "bot");
-    const message = "No profile nobody: make it with `ghostly profile create nobody`";
+    const message = 'No profile "nobody" (ghostly profile list, or ghostly profile create nobody)';
     expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "status"], { env }), "not_found", 3).message).toBe(message);
     expect(error(await ghostly(["--home", typo, "-p", "nobody", "daemon", "stop"], { env }), "not_found", 3).message).toBe(message);
     expect(existsSync(profilePaths(typo, "nobody").dir)).toBe(false);

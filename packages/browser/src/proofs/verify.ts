@@ -1,4 +1,4 @@
-import { boundVerifiedIdentity, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_VALIDITY, type IdentityStatement, type VerifiedIdentity } from "@ghostly/core";
+import { boundVerifiedIdentity, IdentityCheckUnavailable, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_VALIDITY, type IdentityStatement, type VerifiedIdentity } from "@ghostly/core";
 import type { IdentityFetch, IdentityProofProvider, IdentitySigner, VerifyContext } from "./contract";
 
 const DAY = 86_400;
@@ -34,6 +34,7 @@ export function descriptorProblems(p: IdentityProofProvider): string[] {
   const { defaultDays, maxDays } = p.validity;
   if (!(Number.isInteger(defaultDays) && Number.isInteger(maxDays) && defaultDays >= 1 && defaultDays <= maxDays && maxDays * DAY <= IDENTITY_MAX_VALIDITY)) problems.push("validity must be whole days, 1 ≤ default ≤ max ≤ 400");
   if (p.recheck && !(Number.isInteger(p.recheck.afterSeconds) && p.recheck.afterSeconds >= 60)) problems.push("recheck.afterSeconds must be at least 60");
+  if (p.recheck?.perHour !== undefined && !(Number.isInteger(p.recheck.perHour) && p.recheck.perHour >= 1)) problems.push("recheck.perHour must be a whole number, at least 1");
   if (!p.signers.length) problems.push("no signers");
   const ids = p.signers.map(s => s.id);
   if (new Set(ids).size !== ids.length) problems.push("signer ids are not unique");
@@ -59,7 +60,7 @@ export function availableSigners<E>(p: IdentityProofProvider<E>, platform: Ident
  */
 export function boundedIdentityFetch(options: { online: () => boolean; timeoutMs?: number; fetcher?: typeof fetch } = { online: () => true }): IdentityFetch {
   return async (url, { headers, maxBytes = 64 * 1024, signal, redirect = "error" } = {}) => {
-    if (!options.online()) throw new Error("Offline: this identity cannot be checked now");
+    if (!options.online()) throw new IdentityCheckUnavailable("Offline: this identity cannot be checked now");
     const target = new URL(url);
     if (target.protocol !== "https:" || target.username || target.password) throw new Error("Identity checks use HTTPS only");
     const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);

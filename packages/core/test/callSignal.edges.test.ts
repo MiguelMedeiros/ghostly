@@ -61,6 +61,21 @@ describe("call signal candidates: refusals", () => {
     expect(withCandidate(`${srflx} generation :: raddr :: rport 0`)).toBeNull();
   });
 
+  it("keeps a candidate only on an IP address or a browser's <uuid>.local name, skipping one on any other name", () => {
+    const at = (address: string, type = "host") => `1 1 udp 2122260223 ${address} 9 typ ${type}`;
+    for (const address of ["192.0.2.1", "2001:db8::1", "::", "::ffff:192.0.2.1", "fe80::1:2:3:4", "6f2b1c3e-1111-4222-8333-944445555666.local"]) {
+      expect(withCandidate(at(address))?.c).toEqual([at(address)]);
+    }
+    for (const address of ["attacker.example.com", "xn--e1afmkfd.example", "a-b.c", "localhost", "example.local", "probe.6f2b1c3e-1111-4222-8333-944445555666.local",
+      "6f2b1c3e-1111-4222-8333-944445555666.local.example.com", "192.0.2.1.example.com", "1.2.3", "256.1.1.1", "01.2.3.4", "1:2:3:4:5:6:7:8:9", "1::2::3", "12345::1"]) {
+      expect(withCandidate(at(address)), address).toEqual(expect.objectContaining({ c: [] }));
+    }
+    // A name as the related address drops that candidate too; the rest of the signal is kept.
+    const named = `${at("203.0.113.7", "srflx")} raddr probe.example.com rport 9`;
+    expect(parseCallSignal(JSON.stringify({ ...base, c: [named, HOST, at("attacker.example.com", "relay")] }), NOW)?.c).toEqual([HOST]);
+    expect(buildSdpFromSignal(parseCallSignal(JSON.stringify({ ...base, c: [named, HOST] }), NOW) as never)).not.toContain("example");
+  });
+
   it("keeps raddr/rport only as a pair and drops every other extension", () => {
     expect(withCandidate(`${HOST} raddr 0.0.0.0`)?.c).toEqual([HOST]);
     expect(withCandidate(`${HOST} rport 9`)?.c).toEqual([HOST]);

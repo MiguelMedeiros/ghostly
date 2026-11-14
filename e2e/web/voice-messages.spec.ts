@@ -374,3 +374,36 @@ test("voice messages: on a phone the recorder's hint stays on the screen in a lo
   expect(edges.left).toBeGreaterThanOrEqual(0);
   expect(edges.right).toBeLessThanOrEqual(edges.width);
 });
+
+test("voice messages: on a phone the recorder's Discard question reads whole in every language", { tag: ["@feature:files.voice.record", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // Beside Keep and Discard, the question had what was left of the bar on one line: "¿Descartar …" in Spanish at 375 px.
+  const [alice, bob] = await Promise.all([peer("voice-ask-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("voice-ask-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  for (const language of ["es", "fr", "ja", "ar"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await mic(page).click();
+    await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+    // Past the 3 s a recording is thrown away without asking.
+    await expect(page.getByTestId("voice-timer")).toHaveText("0:04", { timeout: 15_000 });
+    await page.keyboard.press("Escape");
+    const ask = page.getByTestId("voice-confirm");
+    await expect(ask).toBeVisible();
+    const question = await ask.locator(".voice-confirm-text").evaluate((text) => {
+      const box = text.getBoundingClientRect();
+      // Drawn on top where it stands: not under the messages, the composer or the screen's edge.
+      const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return { cut: text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight, left: box.left, right: box.right, width: document.documentElement.clientWidth, onTop: !!top && text.contains(top) };
+    });
+    expect(question, language).toEqual({ cut: false, left: expect.any(Number), right: expect.any(Number), width: 375, onTop: true });
+    expect(question.left, language).toBeGreaterThanOrEqual(0);
+    expect(question.right, language).toBeLessThanOrEqual(question.width);
+    await ask.getByTestId("voice-confirm-discard").click();
+    await expect(page.getByTestId("voice-bar")).toBeHidden();
+  }
+});

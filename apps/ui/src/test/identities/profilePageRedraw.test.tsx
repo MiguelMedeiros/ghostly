@@ -1,7 +1,8 @@
 import { Profiler } from "react";
 import { act, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { saveSession } from "../../lib/storage";
+import { createProfile, prefixOf, registryKey, settingsKeyFor } from "../../lib/profiles";
+import { getPrefix, saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { Profile } from "../../pages/Profile";
 import { fakeEngine, type StatePatch } from "../fakeEngine";
@@ -13,7 +14,8 @@ import { proofView } from "./views";
 /**
  * The Profile page shows how many identities and chats the profile has. The engine sends its whole state anew on every
  * change, up to 20 times a second while a file moves: the page draws again only when the count it shows changes, and a
- * draw counts the chats without reading every chat's messages.
+ * draw counts the chats without reading every chat's messages. Nor does another profile's tab, writing its chats a few
+ * times per text it gets, draw it again.
  */
 
 const chat = (id: string): ChatSession => ({
@@ -36,6 +38,23 @@ describe("the Profile page on an engine state", () => {
     expect(draws - before).toBe(0);
     sentAgain({ identityProofs: [proofView(), proofView({ id: "b".repeat(64), subject: "other" })] });
     expect(screen.getByTestId("profile-identities-link")).toHaveTextContent("2");
+  });
+
+  it("is not drawn again on another profile's tab storing its chats, and is on this profile's keys", () => {
+    const work = createProfile("Work");
+    let draws = 0;
+    renderApp(<Profiler id="profile" onRender={() => { draws++; }}><Profile /></Profiler>);
+    const stored = (key: string | null) => act(() => { window.dispatchEvent(new StorageEvent("storage", { key, storageArea: localStorage })); });
+    const before = draws;
+    // About three writes per text that profile gets, for 30 texts: its chat, its read mark, a draft.
+    for (let i = 0; i < 30; i++) for (const key of [`${prefixOf(work.id)}chat${i % 3}`, `${prefixOf(work.id)}read_chat${i % 3}`, `${prefixOf(work.id)}draft_chat${i % 3}`]) stored(key);
+    expect(draws - before).toBe(0);
+    // The registry, the other profile's settings (its colour in the list), this profile's own keys and a cleared storage do.
+    for (const key of [registryKey(), settingsKeyFor(work.id), `${getPrefix()}chat1`, null]) {
+      const at = draws;
+      stored(key);
+      expect(draws - at, String(key)).toBeGreaterThan(0);
+    }
   });
 
   it("counts the chats without parsing each chat's stored copy on every draw", async () => {

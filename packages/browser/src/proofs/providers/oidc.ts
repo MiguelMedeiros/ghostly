@@ -1,10 +1,11 @@
 import { IDENTITY_CLOCK_SKEW, type IdentityStatement } from "@ghostly/core";
-import type { IdentityProofProvider, IdentityPlatform, RedirectSigner } from "../contract";
+import { englishSay, type IdentityProofProvider, type IdentityPlatform, type RedirectSigner } from "../contract";
 import { getBrowserHost, type OidcHost } from "../../host";
 import { audiences, isConfigured, oidcProviders, providerForIssuer, type OidcProvider, type OidcReveal } from "../oidc/providers";
 import { signInForProof } from "../oidc/flow";
 import { MAX_ID_TOKEN_LENGTH, verifyIdToken } from "../oidc/verify";
 import { JwksCache, sharedJwksCache } from "../oidc/jwks";
+import { oidcDisplaySource } from "../displaySource";
 
 /**
  * Identity proofs through OpenID Connect: the person signs in with a provider (Google, Microsoft,
@@ -56,7 +57,7 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         if (!h || !opening) throw new Error("Signing in with a provider is not available here.");
         const provider = providerForIssuer(statement.binding.subject, providers());
         if (!provider || !isConfigured(provider, h.platform)) { void opening.then(w => w.close(), () => {}); throw new Error("This provider is not set up in this Ghostly build."); }
-        ctx.onProgress(`Sign in with ${provider.name} in the window that opened.`);
+        ctx.onProgress((ctx.say ?? englishSay)("signIn", "Sign in with {{provider}} in the window that opened.", { provider: provider.name }));
         const token = await signInForProof({
           provider, platform: h.platform, nonce: statement.id, window: await opening, signal: ctx.signal, fetch: options.fetch,
           // What the provider cannot put in its token is not asked for.
@@ -112,7 +113,12 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
       if (!SUB.test(id.subject)) throw new Error("The provider’s account identifier cannot be shown");
       const attester = hostOf(provider.issuer);
       const person = id.name ?? id.username;
-      const name = id.email ? (person && `${person} · ${id.email}`.length <= 64 ? `${person} · ${id.email}` : id.email) : person;
+      // A display name is the account's own words (its holder's, or any directory admin's): only a GitLab or Twitch
+      // username, unique at the provider, is the provider's. Any other carries that caveat, never shown as checked.
+      const handle = !id.name && (provider.id === "gitlab" || provider.id === "twitch");
+      // Only an email the provider marks verified names the account; one it does not (Microsoft never says) is left out.
+      const email = id.emailVerified ? id.email : undefined;
+      const name = email ? (person && `${person} · ${email}`.length <= 64 ? `${person} · ${email}` : email) : person;
       const url = id.username && /^[A-Za-z0-9_.-]{1,64}$/.test(id.username)
         ? provider.id === "gitlab" ? `https://gitlab.com/${id.username}` : provider.id === "twitch" ? `https://www.twitch.tv/${id.username}` : undefined
         : undefined;
@@ -121,9 +127,10 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
         subject: `${provider.id === "microsoft" ? id.issuer : provider.issuer}#${id.subject}`,
         attester,
         source: `ID token signed by ${attester}`,
-        ...(name || url ? { display: {
+        // With an email, always: a recheck then replaces a display stored before (which kept the email as the name).
+        ...(name || url || id.email ? { display: {
           ...(name ? { name } : {}), ...(url ? { url } : {}), fetchedAt: id.issuedAt,
-          source: `Signed by ${provider.name}${id.email ? id.emailVerified ? `; email verified by ${provider.name}` : `; email not verified by ${provider.name}` : ""}`,
+          source: oidcDisplaySource(provider.name, id.email ? id.emailVerified ? "verified" : "unverified" : undefined, !!person && !handle),
         } } : {}),
       };
     },

@@ -48,6 +48,16 @@ describe("Unpin on the pinned message's bar, from the keyboard", () => {
     expect(document.activeElement).toBe(composer);
   });
 
+  // Unpinned by the other side (a contact, a group's admin) while the focus is on the bar's line or its ⓘ: the bar goes
+  // with the focus on it, which fell to the page.
+  it.each(["pinned-open", "pinned-info"])("leaves the focus on the chat's ⋮ when the other side unpins with the focus on %s", (id) => {
+    renderApp(<Chat />);
+    screen.getByTestId(id).focus();
+    act(() => screen.getByTestId("unpin-elsewhere").click());
+    expect(screen.queryByTestId("pinned-bar")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("chat-options"));
+  });
+
   it("takes no focus when the pin goes with the focus on the page already", () => {
     renderApp(<Chat />);
     act(() => screen.getByTestId("unpin-elsewhere").click());

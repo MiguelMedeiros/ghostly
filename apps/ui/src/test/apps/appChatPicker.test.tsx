@@ -1,4 +1,5 @@
-import { screen, within } from "@testing-library/react";
+import { Profiler } from "react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -59,6 +60,23 @@ describe("Open an app in a chat: which chat, found by name", () => {
     expect(names()).toHaveLength(31);
   });
 
+  it("says what the search found once the typing settles, as Forward does: how many chats, or none", async () => {
+    const { user } = open();
+    const status = screen.getByTestId("app-chat-picker-found");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status.textContent).toBe("");
+    await user.keyboard("Contact 1");
+    expect(status.textContent).toBe("");
+    await waitFor(() => expect(status).toHaveTextContent(/^10 chats$/));
+    await user.clear(screen.getByTestId("app-chat-picker-search"));
+    await user.keyboard("zoe");
+    await waitFor(() => expect(status).toHaveTextContent(/^1 chat$/));
+    await user.keyboard("x");
+    await waitFor(() => expect(status).toHaveTextContent(/^No chat by that name$/));
+    await user.clear(screen.getByTestId("app-chat-picker-search"));
+    await waitFor(() => expect(status.textContent).toBe(""));
+  });
+
   it("the down arrow (or Tab) goes from the search to the chats found, and Enter opens the app there", async () => {
     const { user } = open();
     await user.keyboard("zoe");
@@ -82,6 +100,25 @@ describe("Open an app in a chat: which chat, found by name", () => {
     expect(screen.getAllByTestId("app-chat-picker-chat")[30]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(screen.getAllByTestId("app-chat-picker-chat")[0]).toHaveFocus();
+  });
+});
+
+describe("Open an app in a chat: drawn again only when its chats change", () => {
+  it("draws nothing again for an engine state that changes nothing it lists, and its rows when a chat's does", async () => {
+    const links = Array.from({ length: 30 }, (_, i) => paired(`c${i}`, `Contact ${i}`, 10_000 - i));
+    fakeEngine.update({ links, groups: [] });
+    let commits = 0;
+    renderApp(<Profiler id="picker" onRender={() => { commits++; }}><AppChatPicker app={chess} onClose={() => {}} /></Profiler>, { route: "/apps" });
+    expect(await screen.findAllByTestId("app-chat-picker-chat")).toHaveLength(30);
+    commits = 0;
+    // The engine's state crosses a port: its chats and groups come anew each time, here with only a file moving.
+    for (let i = 0; i < 20; i++) {
+      await act(async () => { fakeEngine.update({ links: fakeEngine.state.links.map((link) => ({ ...link })), groups: [], transfers: { [`t${i}`]: {} } } as never); });
+    }
+    expect(commits).toBe(0);
+    // A chat's link that changes what the list holds (a contact paired again) is drawn.
+    await act(async () => { fakeEngine.update({ links: fakeEngine.state.links.map((link, i) => (i === 0 ? { ...link, id: "link-again" } : { ...link })) }); });
+    expect(commits).toBeGreaterThan(0);
   });
 });
 

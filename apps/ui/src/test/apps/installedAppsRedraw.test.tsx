@@ -1,6 +1,6 @@
 import { Profiler } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -11,6 +11,7 @@ import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
+import { hideApps, showApps } from "./showApps";
 
 // covers: apps.chat.card
 
@@ -70,6 +71,9 @@ describe("the installed apps read again", () => {
   });
 
   it("still names an app that changed in a row with its card", async () => {
+    // A 1:1 chat where Apps shows, as its bubble draws the card there.
+    showApps();
+    onTestFinished(hideApps);
     const message = { id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: NOW } as ChatMessage;
     saveSession(session("ana", [message]));
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);

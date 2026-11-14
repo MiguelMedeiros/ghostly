@@ -130,6 +130,47 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape, 
   expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });
 
+test("a picture opened large on a phone on its side keeps its Close and itself clear of the notch, in either app direction", { tag: ["@feature:files.image.view", "@feature:profiles.picture.viewer", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // The viewer is a portal on the body, outside the page's side insets: its × sat 12px from the edge, under the
+  // notch at one end (788..832 of 844 in English, 12..56 in Arabic) and in the rounded corner at the other.
+  const SCREEN = { width: 844, height: 390 }, SIDE = 47;
+  const [alice, bob] = await Promise.all([peer("side-view-alice"), peer("side-view-bob", { mobile: true, viewport: SCREEN })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  const name = "wide ghost.png";
+  await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "image/png", buffer: png(1600, 400) });
+  const picture = () => chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByRole("img", { name });
+  await expect.poll(() => picture().evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(1600);
+
+  for (const language of ["en", "ar"] as const) {
+    if (language === "ar") {
+      await bob.page.evaluate(() => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+      });
+      await bob.page.reload();
+      await expect(bob.page.locator("html")).toHaveAttribute("dir", "rtl");
+      await expect.poll(() => picture().evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(1600);
+    }
+    // A reload starts a new protocol session: the insets are set again after it.
+    const cdp = await bob.page.context().newCDPSession(bob.page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: 21 } });
+    await chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByTestId("file-picture-open").click();
+    const viewer = bob.page.getByTestId("avatar-viewer");
+    await expect(viewer).toHaveAttribute("data-kind", "picture");
+    for (const part of [viewer.getByTestId("avatar-viewer-close"), viewer.getByTestId("avatar-viewer-image")]) {
+      const box = (await part.boundingBox())!;
+      expect(box.x, `${language}: its start`).toBeGreaterThanOrEqual(SIDE);
+      expect(box.x + box.width, `${language}: its end`).toBeLessThanOrEqual(SCREEN.width - SIDE);
+    }
+    // At the end of the page's direction: the right in English, the left in Arabic.
+    const close = (await viewer.getByTestId("avatar-viewer-close").boundingBox())!;
+    expect(close.x + close.width / 2 > SCREEN.width / 2).toBe(language === "en");
+    await bob.page.keyboard.press("Escape");
+    await expect(viewer).toHaveCount(0);
+  }
+});
+
 test("a long name under a picture opened large reads from its start in either app direction", { tag: ["@feature:files.image.view", "@feature:profiles.picture.viewer", "@feature:app.i18n"] }, async ({ peer }) => {
   // The viewer's caption cut a name in the other script at its start, on a phone: its first word was under the "…".
   const [alice, bob] = await Promise.all([peer("caption-alice"), peer("caption-bob", { mobile: true, viewport: { width: 375, height: 740 } })]);

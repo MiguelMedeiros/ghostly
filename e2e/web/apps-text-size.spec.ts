@@ -35,14 +35,14 @@ async function expectButtonsOnScreen(screen: Locator, names: readonly string[]):
   }
 }
 
-test("on a phone at a doubled text size, Add's store question and a card's install screen keep their buttons on screen", { tag: ["@feature:apps.page", "@feature:apps.chat.card", "@feature:app.accessibility"] }, async ({ peer }) => {
+/** Ana installs Chess from the store, pairs with Bob and opens it in their chat: Bob gets its card. */
+async function cardInChat(peer: (name: string) => Promise<Peer>): Promise<{ ana: Peer; bob: Peer }> {
   const store = await testStore();
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   await serveStore(ana.context, store);
   await serveStore(bob.context, store);
   await setNickname(ana, "Ana");
   await setNickname(bob, "Bob");
-  // Ana installs Chess from the store, pairs with Bob and opens it in their chat: Bob gets its card.
   await ana.page.getByTestId("account-apps").click();
   await ana.page.getByTestId("apps-add").click();
   await ana.page.getByTestId("apps-add-url").fill(STORE_URL);
@@ -56,7 +56,11 @@ test("on a phone at a doubled text size, Add's store question and a card's insta
   await (await composerRow(ana.page, "composer-apps")).click();
   await ana.page.getByTestId("chat-apps").getByTestId("chat-app-open").click();
   await expect(chat(bob).getByTestId("app-card")).toContainText("Ana opened it here");
+  return { ana, bob };
+}
 
+test("on a phone at a doubled text size, Add's store question and a card's install screen keep their buttons on screen", { tag: ["@feature:apps.page", "@feature:apps.chat.card", "@feature:app.accessibility"] }, async ({ peer }) => {
+  const { bob } = await cardInChat(peer);
   const page = bob.page;
   await page.setViewportSize(PHONE);
   await textSize(page, 32);
@@ -79,4 +83,59 @@ test("on a phone at a doubled text size, Add's store question and a card's insta
   const install = page.getByTestId("app-install");
   await expect(install.getByTestId("app-install-confirm")).toBeVisible();
   await expectButtonsOnScreen(install, ["Cancel", "Install and open"]);
+});
+
+/** The card's words' sizes, in px: its title, who opened it, "Not checked yet", the fingerprint, its time. */
+const cardSizes = (card: Locator) => card.evaluate((card) => {
+  const px = (element: Element | null | undefined) => element ? Math.round(parseFloat(getComputedStyle(element).fontSize) * 10) / 10 : 0;
+  return {
+    title: px(card.querySelector("[data-testid=app-card-title]")),
+    who: px(card.querySelector("[data-testid=app-card-who]")),
+    check: px(card.querySelector("[data-testid=app-card-check]")),
+    fingerprint: px(card.querySelector(".font-mono")),
+    time: px(card.querySelector(".ms-auto")),
+  };
+});
+
+/** What is cut or pushed out: the page wider than the screen, the card past its edge, one of its lines wider than its box. */
+const cardCut = (card: Locator) => card.evaluate((card) => {
+  const out: string[] = [];
+  if (document.documentElement.scrollWidth > window.innerWidth) out.push(`page ${document.documentElement.scrollWidth} > ${window.innerWidth}`);
+  const box = card.getBoundingClientRect();
+  if (box.left < -0.5 || box.right > window.innerWidth + 0.5) out.push(`card at ${box.left}-${box.right}`);
+  for (const id of ["app-card-who", "app-card-check", "app-card-install"]) {
+    const element = card.querySelector<HTMLElement>(`[data-testid=${id}]`);
+    if (!element) { out.push(`${id} missing`); continue; }
+    if (element.scrollWidth > element.clientWidth + 1) out.push(`${id} ${element.scrollWidth} wide in ${element.clientWidth}`);
+    const own = element.getBoundingClientRect();
+    if (own.left < box.left - 0.5 || own.right > box.right + 0.5) out.push(`${id} at ${own.left}-${own.right} out of ${box.left}-${box.right}`);
+  }
+  return out;
+});
+
+async function settings(page: Page, values: { language?: string; textSize: string }): Promise<void> {
+  await page.evaluate((values) => localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"), ...values })), values);
+  await page.reload();
+}
+
+test("at Text size Huge on a phone, an app's card in a chat grows with the messages, in English and Arabic, and nothing is cut", { tag: ["@feature:settings.text-size", "@feature:apps.chat.card", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const { bob } = await cardInChat(peer);
+  const page = bob.page;
+  await page.setViewportSize(PHONE);
+  const card = chat(bob).getByTestId("app-card");
+  await expect(card).toBeVisible();
+  const before = await cardSizes(card);
+  expect(before).toEqual({ title: 14, who: 12, check: 12, fingerprint: 11, time: 11 });
+
+  for (const language of ["en", "ar"]) {
+    await settings(page, { language, textSize: "huge" });
+    await expect(page.locator("html")).toHaveAttribute("lang", language);
+    await page.goto("/#/");
+    await page.getByTestId("chat-row").first().click();
+    await expect(card).toBeVisible();
+    // Its words at half again their size, as the messages are; its time beside it as a message's keeps its own.
+    expect(await cardSizes(card), language).toEqual({ title: 21, who: 18, check: 18, fingerprint: 16.5, time: 11 });
+    expect(await cardCut(card), language).toEqual([]);
+    await card.screenshot({ path: test.info().outputPath(`card-huge-${language}.png`) });
+  }
 });

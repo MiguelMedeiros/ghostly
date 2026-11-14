@@ -204,3 +204,40 @@ test("on a phone the install screen and the app's screen show its whole title, o
   await expect(ana.page.getByTestId("app-details")).toBeVisible();
   expect(await whole("app-details")).toBe(true);
 });
+
+for (const language of ["en", "ar"] as const) {
+  test(`${language}: on a phone the install screen and the app's screen break a long version, and never scroll sideways`, { tag: ["@feature:apps.page", "@feature:app.i18n"] }, async ({ peer }) => {
+    // A version has no space to break at, and a bundle allows 64 characters: with this one (57) both screens were
+    // 402 px wide in their 373 px box, the line's end cut off.
+    const version = "1.0.0-rc.1+sha.0123456789abcdef0123456789abcdef0123456789";
+    const store = await testStore({ version });
+    const ana = await peer(`ana-version-${language}`, { mobile: true, viewport: { width: 375, height: 740 } });
+    await serveStore(ana.context, store);
+    await ana.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await ana.page.goto("/#/apps");
+    await ana.page.reload();
+    await expect(ana.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    await ana.page.getByTestId("apps-add").click();
+    await ana.page.getByTestId("apps-add-url").fill(APP_URL);
+    await ana.page.getByTestId("apps-add-check").click();
+    // How far the screen scrolls sideways, and whether the version's "-" is drawn after its "1.0.0" (in Arabic it was
+    // drawn before it once the line broke there: "-1.0.0").
+    const seen = (screen: string) => ana.page.getByTestId(screen).evaluate((el, version) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let text: Node | null;
+      while ((text = walker.nextNode()) && !text.textContent!.includes(version));
+      const at = (i: number) => { const range = document.createRange(); range.setStart(text!, i); range.setEnd(text!, i + 1); return range.getBoundingClientRect(); };
+      const start = text!.textContent!.indexOf(version);
+      return { screen: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - innerWidth, dashAfter: at(start + 5).left > at(start).left };
+    }, version);
+    await expect(ana.page.getByTestId("app-install-confirm")).toBeVisible();
+    await expect(ana.page.getByTestId("app-install")).toContainText(version);
+    expect(await seen("app-install")).toEqual({ screen: 0, page: 0, dashAfter: true });
+    await ana.page.getByTestId("app-install-confirm").click();
+    await ana.page.getByTestId("installed-app").getByRole("button").first().click();
+    await expect(ana.page.getByTestId("app-details")).toContainText(version);
+    expect(await seen("app-details")).toEqual({ screen: 0, page: 0, dashAfter: true });  });
+}

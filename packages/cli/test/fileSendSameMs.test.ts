@@ -8,6 +8,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /**
@@ -29,6 +30,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 describe("file send in one millisecond", () => {
   const sent: number[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

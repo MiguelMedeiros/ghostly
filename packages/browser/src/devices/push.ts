@@ -187,11 +187,39 @@ export function wakeOwnerOf(current: WakeSubscription | undefined, self: string 
   return current.device === self ? "here" : "away";
 }
 
+/** The most of a push relay's own error text kept to show the person (`PushRelayRefusal.text`). */
+const RELAY_TEXT_CHARS = 120;
+
+/**
+ * The push relay answered, but not with a push service's status: its own refusal (403 `Origin not allowed`, 400 naming
+ * a header, 429), a web page or JSON without `status` (a wrong address or path, a proxy with no route). `text` is the
+ * relay's own `{ error }` text when it gave one, on one line and cut to `RELAY_TEXT_CHARS`; a web page gives none.
+ */
+export class PushRelayRefusal extends Error {
+  constructor(readonly http: number, readonly text?: string, readonly cause?: unknown) {
+    super(`The push relay did not forward it (HTTP ${http})`);
+    this.name = "PushRelayRefusal";
+  }
+}
+
+/** The relay's own `{ error: "..." }` text in `body`, one line, cut; undefined when it gave none. */
+function relayErrorText(body: unknown): string | undefined {
+  const error = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  if (typeof error !== "string") return undefined;
+  // eslint-disable-next-line no-control-regex
+  const line = error.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!line) return undefined;
+  const chars = [...line];
+  return chars.length > RELAY_TEXT_CHARS ? `${chars.slice(0, RELAY_TEXT_CHARS - 1).join("")}…` : line;
+}
+
 /**
  * Posts a push: the host's way (Desktop and the CLI post it themselves), or `fetch`, then the person's push relay when
- * a page may not post it (the push services answer without CORS). Answers the push service's HTTP status.
+ * a page may not post it (the push services answer without CORS). Answers the push service's HTTP status; throws a
+ * `PushRelayRefusal` when the relay answers without it (`relayed` is told when it answers with it), and the fetch's
+ * own error when the relay cannot be reached at all.
  */
-export async function postPush(request: PushRequest, options: { pushSend?: (request: PushRequest) => Promise<number>; relay?: string }): Promise<number> {
+export async function postPush(request: PushRequest, options: { pushSend?: (request: PushRequest) => Promise<number>; relay?: string; relayed?: () => void }): Promise<number> {
   if (options.pushSend) return options.pushSend(request);
   const quiet = { credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" } as const;
   try {
@@ -202,8 +230,12 @@ export async function postPush(request: PushRequest, options: { pushSend?: (requ
     const response = await fetch(options.relay, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
     });
+    // Only the push service's status, as the relay reports it, counts: any other answer (a wrong address, a proxy with no
+    // route, a captive portal, the relay's own refusal) is the relay failing, never "gone" or "sent".
     const answer = await response.json().catch(() => null) as { status?: unknown } | null;
-    return typeof answer?.status === "number" ? answer.status : response.status;
+    if (!response.ok || typeof answer?.status !== "number") throw new PushRelayRefusal(response.status, relayErrorText(answer), error);
+    options.relayed?.();
+    return answer.status;
   }
 }
 

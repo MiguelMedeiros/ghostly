@@ -1,8 +1,9 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
-import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply } from "./messages";
 import { fromOwnPage } from "./shared/sender";
-import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
+import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate, takePagesToReopen } from "./updates";
+import { localOriginAllowed } from "./localAllowList";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -30,27 +31,39 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active) return;
+  if (status.profile === status.active && !status.stopped) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine(status.activeId);
+  // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
+  // before it could (`restart-engine`), or a worker went away mid-restart. That document goes too, as after a switch.
+  await replaceEngine(status.profile === status.active ? undefined : status.activeId);
 }
+
+/** Peers started one after another for switches made while each one started, before the pages are told to retry. */
+const MAX_REPLACEMENTS = 20;
 
 /** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
 async function replaceEngine(next?: string): Promise<void> {
   // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
-  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // profile it named, not the one before: that peer goes too, as often as the registry moved (only a click moves it).
+  // Should it never settle, the pages hear of it: none is told the peer runs while it runs another profile.
+  for (let attempt = 0; attempt < MAX_REPLACEMENTS; attempt++) {
     // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+    // One still opening (it waited on this start, or made its tab after it) counts this close too, and leaves no tab.
+    viewersClosed++;
     await closeViewers();
     await clearNotices(next);
     await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
     await chrome.offscreen.closeDocument().catch(() => {});
     await createEngineDocument();
-    const status = await waitForEngine();
+    // Just made: one that does not answer is replaced at the next start (`waitForEngine`).
+    const status = (await answerOf()) ?? notStarted();
+    // Again: a tab still on the peer before posted one while that peer stopped. The next profile's pages wait on this start.
+    await clearNotices(next);
     if (status.profile === status.active) return;
     next = status.activeId;
   }
+  throw new Error("Switching profiles…");
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
@@ -77,8 +90,25 @@ async function createEngineDocument(): Promise<void> {
     });
 }
 
-/** The document exists before its script listens; wait until the peer answers. */
+/**
+ * The peer's answer. A document that never gives one (its script threw as it loaded, a chunk did not load) is no peer,
+ * and nothing else closes it: every later try (a page's, a new tab's, the minute check) would wait on it again. It goes,
+ * and a new one is waited on before the start fails; one that does not answer either goes at the next try.
+ */
 async function waitForEngine(): Promise<EngineStatus> {
+  const status = await answerOf();
+  if (status) return status;
+  await chrome.offscreen.closeDocument().catch(() => {});
+  await createEngineDocument();
+  return (await answerOf()) ?? notStarted();
+}
+
+function notStarted(): never {
+  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+}
+
+/** The document exists before its script listens; wait until the peer answers, or 5 seconds. */
+async function answerOf(): Promise<EngineStatus | undefined> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
       const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) as EngineStatus | undefined;
@@ -88,10 +118,24 @@ async function waitForEngine(): Promise<EngineStatus> {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
+  return undefined;
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
+
+/**
+ * The peer runs with no page open (it fetches mailbox texts that live minutes, answers contacts), so it comes back by
+ * itself: each start of the worker makes sure it runs, as Chrome fires neither `onStartup` nor `onInstalled` when the
+ * extension is turned on again, and an alarm wakes the worker once a minute, should the document go away with no tab
+ * open (its renderer crashed, or it was ended from Chrome's task manager). Set once: setting it again puts it off.
+ */
+const PEER_CHECK = "peer-check";
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PEER_CHECK) void ensureEngine().catch(() => {});
+});
+void chrome.alarms.get(PEER_CHECK).then((alarm) => { if (!alarm) return chrome.alarms.create(PEER_CHECK, { periodInMinutes: 1 }); }).catch(() => {});
+void ensureEngine().catch(() => {});
+
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
  * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages
@@ -104,8 +148,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   else void started.catch(() => {});
 });
 
-async function reopenAfterUpdate(): Promise<void> {
-  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+/** In the same line as the toolbar button: pressed while the new version starts, it finds the page opened again. */
+function reopenAfterUpdate(): Promise<void> {
+  return inTurn(async () => { for (const url of await takePagesToReopen()) await openTab(url); });
 }
 
 /**
@@ -117,21 +162,46 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
   void rememberPendingUpdate(details.version);
 });
 
-chrome.action.onClicked.addListener(async () => {
-  await ensureEngine();
-  await showApp();
+// The app opens even when the peer does not start, as on a first install: the page says why.
+chrome.action.onClicked.addListener(() => {
+  void ensureEngine().catch(() => {}).then(() => showApp()).catch(() => {});
 });
 
-/** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
-async function showApp(route?: string): Promise<void> {
+let showing: Promise<void> = Promise.resolve();
+
+/**
+ * Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. One at a time: the toolbar button
+ * pressed twice (a double-click) while the peer starts, or as a first install opens the app, asked both at once, and
+ * neither found the other's tab, so each opened one.
+ */
+function showApp(route?: string): Promise<void> {
+  return inTurn(() => showAppNow(route));
+}
+
+function inTurn(task: () => Promise<void>): Promise<void> {
+  const run = showing.catch(() => {}).then(task);
+  showing = run;
+  return run;
+}
+
+async function showAppNow(route?: string): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
   const existing = await openAppTab(url);
   if (existing) {
     // Only the fragment changes: the page stays, and its router goes there.
     await chrome.tabs.update(existing.tabId, route ? { active: true, url: `${url}#${route}` } : { active: true });
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
-  } else {
-    await chrome.tabs.create({ url: route ? `${url}#${route}` : url });
+  } else await openTab(route ? `${url}#${route}` : url);
+}
+
+async function openTab(url: string): Promise<void> {
+  const tab = await chrome.tabs.create({ url });
+  // The new tab is among the extension's contexts only once its page loads (some 20-30 ms later): the next one
+  // waits for that, or it opens a second tab too.
+  for (let attempt = 0; attempt < 40 && tab.id !== undefined; attempt++) {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+    if (contexts.some((context) => context.tabId === tab.id)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -146,8 +216,11 @@ async function showApp(route?: string): Promise<void> {
 async function openNotification(id: string): Promise<void> {
   void chrome.notifications.clear(id).catch(() => {});
   const key = `notice:${id}`;
-  const chat: unknown = (await chrome.storage.session.get(key))[key];
-  await chrome.storage.session.remove(key);
+  const chat = await inNoticeOrder(async () => {
+    const kept: unknown = (await chrome.storage.session.get(key))[key];
+    await chrome.storage.session.remove(key);
+    return kept;
+  });
   const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
   if (owned === true) return;
   await ensureEngine().catch(() => {});
@@ -167,13 +240,48 @@ function chatRoute(chat: string): string | undefined {
  * profile now in use, goes too: its "New messages in" is read once it is open, as the pages' `clearPeek` does where a
  * notice can be taken back by its chat (useProfilePeek.ts).
  */
-async function clearNotices(next?: string): Promise<void> {
+function clearNotices(next?: string): Promise<void> {
+  return inNoticeOrder(() => clearNoticesNow(next));
+}
+
+async function clearNoticesNow(next?: string): Promise<void> {
   const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
   const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
   const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
   if (!keys.length) return;
   await chrome.storage.session.remove(keys).catch(() => {});
   await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
+}
+
+/**
+ * The worker's reads and writes of the `notice:<id>` keys, one after another: each reads the keys, then writes, and two
+ * running at once would both read before either wrote (a burst's messages, asked for in the same moment, each made a
+ * notification of its own). Session storage stays what says which notification is a chat's: this order lives only as long
+ * as the worker, and the next worker reads the keys afresh.
+ */
+let noticeWork: Promise<unknown> = Promise.resolve();
+
+function inNoticeOrder<T>(task: () => Promise<T>): Promise<T> {
+  const run = noticeWork.catch(() => {}).then(task);
+  noticeWork = run;
+  return run;
+}
+
+/**
+ * A notification the peer asked for, of a message no tab heard (attentionNotices.ts), with its chat kept as a page keeps
+ * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab,
+ * also when the burst's messages are asked for at once.
+ */
+function showNotice(body: string, chat?: string): Promise<void> {
+  return inNoticeOrder(() => showNoticeNow(body, chat));
+}
+
+async function showNoticeNow(body: string, chat?: string): Promise<void> {
+  if (!chrome.notifications) return;
+  const kept = chat ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
+  const id = Object.keys(kept).find((key) => key.startsWith("notice:") && kept[key] === chat)?.slice("notice:".length) ?? crypto.randomUUID();
+  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat });
+  await chrome.notifications.create(id, { type: "basic", iconUrl: chrome.runtime.getURL("icons/128.png"), title: "Ghostly", message: body, silent: true });
 }
 
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
@@ -184,6 +292,18 @@ function listenToNotifications(): void {
 const onNotificationClicked = (id: string) => void openNotification(id).catch(() => {});
 listenToNotifications();
 chrome.permissions.onAdded.addListener(listenToNotifications);
+
+/**
+ * The person turned off the extension's site access to a host of this machine (`chrome://extensions`, or the puzzle
+ * menu): the peer stops sharing the apps there, as "Share" turned off does, until they are turned on again. Ghostly's own
+ * `permissions.remove` fires this too, once no app is left at that host: then there is nothing to turn off.
+ */
+chrome.permissions.onRemoved.addListener(({ origins }) => {
+  if (!origins?.length) return;
+  void ensureEngine()
+    .then(() => chrome.runtime.sendMessage({ target: "engine", type: "local-access-removed", origins } satisfies RuntimeMessage))
+    .catch(() => {});
+});
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
@@ -212,6 +332,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "notify") {
+    if (typeof message.body !== "string" || !message.body || (message.chat !== undefined && typeof message.chat !== "string")) return false;
+    void showNotice(message.body.slice(0, 200), message.chat).catch(() => {}).then(() => sendResponse(true));
+    return true;
+  }
   if (message.type === "open-payment-link") {
     // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
     const uri = typeof message.uri === "string" && /^(lightning|bitcoin|monero):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
@@ -223,7 +348,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
+    // Hide my IP from contacts is on: a contact's app does not open in a tab (see "viewer" below).
+    if (message.relayOnly === true) { sendResponse({ ok: false, error: RELAY_ONLY_REFUSED }); return false; }
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, message.profile, viewerPageOf(message.page), viewersClosed).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
@@ -236,7 +363,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "local-access-allowed") {
+    if (typeof message.profile !== "string" || typeof message.origin !== "string") { sendResponse(false); return false; }
+    void localOriginAllowed(message.profile, message.origin).then((allowed) => sendResponse(allowed === true), () => sendResponse(false));
+    return true;
+  }
   if (message.type === "close-services") {
+    viewersClosed++;
     void closeViewers().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: true }));
     return true;
   }
@@ -255,7 +388,18 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 //
 // A tab serves the one service it was opened for. The app in it is a
 // contact's code: if it could reach another virtual origin, it would talk to
-// another contact's app as the user.
+// another contact's app as the user. Nor may it reach the person's own
+// services: every answer carries Ghostly's connection policy
+// (`withViewerPolicy`), which keeps it off plain http, whatever the browser's
+// own guard for local addresses allows. A top-level navigation is beyond any
+// policy, and once the tab leaves the virtual origin it is no viewer any more.
+//
+// So no tab opens while Hide my IP from contacts is on (`RELAY_ONLY_REFUSED`):
+// the app could send the tab, or a frame, to a server of the contact's, and
+// Chrome connects there before any policy or DevTools refuses the page, which
+// shows that server this device's address. A frame whose page's `frame-src`
+// refuses it is connected to all the same (Chromium, 2026-11). Desktop's window
+// never leaves the app's origin (`may_navigate` in apps/desktop/src/viewer.rs).
 //
 // The `debugger` permission reaches every tab, so its use is kept narrow here,
 // the only place in the extension that calls `chrome.debugger`:
@@ -267,11 +411,22 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 
 const PROTOCOL_VERSION = "1.3";
 
+/** Why a contact's app does not open while Hide my IP from contacts is on; the app says it in its language (errorText.ts). */
+const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
+
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
 const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
+/**
+ * Added to Ghostly's policy on every page a viewer serves: the app opens no window or tab of its own, which would run
+ * on its origin with no DevTools and no binding, so no close (lock, profile switch, Hide my IP) would reach it. The web
+ * view's frame has the same flags (apps/web/src/svc/opener.ts); Desktop's viewer opens no window either.
+ */
+const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
+
 interface PausedRequest {
   requestId: string;
+  resourceType?: string;
   request: {
     url: string;
     method: string;
@@ -290,15 +445,15 @@ interface ViewerBinding {
 }
 
 /** The English page, for a request that came without one. */
-const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
+const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed, upload: servicesEn.window.upload };
 
-/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. */
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. An app name and upload line only if short text. */
 function viewerPageOf(page: unknown): ViewerPage {
   const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
   if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
-  const { lang, dir, unreachable, failed } = page as Record<string, unknown>;
+  const { lang, dir, unreachable, failed, upload, app } = page as Record<string, unknown>;
   if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
-  return { lang, dir, unreachable: unreachable as string, failed: failed as string };
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string, ...(text(upload) ? { upload: upload as string } : {}), ...(text(app) ? { app: app as string } : {}) };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -311,7 +466,63 @@ async function bindingOf(tabId: number): Promise<ViewerBinding | null> {
 
 const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId));
 
+/**
+ * The closes of every viewer so far: the pages' `close-services` (Hide my IP turned on, the lock screen) and each new
+ * peer (`replaceEngine`: a switch, Clear all data). One that comes while `openViewer` makes its tab finds no binding yet,
+ * or none at all while the peer starts: that open counts it and leaves no tab.
+ */
+let viewersClosed = 0;
+
 chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
+
+/**
+ * A reload of the extension (Update and restart, chrome://extensions, turned off and on) empties session storage, but a
+ * viewer tab is an ordinary tab and stays open, the contact's page and script in it. So each binding is also kept in
+ * `storage.local`, as the tab's DevTools targets: a target id is the tab's for as long as it lives, whatever it shows,
+ * and never comes back in a later browser run, where tab ids start over. A tab still open with no binding is one of
+ * those: it closes as the next worker starts, and at the latest with the next closer (`closeViewers`).
+ */
+chrome.storage.session.onChanged.addListener((changes) => {
+  for (const [key, { newValue }] of Object.entries(changes)) {
+    const tabId = boundTab(key);
+    if (tabId === null) continue;
+    void (newValue === undefined ? chrome.storage.local.remove(key) : rememberTargets(tabId)).catch(() => {});
+  }
+});
+
+/** The tab a binding's key names, or null for any other key. */
+function boundTab(key: string): number | null {
+  const match = /^viewer:(\d+)$/.exec(key);
+  return match ? Number(match[1]) : null;
+}
+
+async function rememberTargets(tabId: number): Promise<void> {
+  const targets = (await chrome.debugger.getTargets()).filter((target) => target.tabId === tabId).map((target) => target.id);
+  if (targets.length) await chrome.storage.local.set({ [bindingKey(tabId)]: targets });
+}
+
+async function closeLeftoverViewers(): Promise<void> {
+  try {
+    const kept = await chrome.storage.local.get(null);
+    const targets = await chrome.debugger.getTargets();
+    const unbound = async (tabId: number) => !(await bindingOf(tabId));
+    // A tab still on a contact's app's origin with no binding is one too, recorded or not.
+    const leftovers = new Set(targets.filter((target) => target.tabId !== undefined && isViewerOrigin(target.url)).map((target) => target.tabId!));
+    for (const key of Object.keys(kept)) {
+      const tabId = boundTab(key);
+      if (tabId === null) continue;
+      const ids = kept[key];
+      if (Array.isArray(ids) && targets.some((target) => target.tabId === tabId && ids.includes(target.id))) leftovers.add(tabId);
+      // A live viewer's record stays; any other is used up here (its tab closes, or it is long gone).
+      if (!(await unbound(tabId))) continue;
+      await chrome.storage.local.remove(key);
+    }
+    for (const tabId of leftovers) if (await unbound(tabId)) await chrome.tabs.remove(tabId).catch(() => {});
+  } catch {
+    // No target list now: the next start or closer tries again, and the records stay for it.
+  }
+}
+void closeLeftoverViewers();
 
 /**
  * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
@@ -319,11 +530,16 @@ chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
  * of the viewers it picks.
  */
 async function closeViewers(which: (binding: ViewerBinding) => boolean = () => true): Promise<void> {
-  const tabs = await chrome.tabs.query({});
+  // A tab at a viewer origin with no binding (its debugger cancelled) closes too: the app in it would write again.
+  await closeLeftoverViewers();
+  // The bindings, read at once: not one read per tab the browser has open (hundreds, at each lock and switch).
+  const kept = await chrome.storage.session.get(null);
+  const viewers = Object.entries(kept).flatMap(([key, binding]) => {
+    const id = boundTab(key);
+    return id !== null && which(binding as ViewerBinding) ? [id] : [];
+  });
   await Promise.all(
-    tabs.map(async ({ id }) => {
-      const binding = id === undefined ? null : await bindingOf(id);
-      if (id === undefined || !binding || !which(binding)) return;
+    viewers.map(async (id) => {
       await forget(id);
       await chrome.debugger.detach({ tabId: id }).catch(() => {});
       await chrome.tabs.remove(id).catch(() => {});
@@ -331,18 +547,35 @@ async function closeViewers(which: (binding: ViewerBinding) => boolean = () => t
   );
 }
 
-/** Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. */
-export async function devtools(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
+/**
+ * Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. `bound`: the
+ * binding the caller read for this tab, not read again. A close since then (`closeViewers`, the tab leaving the origin)
+ * let go of the tab's debugger after forgetting it, and only `openViewer` attaches it to a tab: the command fails.
+ */
+export async function devtools(tabId: number, method: string, params?: Record<string, unknown>, bound?: ViewerBinding): Promise<void> {
   if (!VIEWER_COMMANDS.has(method)) throw new Error(`DevTools command not allowed: ${method}`);
-  if (!(await bindingOf(tabId))) throw new Error("Not a viewer tab");
+  if (!(bound ?? (await bindingOf(tabId)))) throw new Error("Not a viewer tab");
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
+/**
+ * `profile`: the page's (`EngineStatus.profile`); `closedAt`: `viewersClosed` when the page asked. The tab is only made,
+ * and only shows the app, while the peer runs that profile and no close came since.
+ */
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, profile: unknown, page: ViewerPage, closedAt: number): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
-  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag || typeof profile !== "string") throw new Error("Invalid service");
   await ensureEngine();
+  // The open ends as the tab would have, had it been made a moment sooner: closed with the others. So it does when the
+  // peer it waited on is another profile's: a switch in another tab while it started, or one the document read as it
+  // loaded (no peer was replaced, nothing closed). The tab is the page's profile's origin, and no other peer serves it.
+  const running = async () => {
+    const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage).catch(() => undefined)) as EngineStatus | undefined;
+    return status && !status.stopped ? status.profile : undefined;
+  };
+  const closed = async () => viewersClosed !== closedAt || (await running()) !== profile;
+  if (await closed()) return;
 
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
@@ -356,7 +589,16 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
     await devtools(tab.id, "Page.enable");
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
+    // `closeViewers` took the tab while DevTools attached to it.
+    if (await closed()) return;
     throw error;
+  }
+  // From here on the binding is written: a close that comes later finds the tab (`closeViewers`).
+  if (await closed()) {
+    await forget(tab.id);
+    await chrome.debugger.detach({ tabId: tab.id }).catch(() => {});
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    return;
   }
   await chrome.tabs.update(tab.id, { url });
 }
@@ -377,7 +619,7 @@ async function forgetViewer(peerPubKeyZ32: string, serviceId: string, tag: strin
   );
 }
 
-function errorPage(page: ViewerPage, text: string): string {
+function errorPage(page: Pick<ViewerPage, "lang" | "dir">, text: string): string {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html><html lang="${escape(page.lang)}" dir="${page.dir}"><meta charset="utf-8"><title>Ghostly</title>
 <body style="font:16px system-ui;background:#0b0b12;color:#d8d8e8;display:grid;place-items:center;height:100vh;margin:0">
@@ -386,6 +628,27 @@ function errorPage(page: ViewerPage, text: string): string {
 }
 
 const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline", "unknown-peer"]);
+
+/** The types a tab shows as a page; Chrome saves any other as a file. */
+const SHOWN_TYPES = new Set([
+  "text/html", "text/plain", "text/css", "text/javascript", "text/xml", "application/xml", "application/xhtml+xml", "application/json", "application/javascript",
+  "image/svg+xml", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+]);
+
+/**
+ * Whether Chrome would show this answer to a page's navigation, not save it as a file. The sandbox keeps a contact's
+ * page from starting a download, but it comes with a document: the tab's own navigation to the app (`openViewer`, a
+ * reload, back) has none, so an answer it would save is shown as the error page, as Desktop and the web view save no
+ * file a contact's app sends. Fail closed: no type, an unknown one, several, or a disposition other than inline.
+ */
+function shownAsPage(status: number, headers: [string, string][]): boolean {
+  const named = (name: string) => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+  if (status === 204 || status === 205 || (status >= 300 && status < 400 && named("location").length)) return true;
+  if (named("content-disposition").some((value) => value.split(";")[0].trim().toLowerCase() !== "inline")) return false;
+  const types = named("content-type").flatMap((value) => value.split(","));
+  return types.length === 1 && SHOWN_TYPES.has(types[0].split(";")[0].trim().toLowerCase());
+}
 
 async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   const binding = await bindingOf(tabId);
@@ -397,61 +660,126 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   }
   const parsed = parseViewerUrl(paused.request.url);
   if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId || parsed.tag !== binding.tag) {
-    await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
+    await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" }, binding);
     return;
   }
 
+  // DevTools leaves `bytes` out of a piece it holds as a file or a stream (a FormData with a picked file, an XHR sending
+  // one; an empty piece is `bytes: ""`), and has no command that reads it: sent without it, the app would get the form
+  // with an empty file, or no body at all, as if it were the upload. The request fails instead, saying why and where
+  // the file does go (a page of an older build has no such line: its plain failure).
+  if (paused.request.postDataEntries?.some((e) => typeof e.bytes !== "string")) {
+    const { page } = binding;
+    await answerFailed(tabId, paused.requestId, { ...binding, page: { ...page, failed: page.upload ?? page.failed } }, { ok: false, code: "error", message: "A file or stream in the request's body cannot be sent from a browser extension tab" });
+    return;
+  }
   let bodyB64: string | null = null;
   const entries = paused.request.postDataEntries?.filter((e) => e.bytes);
   if (entries?.length === 1) bodyB64 = entries[0].bytes!;
   else if (entries && entries.length > 1) bodyB64 = toBase64(concatBytes(...entries.map((e) => fromBase64(e.bytes!))));
   else if (paused.request.postData !== undefined) bodyB64 = toBase64(utf8Encode(paused.request.postData));
 
-  const message: RuntimeMessage = {
-    target: "engine",
-    type: "http-request",
+  const request: HttpRequest = {
     peerPubKeyZ32: parsed.peerPubKeyZ32,
     serviceId: parsed.serviceId,
     method: paused.request.method,
     path: parsed.path,
     headers: Object.entries(paused.request.headers),
     bodyB64,
+    ...(binding.page.app ? { app: binding.page.app } : {}),
   };
 
   let reply: HttpRequestReply;
   try {
-    await ensureEngine();
-    // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
-    if (!(await bindingOf(tabId))) return;
-    reply = await chrome.runtime.sendMessage(message);
-    if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
+    // Straight to the peer that served the tab so far; only when no peer takes it is one started (or replaced) and asked.
+    let answer = await askPeer(request);
+    if (!answer) {
+      await ensureEngine();
+      // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
+      if (!(await bindingOf(tabId))) return;
+      answer = await askPeer(request);
+    }
+    reply = answer ?? { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {
     reply = { ok: false, code: "error", message: String(error) };
+  }
+  if (reply.ok && paused.resourceType === "Document" && !shownAsPage(reply.status, viewerResponseHeaders(reply.headers))) {
+    reply = { ok: false, code: "download", message: "The app answered a page with a file to save" };
   }
 
   if (reply.ok) {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: viewerResponseHeaders(reply.headers).map(([name, value]) => ({ name, value })),
+      // Ghostly's policy is the header's last one, after the contact's.
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
       body: reply.bodyB64,
-    });
+    }, binding);
     return;
   }
+  await answerFailed(tabId, paused.requestId, binding, reply);
+}
 
+/** A request that got no answer from the app: its error page, in the words of the page that opened the tab. */
+async function answerFailed(tabId: number, requestId: string, binding: ViewerBinding, reply: Extract<HttpRequestReply, { ok: false }>): Promise<void> {
+  const { page } = binding;
   const gone = UNREACHABLE_CODES.has(reply.code);
   // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
-  if (!gone) console.warn("Service request failed:", reply.code, reply.message);
-  const { page } = binding;
+  if (!gone && !reply.shown) console.warn("Service request failed:", reply.code, reply.message);
+  // The contact's machine answered in place of their app: the peer said why, from this side (viewerWords.ts).
+  const html = reply.shown ? errorPage(reply.shown, reply.shown.text) : errorPage(page, gone ? page.unreachable : page.failed);
   await devtools(tabId, "Fetch.fulfillRequest", {
-    requestId: paused.requestId,
-    responseCode: gone ? 503 : 502,
+    requestId,
+    responseCode: reply.status ?? (gone ? 503 : 502),
     responseHeaders: [
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
+      { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
     ],
-    body: toBase64(utf8Encode(errorPage(page, gone ? page.unreachable : page.failed))),
+    body: toBase64(utf8Encode(html)),
+  }, binding);
+}
+
+/**
+ * The port the requests go to the peer on, opened once per document (`VIEWER_PORT`): a `runtime.sendMessage` reaches
+ * every page of the extension too, and each app tab read every request, its body included, only to drop it.
+ */
+let viewerPort: { port: chrome.runtime.Port; waiting: Map<number, (reply: HttpRequestReply | null) => void> } | null = null;
+let nextAsk = 0;
+
+/**
+ * The peer's answer, or null when no peer took the request: no document, one whose script does not listen yet, one that
+ * went away meanwhile (a switch closes it), or one whose peer stopped for good. The next ask opens the port again.
+ */
+function askPeer(request: HttpRequest): Promise<HttpRequestReply | null> {
+  if (!viewerPort) {
+    const opened = { port: chrome.runtime.connect({ name: VIEWER_PORT }), waiting: new Map<number, (reply: HttpRequestReply | null) => void>() };
+    viewerPort = opened;
+    opened.port.onMessage.addListener(({ id, reply }: ViewerReply) => {
+      opened.waiting.get(id)?.(reply);
+      opened.waiting.delete(id);
+    });
+    opened.port.onDisconnect.addListener(() => {
+      // "Receiving end does not exist" when no document listens: what the null below says.
+      void chrome.runtime.lastError;
+      if (viewerPort === opened) viewerPort = null;
+      for (const answer of opened.waiting.values()) answer(null);
+      opened.waiting.clear();
+    });
+  }
+  const { port, waiting } = viewerPort;
+  const id = nextAsk++;
+  return new Promise((resolve) => {
+    waiting.set(id, resolve);
+    try {
+      port.postMessage({ id, request } satisfies ViewerAsk);
+    } catch {
+      // Disconnected before its `onDisconnect` ran: the next ask opens another.
+      if (viewerPort?.port === port) viewerPort = null;
+      waiting.delete(id);
+      resolve(null);
+    }
   });
 }
 
@@ -460,14 +788,18 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (tabId === undefined) return;
 
   if (method === "Fetch.requestPaused") {
-    fulfill(tabId, params as PausedRequest).catch(() => {
+    fulfill(tabId, params as unknown as PausedRequest).catch(() => {
       // tab closed or debugger detached mid-request
     });
   } else if (method === "Page.frameNavigated") {
     // Once the tab leaves the virtual origin there is nothing left to serve, and it is no viewer any more.
     const { frame } = params as { frame: { parentId?: string; url: string } };
     if (frame.parentId || frame.url === "about:blank" || parseViewerUrl(frame.url)) return;
-    void forget(tabId).then(() => chrome.debugger.detach({ tabId }).catch(() => {}));
+    // Still the app's origin at an address no closer finds (a `blob:` it made): the app goes with the tab.
+    const close = isViewerOrigin(frame.url);
+    void forget(tabId)
+      .then(() => chrome.debugger.detach({ tabId }).catch(() => {}))
+      .then(() => (close ? chrome.tabs.remove(tabId).catch(() => {}) : undefined));
   }
 });
 

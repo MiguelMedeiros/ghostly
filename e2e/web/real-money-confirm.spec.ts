@@ -42,7 +42,7 @@ test("the Cashu card's Pay on Mainnet asks once more in words; Back pays nothing
 
   await page.getByTestId("wallet-pay-confirm").click();
   await page.getByTestId("review-confirm-send").click();
-  await expect(page.getByText("Paid.", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("wallet-send-result").getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 30_000 });
   await expect(page.getByTestId("review-mainnet-confirm")).toHaveCount(0);
   // 10 sats and the mint's fee left the Mainnet wallet.
   await expect.poll(balance, { timeout: 15_000 }).toMatch(/^(3\d|40)\s*sats/);

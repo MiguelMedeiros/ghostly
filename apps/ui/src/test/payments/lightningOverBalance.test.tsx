@@ -89,7 +89,7 @@ describe("the wallet's Pay invoice", () => {
     const { user, engine } = show("lightning", { lightning: testSource(balance) });
     await user.click(await review(user));
     expect(screen.queryByTestId("wallet-pay-over")).not.toBeInTheDocument();
-    expect(await screen.findByText("Paid.")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-notice")).toHaveTextContent("Paid.");
     expect(engine.callsTo("walletPayQuote")).toHaveLength(1);
   });
 });

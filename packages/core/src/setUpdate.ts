@@ -20,10 +20,9 @@ import { signTurnPacket, TOMBSTONE_TURN, TURN_MAX, TURN_NAME_BYTES, TURN_NO_ACTI
  * `enroll-grant` writes it: by slot, a slot nobody holds is `null` in its place, trailing unheld slots left out (after
  * a removal the slots held need not be the first). The vectors in `packages/core/test/vectors/set-update.json` pin it.
  *
- * `rec`, this build's own field beside the WISP's: the remover's last ordinary record at the old address, as a packet.
- * A tombstone outranks every record there, so a device that stays and never read that record (it was handed over or
- * taken while the device did not look) cannot read it any more; the record is signed by its own author and carries its
- * release, so the receiver checks it alone (`devices/setUpdate.ts`). It is outside the signed tuple: it proves itself.
+ * `rec`, a field older builds send beside the WISP's: the remover's last ordinary record at the old address, as a
+ * packet, outside the signed tuple. It is still read, so their frames stay well formed, and moves nothing: a receiver
+ * believes only the device its stored record names active (`devices/setUpdate.ts`). This build sends none.
  *
  * Nothing here decides who is believed: that is the receiver's rule (`packages/browser/src/devices/setUpdate.ts`).
  */

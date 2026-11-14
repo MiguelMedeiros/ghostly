@@ -40,7 +40,60 @@ describe("the box of a picture", () => {
     expect(pictureBox({ width: 4032, height: 3024 })).toEqual({ width: 330, ratio: "4032 / 3024" });
     expect(pictureBox({ width: 3024, height: 4032 })).toEqual({ width: 248, ratio: "3024 / 4032" });
     expect(pictureBox({ width: 88, height: 31 })).toEqual({ width: 88, ratio: "88 / 31" });
-    expect(pictureBox({ width: 10_000, height: 1 })).toEqual({ width: 330, ratio: "10000 / 1" });
+    expect(pictureBox({ width: 10_000, height: 1 })).toEqual({ width: 330, ratio: "330 / 1" });
+  });
+
+  it("is never taller than 330 nor thinner than a pixel, whatever size its sender says", () => {
+    expect(pictureBox({ width: 1, height: 65_535 })).toEqual({ width: 1, ratio: "1 / 330" });
+    expect(pictureBox({ width: 1, height: 16_384 })).toEqual({ width: 1, ratio: "1 / 330" });
+    expect(pictureBox({ width: 30, height: 65_535 })).toEqual({ width: 24, ratio: "24 / 330" });
+    expect(pictureBox({ width: 65_535, height: 1 })).toEqual({ width: 330, ratio: "330 / 1" });
+  });
+});
+
+/** The height the box is laid out at: from its width and ratio, as CSS does, then capped by its max-height. */
+const laidOutHeight = (shown: HTMLElement) => {
+  const [w, h] = shown.style.aspectRatio.split("/").map(Number);
+  const height = (parseFloat(shown.style.width) * h!) / w!;
+  return shown.style.maxHeight ? Math.min(height, parseFloat(shown.style.maxHeight)) : height;
+};
+
+describe("FileBubble: a picture that says it is 1 × 65535", () => {
+  const thin = () => picture({ mime: "image/png", image: { width: 1, height: 65_535 } });
+  const arriving: FileTransferState = { state: "transferring", direction: "in", transferred: 10, size: 3_000_000 };
+
+  it("has a box no taller than the bubble, arriving, paused by its sender, received or gone", async () => {
+    for (const transfer of [arriving, { ...arriving, stage: "paused", pausedBy: "peer" } as FileTransferState, undefined]) {
+      const view = show(thin(), transfer);
+      expect(laidOutHeight(box()!)).toBeLessThanOrEqual(330);
+      view.unmount();
+    }
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null as never);
+    Object.assign(servicesPlatform!, { fileHeld: vi.fn(async () => "gone") });
+    try {
+      show(thin());
+      await vi.waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent("No longer available"));
+      expect(box()).toHaveAttribute("data-gone");
+      expect(laidOutHeight(box()!)).toBeLessThanOrEqual(330);
+    } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+
+  it("one whose bytes really are 1 × 16384 is shown contained in a box no taller than the bubble", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1, 16_384));
+    show(picture({ mime: "image/png" }));
+    const image = await screen.findByRole("img", { name: "photo.jpg" });
+    Object.defineProperty(image, "naturalWidth", { value: 1 });
+    Object.defineProperty(image, "naturalHeight", { value: 16_384 });
+    fireEvent.load(image);
+    expect(laidOutHeight(box()!)).toBeLessThanOrEqual(330);
+    expect(image.className).toContain("object-contain");
+  });
+
+  it("a usual 4:3 picture keeps its box", () => {
+    show(picture({ image: { width: 4032, height: 3024 } }));
+    expect(box()!.style.width).toBe("330px");
+    expect(box()!.style.aspectRatio).toBe("4032 / 3024");
+    expect(laidOutHeight(box()!)).toBe(247.5);
   });
 });
 

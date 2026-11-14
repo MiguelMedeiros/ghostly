@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { error, ghostly, home } from "./support/cli";
 // covers: headless.cli
 
-const CREATE = "profile create <name> [--use] [--name <shown name>]";
+const CREATE = "profile create <name> [--use] [--name <shown name>] [--force]";
 const USE = "profile use <name>";
-const SET = "profile set [--name <name>] [--share-profile | --no-share-profile]";
+const SET = "profile set [--name <name>] [--share-profile | --no-share-profile] [--force]";
 const BACKUP = "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]";
 const RESTORE = "profile restore <file> <new profile> [--passphrase-file f] [--use]";
 const ENGINE = "engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]";
-const SETTINGS = "settings set <key> <json-value>";
+const SETTINGS = "settings set <key> <json-value> [--force]";
 const IDENTITY = "identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]";
 const AUTO = "call auto [on|off] [--from <chat>]... [--rate 48000]";
 const REVOKE = "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";

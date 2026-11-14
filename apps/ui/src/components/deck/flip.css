@@ -16,6 +16,11 @@
 .deck-flip-turn:has(span){padding:5px 10px 5px 6px}
 .deck-flip-turn:hover{background:rgba(var(--card-rgb,36,211,194),.14)}
 .deck-flip-turn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+/* In the payment picker's head it sits on the theme's panel, not on a dark card: in a light theme the white ring and
+   the card's ink on a dark wash were about 1:1 there, so it takes the theme's ink and focus colour. */
+:root[data-theme="light"] .composer-sheet-head .deck-flip-turn{background:transparent;border-color:var(--theme-border-bright);color:var(--theme-text-secondary)}
+:root[data-theme="light"] .composer-sheet-head .deck-flip-turn:hover{background:var(--theme-surface-hover)}
+:root[data-theme="light"] .composer-sheet-head .deck-flip-turn:focus-visible{outline-color:var(--theme-accent)}
 
 /* Reduced motion: no turn, the faces cross-fade where they are (Flip.tsx's FADE_MS) and the height changes at once.
    index.css makes every transition instant then, so the fade keeps its own by importance. The face going away fades

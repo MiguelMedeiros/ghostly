@@ -83,7 +83,8 @@ describe("a group's picture in the app", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
     expect(picture("group-avatar")).toHaveAttribute("data-picture", "set");
     const lines = await screen.findAllByTestId("group-event");
-    expect(lines.map(l => l.textContent)).toEqual(["Alice changed the group's picture", "Alice removed the group's picture"]);
+    // Alice is the admin: her name carries the admin's mark.
+    expect(lines.map(l => l.textContent)).toEqual(["Alice admin changed the group's picture", "Alice admin removed the group's picture"]);
   });
 
   it("on the share screen", () => {

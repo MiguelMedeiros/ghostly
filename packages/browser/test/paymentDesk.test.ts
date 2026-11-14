@@ -157,6 +157,33 @@ describe("paying a contact's request, never twice", () => {
     await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "noSharedMint" });
   });
 
+  // A mint that took the split and never answered holds the sats until it does: the fallback finding nothing else to pay
+  // the invoice with said "Not enough sats in your wallet", to a payer with the sats, who was never told they come back.
+  it("ecash whose mint has not answered, with no Lightning to fall back on, says the mint has not answered", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    const unsettled = new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 });
+    wallet.createToken.mockRejectedValue(unsettled);
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughSats"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow(unsettled.message);
+    expect(state("r1")).toMatchObject({ state: "pending" });
+    // Another mint with the sats still pays it over Lightning.
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
+    expect(lightning.pay).toHaveBeenCalledOnce();
+    expect(state("r1")?.state).toBe("settled");
+  });
+
+  it("ecash whose mint has not answered does not hide why Lightning could not pay when that is not a lack of sats", async () => {
+    const { desk, wallet, lightning, state } = setup([record({ id: "r1", mints: [MINT], invoice: INVOICE })]);
+    await desk.start();
+    wallet.createToken.mockRejectedValue(new SwapUnsettledError({ id: "swap-1", mint: MINT, kind: "send", swap: {}, createdAt: 1 }));
+    lightning.quote.mockRejectedValueOnce(engineError("mintsNoAnyAmount"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "mintsNoAnyAmount" });
+    lightning.quote.mockRejectedValueOnce(engineError("notEnoughForFee", { amount: 5 }));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("has not answered yet");
+    expect(state("r1")).toMatchObject({ state: "pending" });
+  });
+
   it("pays an invoice only for the amount asked, and for at most 3% in fees (10 sats at least)", async () => {
     const { desk, lightning, allowed, state } = setup([record({ id: "r1", amount: 1_000, invoice: INVOICE })]);
     await desk.start();
@@ -346,9 +373,17 @@ describe("requests we send", () => {
   it("a USDT request carries the payee's address in token units, and needs USDT on both sides", async () => {
     const { desk, link, sent, state, texts } = setup();
     const { paymentId } = await desk.request({ linkId: "l", amount: 1_500_000, timestamp: 1, method: "usdt" });
+    // Asked: a little more than typed (its own amount, under a thousandth), stored and shown as asked.
+    const asked = state(paymentId)!.amount;
+    expect(asked).toBeGreaterThan(1_500_000);
+    expect(asked).toBeLessThan(1_501_000);
     expect(state(paymentId)).toMatchObject({ unit: "testusdt", target: { method: "usdt" }, state: "pending" });
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1500000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
-    expect(texts()).toEqual(["Requested 1.5 TEST-USDT"]);
+    expect(sent[0].frame).toMatchObject({ amount: { value: String(asked), asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(state(paymentId)!.target)]] });
+    expect(texts()).toHaveLength(1);
+    expect(texts()[0]).toMatch(/^Requested 1\.50[0-9]*[1-9] TEST-USDT$/);
+    // Every open request asks its own amount.
+    const others = await Promise.all([2, 3, 4].map((timestamp) => desk.request({ linkId: "l", amount: 1_500_000, timestamp, method: "usdt" })));
+    expect(new Set([asked, ...others.map((o) => state(o.paymentId)!.amount)]).size).toBe(4);
     link.supportsUsdtPayments = false;
     await expect(desk.request({ linkId: "l", amount: 1, timestamp: 2, method: "usdt" })).rejects.toThrow("Both peers need USDT");
     link.supportsArkPayments = false;
@@ -548,6 +583,45 @@ describe("ecash arriving", () => {
     expect(host.storeMessage.mock.calls.map(([m]) => m.id)).toEqual(["peer_1_refused", "peer_2_refused"]);
   });
 
+  it("a flood of made-up ecash from one chat asks the mint a bounded number of times and stores a bounded number of lines", async () => {
+    const { desk, wallet, sent, host } = setup();
+    wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+    expect(wallet.receiveToken.mock.calls.length, "each one a swap and a state check at the mint, under its lock").toBeLessThanOrEqual(10);
+    expect(host.storeMessage.mock.calls.length, "the chat is not filled with refusals").toBeLessThanOrEqual(5);
+    const results = sent.filter((s) => s.kind === "res").map((s) => s.frame);
+    expect(results, "every frame is answered, none redeemed").toHaveLength(200);
+    expect(results.every((r) => r.ok === false)).toBe(true);
+    expect(results.at(-1)!.error).toMatch(/too many/i);
+  });
+
+  it("another chat's payment still lands at once while one chat is flooding, and the flooding chat's later ones once its minute is over", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { desk, wallet, sent, texts } = setup();
+      wallet.receiveToken.mockRejectedValue(new Error("Token not verified"));
+      for (let i = 0; i < 50; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 1_000 + i, endpoint: [ENDPOINT.cashu, `cashuBmadeup${i}`] }));
+      wallet.receiveToken.mockResolvedValue({ amount: 100, mint: MINT, fee: 0 });
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      // A retransmission of a payment already answered is answered again, not counted.
+      await desk.onPayment("m", cashuPayment("real", { timestamp: 5_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "real", ok: true, credited: "100" });
+      vi.setSystemTime(Date.now() + 61_000);
+      await desk.onPayment("l", cashuPayment("later", { timestamp: 6_000 }));
+      expect(sent.at(-1)!.frame).toEqual({ id: "later", ok: true, credited: "100" });
+      expect(texts().filter((t) => t.startsWith("⚡"))).toEqual(["⚡ 100 sats", "⚡ 100 sats"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a flood of Fedimint payments the app refuses on the spot stores a bounded number of lines", async () => {
+    const { desk, allowed, sent, host } = setup();
+    allowed.fedimint = true;
+    for (let i = 0; i < 200; i++) await desk.onPayment("l", { id: `f${i}`, timestamp: 1_000 + i, amount: { value: "250000", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `notes${i}`] });
+    expect(host.storeMessage.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(sent.filter((s) => s.kind === "res")).toHaveLength(200);
+  });
+
   it("settles our request only in full, from a mint it named, and only when it came through this chat", async () => {
     const { desk, wallet, state } = setup([record({ id: "r", direction: "out", mints: [MINT] })]);
     await desk.start();
@@ -584,6 +658,18 @@ describe("what the contact answers about our payments", () => {
     expect(state("p")?.token).toBe("cashuBp");
   });
 
+  it("refused ecash the contact redeemed anyway is settled at its Take it back, and offered back no more", async () => {
+    const { desk, wallet, state } = setup([record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" })]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValueOnce(new Error("mint offline"));
+    await desk.onPaymentResult("l", { id: "p", ok: false, error: "No thanks" });
+    expect(state("p")).toMatchObject({ state: "failed", token: "cashuBp" });
+    wallet.receiveToken.mockRejectedValueOnce(new Error("Token already spent"));
+    await expect(desk.reclaim("p")).resolves.toBeUndefined();
+    expect(state("p")).toMatchObject({ state: "settled", token: undefined, error: undefined });
+    await expect(desk.reclaim("p")).rejects.toThrow("Nothing to reclaim");
+  });
+
   it("a payment with a target, one we received, or one already over is never changed by the contact's word", async () => {
     const { desk, wallet, state } = setup([
       record({ id: "a", kind: "payment", direction: "out", target: ark(), txid: tx("a") }),
@@ -611,6 +697,33 @@ describe("what the contact answers about our payments", () => {
     expect(host.onReviewedPaymentResult, "another chat cannot confirm it").not.toHaveBeenCalled();
   });
 
+  it("a contact's reason is kept only as a display text's check leaves it: no hidden or direction characters, no address", async () => {
+    const reviewed = record({ id: "rv", kind: "payment", direction: "out", token: "cashuBrv", target: cashuTarget() });
+    const { desk, wallet, host, state } = setup([
+      record({ id: "p1", kind: "payment", direction: "out", token: "cashuB1" }), record({ id: "p2", kind: "payment", direction: "out", token: "cashuB2" }),
+      record({ id: "p3", kind: "payment", direction: "out", token: "cashuB3" }), record({ id: "p4", kind: "payment", direction: "out", token: "cashuB4" }),
+      record({ id: "p5", kind: "payment", direction: "out", token: "cashuB5" }), record({ id: "p6", kind: "payment", direction: "out", token: "cashuB6" }),
+      record({ id: "p7", kind: "payment", direction: "out", token: "cashuB7" }), record({ id: "open", invoice: INVOICE }), reviewed,
+    ]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValue(new Error("mint offline"));
+    await desk.onPaymentResult("l", { id: "p1", ok: false, error: "No‮ thanks​\n today" });
+    await desk.onPaymentResult("l", { id: "p2", ok: false, error: "Your wallet is compromised. Restore it now at https://evil.example/restore" });
+    await desk.onPaymentResult("l", { id: "p3", ok: false, error: "Restore it at evil．example/restore" });
+    await desk.onPaymentResult("l", { id: "p4", ok: false, error: "x".repeat(121) });
+    await desk.onPaymentResult("l", { id: "p5", ok: false, error: "‮​ " });
+    // The one wallet reason with a host in it: our mint's, which the contact does not take. With a path, it is none.
+    await desk.onPaymentResult("l", { id: "p6", ok: false, error: "Ecash from mint.example is not accepted" });
+    await desk.onPaymentResult("l", { id: "p7", ok: false, error: "Ecash from evil.example/restore is not accepted" });
+    expect(["p1", "p2", "p3", "p4", "p5", "p6", "p7"].map((id) => state(id)?.error))
+      .toEqual(["No thanks today", ...Array(4).fill("The payment was refused"), "Ecash from mint.example is not accepted", "The payment was refused"]);
+    await desk.onPaymentResult("l", { id: "open", ok: false, closed: true, error: "Closed. Pay me at www.evil.example instead" });
+    expect(state("open")).toMatchObject({ state: "failed", closed: true, error: "your contact closed it" });
+    wallet.receiveToken.mockResolvedValueOnce({ amount: 100, mint: MINT, fee: 0 });
+    await desk.onPaymentResult("l", { id: "rv", ok: false, error: "Refused, see lightning:lnbc1evil" });
+    expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv", "The payment was refused", { amount: 100, fee: 0 });
+  });
+
   it("only ecash we sent and still hold can be taken back, and a mint that cannot be reached is said so", async () => {
     const { desk, wallet } = setup([record({ id: "in", kind: "payment" }), record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" })]);
     await desk.start();
@@ -627,7 +740,9 @@ describe("asks to pay without a request", () => {
     await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "1000000", asset: "sat" }, method: "usdt" });
     await desk.onPaymentAsk("l2", { id: "ask_000002", timestamp: 1, amount: { value: "1000000", asset: "usdtbase" }, method: "usdt" });
     expect(sent.map((s) => s.frame.ask)).toEqual(["ask_000002"]);
-    expect(sent[0].frame).toMatchObject({ amount: { value: "1000000", asset: "testusdt" } });
+    expect(sent[0].frame).toMatchObject({ amount: { asset: "testusdt" } });
+    expect(Number(sent[0].frame.amount.value) - 1_000_000, "the answer asks its own amount, under a thousandth more").toBeGreaterThan(0);
+    expect(Number(sent[0].frame.amount.value) - 1_000_000).toBeLessThan(1000);
     net.online = false;
     await desk.onPaymentAsk("l3", { id: "ask_000003", timestamp: 1, amount: { value: "10", asset: "sat" }, method: "arkade" });
     expect(sent).toHaveLength(1);
@@ -640,6 +755,12 @@ describe("asks to pay without a request", () => {
     expect(sent[0].frame.amount).toEqual({ value: "2000000", asset: "usdtbase" });
     await desk.onPaymentRequest("l", { id: "u1", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: usdtAsk });
     expect(desk.payment("u1")?.ask).toBe(usdtAsk);
+    // A newer app's answer asks a little more (its own amount): still the ask's; a thousandth more is not.
+    const { askId: tagged } = await desk.ask({ linkId: "l", amount: 2_000_000, method: "usdt", timestamp: 1, network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "u2", timestamp: 2, amount: { value: "2001000", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u2")?.ask).toBeUndefined();
+    await desk.onPaymentRequest("l", { id: "u3", timestamp: 2, amount: { value: "2000347", asset: "testusdt" }, endpoints: [[ENDPOINT.usdt, JSON.stringify(usdt())]], ask: tagged });
+    expect(desk.payment("u3")?.ask).toBe(tagged);
 
     const { askId } = await desk.ask({ linkId: "l", amount: 700, method: "arkade", timestamp: 1, network: "testnet" });
     await desk.onPaymentRequest("l", { id: "b1", timestamp: 2, amount: { value: "700", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(btc())]], ask: askId });
@@ -871,6 +992,21 @@ describe("Ark receipts", () => {
     expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
   });
 
+  it("an Ark receipt for a request on another rail is not taken; that rail's own receipt still settles it", async () => {
+    const { desk, arkWallet, usdtWallet, state, texts } = setup([record({ id: "r", direction: "out", unit: "testusdt", target: usdt(), amount: 2_000_000 })]);
+    await desk.start();
+    await desk.onPayment("l", { id: "p-ark", requestId: "r", timestamp: 1, amount: { value: "2000000", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid: tx("a") })] });
+    expect(state("p-ark")).toBeUndefined();
+    expect(texts().filter((t) => t?.includes("on Ark"))).toEqual([]);
+    expect(arkWallet.adapter.verifyReceipt).not.toHaveBeenCalled();
+
+    const txid = "0x" + tx("b");
+    usdtWallet.adapter.receipt.mockResolvedValueOnce({ settled: true });
+    await desk.onPayment("l", { id: "p", requestId: "r", timestamp: 2, amount: { value: "2000000", asset: "testusdt" }, endpoint: [ENDPOINT.usdt, JSON.stringify({ txid })] });
+    expect(state("p")).toMatchObject({ state: "settled", txid });
+    expect(state("r")?.state).toBe("settled");
+  });
+
   it("one request keeps one pending Ark receipt: more under fresh ids are not stored, said, or checked", async () => {
     const { desk, arkWallet, state, texts } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
     await desk.start();
@@ -967,6 +1103,7 @@ describe("the reviewed Cashu adapter", () => {
       executeReviewedCashu: vi.fn(async () => "cashuBfresh"),
       reviewedCashuSpent: vi.fn(async () => false),
       reviewedCashuTakenBack: vi.fn(async () => false),
+      cashuTakingBack: vi.fn(async () => false),
       recoverReviewedCashu: vi.fn(async (): Promise<string | undefined> => "cashuBrecovered"),
       // The mint has not proved the swap never happened: reconcile keeps waiting.
       reviewedCashuNeverSwapped: vi.fn(async () => false),
@@ -1183,15 +1320,17 @@ describe("a request closed because its wallet was removed", () => {
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id).sort()).toEqual(["ark", "ln"]);
 
     sent.length = 0;
-    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to", "your contact removed the wallet it was paid to")).toBe(true);
-    expect(await desk.close("done", "x", "y"), "a paid request stays paid").toBe(false);
+    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to")).toBe(true);
+    expect(await desk.close("done", "x"), "a paid request stays paid").toBe(false);
     expect(state("ark")).toMatchObject({ state: "failed", closed: true, error: "you removed the Mainnet Ark wallet it was paid to" });
     expect(state("done")?.state).toBe("settled");
     expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
 
+    // The chat opening again says it closed once more: a contact away when it closed still had it open, with Pay.
     sent.length = 0;
     await desk.replay("l");
     expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id)).toEqual(["ln"]);
+    expect(sent.filter((s) => s.kind === "res")).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
   });
 
   it("on the payer's side it closes too, unless a Lightning payment for it is already in flight; nobody else can close it", async () => {
@@ -1222,6 +1361,22 @@ describe("the line kept with a payment message (the CLI and older apps show it)"
     await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "1234", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
     await desk.onPaymentRequest("l", { id: "rm", timestamp: 4, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([MINT])]], network: "mainnet" });
     expect(texts()).toEqual(["⚡ Requested 1,234 test sats", "⚡ Requested 50 sats"]);
+  });
+
+  it("writes the amount in English on a device whose own numbers use other digits", async () => {
+    const real = Number.prototype.toLocaleString;
+    const bengali = vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+      return real.call(this, locales ?? "bn-BD", options);
+    });
+    try {
+      const { desk, wallet, texts } = setup();
+      await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "21000", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+      wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
+      await desk.send({ linkId: "l", amount: 21000, timestamp: 4, network: "testnet" });
+      expect(texts()).toEqual(["⚡ Requested 21,000 test sats", "⚡ 21,000 test sats"]);
+    } finally {
+      bengali.mockRestore();
+    }
   });
 
   it("ecash sent from a test mint says test sats", async () => {

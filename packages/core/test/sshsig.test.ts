@@ -48,8 +48,8 @@ describe('SSHSIG verification against ssh-keygen vectors', () => {
       const v = byName(name);
       await refused(verifySshSignature(v.signature, `${message} `), /does not match this statement/);
       await refused(verifySshSignature(v.signature, message.replace('2027-04-15', '2028-04-15')), /does not match/);
-      await refused(verifySshSignature(v.otherNamespace, message), /namespace "git", not "ghostly"/);
-      await refused(verifySshSignature(v.signature, message, { namespace: 'git' }), /namespace "ghostly", not "git"/);
+      await refused(verifySshSignature(v.otherNamespace, message), /^Signed for another namespace, not "ghostly"\. Use -n ghostly\.$/);
+      await refused(verifySshSignature(v.signature, message, { namespace: 'git' }), /another namespace, not "git"/);
       const blob = unarmor(v.signature);
       blob[blob.length - 9] ^= 1;
       await expect(verifySshSignature(armor(blob), message)).rejects.toThrow(SshSigError);

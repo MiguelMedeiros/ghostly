@@ -115,6 +115,28 @@ describe("the payee is asked to look", () => {
     expect(lightning.check).not.toHaveBeenCalled();
     expect(sent).toEqual([{ kind: "res", frame: { id: "r1", ok: true } }]);
   });
+  it("a Fedimint request paid over its invoice while the chat was down is said paid again when it is back, as is one of any other rail", async () => {
+    const fresh = Date.now();
+    const { desk: payee, link } = setup([
+      outgoing({ federations: ["fed1"], invoice: INVOICE, createdAt: fresh }),
+      outgoing({ id: "r2", target: btc(), state: "settled", createdAt: fresh }),
+      outgoing({ id: "r3", target: ark("tark1qexample"), state: "settled", createdAt: fresh }),
+    ]);
+    await payee.start();
+    const { desk: payer } = setup([incoming({ federations: ["fed1"], invoice: INVOICE })]);
+    await payer.start();
+    let up = false;
+    link.sendPaymentResult.mockImplementation((frame) => { if (up) void payer.onPaymentResult("l", frame as unknown as { id: string; ok: boolean }); });
+    // Paid from another Lightning wallet: no notes and no receipt the payer would say again.
+    await payee.onLightningPaid({ paymentId: "r1" });
+    const theirs = () => payer.records().find((p) => p.id === "r1")!;
+    expect(theirs().state).toBe("pending");
+    up = true;
+    link.sendPaymentResult.mockClear();
+    await payee.replay("l");
+    await vi.waitFor(() => expect(theirs().state).toBe("settled"));
+    expect(link.sendPaymentResult.mock.calls.map(([frame]) => frame).sort((a, b) => String(a.id).localeCompare(String(b.id)))).toEqual([{ id: "r1", ok: true }, { id: "r2", ok: true }, { id: "r3", ok: true }]);
+  });
   it("a request our wallet saw paid while the chat was down is said paid again when it is back: the payer's Pay is gone", async () => {
     const { desk: payee, link } = setup([outgoing({ invoice: INVOICE, createdAt: Date.now() }), outgoing({ id: "old", invoice: INVOICE, state: "settled", createdAt: Date.now() - RECEIPT_FRESH_MS - 1 })]);
     await payee.start();
@@ -215,12 +237,12 @@ describe("a test mint's invoice waits for the payer's word", () => {
     const { desk, lightning } = setup([outgoing({ invoice: INVOICE, network: "testnet" })]);
     await desk.start();
     await desk.onPayment("l", check([ENDPOINT.bolt11, INVOICE.toUpperCase()]));
-    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE);
+    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE, true);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 10_000);
-    // Another invoice is not this request's: the contact cannot speak for it, the wallet only looks.
+    // Another invoice is not this request's: the contact cannot speak for it, the wallet only looks at the request's own.
     await desk.onPayment("l", check([ENDPOINT.bolt11, "lnbc1someoneelse"]));
-    expect(lightning.check).toHaveBeenLastCalledWith(undefined);
+    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE, false);
     vi.useRealTimers();
   });
 

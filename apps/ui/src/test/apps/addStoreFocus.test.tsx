@@ -45,6 +45,19 @@ describe("Add, a store's link", () => {
     await screen.findByTestId("apps-add-store");
     expect(screen.getByTestId("apps-add-url")).toHaveFocus();
   });
+
+  it("says the store found to a screen reader, its name and how many apps it lists", async () => {
+    fakeEngine.on("appStorePreview", preview);
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    expect(screen.getByTestId("apps-add-store-said")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("apps-add-store-said")).toBeEmptyDOMElement();
+    await user.type(screen.getByTestId("apps-add-url"), `${STORE}{Enter}`);
+    await screen.findByTestId("apps-add-store");
+    expect(screen.getByTestId("apps-add-store-said")).toHaveTextContent("Ghostly. 1 app");
+    // An edit drops the store's question, and what was said with it.
+    await user.type(screen.getByTestId("apps-add-url"), "x");
+    expect(screen.getByTestId("apps-add-store-said")).toBeEmptyDOMElement();
+  });
 });
 
 describe("Add, the link of a store the person has already", () => {
@@ -53,11 +66,11 @@ describe("Add, the link of a store the person has already", () => {
     const added: unknown[] = [];
     fakeEngine.on("appStorePreview", answer).on("appStoreAdd", (params) => { added.push(params); return {} as AppStoreSummary; });
     const onStoreAdded = vi.fn();
-    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={onStoreAdded} />);
+    const { user, unmount } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={onStoreAdded} />);
     await user.type(screen.getByTestId("apps-add-url"), STORE);
     await user.click(screen.getByTestId("apps-add-check"));
     const card = await screen.findByTestId("apps-add-store");
-    return { card, user, added, onStoreAdded };
+    return { card, user, added, onStoreAdded, unmount };
   };
 
   it("the same index: says it is on the Apps page, with Close and no Add store", async () => {
@@ -67,6 +80,8 @@ describe("Add, the link of a store the person has already", () => {
     expect(within(card).queryByTestId("apps-add-store-confirm")).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Add store" })).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Close" })).toHaveFocus();
+    // The focus on Close says nothing of why: the screen reader hears it with the store.
+    expect(screen.getByTestId("apps-add-store-said")).toHaveTextContent("Ghostly. 1 app. You have this store already: it is on your Apps page.");
   });
 
   it("another index under the held sequence: says the store signed two lists, not that it is the one held, and offers nothing to add", async () => {
@@ -94,6 +109,19 @@ describe("Add, the link of a store the person has already", () => {
     await user.click(within(card).getByTestId("apps-add-store-confirm"));
     expect(added).toEqual([{ url: STORE, key: "s" }]);
     expect(onStoreAdded).toHaveBeenCalled();
+  });
+
+  it("an older copy of a store the person removed (or another under the number last taken): says so, and offers nothing to add", async () => {
+    for (const refused of ["rollback", "equivocation"] as const) {
+      const { card, added, unmount } = await check(() => ({ ...preview(), sequence: 4, refused }));
+      expect(within(card).getByTestId("apps-add-store-held")).toHaveTextContent("You removed this store when its list was newer than this copy. To add it again, use a link to its newest list.");
+      // Nor where it would be read from: it is not added.
+      expect(card).not.toHaveTextContent("raw.githubusercontent.com");
+      expect(within(card).queryByTestId("apps-add-store-confirm"), refused).not.toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Close" })).toHaveFocus();
+      expect(added).toEqual([]);
+      unmount();
+    }
   });
 
   it("a store not held (or removed): Add store as before, with no such line", async () => {

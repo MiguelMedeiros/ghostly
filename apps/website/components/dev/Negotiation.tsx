@@ -239,7 +239,7 @@ function ResultCard({ s, phase, t, relayedLabel }: { s: Scenario; phase: number;
                 <li key={tr} data-first={i === 0} style={{ "--i": i } as CSSProperties}>
                   <span className="mono">{tr}</span>
                   {out.relayed.includes(tr) && <span className="ng-relayed">{relayedLabel}</span>}
-                  <span className="ng-sum" title={t.sum} aria-label={`${a} + ${b} = ${a + b}`}>
+                  <span className="ng-sum" title={t.sum}>
                     <b data-who="boo">{a}</b>+<b data-who="casper">{b}</b>=<b data-total="">{a + b}</b>
                   </span>
                 </li>

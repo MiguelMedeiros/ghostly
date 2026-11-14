@@ -9,6 +9,7 @@
   "downloading": "正在下载... {{percent}}%",
   "errorDetails": "更新程序的返回信息",
   "failed": "无法检查更新",
+  "installFailed": "更新未能安装。请重试。",
   "installing": "正在更新...",
   "lastChecked": "上次检查于 {{when}}",
   "later": "稍后",

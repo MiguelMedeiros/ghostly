@@ -97,10 +97,12 @@ describe('record formats', () => {
 });
 
 describe('DNS over HTTPS messages', () => {
-  const reply = (question: Uint8Array, answers: Uint8Array, count: number, flags = 0x8180) => {
+  // The query's header and question, then the answers; the query's 19-byte OPT record is left out, as ARCOUNT 0 says.
+  const reply = (query: Uint8Array, answers: Uint8Array, count: number, flags = 0x8180) => {
+    const question = query.subarray(0, query.length - 19);
     const out = new Uint8Array(question.length + answers.length);
     out.set(question); out.set(answers, question.length);
-    out[2] = flags >> 8; out[3] = flags & 0xff; out[6] = 0; out[7] = count;
+    out[2] = flags >> 8; out[3] = flags & 0xff; out[6] = 0; out[7] = count; out[11] = 0;
     return out;
   };
   const name = (n: string) => n.split('.').flatMap(l => [l.length, ...new TextEncoder().encode(l)]).concat(0);
@@ -112,7 +114,7 @@ describe('DNS over HTTPS messages', () => {
 
   it('encodes a recursive query asking for DNSSEC status', () => {
     const q = encodeDnsQuery('_ghostly.example.com', 'TXT');
-    expect(hex(q.subarray(0, 12))).toBe('000001200001000000000000');
+    expect(hex(q.subarray(0, 12))).toBe('000001200001000000000001');
     expect(decodeDnsResponse(reply(q, new Uint8Array(), 0, 0x81a0), '_ghostly.example.com', 'TXT')).toEqual({ rcode: 0, authenticated: true, answers: [] });
   });
 

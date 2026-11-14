@@ -1,6 +1,6 @@
 # USDT via Tether WDK: experimental implementation
 
-Ghostly integrates `@tetherto/wdk-wallet-evm` 1.0.0-beta.19 with the existing payment coordinator. This is an experimental implementation, not a production security audit or an independent protocol implementation.
+Ghostly integrates `@tetherto/wdk-wallet-evm` 1.0.0-beta.24 with the existing payment coordinator. This is an experimental implementation, not a production security audit or an independent protocol implementation.
 
 ## Supported configuration
 
@@ -23,7 +23,7 @@ Preparation checks token and ETH balances and estimates gas without signing. The
 
 After an uncertain network response, recovery looks up the existing hash. If necessary it broadcasts the exact persisted bytes again, never a newly signed payment or changed nonce. A consumed nonce with an unknown hash remains uncertain and requires investigation; automatic replacement/cancellation is not implemented. Gas spikes can leave the original transaction pending. The approved gas ceiling is encoded in the signed transaction, not merely checked against a later estimate.
 
-Settlement requires the expected recipient/amount/token calldata, successful canonical receipt, matching Transfer event and two block confirmations. Two confirmations are not finality; deeper reorganizations are a remaining risk. A generic peer acknowledgment cannot settle a token request, and a receipt cannot settle another request. Reverted transactions report failed with gas spent. A locked recipient reconciles its saved receipt after unlocking.
+Settlement requires the expected recipient/amount/token calldata, successful canonical receipt, matching Transfer event and two block confirmations. Two confirmations are not finality; deeper reorganizations are a remaining risk. A generic peer acknowledgment cannot settle a token request, and a receipt cannot settle another request. Every request names the wallet's one address and asks for its own amount (the amount typed plus under a thousandth of a token, unique among the wallet's open requests): a transfer settles only the request of its exact amount, and one transaction settles one request. Reverted transactions report failed with gas spent. A locked recipient reconciles its saved receipt after unlocking.
 
 ## Backup and limits
 

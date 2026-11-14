@@ -1,11 +1,12 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
+import { canonicalJsonBytes } from "@ghostly/core";
 import type { BuiltInApp } from "../src/engine/appDefaults";
 import { BUILT_IN_APPS_KEY, builtInsDue } from "../src/engine/apps";
 import { snapshotDatabase } from "../src/backup/database";
 import { PROFILE_SETTINGS_KEYS, STORES, clearProfileStores, databaseName, store, wrap } from "../src/shared/idb";
 import { fileBytes } from "../src/shared/fileBytes";
-import { BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, appRows, apps, bundle, bundleIds, emptyProfile, keyOf, signer, storageRows } from "./appsSupport";
+import { BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, appRows, apps, bundle, bundleIds, emptyProfile, keyOf, revocation, signer, storageRows } from "./appsSupport";
 // covers: apps.engine.built-in
 
 /*
@@ -201,6 +202,33 @@ describe("opened from the build", () => {
     expect(net.requests.filter((u) => u === BUNDLE_URL)).toEqual([]);
   });
 
+  it("Allow reads its publisher's revocations at its public URL first: a carried version revoked since is not installed", async () => {
+    const v1 = await bundle();
+    carried = v1.bytes;
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest])]));
+    const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
+    // Opening it still asks no server anything.
+    const preview = await store.preview({ builtIn: REF });
+    expect(net.requests).toEqual([]);
+    await expect(store.install({ digest: preview.digest, grant: ["chat"] })).rejects.toThrow(/^revoked: /);
+    expect(net.requests).toEqual([`${REPO}/ghostly-revoke.json`]);
+    expect(await appRows()).toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+    // Kept: the screen opened again, by the build or by a contact's card of that version, shows it revoked.
+    expect((await store.preview({ builtIn: REF })).run).toMatchObject({ status: "revoked", reason: "Leaked key" });
+    const card = await store.preview({ card: { ref: REF, url: PINNED_URL, sequence: 1, digest: v1.digest } });
+    expect(card.run).toMatchObject({ status: "revoked" });
+    await expect(store.install({ stage: card.stage, digest: card.digest, grant: ["chat"] })).rejects.toThrow(/^revoked: /);
+
+    // Offline (no file answers), Allow installs it as before: the update check reads them later.
+    await emptyProfile();
+    const offline = new FakeNet();
+    const later = apps(offline, { readBuiltIn, builtIns: [chess(v1.digest)] });
+    const installed = await later.install({ digest: (await later.preview({ builtIn: REF })).digest, grant: ["chat"] });
+    expect(installed.run).toMatchObject({ status: "ok" });
+    expect(offline.requests).toEqual([`${REPO}/ghostly-revoke.json`]);
+  });
+
   it("a carried file that is not the pinned bundle is not an app", async () => {
     const v1 = await bundle();
     const other = await bundle({ sequence: 2 });
@@ -277,6 +305,9 @@ describe("opened from the build", () => {
     carried = v1.bytes;
     const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
     await store.install({ digest: (await store.preview({ builtIn: REF })).digest, grant: ["chat"] });
+    // Allow read its publisher's revocations; the restore reads nothing.
+    expect(net.requests).toEqual([`${REPO}/ghostly-revoke.json`]);
+    net.requests.length = 0;
     // As after a restore: the record is there, the bundle's bytes are not.
     await (await fileBytes()).remove(`app-${v1.digest}`);
     const fresh = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });

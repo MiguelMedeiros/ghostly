@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import type { Removal } from "../src/engine/removals";
-import { MAX_REMOVED_IDS } from "../src/engine/groups";
+import { MAX_REMOVED_IDS, type GroupStore } from "../src/engine/groups";
 // covers: groups.catch-up, groups.community.catch-up
 
 /**
@@ -24,9 +24,10 @@ async function groupOf(kind: "mesh" | "community"): Promise<{ world: CommunityWo
   return { world, alice, id };
 }
 
+/** The group's saves: its record, or a private group's pin and deletion row alone (`GroupLight`). */
 const writesOf = (peer: Peer, id: string) => {
-  const put = vi.spyOn(peer.store, "putGroup");
-  return () => put.mock.calls.filter(([g]) => g.id === id).length;
+  const put = vi.spyOn(peer.store, "putGroup"), light = vi.spyOn(peer.store as Required<GroupStore>, "putGroupLight");
+  return () => put.mock.calls.filter(([g]) => g.id === id).length + light.mock.calls.filter(([g]) => g === id).length;
 };
 
 describe("removals in a group", { timeout: 120_000 }, () => {

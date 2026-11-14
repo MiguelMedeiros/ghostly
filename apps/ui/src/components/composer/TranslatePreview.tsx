@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { useComposition } from "../../hooks/useComposition";
 import type { DraftTranslation } from "../../hooks/useDraftTranslation";
 import { languageName } from "../../lib/documentLanguage";
 import { fitFieldHeight } from "./fieldHeight";
@@ -24,6 +25,7 @@ export function TranslatePreview({ state, stale, disabled, onEdit, onChoose, onA
 }) {
   const { t, language: appLanguage } = useI18n();
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const composition = useComposition();
   const shownText = state.step === "shown" ? state.text : null;
   useEffect(() => { if (fieldRef.current && shownText !== null) fitFieldHeight(fieldRef.current); }, [shownText]);
 
@@ -50,7 +52,7 @@ export function TranslatePreview({ state, stale, disabled, onEdit, onChoose, onA
   const name = languageName(state.to, appLanguage);
   const ready = state.step === "shown";
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (composition.composing(e)) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); return; }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (stale) onAgain(); else onSendTranslation(); }
   };
@@ -67,7 +69,7 @@ export function TranslatePreview({ state, stale, disabled, onEdit, onChoose, onA
       {ready ? (
         <textarea ref={fieldRef} data-testid="translate-text" dir="auto" rows={1} value={state.text} disabled={disabled}
           aria-label={t("composer.translate.region", { language: name })}
-          onChange={(e) => { onEdit(e.target.value); fitFieldHeight(e.target); }} onKeyDown={onKeyDown}
+          onChange={(e) => { onEdit(e.target.value); fitFieldHeight(e.target); }} onKeyDown={onKeyDown} {...composition.inputProps}
           className="composer-textarea w-full resize-none rounded-md bg-panel-header px-2 py-1.5" />
       ) : (
         <p data-testid="translate-working" className="m-0 text-[13px] text-text-muted">{t("composer.translate.working")}</p>

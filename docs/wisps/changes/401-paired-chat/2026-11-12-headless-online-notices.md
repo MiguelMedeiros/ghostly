@@ -1,0 +1,1 @@
+A headless profile (WISP 1100) sends online notices only while it says presence: a daemon with `daemonPresence` on. A one-shot command, or a daemon with it off, sends none, so a bot that shows its contacts no dot no longer tells their closed apps that it came online.

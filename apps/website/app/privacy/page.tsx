@@ -124,8 +124,8 @@ export default async function PrivacyPage() {
             offer a new version. A browser extension installed outside the Chrome Web Store asks ghostly.tools for{" "}
             <Code>/latest.json</Code>. The desktop app asks GitHub for new releases. The Android app asks ghostly.tools
             for <Code>/latest.json</Code> when it opens, every four hours and when it comes back to the foreground, and
-            when you tap Download, the new version&apos;s APK comes from GitHub. Settings, Updates turns these checks
-            off.
+            when you tap Download, the new version&apos;s APK comes from GitHub. Settings, About, Check for updates
+            automatically turns these checks off.
           </li>
         </ul>
       </Section>
@@ -179,7 +179,7 @@ export default async function PrivacyPage() {
             address. Connect only with people you are willing to show it to. They also see everything you send them.
             While you write in a one-to-one chat or a private group, your app tells that contact or the group&apos;s
             members you are typing or recording, over live connections only. You can turn this off in Settings,
-            Security.
+            Privacy &amp; security.
           </li>
           <li>
             <Term>STUN servers.</Term> To set up a direct connection through a router, WebRTC asks public STUN
@@ -210,14 +210,14 @@ export default async function PrivacyPage() {
           <li>
             <Term>Link previews.</Term> When you send a link, your app reads that page to make its preview, so that
             site sees your IP address. Your contact&apos;s app does not contact it: the preview travels inside the
-            message. You can turn link previews off in Settings, Security.
+            message. You can turn link previews off in Settings, Privacy &amp; security.
           </li>
           <li>
             <Term>Identities and public profiles.</Term> Checking an identity someone shared, or showing its public
             profile, asks the service behind it, such as Nostr relays, Pubky&apos;s servers, Bluesky&apos;s public API,
             GitHub or GitLab, keys.openpgp.org, or a DNS-over-HTTPS resolver for a domain: Quad9 by default, then
             Cloudflare and then Google when it gives no answer (the Mac app and Safari cannot read Quad9, so they ask
-            Cloudflare). They see your IP address and which identity is looked up. Public profiles can be turned off in Settings, Security. Some proofs you make are
+            Cloudflare). They see your IP address and which identity is looked up. Public profiles can be turned off in Settings, Privacy &amp; security. Some proofs you make are
             public by nature, such as a DNS record, a file on your website or a post on your Bluesky account: you
             publish them, and anyone can read them.
           </li>

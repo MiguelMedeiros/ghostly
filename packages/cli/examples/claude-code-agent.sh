@@ -17,6 +17,11 @@ home="${GHOSTLY_AGENT_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/ghostly-agent}
 
 if [ "${1:-}" = "--turn" ]; then   # one turn, as `listen --exec` hands it over
   turn="$(cat)"
+  # `listen --turns` also hands over `events.gap` (turns lost across a crash or the journal's trim): not a turn.
+  if [ "$(jq -r .type <<<"$turn")" != "agent.turn" ]; then
+    jq -r 'if .type == "events.gap" then "ghostly-agent: events \(.from) to \(.to) were lost; turns among them got no answer" else "ghostly-agent: skipped a \(.type) event" end' <<<"$turn" >&2
+    exit 0
+  fi
   chat="$(jq -r '.chat // empty' <<<"$turn")"; group="$(jq -r '.group // empty' <<<"$turn")"
   id="$(jq -r .messageId <<<"$turn")"
   folder() { printf "%s" "$1" | tr -cd 'A-Za-z0-9_-'; }   # an id in a folder name: nothing else

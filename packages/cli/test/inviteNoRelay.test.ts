@@ -20,16 +20,13 @@ describe("invite create with no relay reachable", { timeout: 180_000 }, () => {
 
     const first = ok(await ghostly(["--home", dir, "invite", "create", "--label", "first"], { env }));
     expect(first).toMatchObject({ published: false, note: expect.stringContaining("once a relay answers") });
-    expect(first.reason).toEqual(expect.stringContaining("Publish failed on every relay"));
-    // Node's "TypeError: fetch failed" named no relay.
-    expect(first.reason).toContain(`${relay.url} did not answer`);
-    expect(first.reason).not.toContain("fetch failed");
+    // Node's "TypeError: fetch failed" named no relay; the engine's "Publish failed on every relay: Error: …" read as the CLI failing.
+    expect(first.reason).toBe(`No relay answered (127.0.0.1:${port}): it goes out once one does`);
 
-    // The relay refused already: the next answer is the one that said it was cooling down.
+    // The relay refused already: the next answer is the one that said it did not answer a moment ago, in the same words.
     const second = ok(await ghostly(["--home", dir, "invite", "create", "--label", "second"], { env }));
     expect(second).toMatchObject({ published: false, note: expect.stringContaining("once a relay answers") });
-    expect(second.reason).toContain(`${relay.url} did not answer a moment ago`);
-    expect(second.reason).not.toContain("cooling down");
+    expect(second.reason).toBe(`No relay answered (127.0.0.1:${port}): it goes out once one does`);
 
     // What the note says: the same invite, nothing made again.
     await new Promise<void>((r) => relay!.server.listen(port, "127.0.0.1", r));
