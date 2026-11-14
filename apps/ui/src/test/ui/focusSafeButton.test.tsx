@@ -64,6 +64,21 @@ describe.each(["raw", "button"] as const)("a %s button disabled by its own work"
     expect(go).toBeDisabled();
   });
 
+  it("is usable again when its work fails after the window came back", async () => {
+    let fail: (() => void) | undefined;
+    const { user } = renderApp(<Work as={as} work={() => new Promise<void>((_, refuse) => { fail = () => refuse(new Error("no")); })} />);
+    const go = screen.getByTestId("go");
+    go.focus();
+    await user.keyboard("{Enter}");
+    act(() => { go.dispatchEvent(new FocusEvent("blur")); go.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    act(() => { go.dispatchEvent(new FocusEvent("focus")); go.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    await act(async () => fail!());
+    expect(go).toBeEnabled();
+    expect(go).not.toHaveAttribute("aria-disabled");
+    await user.keyboard("{Enter}");
+    expect(go, "pressed again after the failure").toHaveAttribute("aria-disabled", "true");
+  });
+
   it("is plain disabled when it was disabled before it had the focus", () => {
     renderApp(as === "raw" ? <FocusSafeButton data-testid="go" disabled>Go</FocusSafeButton> : <Button data-testid="go" disabled>Go</Button>);
     expect(screen.getByTestId("go")).toBeDisabled();
