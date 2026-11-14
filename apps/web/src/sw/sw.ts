@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, carriedOver, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText, type WakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -25,6 +25,8 @@ declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
 /** The files of each language but English, left out of `__SW_PRECACHE__`: the install takes the person's own (`installList`). */
 declare const __SW_LANGUAGES__: Record<string, string[]>;
+/** The build's other hashed files, kept on their first use (`asset`): the install takes them from an older cache only. */
+declare const __SW_LAZY__: string[];
 
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
@@ -61,13 +63,17 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
-    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    // What the caches of earlier builds hold, and which holds it.
     const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
-    const held = (await Promise.all(older.map(async (name) => (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)))).flat();
-    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], held);
-    // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    const held = new Map<string, string>();
+    for (const name of older) for (const request of await (await caches.open(name)).keys()) held.set(new URL(request.url).pathname, name);
+    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], [...held.keys()]);
     const cache = await caches.open(CACHE);
-    await cache.addAll(list.map((path) => new Request(path, { cache: precacheMode(path) })));
+    // The hashed files an earlier build's cache holds, from there (`carriedOver`).
+    const carried = new Set(await carryOver(cache, carriedOver(list, __SW_LAZY__, held), held));
+    // The rest: the page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    await cache.addAll(list.filter((path) => !carried.has(path)).map((path) => new Request(path, { cache: precacheMode(path) })));
   })());
 });
 
@@ -81,6 +87,22 @@ worker.addEventListener("activate", (event) => {
     await worker.clients.claim();
   })());
 });
+
+/** Puts each of `paths` in `cache` from the older cache `held` names for it: the paths it could, the others to download. */
+async function carryOver(cache: Cache, paths: readonly string[], held: ReadonlyMap<string, string>): Promise<string[]> {
+  const done = await Promise.all(paths.map(async (path) => {
+    try {
+      // Gone meanwhile (another tab's new worker deleted that cache): downloaded as any other.
+      const kept = await caches.match(path, { cacheName: held.get(path) });
+      if (!kept) return null;
+      await cache.put(path, kept);
+      return path;
+    } catch {
+      return null;
+    }
+  }));
+  return done.filter((path): path is string => path !== null);
+}
 
 async function fromCache(key: string, request: Request): Promise<Response> {
   const cached = await caches.match(key, { cacheName: CACHE });
