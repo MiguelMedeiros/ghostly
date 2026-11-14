@@ -817,6 +817,15 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(r.stdout).toMatch(/\n {2}other {3}core {6}group 4 runs it \(related: /);
   }, 60_000);
 
+  it("says a project nothing reaches is skipped, never that another group runs it", () => {
+    // Group 1 of 4 told the author that group 4 runs core's tests, and group 4 skipped them: they ran nowhere.
+    const r = affected("--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "docs/TESTING.md");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/\n {2}skip {4}core {6}nothing it imports changed\n/);
+    expect(r.stdout).toContain("· skipped unit core: nothing it imports changed");
+    expect(r.stdout).not.toContain("runs it");
+  }, 60_000);
+
   it("is what ci.yml's draft tier runs: one runner per group, each project of UNIT_ALONE on its own", () => {
     const ci = readFileSync(join(import.meta.dirname, "..", "..", "..", ".github", "workflows", "ci.yml"), "utf8");
     const job = /^ {2}affected-tests:\n((?: {4}.*\n|\n)+)/m.exec(ci)?.[1] ?? "";
