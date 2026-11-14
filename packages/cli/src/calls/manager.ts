@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
-import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
+import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
@@ -20,9 +20,14 @@ import { DEFAULT_RATE, FRAME_MS, isCallRate, monotonic, PlaybackQueue, type Call
 export type CallState = "ringing" | "connecting" | "connected";
 export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "crossed" | "failed" | "stopped";
 
-/** What the engine gives the calls: its state, and a way to send this side's signal. */
+/**
+ * What the engine gives the calls: its state, one chat's view and its settings without building every chat's (each
+ * `getState` builds a view of every chat, ~15-20 µs a chat on the daemon's thread), and a way to send this side's signal.
+ */
 export interface CallEngine {
   getState(): EngineState;
+  chatView(linkId: string): LinkView | undefined;
+  getSettings(): Settings;
   setCallSignal(params: { linkId: string; signal: string | null }): Promise<void> | void;
 }
 
@@ -380,7 +385,7 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
-    const settings = this.host.engine.getState().settings;
+    const settings = this.host.engine.getSettings();
     const iceServers = settings?.iceServers ?? [];
     // Hide my IP from contacts: no call is answered here (`callable`), so none is made ahead either.
     if (settings?.relayOnly === true || callUsesTurn(callIceServers(iceServers))) return;
@@ -613,7 +618,7 @@ export class CallManager {
       rate: call.rate,
       queue: call.queue ?? undefined,
       log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
-      iceServers: this.host.engine.getState().settings?.iceServers ?? [],
+      iceServers: this.host.engine.getSettings()?.iceServers ?? [],
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended || attempt !== call.attempt) return;
@@ -825,7 +830,7 @@ export class CallManager {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      const call = this.byChat(this.chatId(ref));
+      const call = this.byChat(this.chatOf(ref).id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
     }
@@ -837,18 +842,24 @@ export class CallManager {
   }
 
   private link(chat: string): LinkView | undefined {
-    return this.host.engine.getState().links.find((l) => l.id === chat);
+    return this.host.engine.chatView(chat);
   }
 
-  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. */
-  private chatId(ref: string): string {
+  /**
+   * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
+   * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   */
+  private chatOf(ref: string): LinkView {
+    const byId = this.link(ref);
+    if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups).id;
+    return findChat(links, ref, groups);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.link(this.chatId(ref))!;
+    const link = this.chatOf(ref);
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
@@ -859,7 +870,7 @@ export class CallManager {
       throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
     }
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
-    if (this.host.engine.getState().settings?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
+    if (this.host.engine.getSettings()?.relayOnly === true) throw new CliError("unavailable", CALLS_OFF_RELAY_ONLY);
     return link;
   }
 
