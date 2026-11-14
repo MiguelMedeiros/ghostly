@@ -388,10 +388,17 @@ UDXStream.prototype._onack = function (id) {
  * has thousands there (each listen's keep-alives, a restart's lookups and announcements): after a restart the two walks
  * took a third of the relay's CPU, its thread pegged while most listens missed a browser's 20 s. `inflight` now keeps
  * each request's slot and the requests of each tid (tids wrap at 65,536, so two may share one), and a reply goes to the
- * oldest request of its tid, a destroy to its slot, at once. Everything else dht-rpc does with the list is unchanged.
+ * request of its tid sent to the node that answers, a destroy to its slot, at once. Everything else dht-rpc does with the
+ * list is unchanged.
+ *
+ * A full relay has about as many requests in flight as there are tids, most waiting in the queue, so a new request nearly
+ * always shares its tid with an older one sent to another node. dht-rpc hands a reply to the first request of its tid it
+ * finds: after a restart at the default limits, one reply in six went to a request sent elsewhere, that lookup taking
+ * another target's closest nodes while the request the reply was for timed out and went again. A reply from a node none
+ * of its tid's requests went to (a server answers a handshake from its own socket) still goes to the oldest.
  */
 class Inflight extends Array {
-  // tid → its requests in flight, oldest first (nearly always one).
+  // tid → its requests in flight, oldest first.
   tids = new Map()
   push(request) {
     if (!requestPatched) patchRequest(Object.getPrototypeOf(request))
@@ -424,8 +431,11 @@ class Inflight extends Array {
     this[last] = request
     request._slot = last
   }
-  first(tid) {
-    return this.tids.get(tid)?.[0]
+  // The request of `tid` sent to `from`, or the oldest of that tid.
+  first(tid, from) {
+    const same = this.tids.get(tid)
+    if (!same || same.length === 1) return same?.[0]
+    return same.find(request => request.to.port === from.port && request.to.host === from.host) ?? same[0]
   }
 }
 const IO = dhtRpc('./lib/io.js')
@@ -478,7 +488,7 @@ IO.prototype.onmessage = function (socket, buffer, { host, port }) {
   const from = { id: null, host, port }
   const res = decodeReply(from, { start: 1, end: buffer.byteLength, buffer })
   if (res === null) return
-  const req = this.inflight.first(res.tid)
+  const req = this.inflight.first(res.tid, from)
   if (!req) return
   const external = socket !== (this.firewalled ? this.clientSocket : this.serverSocket)
   res.rtt = Date.now() - req._timestamp
