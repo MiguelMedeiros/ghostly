@@ -17,7 +17,7 @@ import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
 import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
 import { completeWithPipedEvidence, credentialFromStdin, evidenceFromStdin, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
@@ -603,7 +603,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
-    since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
+    since: o("number", "Replay events after this seq first (with --cursor: only while its file holds no seq yet)"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event); its seq wins over --since"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
     from: o("list", "Only this chat's events (id, a label given here or the contact's key; again for more)"),
@@ -1366,7 +1366,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  const since = sinceOf(parsed.options) ?? readCursor(cursor);
+  const since = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n"));
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
