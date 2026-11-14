@@ -180,6 +180,7 @@
     "noMatch": "此商店中没有匹配的应用。",
     "notRead": "尚未读取",
     "read": "读取",
+    "readDone": "{{name}} 已是最新：{{apps}}",
     "readNamed": "读取 {{name}}",
     "refresh": "刷新",
     "refreshNamed": "刷新 {{name}}",
