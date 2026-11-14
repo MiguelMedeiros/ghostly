@@ -79,11 +79,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   useEffect(() => {
     const pane = root.current?.parentElement;
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
-    // 0: not laid out (a chat kept loaded off screen); measured again as it shows. The contact's identities take none of
-    // this page from an app beside the chat: they lie over the chat while one is there, wherever its 360 px would leave
-    // the chat less than 320 (contact-panel.css). Measured with them docked while the app was hidden, the app covered the
-    // chat when they opened first, and sat beside it when it opened first (bug hunt, 2026-11-14).
-    const measure = () => setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth < BESIDE_MIN);
+    // 0: not laid out (a chat kept loaded off screen): as it was, measured again as it shows. Cleared there, each time the
+    // person left the chat and came back the whole chat was drawn twice, and laid out once beside the app for nothing.
+    // The contact's identities take none of this page from an app beside the chat: they lie over the chat while one is
+    // there, wherever its 360 px would leave the chat less than 320 (contact-panel.css). Measured with them docked while
+    // the app was hidden, the app covered the chat when they opened first, and sat beside it when it opened first (bug
+    // hunt, 2026-11-14).
+    const measure = () => { if (pane.clientWidth > 0) setChatAppNarrow(linkId, pane.clientWidth < BESIDE_MIN); };
     const observer = new ResizeObserver(measure);
     observer.observe(pane);
     measure();
