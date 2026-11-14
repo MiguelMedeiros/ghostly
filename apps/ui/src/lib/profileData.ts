@@ -57,7 +57,9 @@ export async function profileSummary(id: string): Promise<ProfileSummary> {
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
-    const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
+    const tx = db.transaction(["proofs", "settings", "services", "groups"].filter(has), "readonly");
+    // Its groups are chats too, as the chat list shows them, and go with it.
+    if (has("groups")) summary.chats += await request(tx.objectStore("groups").count());
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
     if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));

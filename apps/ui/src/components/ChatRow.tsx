@@ -112,7 +112,7 @@ function rowLabel(t: Translate, name: string, state: (string | false | undefined
 
 /** A button in the row's actions: a round target that lights up under the pointer, and in the accent while it is on. */
 const rowAction = (hover = "hover:text-accent") =>
-  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} aria-pressed:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
+  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} data-[pinned]:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
 
 /**
  * The row's actions, laid over its marks and time (RowText's `timeCover`). Pointer devices only: a phone opens the
@@ -409,7 +409,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
           !p.reorder?.dragging && <RowActions active={p.active}>
             <RowMute chat={p.chatId} />
-            <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
+            {/* Named for what it does next (Pin, Unpin), so it is no toggle: "Unpin chat, pressed" read as unpinned. */}
+            <button type="button" title={pinLabel} aria-label={pinLabel} data-pinned={p.pinned || undefined} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
               <PinIcon active={p.pinned} />
             </button>

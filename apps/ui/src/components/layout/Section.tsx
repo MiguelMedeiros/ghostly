@@ -133,7 +133,7 @@ export function LinkRow({ label, hint, value, leading, onClick, testId }: {
       className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-start hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
       {leading && <span className="shrink-0">{leading}</span>}
       <span className="flex-1 min-w-0">
-        <span className="block truncate text-sm text-text-primary">{label}</span>
+        <span className="block break-words text-sm text-text-primary">{label}</span>
         {hint && <span className="block text-xs text-text-muted mt-0.5 break-words">{hint}</span>}
       </span>
       {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}

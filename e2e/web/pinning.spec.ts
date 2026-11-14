@@ -19,13 +19,13 @@ test("pin from list does not switch chat, survives reload, and unpins from Optio
   await expect(mark).toBeVisible();
   await expect(mark.locator("svg path").first()).toHaveAttribute("fill","currentColor");
   const activePin = page.getByRole("button",{name:"Unpin chat",exact:true});
-  await expect(activePin).toHaveAttribute("aria-pressed","true");
+  await expect(activePin).toHaveAttribute("data-pinned");
   // Discovery/history refreshes must not revert a pin while the pointer is elsewhere.
   await page.getByRole("button",{name:"Options",exact:true}).click();
   await page.getByRole("button",{name:"Refresh",exact:true}).click();
-  await expect(activePin).toHaveAttribute("aria-pressed","true");
+  await expect(activePin).toHaveAttribute("data-pinned");
   await expect(page).toHaveURL(current);
-  await expect(page.locator('[data-testid="sidebar"] button[aria-pressed]').first()).toHaveAttribute("aria-pressed","true");
+  await expect(page.getByTestId("sidebar").getByTestId("chat-row-pin").first()).toHaveAttribute("data-pinned");
   await page.reload();
   await expect(page.getByRole("button",{name:"Unpin chat",exact:true})).toHaveCount(1);
   await expect(page.getByTestId("chat-row-pinned")).toHaveCount(1);

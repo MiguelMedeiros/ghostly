@@ -131,7 +131,9 @@ export function Profile() {
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const chats = useStoredSessions(chatCount, Object.is);
+  // Its groups are chats too, as the chat list shows them.
+  const groups = useEngineValue(state => state?.groups.length ?? 0);
+  const chats = useStoredSessions(chatCount, Object.is) + groups;
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
   const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
