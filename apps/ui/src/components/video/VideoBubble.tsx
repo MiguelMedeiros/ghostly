@@ -344,8 +344,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                 type="button"
                 data-testid="video-fullscreen"
                 aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
+                // Named for what it does next, so it is no toggle: "Exit full screen, pressed" read as left already.
                 title={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
-                aria-pressed={theater}
                 onClick={() => setTheater(!theater)}
                 className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
               >
