@@ -4,6 +4,8 @@ import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame,
 import { CommunitySession, COMMUNITY_LIMITS, type CommunityFrame } from "../src/groupCommunity";
 import { COMMUNITY_EDIT_FRAME, GROUP_EDIT_FRAME, carryMentions, communityEditFrame, meshMessageRef, parseCommunityEdit, type GroupIncomingEdit } from "../src/groupEdits";
 import { REMOVED_TEXT } from "../src/pairedEdits";
+import { decryptText, epochKeys } from "../src/groupCrypto";
+import { fromBase64Url } from "../src/bytes";
 // covers: groups.protocol.edits
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -104,6 +106,29 @@ describe("group-edit frames (a private group)", () => {
     expect(JSON.stringify(mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME)!.frame)).not.toContain("Message removed");
     // Only its author removes it.
     expect(await carol.sendEdit(id, { v: 5_001, ts: 9, text: REMOVED_TEXT, remove: true })).toEqual({ error: "Only your own messages can be edited" });
+  });
+
+  it("a message of mine deleted for everyone leaves nothing my saved state could open, and is handed to nobody", async () => {
+    const { mesh, bob, carol } = await trio();
+    mesh.setEdge(bob, carol, false);
+    const id = ((await bob.sendText("token sk-made-up-0123456789")) as { id: string }).id;
+    await bob.sendText("the next one");
+    bob.forget(id);
+    await bob.flush();
+    const saved = mesh.saves.get(bob.myKey)!.at(-1)!;
+    const opened = saved.sent.map(f => decryptText(epochKeys(fromBase64Url(saved.secrets[f.e]), f.g, f.e).message, JSON.stringify([f.g, f.e, f.s, f.n, f.ts]), f.nn, f.c));
+    expect(opened).toEqual([null, "the next one"]);
+    // Its place stays: the removal still goes, and the next message takes the next number.
+    expect(await bob.sendEdit(id, { v: 5_001, ts: 9, text: REMOVED_TEXT, remove: true })).toEqual({ sent: 2 });
+    expect(saved.sent.map(f => f.n)).toEqual([0, 1]);
+    // Carol, away while it was said, gets the one after it when her edge opens, not it.
+    mesh.setEdge(bob, carol, true);
+    const before = mesh.sent.length;
+    await carol.handle(bob.myKey, bob.syncFrame());
+    await bob.handle(carol.myKey, carol.syncFrame([bob.myKey]));
+    await mesh.settle();
+    const toCarol = mesh.sent.slice(before).filter(f => f.from === bob.myKey && f.to === carol.myKey && f.frame.t === "group-msg").map(f => (f.frame as { n: number }).n);
+    expect(toCarol).toEqual([1]);
   });
 
   it("only its author edits a message: a member can hand the author's edit on, never alter or forge one", async () => {
