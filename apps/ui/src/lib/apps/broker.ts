@@ -191,18 +191,6 @@ export function withoutLoneSurrogates<T>(value: T): T {
   return hasLoneSurrogate(value) ? (fix(value, 0) as T) : value;
 }
 
-/** Whether `value` is plain JSON (what a request may carry), no deeper than MAX_DEPTH, with no lone surrogate. */
-export function isJsonValue(value: unknown, depth = 0): value is MiniAppJson {
-  if (depth > MAX_DEPTH) return false;
-  if (value === null || typeof value === "boolean") return true;
-  if (typeof value === "string") return wellFormedText(value);
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every((item) => isJsonValue(item, depth + 1));
-  if (typeof value !== "object") return false;
-  if (!isPlainObject(value)) return false;
-  return Object.entries(value).every(([key, item]) => wellFormedText(key) && isJsonValue(item, depth + 1));
-}
-
 const NOT_JSON: unique symbol = Symbol("not JSON");
 
 /**
