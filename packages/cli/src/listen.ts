@@ -97,24 +97,31 @@ export async function allowlist(from: readonly string[], groups: readonly string
   for (const ref of from) {
     const key = contactKeyOf(ref);
     if (key !== undefined) { keys.add(key); continue; }
-    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
-    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
-    chats.add(chat.id);
+    chats.add(await fromChat(ref, call));
   }
-  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
+  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/** The chat `--from <ref>` names (not a contact key): its id, or `namedByThem` when only its contact chose `ref`. */
+async function fromChat(ref: string, call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<string> {
+  const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from", call)) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+  // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+  if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+  return chat.id;
 }
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
  * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
- * or the name its contact chose, which `--group`'s lookup took.
+ * or the name its contact chose, which `--group`'s lookup took, so a `--group` that found its chat only so is refused
+ * as `--from` refuses it, with no `--from` to paste.
  */
-async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
+    if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = other === "chat" ? error.details.chat as string : ref;
     const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
