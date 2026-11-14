@@ -121,6 +121,22 @@ describe("the state a change of one chat pushes", () => {
     expect(built).toBe(0);
   });
 
+  it("builds only the chat whose round trip moved, and no group", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice"), b = await addChat(node, "Bob");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["emitState"]();
+    const first = await next();
+    built = 0;
+    // A pong on Bob's chat (every 15 s on each live chat) whose round trip moved: in his chat's connection story.
+    node["noteRtt"](node["links"].get(b.id)!, 120);
+    const second = await next();
+    expect(view(second, a.id)).toBe(view(first, a.id));
+    expect(view(second, b.id)).not.toBe(view(first, b.id));
+    expect(built).toBe(0);
+  });
+
   it("keeps every group's view for a change of a 1:1 chat's own, and builds them again for a contact's name or a group's change", async () => {
     const { node, next } = engine();
     const a = await addChat(node, "Alice");
