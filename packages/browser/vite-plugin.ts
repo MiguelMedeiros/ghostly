@@ -66,6 +66,13 @@ const BROWSER_PACKAGES = new Map([
  */
 const PINNED_CRYPTO = /^@(noble\/(ciphers|curves|hashes)|scure\/(base|bip32|bip39))(\/|$)/;
 const NOSTR_TOOLS = "/node_modules/nostr-tools/";
+
+/**
+ * The Bitcoin descriptor libraries are CommonJS and `require()` noble's secp256k1; a `require()` keeps every export
+ * of the module it loads, so they get a module with only the two they use (src/platform/nobleSecp256k1.ts).
+ */
+const NOBLE_SECP256K1 = /^@noble\/curves\/secp256k1(\.js)?$/;
+const DESCRIPTORS = "/node_modules/@bitcoinerlab/";
 const FROM_ROOT = viteId(resolve(repositoryRoot, "package.json"));
 
 export function ghostlyPlatformModules(): Plugin {
@@ -76,6 +83,7 @@ export function ghostlyPlatformModules(): Plugin {
       const sdkModule = SDK_MODULES.get(source) ?? BROWSER_PACKAGES.get(source);
       if (sdkModule) return sdkModule;
       if (!importer || viteId(importer).startsWith(platform(""))) return null;
+      if (NOBLE_SECP256K1.test(source) && viteId(importer).includes(DESCRIPTORS)) return platform("nobleSecp256k1.ts");
       if (PINNED_CRYPTO.test(source) && viteId(importer).includes(NOSTR_TOOLS)) return this.resolve(source, FROM_ROOT, { ...options, skipSelf: true });
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
