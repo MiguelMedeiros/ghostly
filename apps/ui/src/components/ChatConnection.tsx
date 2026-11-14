@@ -229,8 +229,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   })();
   // Back on Automatic over a relay, with a direct transport both apps run: the chat moves there in a moment. Said
   // aloud, every reload and every return of the contact's app read "Connected · Iroh (relayed)" and then "Connected ·
-  // WebRTC"; it says where it lands, and the relay only if the chat is still on it after MOVE_QUIET_MS.
-  const moving = labelState === "connected" && !!link?.transportRelayed && !!pair?.transport && link.transportFallback !== false
+  // WebRTC"; it says where it lands, and the relay only if the chat is still on it after MOVE_QUIET_MS. Not on a network
+  // that blocks direct connections (`directBlocked`): the relay is where it lands there.
+  const moving = labelState === "connected" && !directBlocked && !!link?.transportRelayed && !!pair?.transport && link.transportFallback !== false
     && (link.transportAutomatic ?? link.preferredTransport === undefined) && link.transportLive?.cause !== "contact"
     && ownTransports(link).some(t => t !== pair.transport && !!link.peerTransports?.includes(t) && !link.relayedTransports?.includes(t));
   const [spoken, setSpoken] = useState(label), [movingSince, setMovingSince] = useState<number>();
