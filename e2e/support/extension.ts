@@ -18,7 +18,7 @@ export const LATEST_URL = "https://ghostly.tools/latest.json";
  * permission prompt cannot be clicked by automation. Everything else is the shipped code.
  */
 function prepareExtension(work: string): string {
-  if (!existsSync(join(dist, "manifest.json"))) throw new Error("apps/extension/dist is missing: run `npm run build:extension` first (`npm run e2e` does)");
+  if (!existsSync(join(dist, "manifest.json"))) throw new Error("apps/extension/dist is missing: run `npm run build:extension` first (`npm run test:e2e` does)");
   const dir = join(work, "extension");
   cpSync(dist, dir, { recursive: true });
   const manifestPath = join(dir, "manifest.json");
