@@ -53,6 +53,20 @@ describe("what a contact's app kept in its viewer tab", () => {
     expect(removed()).toHaveLength(2);
   });
 
+  it("a viewer tab whose debugger was cancelled still closes before its origin is cleared", async () => {
+    const { extensionHost, forgetServicesOf } = await page();
+    await extensionHost.openService(PEER, SERVICE, TAG, false);
+    const [viewer] = [...world.tabs.values()].filter((tab) => tab.url === `${origin(PEER, TAG)}/`);
+    // "Cancel" on Chrome's debugging bar: the tab loses its binding but stays open, the app still running in it.
+    fire(world.chrome.debugger.onDetach, { tabId: viewer.id }, "canceled_by_user");
+    await settle();
+    expect(world.tabs.has(viewer.id)).toBe(true);
+
+    await forgetServicesOf({ tag: TAG });
+    expect(removed()).toHaveLength(1);
+    expect(world.tabs.has(viewer.id)).toBe(false);
+  });
+
   it("goes with its profile (Clear all data, Delete profile), and another profile's stays", async () => {
     await (await page()).extensionHost.openService(PEER, SERVICE, TAG, false);
     // Another page, started once WORK is the profile in use, opens one as that profile.
