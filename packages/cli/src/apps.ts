@@ -539,7 +539,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   // from elsewhere stops nothing.
   const listPath = join(dirname(bundlePath), APP_REVOKE_FILE);
   const usage = "ghostly app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]";
-  const digests = what.digests ?? [];
+  // Sorted, so the same digests in another order are the same statement, signed and compared once.
+  const digests = [...(what.digests ?? [])].sort();
   if ((digests.length > 0) === (what.upTo !== undefined)) throw new CliError("usage", `Give --digest (again for each) or --up-to, one of the two: ${usage}`);
   if (what.upTo !== undefined && !(Number.isSafeInteger(what.upTo) && what.upTo >= 1)) throw new CliError("usage", `--up-to takes a sequence, a whole number from 1, not ${what.upTo}`);
   // Checked here as the statement's checker checks them, so a bad value is a usage error naming its option.
@@ -590,7 +591,9 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
     list = held.revocations;
   }
   const signed = await signAppRevocation(statement, key.signer);
-  const same = list.some((r) => canonicalJson(r.statement) === canonicalJson(signed.statement));
+  // A held list made before the digests were sorted may hold them in another order: compared sorted too.
+  const sorted = (s: AppRevokeStatement) => canonicalJson("digests" in s ? { ...s, digests: [...s.digests].sort() } : s);
+  const same = list.some((r) => sorted(r.statement) === sorted(signed.statement));
   if (!same) {
     if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
     list = [...list, signed];

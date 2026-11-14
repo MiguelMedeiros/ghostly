@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
+import { appRevocationFor, canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, signAppRevocation, type AppManifest } from "@ghostly/core";
 import { publishApp, verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
 import { error, ghostly, home, ok } from "./support/cli";
@@ -395,6 +395,24 @@ describe("app revoke", () => {
     error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--digest", first.digest as string]), "usage", 2);
     expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "usage", 2).message).toContain("--digest \"not-a-digest\"");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
+  }, 60_000);
+
+  it("signs the digests sorted, so the same digests in another order add nothing", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const [low, high] = ["version a", "version b"].map((v) => createHash("sha256").update(v).digest("base64url")).sort();
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", high!, "--digest", low!]))).toMatchObject({ digests: [low, high], added: true, revocations: 1 });
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", low!, "--digest", high!]))).toMatchObject({ digests: [low, high], added: false, revocations: 1 });
+    const read = readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))));
+    expect(read.ok && read.revocations.map((r) => r.statement)).toEqual([{ ghostlyRevoke: 1, app: `${manifest.publisher}/chess`, digests: [low, high] }]);
+
+    // A list an older CLI signed in the order given is matched too.
+    const seed = createHash("sha256").update("ghostly apps vectors: publisher").digest();
+    const held = await signAppRevocation({ ghostlyRevoke: 1, app: `${manifest.publisher}/chess`, digests: [high!, low!] }, seedSigner(seed));
+    writeFileSync(join(dir, "ghostly-revoke.json"), canonicalJsonBytes([held] as never));
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", low!, "--digest", high!]))).toMatchObject({ added: false, revocations: 1 });
   }, 60_000);
 
   it("refuses a bad --digest or --reason as a usage error naming the option, and signs no empty reason", async () => {
