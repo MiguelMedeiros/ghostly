@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "No se envió nada. Revísalo de nuevo.",
     "sentAfterReview": "Otro pago salió de esta billetera tras la revisión",
     "sentAfterReviewNext": "Crea una nueva revisión.",
+    "serviceShareFull": "Un contacto puede usar como máximo {{max}} de tus apps",
+    "serviceShareFullNext": "Quítale el acceso a una antes de compartir otra.",
     "testMintOnMainnet": "Es un mint de prueba: sus sats no valen nada",
     "testMintOnMainnetNext": "Añádelo a una billetera Cashu Testnet.",
     "unknownPaymentIntent": "Pago desconocido",

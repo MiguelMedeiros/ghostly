@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "Non è stato inviato nulla. Rivedilo.",
     "sentAfterReview": "Un altro pagamento è uscito da questo portafoglio dopo la revisione",
     "sentAfterReviewNext": "Crea una nuova revisione.",
+    "serviceShareFull": "Un contatto può raggiungere al massimo {{max}} delle tue app",
+    "serviceShareFullNext": "Togligli l'accesso a una prima di condividerne un'altra.",
     "testMintOnMainnet": "È un mint di prova: i suoi sats non valgono nulla",
     "testMintOnMainnetNext": "Aggiungilo a un portafoglio Cashu Testnet.",
     "unknownPaymentIntent": "Pagamento sconosciuto",

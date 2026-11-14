@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, createIdentity, createChatInvite } from "@ghostly/core";
+import { GhostlyHttpError, MAX_SHARED_APPS, createIdentity, createChatInvite, decodeServices, encodeServices } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -520,6 +520,27 @@ describe("shared services", () => {
     [a, b] = open();
     node.removeService({ serviceId });
     expect([a.aborted, b.aborted]).toEqual([true, true]);
+  });
+
+  it("a contact is granted no more apps than it can see; a grant past them is refused, not shared on paper", () => {
+    const { node } = engine();
+    const alice = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;
+    const ids = Array.from({ length: MAX_SHARED_APPS + 1 }, (_, i) => node.addService({ name: `web ${i + 1}`, target: `localhost:${3000 + i}` }).serviceId);
+    // Stopped ones count too: turned on again, one would push another off the contact's list.
+    node.setServiceEnabled({ serviceId: ids[0], enabled: false });
+    for (const serviceId of ids.slice(0, -1)) node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    node.setServiceEnabled({ serviceId: ids[0], enabled: true });
+    const last = ids.at(-1)!;
+    expect(() => node.setServiceShared({ serviceId: last, peerPubKeyZ32: alice, shared: true })).toThrow(expect.objectContaining({ engineCode: "serviceShareFull" }));
+    expect(node.getState().services.find((s) => s.id === last)?.sharedWith ?? []).toEqual([]);
+    // Everything granted reaches the contact, the built-ins first as a chat not paired yet tells them.
+    expect(decodeServices(encodeServices(node["advertisedServices"](alice)))?.filter((s) => s.type === "http").map((s) => s.id)).toEqual(ids.slice(0, -1));
+
+    node.setServiceShared({ serviceId: ids[1], peerPubKeyZ32: alice, shared: true });
+    node.setServiceShared({ serviceId: last, peerPubKeyZ32: bob, shared: true });
+    node.setServiceShared({ serviceId: ids[1], peerPubKeyZ32: alice, shared: false });
+    node.setServiceShared({ serviceId: last, peerPubKeyZ32: alice, shared: true });
+    expect(node["hostedService"](last, alice)).toMatchObject({ id: last });
   });
 
   it("a contact's requests send one state a second with their count, not one each", async () => {

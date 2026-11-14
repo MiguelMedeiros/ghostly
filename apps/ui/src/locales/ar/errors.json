@@ -135,6 +135,8 @@
     "reviewedSatsGoneNext": "لم يُرسل شيء. راجعها مجددًا.",
     "sentAfterReview": "خرجت دفعة أخرى من هذه المحفظة بعد المراجعة",
     "sentAfterReviewNext": "أنشئ مراجعة جديدة.",
+    "serviceShareFull": "يمكن لجهة الاتصال الوصول إلى {{max}} من تطبيقاتك كحد أقصى",
+    "serviceShareFullNext": "اسحب الوصول إلى أحدها قبل مشاركة تطبيق آخر.",
     "testMintOnMainnet": "هذه دار سك تجريبية: الـ sats فيها بلا قيمة",
     "testMintOnMainnetNext": "أضفها إلى محفظة Cashu على Testnet.",
     "unknownPaymentIntent": "دفعة غير معروفة",
