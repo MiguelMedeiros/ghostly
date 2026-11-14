@@ -1,7 +1,7 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
-  mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
+  mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, routedCommunityFrame, shouldBeHub,
   GROUP_HAVE_FRAME, WATCH_PEER_MS, COMMUNITY_PIN_FRAME,
   type CommunityFrame, type CommunityLeaveFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
@@ -2320,12 +2320,14 @@ export class Communities {
     // Addressed to someone else: a hub routes it, whoever it is for.
     if ((f.t === "group-secret" || f.t === "group-entry") && typeof f.to === "string" && f.to !== live.session.myKey) {
       if (!live.hub) return;
-      const id = `${String(f.t)}:${f.to}:${String(f.h ?? f.x)}`;
+      // Only one of this group's, for a member it names, in a real one's shape: and only what it carries is handed on.
+      const routed = routedCommunityFrame(f);
+      if (!routed || routed.g !== groupId || !live.session.isRecentMember(routed.to) || live.session.wasRemoved(routed.to)) return;
+      const id = `${routed.t}:${routed.to}:${routed.t === "group-secret" ? routed.h : routed.x}`;
       if (!this.remember(live, id)) return;
-      if (live.session.wasRemoved(f.to)) return;
-      const edges = this.host.edges(groupId), direct = edges.get(f.to);
-      if (direct && this.host.linkReady(direct, 2)) { this.sendTo(direct, f); return; }
-      for (const [key, id] of edges) if (key !== peerKey && this.peerIsHub(live, key)) this.sendTo(id, f);
+      const edges = this.host.edges(groupId), direct = edges.get(routed.to);
+      if (direct && this.host.linkReady(direct, 2)) { this.sendTo(direct, routed); return; }
+      for (const [key, id] of edges) if (key !== peerKey && this.peerIsHub(live, key)) this.sendTo(id, routed);
       return;
     }
     const fresh = await live.session.handle(peerKey, frame);

@@ -22,7 +22,7 @@ function bounds(app: AndroidApp): number[] {
 
 /** The app's task id. With its empty taskAffinity the task reads `I=<package>/.MainActivity`, not `A=<uid>:<package>`. */
 function task(app: AndroidApp): string {
-  const pkg = PKG.replace(/\./g, "\\.");
+  const pkg = PKG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const id = app.adb.shell("dumpsys activity recents").match(new RegExp(`Task\\{\\w+ #(\\d+) type=standard (?:I=${pkg}/|A=\\d+:${pkg}\\b)`));
   if (!id) throw new Error(`no task of ${PKG} in dumpsys activity recents`);
   return id[1];

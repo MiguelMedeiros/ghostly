@@ -609,7 +609,8 @@ export class CashuWallet {
       throw Object.assign(engineError("mintUnreachable", { host: new URL(normalized).host }), { cause: error });
     }
     const info = wallet.getMintInfo();
-    const name = info.name || new URL(normalized).hostname;
+    // The mint's own words, without the characters that hide text or reorder it, so its name reads as what it is.
+    const name = (typeof info.name === "string" ? stripHidden(info.name).replace(/\s+/g, " ").trim().slice(0, 80) : "") || new URL(normalized).hostname;
     this.names.set(normalized, name);
 
     const bounds = (nut: 4 | 5) => {
@@ -620,7 +621,7 @@ export class CashuWallet {
     const active = wallet.keyChain.getKeysets().filter((k) => k.isActive);
     this.infos.set(normalized, {
       version: info.version || undefined,
-      motd: info.motd?.trim().slice(0, 200) || undefined,
+      motd: typeof info.motd === "string" ? stripHidden(info.motd).trim().slice(0, 200) || undefined : undefined,
       inputFeePpk: active.length > 0 ? Math.min(...active.map((k) => k.fee)) : 0,
       receive: bounds(4),
       send: bounds(5),

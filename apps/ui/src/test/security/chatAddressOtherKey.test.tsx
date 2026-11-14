@@ -4,6 +4,7 @@ import { afterEach, expect, it } from "vitest";
 import { Root } from "../../Root";
 import { ensureSession, getPrefix, loadSession, loadShownSession, sessionPeerKey, storedSession } from "../../lib/storage";
 import { readInvite } from "../../lib/url";
+import { registryKey } from "../../lib/profiles";
 
 // covers: invite.link
 
@@ -56,6 +57,22 @@ it("the address of another of the profile's keys says the chat is gone and leave
   const notice = await screen.findByTestId("invite-link-invalid");
   expect(notice).toHaveTextContent("This chat is gone from this device.");
   await waitFor(() => expect(window.location.hash).toBe("#/"));
+});
+
+it("in the first profile, the registry of profiles is no chat and its address says the chat is gone", async () => {
+  expect(`${getPrefix()}profiles`).toBe(registryKey());
+  localStorage.setItem(registryKey(), JSON.stringify({ version: 2, active: "default", profiles: [{ id: "default", name: "Me" }] }));
+  const registry = localStorage.getItem(registryKey());
+  expect(loadSession("profiles")).toBeNull();
+  expect(loadShownSession("profiles")).toBeNull();
+  expect(storedSession("profiles")).toBeNull();
+  expect(sessionPeerKey("profiles")).toBeUndefined();
+  render(<Root />);
+  go("#/chat/profiles");
+  const notice = await screen.findByTestId("invite-link-invalid");
+  expect(notice).toHaveTextContent("This chat is gone from this device.");
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  expect(localStorage.getItem(registryKey())).toBe(registry);
 });
 
 it("the address of another profile's chat says the chat is gone and leaves the address", async () => {

@@ -115,12 +115,11 @@ describe("an audio file in the chat", () => {
     expect(getFile).not.toHaveBeenCalled();
   });
 
-  it("a name in the other direction than the app's starts at its start, cut at its end", () => {
+  it("a name in the other direction than the app's starts at its start", () => {
     // A <bdi> inside the truncating line took the line's (the page's) direction for the cut: "…g about the release plan.wav".
     show(song({ name: "تسجيل اجتماع الفريق الأسبوعي.wav" }));
     const name = screen.getByTestId("audio-name");
     expect(name).toHaveAttribute("dir", "auto");
-    expect(name).toHaveClass("truncate");
   });
 
   it("plays from its bytes; the seek bar moves it; the time reads position of length", async () => {
@@ -448,5 +447,16 @@ describe("an audio file not here yet", () => {
     expect(screen.getByTestId("audio-why-text")).toHaveTextContent("The connection dropped");
     fireEvent.click(screen.getByTestId("audio-retry"));
     expect(retryFile).toHaveBeenCalledWith("chat1-out-song");
+  });
+});
+
+// A long name cut with … at its end hid what the file is on a phone: it wraps, its end kept.
+describe("a long audio file name", () => {
+  it("wraps onto more lines and keeps its extension in sight", () => {
+    show(song({ name: "Voice memo from the bank about your account (listen).mp3.exe" }));
+    const name = screen.getByTestId("audio-name");
+    expect(name).toHaveTextContent("Voice memo from the bank about your account (listen).mp3.exe");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
   });
 });
