@@ -354,6 +354,25 @@ describe("hands-free (locked) recording", () => {
     expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
   });
 
+  it("stops telling the contact \"recording\" while the recording is paused, and tells it again on Resume", async () => {
+    const onTyping = vi.fn();
+    composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(1_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await wait(0);
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await wait(0);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+  });
+
   it("pauses without counting the pause, plays what is recorded so far, and resumes", async () => {
     await locked();
     await wait(2_000);
