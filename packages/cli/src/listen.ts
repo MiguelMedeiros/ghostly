@@ -5,6 +5,7 @@ import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
@@ -115,7 +116,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
     const other = flag === "--from" ? "group" : "chat";
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
     const named = other === "chat" ? error.details.chat as string : ref;
-    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
+    const shown = shellWord(named);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }

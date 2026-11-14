@@ -2,6 +2,7 @@ import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
 import type { GroupAutoJoin } from "./groupAuto";
@@ -212,7 +213,7 @@ function noChat(ref: string, groups: readonly GroupView[]): CliError {
 }
 
 /** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word. */
-const shownRef = (ref: string) => (/^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref));
+const shownRef = shellWord;
 
 /** The chat or the group a message or a file was looked for in, as the command was given it (`ref`). */
 export type RefPlace = { group: boolean; ref: string };
@@ -488,7 +489,7 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
     if (!(error instanceof CliError) || error.code !== "not_found" || groupPrefixed(ref) !== null) throw error;
     let chat: LinkView;
     try { chat = findChat(links, ref); } catch { throw error; }
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    const shown = shellWord(ref);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
 }

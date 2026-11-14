@@ -224,7 +224,7 @@ describe("an invitation not yet joined", () => {
     const calls = [["group.rename", { name: "Mine" }], ["group.picture", { clear: true }], ["group.link", {}], ["group.link", { on: false }], ["group.rotate", {}],
       ["group.invite", { chat: "ana" }], ["group.remove", { member: "Ana" }], ["group.admin", { member: "Ana" }], ["group.hub", { member: "Ana" }]] as const;
     for (const [accepted, message] of [
-      [false, 'You are not in Lab group yet: ghostly group accept "Lab group" joins it'],
+      [false, "You are not in Lab group yet: ghostly group accept 'Lab group' joins it"],
       [true, "You are not in Lab group yet: you accepted its invitation, and its admin has not let you in"],
     ] as const) {
       node.getState = () => ({ links: [], groups: [group, invited(accepted)], settings: {}, transport: {} }) as unknown as EngineState;
