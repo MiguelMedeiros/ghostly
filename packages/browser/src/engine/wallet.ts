@@ -336,28 +336,38 @@ function within<T>(ms: number, work: Promise<T>, mint: string): Promise<T> {
 
 /** A swap's request, and those that ask a mint where a swap stands (NUT-09 restore, NUT-07 states). */
 const SWAP_REQUESTS = ["/v1/swap", "/v1/restore", "/v1/checkstate"];
+/** A Lightning payment's request (`completeMelt`): `meltOverdue` holds its coins until it can no longer land. */
+const MELT_REQUEST = "/v1/melt/bolt11";
+
+/** How long a request to this path may last, its retries included; undefined: cashu-ts' defaults. */
+function requestLimit(pathname: string): number | undefined {
+  if (SWAP_REQUESTS.some((path) => pathname.endsWith(path))) return CASHU_REQUEST_TIMEOUT_MS;
+  if (pathname.endsWith(MELT_REQUEST)) return MELT_REQUEST_TIMEOUT_MS;
+  return undefined;
+}
 
 /**
- * Each of `SWAP_REQUESTS` ends within `CASHU_REQUEST_TIMEOUT_MS`, retries included. cashu-ts' `requestTimeout` is per
- * try, and NUT-19 tries a cached endpoint again after a timeout, each try with a timeout of its own, for as long as the
- * mint's `ttl` (endless when it gives none): one deadline for the whole request ends them all, and a caller's abort is
- * never retried. Past it the request failed with no answer (`NetworkError`), as a try that timed out does. Every other
- * request, melts among them, keeps cashu-ts' defaults. cashu-ts takes no options per call of a swap: its mint client's
- * request function is wrapped.
+ * Each of `SWAP_REQUESTS` ends within `CASHU_REQUEST_TIMEOUT_MS`, and a melt's within `MELT_REQUEST_TIMEOUT_MS`, retries
+ * included. cashu-ts' `requestTimeout` is per try, and NUT-19 tries a cached endpoint again after a timeout, each try
+ * with a timeout of its own, for as long as the mint's `ttl` (endless when it gives none): one deadline for the whole
+ * request ends them all, and a caller's abort is never retried. Past it the request failed with no answer
+ * (`NetworkError`), as a try that timed out does. Every other request keeps cashu-ts' defaults. cashu-ts takes no
+ * options per call of a swap or a melt: its mint client's request function is wrapped.
  */
-function boundSwapRequests(wallet: Wallet, NetworkError: typeof CashuNetworkError): void {
+function boundMintRequests(wallet: Wallet, NetworkError: typeof CashuNetworkError): void {
   const client = wallet.mint as unknown as { _request: RequestFn };
   const request = client._request;
   client._request = async <T,>(options: RequestOptions): Promise<T> => {
     const url = new URL(options.endpoint);
-    if (!SWAP_REQUESTS.some((path) => url.pathname.endsWith(path))) return request<T>(options);
+    const limit = requestLimit(url.pathname);
+    if (limit === undefined) return request<T>(options);
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), CASHU_REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => deadline.abort(), limit);
     options.signal?.addEventListener("abort", () => deadline.abort(), { once: true });
     try {
-      return await request<T>({ ...options, requestTimeout: CASHU_REQUEST_TIMEOUT_MS, signal: deadline.signal });
+      return await request<T>({ ...options, requestTimeout: limit, signal: deadline.signal });
     } catch (error) {
-      if (deadline.signal.aborted && !options.signal?.aborted) throw new NetworkError(`${url.host} did not answer within ${CASHU_REQUEST_TIMEOUT_MS / 1_000} s`, { cause: error });
+      if (deadline.signal.aborted && !options.signal?.aborted) throw new NetworkError(`${url.host} did not answer within ${limit / 1_000} s`, { cause: error });
       throw error;
     } finally {
       clearTimeout(timer);
@@ -2102,7 +2112,7 @@ export class CashuWallet {
       const loading = (async () => {
         const cashu = await loadCashu();
         const instance = new cashu.Wallet(mint, { unit: UNIT });
-        boundSwapRequests(instance, cashu.NetworkError);
+        boundMintRequests(instance, cashu.NetworkError);
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
         const info = instance.getMintInfo();
         if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
