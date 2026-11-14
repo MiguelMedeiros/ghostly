@@ -235,9 +235,10 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
     if (!wellFormedText(key)) return NOT_JSON;
     const next = jsonValueOf(item, depth + 1);
     if (next === NOT_JSON) return NOT_JSON;
-    // Defined, not assigned: a member named `__proto__` (a word a person typed) is kept as JSON.stringify keeps it,
-    // where an assignment would set the copy's prototype and lose it.
-    Object.defineProperty(out, key, { value: next, enumerable: true, writable: true, configurable: true });
+    // A member named `__proto__` (a word a person typed) is defined, not assigned, and kept as JSON.stringify keeps it,
+    // where an assignment would set the copy's prototype and lose it. Defining every member took twice what assigning did.
+    if (key === "__proto__") Object.defineProperty(out, key, { value: next, enumerable: true, writable: true, configurable: true });
+    else out[key] = next;
   }
   return out;
 }
@@ -252,12 +253,15 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
   let bytes = 0;
   const walk = (item: unknown, depth: number): boolean => {
     // MAX_DEPTH within the args, one level below the request.
-    if (depth > MAX_DEPTH + 1 || item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return false;
+    if (depth > MAX_DEPTH + 1) return false;
     if (typeof item === "string") bytes += item.length + 2;
+    // Binary data is an object: asking every number whether it was one took 10 times what JSON.stringify did.
+    else if (item === null || typeof item !== "object") bytes += 1;
+    else if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return false;
     else if (Array.isArray(item)) {
       bytes += item.length + 1;
       for (let i = 0; i < item.length && bytes <= budget; i++) if (!walk(item[i], depth + 1)) return false;
-    } else if (item !== null && typeof item === "object") {
+    } else {
       // Only a plain object is JSON (jsonValueOf): anything else is refused before `for...in` lists its keys, which for
       // a String object of 10 million characters took 1.5 s on the page's thread and from 30 million threw.
       const proto = Object.getPrototypeOf(item);
@@ -270,7 +274,7 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
         bytes += key.length + 2;
         if (!walk(member, depth + 1)) return false;
       }
-    } else bytes += 1;
+    }
     return true;
   };
   try { return walk(value, 0) ? bytes : NOT_JSON; } catch { return NOT_JSON; }
@@ -534,8 +538,9 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
       case "storage.set": {
         const key = storageKey(args[0]);
         const value = args[1];
-        // No value is a request the call does not take, not one too large (`storage.delete` removes a key).
-        if (!isJsonValue(value)) refuse("bad-request");
+        // No value is a request the call does not take, not one too large (`storage.delete` removes a key). Any other
+        // value is JSON already (jsonValueOf): walking it again cost as much as the rest of the request.
+        if (value === undefined) refuse("bad-request");
         if (utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
         await host.storage.set(launch.ref, scope, key, value as MiniAppJson);
         return {};

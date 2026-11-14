@@ -336,6 +336,37 @@ describe("requests", () => {
     expect(posted.slice(-requests.length).map((p) => p.message)).toEqual(requests.map(([, , error], i) => ({ id: 100 + i, ok: false, error })));
   });
 
+  it("checks each number and member of a request within the limits once, not once per walk", async () => {
+    // A storage.set of 32k zeros took 4-8 ms on the page's thread, an object of 6k members up to 12 ms: each number was
+    // asked whether it was binary data, then checked twice, and each member defined one by one.
+    const { broker, host, posted, run } = setup();
+    run();
+    const numbers = Array.from({ length: 1_000 }, (_, i) => i);
+    const members = Object.fromEntries(numbers.map((i) => [`k${i}`, i]));
+    // Counted by hand, as JSON.stringify above.
+    const { isView } = ArrayBuffer;
+    const { isFinite } = Number;
+    const { defineProperty } = Object;
+    const count = { isView: 0, isFinite: 0, defineProperty: 0 };
+    ArrayBuffer.isView = ((value: unknown) => { count.isView++; return isView(value); }) as typeof isView;
+    Number.isFinite = ((value: unknown) => { count.isFinite++; return isFinite(value); }) as typeof isFinite;
+    Object.defineProperty = ((...args: Parameters<typeof defineProperty>) => { count.defineProperty++; return defineProperty(...args); }) as typeof defineProperty;
+    try {
+      broker.message({ id: 1, type: "storage.set", args: ["numbers", numbers] });
+      broker.message({ id: 2, type: "storage.set", args: ["members", members] });
+    } finally {
+      ArrayBuffer.isView = isView;
+      Number.isFinite = isFinite;
+      Object.defineProperty = defineProperty;
+    }
+    expect(count.isView).toBeLessThan(10);
+    expect(count.isFinite).toBe(2 * numbers.length);
+    expect(count.defineProperty).toBe(0);
+    await vi.waitFor(() => expect(posted.filter((p) => p.message.id === 1 || p.message.id === 2).map((p) => p.message.ok)).toEqual([true, true]));
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("numbers")).toEqual(numbers);
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("members")).toEqual(members);
+  });
+
   it("answers at most 50 requests a second, malformed ones counted", async () => {
     const { broker, host, run, posted, clock } = setup();
     run();
