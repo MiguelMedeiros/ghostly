@@ -487,6 +487,7 @@ The app's e2e suites do not run on pull requests: they would hold up every merge
 | Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
 | Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
 | Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
+| Time budgets (`@perf`: milliseconds and frame times, left out of every other run; `E2E (perf)`, `E2E_PERF=1`) | nightly on `dev`, and by hand; each budget's value in the run's summary and its `perf.json` artifact |
 | Compatibility with v0.4.0, v1.1.4, v1.1.5 and the newest release | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
 | Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 

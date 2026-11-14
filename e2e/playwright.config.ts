@@ -40,6 +40,9 @@ export default defineConfig({
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
+  // Time budgets (@perf, support/perfBudget.ts) fail at random on a shared runner: only the nightly E2E (perf) job runs
+  // them, with E2E_PERF=1. A --grep-invert given on the command line applies on top of this one.
+  grepInvert: process.env.E2E_PERF ? undefined : /@perf\b/,
   // On CI also a blob report: e2e.yml runs the suite in shards and merges their blobs into one HTML report.
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"], ["blob", { outputDir: "../blob-report" }]]

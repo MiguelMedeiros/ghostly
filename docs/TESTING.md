@@ -30,6 +30,7 @@ test("LND pays a chat request", { tag: ["@feature:wallet.lightning.lnd.pay", "@g
 ```
 
 - `@gated`: the test runs only when its infrastructure is there (`GHOSTLY_*_REGTEST`, `GHOSTLY_S3_*`, …; `test.skip` otherwise). It counts in the Gated column, not in its client's. `@network` alone is not gated: the test needs a service on the Internet (a public chain server, Breez's regtest), so the release gate leaves it out and the nightly `E2E (full)` runs it.
+- `@perf`: the test's pass hangs on milliseconds or frame times (`budget()` in `e2e/support/perfBudget.ts`), which a shared runner misses at random. `e2e/playwright.config.ts` leaves it out of every run unless `E2E_PERF=1`: only the nightly `E2E (perf)` runs it, and keeps what each budget measured. What such a test checks besides (rows in the page, commits, writes) stays in a twin without the tag.
 - The folder decides the client: `e2e/web/` web, `e2e/extension/` extension, `e2e/desktop/` desktop. A spec elsewhere (a combination matrix, say) names its clients with `@client:web`, `@client:extension`, `@client:desktop` in the same tag array.
 - Tags are plain string literals in `tag: [...]`: the check reads them without running Playwright. `npx playwright test --grep @feature:chat.paired.send` runs every test of one feature.
 
@@ -126,6 +127,7 @@ Other workflows:
 | Security (`security.yml`) | known advisories in the lock files (OSV, `tools/scripts/security-scan.mjs`) | pull requests, pushes, every morning |
 | E2E (`e2e.yml`) | web and extension e2e, the Desktop specs on Linux, compatibility with older releases | before every release (`release.yml` calls it) and by hand |
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
+| E2E (perf) (`e2e-perf.yml`) | the `@perf` web tests on one worker; each time budget's value in the run's summary and its `perf.json` artifact | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0, v1.1.4, v1.1.5 and the newest release | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
 | Merge queue (`merge-queue.yml`) | the merge train: lands pull requests labelled `queue` on `dev` and `epic/*` in batches ([below](#the-merge-queue)) | when `queue` or `queue:priority` is added (not the train's own `queue:conflict` and `queue:failed`), when CI ends on the head of a queued pull request or of a batch, or on a push to a base with a train when that commit is still its tip (a red batch held while the base's own CI runs goes on then) (not a run that was cancelled, and not CI on a pull request that is not in line: the workflow starts and lists no base, so no train runs), on a person's push to `dev` and `epic/*` (not the train's own), every 5 minutes, by hand |
