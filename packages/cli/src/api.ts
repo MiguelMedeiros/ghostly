@@ -685,8 +685,9 @@ const METHODS: Record<string, Method> = {
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
-    const ref = str(params, "message") ?? "<message>";
-    const link = chatNotGroup(ctx, params, "message delete", `${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
+    // `message delete --everyone` takes a chat's name before a group's: `group:` stays in the command offered when given.
+    const ref = str(params, "message") ?? "<message>", typed = str(params, "chat", true);
+    const link = notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `ghostly message delete ${groupPrefixed(typed) === null ? shown : shellWord(typed)} ${ref === "<message>" ? ref : shellWord(ref)} --everyone`);
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw noMessage(messageId, { group: false, ref: str(params, "chat", true) });

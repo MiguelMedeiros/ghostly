@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { findChatOrGroup } from "../src/apiKit";
 import { CallManager, type CallEngine } from "../src/calls/manager";
 import { allowlist } from "../src/listen";
 import { chatViewOf, groupViewOf } from "./support/chatView";
@@ -187,5 +188,16 @@ describe("a hint naming a group a shell would expand", () => {
     expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
     expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
     expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
+  });
+
+  it("message delete group:<name> keeps group: in the command offered, which takes a chat's name first", async () => {
+    // A chat labelled "Crew" here beside the group Crew: `message delete Crew m1 --everyone` looked in the chat.
+    const ctx = fake();
+    const node = (ctx.runtime as unknown as { server: { node: { getState: () => EngineState } } }).server.node;
+    const both = { ...state(), links: [alice, { ...alice, id: "chat-crew", label: "Crew", peerPubKeyZ32: "pcrew" }] } as unknown as EngineState;
+    node.getState = () => both;
+    const words = await offered(callApi(ctx, "chat.delete", { chat: "group:Crew", message: "m1" }));
+    expect(words).toEqual(["ghostly", "message", "delete", "group:Crew", "m1", "--everyone"]);
+    expect(findChatOrGroup(both.links, both.groups, words[3])).toEqual({ group: crew });
   });
 });
