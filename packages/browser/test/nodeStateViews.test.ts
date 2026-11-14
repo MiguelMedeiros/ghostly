@@ -32,7 +32,7 @@ function engine() {
 const view = (state: EngineState, id: string) => state.links.find(link => link.id === id)!;
 
 beforeEach(async () => {
-  await transact([STORES.settings, STORES.links], (s) => { s[STORES.settings].clear(); s[STORES.links].clear(); });
+  await transact([STORES.settings, STORES.links, STORES.messages], (s) => { s[STORES.settings].clear(); s[STORES.links].clear(); s[STORES.messages].clear(); });
 });
 afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(); });
 
@@ -64,6 +64,23 @@ describe("the state a change of one chat pushes", () => {
     node["links"].set(b.id, { ...node["links"].get(b.id)!, peerAck: 9 });
     node.renameLink({ linkId: a.id, label: "Alicia" });
     expect(view(await next(), b.id).peerAck).toBe(9);
+  });
+
+  it("builds only the chat a message came to, and no chat for a file's progress", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice"), b = await addChat(node, "Bob");
+    node["emitState"]();
+    const first = await next();
+    await node["storeMessage"]({ linkId: a.id, id: "peer_1", text: "hi", sender: "peer", timestamp: 1_000, via: "datalink" });
+    const second = await next();
+    expect(view(second, a.id).lastMessageAt).toBeGreaterThan(0);
+    expect(view(second, b.id)).toBe(view(first, b.id));
+    node["transfers"].set("f1", { id: "f1", linkId: b.id, direction: "in", name: "x", size: 10, mime: "text/plain", transferred: 0, state: "transferring" } as never);
+    node["fileProgress"]("f1", 5);
+    const third = await next();
+    expect(third.transfers.f1.transferred).toBe(5);
+    expect(view(third, a.id)).toBe(view(second, a.id));
+    expect(view(third, b.id)).toBe(view(second, b.id));
   });
 
   it("is read fresh by getState, whatever the last push kept", async () => {
