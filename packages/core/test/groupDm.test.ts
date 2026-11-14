@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
 import { createChatInvite } from "../src/invite";
 import { CommunitySession, type CommunityFrame, type CommunityIncomingPair, type CommunityState } from "../src/groupCommunity";
@@ -7,6 +7,12 @@ import {
   dmAnswer, dmRequest, readDmBody, readDmPayload, readGroupPair, sealGroupPair, type GroupPairFrame,
 } from "../src/groupDm";
 // covers: groups.protocol.private-message
+
+const opened = vi.hoisted(() => ({ calls: 0 }));
+vi.mock("../src/groupCrypto", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/groupCrypto")>();
+  return { ...actual, openPair: (...args: Parameters<typeof actual.openPair>) => { opened.calls++; return actual.openPair(...args); } };
+});
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const GROUP = "AAAAAAAAAAAAAAAAAAAAAA", OTHER_GROUP = "BBBBBBBBBBBBBBBBBBBBBB";
@@ -206,6 +212,50 @@ describe("a group-pair frame's nonce, kept as long as the frame could be fresh",
     now += 1;
     expect(inbox.open(clone(ahead), edge(alice))).toBeNull();
     expect(inbox.open(ping(alice, now), edge(alice))).not.toBeNull();
+  });
+
+  it("costs no open for a frame refused as a replay or past a cap, and a box that does not open takes no nonce", () => {
+    let now = Date.now();
+    const inbox = new GroupPairInbox(bob, () => now);
+    // A forged box carrying the nonce of Alice's real frame, ahead of it: it does not open, and the real one is still taken.
+    const real = ping(alice, now);
+    const forged = { ...ping(carol, now), from: alice.pubKeyZ32, n: real.n };
+    expect(inbox.open(clone(forged), edge(alice))).toBeNull();
+    expect(inbox.open(clone(real), edge(alice))).not.toBeNull();
+
+    const senders = Array.from({ length: 20 }, () => createIdentity());
+    const kept: GroupPairFrame[] = [real];
+    const send = (m: Identity, count: number) => {
+      let taken = 0;
+      for (let i = 0; i < count; i++) {
+        now += 1;
+        const frame = ping(m, now, i);
+        if (inbox.open(clone(frame), edge(m))) { taken++; kept.push(frame); }
+      }
+      return taken;
+    };
+    const refusedOpens = { pastShare: 0, pastKept: 0, replays: 0 };
+    // Alice's frames past her share of PAIR_SEEN_PER_MEMBER.
+    expect(send(alice, PAIR_SEEN_PER_MEMBER - 1)).toBe(PAIR_SEEN_PER_MEMBER - 1);
+    opened.calls = 0;
+    expect(send(alice, 20)).toBe(0);
+    refusedOpens.pastShare = opened.calls;
+    // The others fill PAIR_SEEN_KEPT; the frames past it are refused.
+    let taken = 0;
+    for (const m of senders.slice(0, 15)) taken += send(m, PAIR_SEEN_PER_MEMBER);
+    expect(kept.length).toBe(PAIR_SEEN_KEPT);
+    opened.calls = 0;
+    for (const m of senders.slice(15)) taken += send(m, PAIR_SEEN_PER_MEMBER);
+    expect(taken).toBe(15 * PAIR_SEEN_PER_MEMBER);
+    refusedOpens.pastKept = opened.calls;
+    // 500 replays of frames already taken.
+    opened.calls = 0;
+    for (let i = 0; i < 500; i++) {
+      const frame = kept[i % kept.length];
+      expect(inbox.open(clone(frame), { group: GROUP, edge: frame.from, member })).toBeNull();
+    }
+    refusedOpens.replays = opened.calls;
+    expect(refusedOpens).toEqual({ pastShare: 0, pastKept: 0, replays: 0 });
   });
 
   it("leaves normal traffic from several members as it was", () => {
