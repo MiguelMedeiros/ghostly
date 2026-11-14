@@ -589,6 +589,7 @@ describe("a contact's app shown over the app", () => {
     // Try again while still offline: the notice stays.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!.click();
     expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
     frame.src = "about:blank";
     change(false);
     expect(notice.hidden).toBe(true);
@@ -597,6 +598,57 @@ describe("a contact's app shown over the app", () => {
     // Closed, it hears nothing more.
     view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
     expect(listeners.size).toBe(0);
+  });
+
+  it("asks the engine to reach the contact on Try again while they are offline, says it is trying, then that they are still offline", async () => {
+    let offline = true;
+    const listeners = new Set<() => void>();
+    const dials: { done: () => void; refuse: () => void }[] = [];
+    const connect = () => new Promise<void>((resolve, reject) => { dials.push({ done: resolve, refuse: () => reject(new Error("Timed out connecting to the peer")) }); });
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); }, connect };
+    const change = (to: boolean) => { offline = to; for (const l of listeners) l(); };
+    const reaching = "Trying to reach your contact…", stillOffline = "Your contact is still offline";
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words: { ...words, reaching, stillOffline }, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const retry = view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!;
+    const said = () => notice.querySelector("p")!.textContent;
+    expect(said()).toBe("Your contact is offline");
+    const first = frame.src;
+    retry.focus();
+    retry.click();
+    expect(dials, "the engine is asked to reach them").toHaveLength(1);
+    expect(said()).toBe(reaching);
+    expect(notice.getAttribute("aria-busy")).toBe("true");
+    // Kept in reach of the focus, not disabled under it; a second press while it tries asks nothing more.
+    expect(retry.disabled).toBe(false);
+    expect(retry.getAttribute("aria-disabled")).toBe("true");
+    retry.click();
+    expect(dials).toHaveLength(1);
+    // Something else the engine says meanwhile (the contact still offline) keeps it trying.
+    change(true);
+    expect(said()).toBe(reaching);
+    dials[0]!.refuse();
+    await vi.waitFor(() => expect(said()).toBe(stillOffline));
+    expect(notice.hasAttribute("aria-busy")).toBe(false);
+    expect(retry.hasAttribute("aria-disabled")).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    // Tried again, and the contact's app answers: the app, loaded anew.
+    retry.click();
+    expect(dials).toHaveLength(2);
+    expect(said()).toBe(reaching);
+    frame.src = "about:blank";
+    change(false);
+    expect(notice.hidden).toBe(true);
+    expect(frame.src).toBe(first);
+    dials[1]!.done();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(notice.hidden).toBe(true);
+    // Offline again later: said as at first, not as after the last Try again.
+    change(true);
+    expect(said()).toBe("Your contact is offline");
+    closeServiceView();
   });
 
   it("counts the person's taps and keys in the app for the lock screen, as the browser's activation says, and only while it is open", async () => {
