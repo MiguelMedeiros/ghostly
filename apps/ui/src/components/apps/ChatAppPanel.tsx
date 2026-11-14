@@ -6,12 +6,18 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
+import { chatApp, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
 import { NAME, aroundName } from "./aroundName";
 import "./chat-app-panel.css";
+
+/**
+ * The chat's page narrower than this has no room for the app beside a chat that still works: the panel's least width
+ * (360 px, chat-app-panel.css) and a phone's width for the chat (320 px, as the chat list leaves the page).
+ */
+const BESIDE_MIN = 680;
 
 const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
@@ -20,7 +26,8 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * the chat's own look in its header: the app's name, "with" the contact and their picture, and the chat's connection
  * control. Wide: Close, and the whole chat's width or back beside it. Phone: Back to the chat (the app keeps running;
  * `ChatAppResume` or opening it again brings it back) and Close. A full-screen app (its manifest's `view` is `full`)
- * never sits beside the chat: it covers the whole chat at every width, with Back to it and Close.
+ * never sits beside the chat: it covers the whole chat at every width, with Back to it and Close. So does any app where
+ * the chat's page has no room for both (`BESIDE_MIN`: a tablet held upright, a narrow window).
  *
  * The frame box is always here while the chat is, hidden when no app shows: a frame that moved would reload. The
  * header is drawn only while the app shows.
@@ -66,11 +73,24 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   // The chat closed: the app in it stops.
   useEffect(() => () => registerAppSlot(linkId, null), [linkId]);
 
+  // No room beside the chat (a tablet held upright, a narrow window): the app covers it, as a full-screen app does.
+  const narrow = useChatAppNarrow(linkId);
+  useEffect(() => {
+    const pane = root.current?.parentElement;
+    if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
+    // 0: not laid out (a chat kept loaded off screen); measured again as it shows.
+    const measure = () => setChatAppNarrow(linkId, pane.clientWidth > 0 && pane.clientWidth < BESIDE_MIN);
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    measure();
+    return () => { observer.disconnect(); setChatAppNarrow(linkId, false); };
+  }, [linkId, phone]);
+
   const shown = !!app?.shown;
   const full = app?.view === "full";
-  // Back to the chat: on a phone, and for a full-screen app at every width.
-  const withBack = phone || full;
-  const wide = !phone && (full || !!app?.wide);
+  // Back to the chat: on a phone, and for a full-screen app or one with no room beside the chat at every width.
+  const withBack = phone || full || narrow;
+  const wide = !phone && (full || narrow || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 

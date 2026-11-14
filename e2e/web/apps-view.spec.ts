@@ -126,6 +126,32 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await expect(input).toBeFocused();
 });
 
+test("on a tablet held upright, with no room beside the chat, the app covers it with Back to it instead of squeezing it", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  // Beside the chat list, an iPad's 820 px left the chat 40 px beside the app (768 px: none, 1024 px: its name gone).
+  const [ana] = await setUp(peer);
+  await ana.page.setViewportSize({ width: 820, height: 1180 });
+  await openChess(ana);
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toBeVisible();
+  await expect(app).toHaveAttribute("data-place", "wide");
+  await expect(ana.page.getByTestId("chat-name")).toBeHidden();
+  const pane = (await ana.page.locator(".chat-pane").boundingBox())!, box = (await app.boundingBox())!;
+  expect(Math.round(box.width)).toBe(Math.round(pane.width));
+  // No way to put it beside the chat; Back goes to the chat, the app one tap away.
+  await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Chess");
+
+  // Wide enough again (the phone turned, the window widened): beside the chat, which keeps a phone's width.
+  await ana.page.setViewportSize({ width: 1280, height: 800 });
+  await ana.page.getByTestId("mini-app-resume").click();
+  await expect(app).toHaveAttribute("data-place", "beside");
+  await expect(ana.page.getByTestId("chat-name")).toBeVisible();
+  expect((await ana.page.locator(".chat-column").boundingBox())!.width).toBeGreaterThanOrEqual(320);
+});
+
 test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana] = await setUp(peer);
   await ana.page.setViewportSize({ width: 375, height: 812 });
