@@ -121,6 +121,31 @@ test("a desktop at a doubled text size: the account bar's names, the wordmark an
   await expectCardLinesApart(page);
 });
 
+test("a phone at 150% and 200% text size: New and Join stay on the screen at the top of the chat list, in English and Arabic", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // At 24px Join ran 48px past the right edge (past the left one in Arabic), at 32px off the screen whole.
+  const { page } = await peer("text-size-header", { mobile: true, viewport: PHONE });
+  for (const language of ["en", "ar"]) {
+    await useLanguage(page, language);
+    for (const px of [24, 32]) {
+      await textSize(page, px);
+      const join = page.getByRole("button", { name: language === "ar" ? "انضمام" : "Join chat" });
+      // The header gives up a step a render after it measured: read once it has settled.
+      await expect.poll(() => join.evaluate((button) => {
+        const { left, right } = button.getBoundingClientRect();
+        return left >= 0 && right <= window.innerWidth;
+      }), `${language} at ${px}px`).toBe(true);
+      for (const id of ["sidebar-new-chat", "sidebar-new-more", "app-brand"]) {
+        const box = (await page.getByTestId(id).boundingBox())!;
+        expect(box.x, `${id}, ${language} at ${px}px`).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, `${id}, ${language} at ${px}px`).toBeLessThanOrEqual(PHONE.width);
+      }
+    }
+    await textSize(page, 16);
+  }
+  // At the default size the wordmark is back beside the ghost.
+  await expect(page.locator(".sidebar-wordmark")).toBeVisible();
+});
+
 test("a phone at a doubled text size: the tab names and the identity card grow, and a Settings section's name shows in full", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
   const { page } = await peer("text-size-phone", { mobile: true, viewport: PHONE });
   await page.getByTestId("mobile-tab-identities").click();

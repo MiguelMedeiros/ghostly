@@ -130,7 +130,9 @@ export function Sidebar() {
   const { t, language } = useI18n();
   // New and Join keep their words while they fit beside the logo, in this language (French needs more room).
   const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
-  const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
+  // What the header gives up when it does not fit (a phone at a large text size): the buttons' words, then the wordmark
+  // (the ghost stays), then Join's share of New's width.
+  const givenUp = useLabelsFit(headerRef, brandRef, actionsRef, language, 8, 3);
   const isMobile = useIsMobile();
   const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -478,7 +480,7 @@ export function Sidebar() {
         </div>
       </> : <>
       {/* Header */}
-      <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+      <div ref={headerRef} data-labels={givenUp >= 1 ? "off" : undefined} data-wordmark={givenUp >= 2 ? "off" : undefined} data-join={givenUp >= 3 ? "own" : undefined} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
         <div ref={actionsRef} className="flex shrink-0 items-center gap-1">
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
