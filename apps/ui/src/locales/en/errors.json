@@ -529,6 +529,7 @@
     "btcSingleKey": "Ghostly checks proofs for single-key addresses only (bc1q…, bc1p…, 3…, 1…), not multisig or script addresses",
     "challenge": "The proof key did not sign this conversation's challenge",
     "checkFailed": "This proof couldn't be verified",
+    "contactNewer": "Your contact keeps a newer proof of this identity from you",
     "contactRefused": "Your contact could not verify it",
     "contactTooMany": "Your contact keeps too many identities from you already",
     "contactUnavailable": "Your contact's app could not check it",

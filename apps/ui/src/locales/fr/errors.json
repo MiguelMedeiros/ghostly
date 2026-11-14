@@ -529,6 +529,7 @@
     "btcSingleKey": "Ghostly ne vérifie que les preuves d’adresses à une seule clé (bc1q…, bc1p…, 3…, 1…), pas les adresses multisig ou de script",
     "challenge": "La clé de la preuve n'a pas signé le défi de cette discussion",
     "checkFailed": "Cette preuve n'a pas pu être vérifiée",
+    "contactNewer": "Votre contact garde déjà une preuve plus récente de cette identité",
     "contactRefused": "Votre contact n'a pas pu la vérifier",
     "contactTooMany": "Votre contact garde déjà trop de vos identités",
     "contactUnavailable": "L'app de votre contact n'a pas pu la vérifier",
