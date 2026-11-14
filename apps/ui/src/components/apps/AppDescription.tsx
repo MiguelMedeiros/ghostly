@@ -43,9 +43,10 @@ export function AppDescription({ text, from, testId }: { text: string; from: "pu
     <div className="ps-3 border-s-2 border-border space-y-1" data-testid={testId}>
       <p className="text-xs text-text-muted">{t(from === "publisher" ? "apps.install.fromPublisher" : "apps.store.fromStore")}</p>
       <p ref={ref} id={id} dir="auto" className={`text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere] ${open ? "" : "line-clamp-4"}`}>{shown}</p>
+      {/* On a phone a 44 px target, as every control there: its line of small print was 16 px tall. */}
       {(clipped || open) && (
         <button type="button" data-testid={`${testId}-more`} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}
-          className="text-xs text-accent hover:underline">
+          className="text-xs text-accent hover:underline max-md:min-h-11 max-md:min-w-11">
           {t(open ? "apps.install.descriptionLess" : "apps.install.descriptionMore")}
         </button>
       )}
