@@ -93,7 +93,7 @@ function readings(page: Page): Promise<Reading[]> {
       return bg;
     };
     const label = (el: Element) => {
-      const id = el.closest("[data-testid]")?.getAttribute("data-testid") ?? "bubble";
+      const id = el.closest("[data-testid]:not([data-testid=file-name])")?.getAttribute("data-testid") ?? "bubble";
       return `${id} › ${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 32)}"`;
     };
     const visible = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
