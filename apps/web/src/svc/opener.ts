@@ -31,17 +31,19 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
  * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
- * while the contact is offline. `blocked` and `unguarded`: the view's notice when the bridge shows no app
+ * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
+ * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
  * name and the line under the app's name.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
- * how to stop hearing it): the open view says so over the app, rather than leaving its last page up.
+ * how to stop hearing it): the open view says so over the app, rather than leaving its last page up. `connect`: asks
+ * the engine to reach the contact now (the chat's Reconnect), settled once that attempt ended; Try again runs it.
  */
-export interface ContactPresence { offline: () => boolean; watch: (changed: () => void) => () => void }
+export interface ContactPresence { offline: () => boolean; watch: (changed: () => void) => () => void; connect?: () => Promise<void> }
 
 /**
  * The page answers a request a little before the services worker gives up on it (`HEAD_TIMEOUT_MS`), so what the
@@ -446,12 +448,20 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   let refused: string | null = null;
   /** What the notice says now: null while the app is on screen. */
   let shown: string | null = null;
+  /** Try again is asking the engine to reach the contact; `tried`: it did, and they were still offline after. */
+  let reaching = false, tried = false;
   /**
    * The notice while the contact is offline, or while the bridge shows no app; once neither, the app again, loaded anew
    * (its last page may be stale).
    */
   const present = () => {
-    const text = options.presence?.offline() ? options.words.offline : refused;
+    const offline = options.presence?.offline() === true;
+    // Back: the next time they are offline is said as the first.
+    if (!offline) tried = false;
+    const text = offline ? (reaching && options.words.reaching) || (tried && options.words.stillOffline) || options.words.offline : refused;
+    // Still in reach of the focus while it tries (`disabled` would drop it to the page), and pressed again, it asks nothing more.
+    if (offline && reaching) { notice.setAttribute("aria-busy", "true"); retry.setAttribute("aria-disabled", "true"); }
+    else { notice.removeAttribute("aria-busy"); retry.removeAttribute("aria-disabled"); }
     if (text === shown) return;
     shown = text;
     if (text !== null) {
@@ -459,7 +469,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       notice.hidden = false;
       notice.style.display = "flex";
       frame.style.display = "none";
-      if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
+      // The focus in the hidden app goes to ✕; on Try again, whose words changed, it stays.
+      if (view.contains(document.activeElement) && document.activeElement !== close && !notice.contains(document.activeElement)) close.focus({ preventScroll: true });
     } else {
       // Try again had the focus: hidden under it, the browser drops it to the page's body. It goes to the app.
       const had = notice.contains(document.activeElement);
@@ -470,7 +481,22 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
       if (had) frame.focus({ preventScroll: true });
     }
   };
-  retry.addEventListener("click", () => { refused = null; present(); });
+  // While the contact is offline, it asks the engine to reach them now (rather than waiting on its own next try, minutes
+  // away for an older chat), says so meanwhile, and that they are still offline if the attempt did not bring them back.
+  retry.addEventListener("click", () => {
+    if (reaching) return;
+    refused = null;
+    const connect = options.presence?.offline() ? options.presence.connect : undefined;
+    if (connect) {
+      reaching = true;
+      void connect().catch(() => {}).finally(() => {
+        reaching = false;
+        tried = options.presence?.offline() === true;
+        if (view.isConnected) present();
+      });
+    }
+    present();
+  });
 
   const ports = new Set<MessagePort>();
   // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
